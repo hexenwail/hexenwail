@@ -47,9 +47,9 @@ static qboolean		layout_checked;
 
 /* The mirrors are only trustworthy if they are the size std140 says they are.
  * Both are built from vec4/mat4/ivec4 only, so this is arithmetic rather than
- * hope: 4 mat4 + 5 vec4 + 1 ivec4, and 8 vec4. */
+ * hope: 4 mat4 + 5 vec4 + 1 ivec4, and 9 vec4. */
 COMPILE_TIME_ASSERT(vertparams_size, sizeof(r_vertparams_t) == 4 * 64 + 6 * 16);
-COMPILE_TIME_ASSERT(fragparams_size, sizeof(r_fragparams_t) == 8 * 16);
+COMPILE_TIME_ASSERT(fragparams_size, sizeof(r_fragparams_t) == 9 * 16);
 
 /* ------------------------------------------------------------------ */
 /* Small helpers                                                       */
@@ -241,6 +241,12 @@ void R_SetSkyFog (float r, float g, float b, float a)
 void R_SetSkyWind (float u, float v)
 {
 	if (RU_Set4(fragparams.sky, u, v, 0.0f, 0.0f))
+		frag_dirty = true;
+}
+
+void R_SetSkyCubeWind (const float *dir3, float yaw)
+{
+	if (RU_Set4(fragparams.skydir, dir3[0], dir3[1], dir3[2], yaw))
 		frag_dirty = true;
 }
 

@@ -489,11 +489,23 @@ one of the two (sflat's fragment stage reads nothing) pushes only that one.
 */
 static void GL_ImmPushBlocks (const glprogram_t *shader, const float *mvp)
 {
+	/* Eye position and the sky wind used to reach the sky programs as loose
+	 * uniforms pushed from the same globals in the glUniform* half of
+	 * GL_ImmEnd.  Writing them here unconditionally is what keeps that
+	 * behaviour: the shadow's dirty flags make an unchanged value free, and
+	 * only the ssky_* stages read these members, so no other program sees a
+	 * difference.  R_SetEyePos fills both blocks' copies from one value. */
+	if (shader->ub_vert >= 0 || shader->ub_frag >= 0)
+		R_SetEyePos (r_origin);
+
 	if (shader->ub_vert >= 0)
 		R_SetMVP (mvp);
 
 	if (shader->ub_frag >= 0)
 	{
+		R_SetSkyWind (sky_wind_uv[0], sky_wind_uv[1]);
+		R_SetSkyCubeWind (sky_wind_vec, sky_box_rot);
+
 		/* The -1 sentinels mean "leave the shader default alone", which
 		 * was a coherent thing to say only while these were loose
 		 * uniforms: a program's own copy started at zero and
@@ -608,8 +620,8 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 	GL_GetMVP(mvp);
 
 	/* Dual path, keyed on whether this program has a block index and never
-	 * on which shader it is.  gl_shader_world, gl_shader_sky_boxside and
-	 * gl_shader_sky_layers still declare loose uniforms and must keep
+	 * on which shader it is.  gl_shader_world and the other programs still
+	 * inline in gl_shader.c declare loose uniforms and must keep
 	 * working through the glUniform* half below while the migrated programs
 	 * take the block half. */
 	if (shader->ub_vert >= 0 || shader->ub_frag >= 0)

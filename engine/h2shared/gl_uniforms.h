@@ -64,7 +64,8 @@ typedef struct {
 	float	skyfog[4];	/*  80  rgb sky fog color, a blend */
 	float	sky[4];		/*  96  xy sky wind uv offset */
 	float	debug[4];	/* 112  x r_fullbright, y r_lightmap */
-} r_fragparams_t;		/* 128 */
+	float	skydir[4];	/* 128  xyz cubemap wind direction, w cubemap yaw */
+} r_fragparams_t;		/* 144 */
 
 void	R_Uniforms_Init (void);
 void	R_Uniforms_Shutdown (void);
@@ -116,6 +117,8 @@ void	R_SetAliasCausticsU (float intensity, float time);
 void	R_SetSoftParams (float x, float y, float z);
 void	R_SetSkyFog (float r, float g, float b, float a);
 void	R_SetSkyWind (float u, float v);
+/* The cubemap sky's wind as a direction offset, plus r_skybox_speed as a yaw. */
+void	R_SetSkyCubeWind (const float *dir3, float yaw);
 void	R_SetLightDebug (float fullbright, float lightmapdbg);
 
 /* Upload whichever blocks changed.  One push per dirty block, whole block,

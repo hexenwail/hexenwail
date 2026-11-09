@@ -78,7 +78,8 @@ FRAG_UBO(0) uniform FragParams {
     highp vec4 u_fskyfog;       /* 80  rgb sky fog color, a blend */
     highp vec4 u_fsky;          /* 96  xy sky wind uv offset */
     highp vec4 u_fdebug;        /* 112 x r_fullbright, y r_lightmap */
-};                              /* 128 bytes */
+    highp vec4 u_fskydir;       /* 128 xyz cubemap wind direction, w cubemap yaw */
+};                              /* 144 bytes */
 
 #define u_eyepos              u_fscene.xyz
 #define u_time                u_fscene.w
@@ -94,4 +95,6 @@ FRAG_UBO(0) uniform FragParams {
 #define u_skyfog              u_fskyfog
 #define u_wind                u_fsky.xy
 #define u_lightdebug          u_fdebug.xy
+#define u_wind3               u_fskydir.xyz
+#define u_skyrot              u_fskydir.w
 #endif  /* UNIFORMS_FRAG */
