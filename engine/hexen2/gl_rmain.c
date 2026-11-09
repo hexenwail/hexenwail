@@ -7733,16 +7733,54 @@ static double	rprof_cpu_world;	/* CPU wall-clock for R_RenderScene */
 static int	rprof_wpoly, rprof_epoly; /* saved from previous frame */
 static int	rprof_texbinds;		  /* ditto (uhexen2-im9g) */
 
+/* Where the GPU number comes from — or why there is none.  SDL_GPU has no
+ * timer queries, and neither does WebGL2, so on those backends the GPU
+ * buckets of r_speeds 2 go dark; the report names the reason instead of
+ * printing nothing at all.  GitHub #451. */
+typedef enum { RPROF_GPU_TIMER_QUERIES, RPROF_GPU_UNAVAILABLE } rprof_gpu_source_t;
+static rprof_gpu_source_t rprof_gpu_source = RPROF_GPU_TIMER_QUERIES;
+static const char *rprof_gpu_unavailable_reason = "timer queries not available";
+
+/*
+================
+R_ProfileSetGPUUnavailable
+
+Hook for a backend with no GPU timing source (the SDL_GPU backend, #340):
+called once at device creation so the r_speeds 2 report can name why the
+GPU buckets are dark.  The reason must be a string literal (or otherwise
+live for the life of the process) — it is printed, never copied.  The
+declaration belongs in glquake.h once a caller outside this file exists.
+================
+*/
+void R_ProfileSetGPUUnavailable (const char *reason)
+{
+	rprof_gpu_source = RPROF_GPU_UNAVAILABLE;
+	if (reason)
+		rprof_gpu_unavailable_reason = reason;
+}
+
 static void R_ProfileInit (void)
 {
 #ifdef USE_GLES
 	/* WebGL2 has no timer queries; glGenQueries_fp is a no-op macro there
 	 * and so cannot be tested as a value.  rprof_available stays false,
-	 * which short-circuits the rest of the GPU profiler. */
+	 * which short-circuits the rest of the GPU profiler — R_ProfileReport
+	 * names the reason instead (GitHub #451). */
+	rprof_gpu_source = RPROF_GPU_UNAVAILABLE;
+	rprof_gpu_unavailable_reason = "WebGL2 has no timer queries";
 	(void)rprof_queries;
 #else
-	if (rprof_available || !glGenQueries_fp)
+	if (rprof_available)
 		return;
+	if (!glGenQueries_fp)
+	{
+		/* No timer-query entry points on this driver — name the missing
+		 * GPU timing instead of silently skipping the whole report
+		 * (GitHub #451). */
+		rprof_gpu_source = RPROF_GPU_UNAVAILABLE;
+		rprof_gpu_unavailable_reason = "GL timer-query entry points missing";
+		return;
+	}
 	glGenQueries_fp(RPROF_COUNT + 1, rprof_queries);
 	rprof_available = true;
 	rprof_pending = false;
@@ -7760,32 +7798,48 @@ static void R_ProfileReport (void)
 	HWGLuint64 ts[RPROF_COUNT + 1];
 	GLint ready = 0;
 	int i;
-	double ms[RPROF_COUNT], total;
 
-	if (!rprof_available || !rprof_pending)
+	if (!rprof_pending)
 		return;
 
-	/* Check if last timestamp is ready (implies all earlier ones are too) */
-	glGetQueryObjectiv_fp(rprof_queries[RPROF_COUNT], GL_QUERY_RESULT_AVAILABLE, &ready);
-	if (!ready)
-		return;
+	if (rprof_available)
+	{
+		double ms[RPROF_COUNT], total;
 
-	for (i = 0; i <= RPROF_COUNT; i++)
-		glGetQueryObjectui64v_fp(rprof_queries[i], GL_QUERY_RESULT, &ts[i]);
+		/* Check if last timestamp is ready (implies all earlier ones are too) */
+		glGetQueryObjectiv_fp(rprof_queries[RPROF_COUNT], GL_QUERY_RESULT_AVAILABLE, &ready);
+		if (!ready)
+			return;
 
-	for (i = 0; i < RPROF_COUNT; i++)
-		ms[i] = (double)(ts[i + 1] - ts[i]) / 1000000.0;
+		for (i = 0; i <= RPROF_COUNT; i++)
+			glGetQueryObjectui64v_fp(rprof_queries[i], GL_QUERY_RESULT, &ts[i]);
 
-	total = (double)(ts[RPROF_COUNT] - ts[0]) / 1000000.0;
+		for (i = 0; i < RPROF_COUNT; i++)
+			ms[i] = (double)(ts[i + 1] - ts[i]) / 1000000.0;
 
-	Con_Printf("GPU %.1f  CPU %.1f | world %.1f  part %.1f  water %.1f  trans %.1f  vm %.1f  mirr %.1f\n"
-		   "  CPU: marklv %.1f  draw %.1f  sky %.1f  ents %.1f (collect %.1f, inst %.1f, loop %.1f [bC=%.1f bD=%.1f p1=%.1f p2=%.1f] a=%d/%.1fms b=%d bL=%d/%.1fms inst[op=%d fc=%d])  glows %.1f  dlt %.1f\n"
+		total = (double)(ts[RPROF_COUNT] - ts[0]) / 1000000.0;
+
+		Con_Printf("GPU %.1f  CPU %.1f | world %.1f  part %.1f  water %.1f  trans %.1f  vm %.1f  mirr %.1f\n",
+			   total, rprof_cpu_world * 1000.0,
+			   ms[RPROF_WORLD], ms[RPROF_PARTICLES], ms[RPROF_WATER],
+			   ms[RPROF_TRANS], ms[RPROF_VM], ms[RPROF_MIRROR]);
+	}
+	else if (rprof_gpu_source == RPROF_GPU_UNAVAILABLE)
+	{
+		/* No timer queries on this backend -- name why, instead of
+		 * printing nothing at all.  The CPU breakdown below is
+		 * collected on every tier, so it prints as usual.
+		 * GitHub #451. */
+		Con_Printf("GPU timing unavailable (%s) -- CPU timings below are unaffected\n",
+			   rprof_gpu_unavailable_reason);
+	}
+	else
+		return;	/* queries not allocated yet; nothing to report */
+
+	Con_Printf("  CPU: marklv %.1f  draw %.1f  sky %.1f  ents %.1f (collect %.1f, inst %.1f, loop %.1f [bC=%.1f bD=%.1f p1=%.1f p2=%.1f] a=%d/%.1fms b=%d bL=%d/%.1fms inst[op=%d fc=%d])  glows %.1f  dlt %.1f\n"
 		   "  draw: bsp %.1f  lmup %.1f (%d pages)  gcull %.1f  chains %.1f (gpufin %.1f, sky-stencil %.1f, sky-proc %.1f, loop %.1f, defer %.1f)\n"
 		   "  chains: fast=%d imm=%d slow=%d skypolys=%d  walk=%d (%.1f ms)  lmrebuild=%d (%.1f ms)\n"
 		   "  %4i wpoly  %4i epoly  %4i texbind\n",
-		   total, rprof_cpu_world * 1000.0,
-		   ms[RPROF_WORLD], ms[RPROF_PARTICLES], ms[RPROF_WATER],
-		   ms[RPROF_TRANS], ms[RPROF_VM], ms[RPROF_MIRROR],
 		   rprof_cpu_marklv * 1000.0,
 		   rprof_cpu_drawworld * 1000.0,
 		   rprof_cpu_sky * 1000.0,
