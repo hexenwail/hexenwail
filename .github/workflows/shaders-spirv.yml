@@ -1,0 +1,66 @@
+name: Shaders SPIR-V
+
+# CompileSpirv.cmake compiles every engine/shaders/ stage with both
+# glslangValidator -V (Vulkan) and -G (OpenGL SPIR-V), which is the only
+# thing that proves the layout.inc set and binding qualifiers are complete.
+# But shaders_spirv is opt-in, not in ALL, and nothing in CI used to run
+# it, so a new shader could ship without its Vulkan bindings and nothing
+# noticed.  The five SSAO stages from #446 are the most recent example.
+#
+# The paths are everything the gate reads: the shaders themselves
+# (.glsl AND .inc -- layout.inc/ssao.inc are the risk), the two CMake
+# scripts that expand and compile them, the CMakeLists target definition,
+# and the flake.nix glslang pin the target depends on.
+# GitHub #449, part of #77 / #339, route recorded in #447.
+on:
+  pull_request:
+    paths:
+      - 'engine/shaders/**'
+      - 'engine/cmake/CompileSpirv.cmake'
+      - 'engine/cmake/EmbedShaders.cmake'
+      - 'engine/CMakeLists.txt'
+      - 'flake.nix'
+      - '.github/workflows/shaders-spirv.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'engine/shaders/**'
+      - 'engine/cmake/CompileSpirv.cmake'
+      - 'engine/cmake/EmbedShaders.cmake'
+      - 'engine/CMakeLists.txt'
+      - 'flake.nix'
+      - '.github/workflows/shaders-spirv.yml'
+
+# Builds and throws the result away; nothing here writes to the repository.
+permissions:
+  contents: read
+
+# A second push makes the first result describe a tree nobody has any more.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shaders-spirv:
+    name: Compile shaders to SPIR-V (Vulkan and OpenGL)
+    runs-on: ubuntu-latest
+    # Seconds of glslang after nix setup and one engine configure.
+    # A "something is stuck" bound, not a target.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: ./.github/actions/setup-nix
+        with:
+          cachix-auth-token: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+
+      # Configure, then build only the shaders_spirv target.  It exists only
+      # when CMake finds glslangValidator, so a dev shell that lost glslang
+      # fails here with "no rule to make target" instead of passing
+      # vacuously.  CompileSpirv.cmake runs BOTH frontends per stage and
+      # exits non-zero if any single compile fails.
+      - name: Build shaders_spirv
+        run: |
+          set -euo pipefail
+          nix develop -c cmake -S . -B /tmp/shader-build
+          nix develop -c cmake --build /tmp/shader-build --target shaders_spirv
