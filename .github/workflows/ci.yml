@@ -320,12 +320,29 @@ jobs:
   # every target in the loop is its own derivation; neither reads ./result --
   # so each is a job of its own.  Serial, `build` was the critical path at
   # 295-344s, ~130s of it this gate and ~75-90s that loop.
+  #
+  # Sharded.  Whole, this job was ~24 minutes -- the whole CI run's critical
+  # path, next to ~2.5 for every other job -- and ~21 of them were sv-main's
+  # and world-trace's differential harnesses running one after another.  Each
+  # harness is independent (own crate build, target dir, log and verdict), so
+  # check-rust.sh --shard I/N runs a balanced share of them per job; see its
+  # SHARDING header.  N is strategy.job-total, the length of the list below,
+  # so adding or removing a shard number needs no other edit, and every
+  # shard computes the same plan, so the jobs cover every item exactly once
+  # (tools/test_rust_gate_shards.py, in lint, checks that partition).  Six
+  # is where the largest single harness (sv_main_inv, ~3.6 min) becomes the
+  # floor; more shards would mostly add per-job setup.  fail-fast is off so
+  # one red shard does not cancel the others' verdicts.
   rust:
-    name: Rust ports
+    name: Rust ports (${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-latest
-    # One shared cmake build of three engine targets plus every harness.  A
-    # "something is stuck" bound, not a target.
-    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+    # One shared cmake build of three engine targets plus this shard's
+    # harnesses.  A "something is stuck" bound, not a target.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-nix
@@ -348,7 +365,7 @@ jobs:
       # gen_fixtures.sh --check) -- live in the header of
       # each scripts/check-rust-<port>.sh.
       - name: Rust ports (differential harnesses, symbols, ABI)
-        run: nix develop .#default -c bash ./scripts/check-rust.sh
+        run: nix develop .#default -c bash ./scripts/check-rust.sh --shard ${{ matrix.shard }}/${{ strategy.job-total }}
 
   # The Hexen II transport is Rust on every Unix now, not only Linux.  What
   # the Linux gate above cannot show is that the port still computes the C's

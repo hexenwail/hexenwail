@@ -45,9 +45,22 @@
 
 set -euo pipefail
 
+# One part per variant/port harness, h2 first then hw, the order this gate
+# has always run them in.  --list-parts prints them; RUST_GATE_PARTS
+# (space-separated) runs a subset, which is how scripts/check-rust.sh
+# --shard splits this gate across CI jobs.  The symbol checks after the
+# harnesses run whatever the subset.
+all_parts=()
+for variant in h2 hw; do
+	for port in trace hull link move svmove svphys svpush svwalk svmovetype; do
+		all_parts+=("$variant/$port")
+	done
+done
+
 for arg in "$@"; do
 	case "$arg" in
 		-h|--help) sed -n '2,/^# SPDX/p' "$0"; exit 0 ;;
+		--list-parts) printf '%s\n' "${all_parts[@]}"; exit 0 ;;
 		*) echo "unknown argument: $arg (try --help)" >&2; exit 2 ;;
 	esac
 done
@@ -55,6 +68,8 @@ done
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=scripts/lib/rust-gate.sh
 . "$root/scripts/lib/rust-gate.sh"
+selected=$(rust_gate_parts_selected "${all_parts[@]}") || exit 2
+mapfile -t parts <<<"$selected"
 crate="$root/engine/rust"
 work="${WORKDIR:-$(mktemp -d)}"
 mkdir -p "$work"
@@ -72,8 +87,9 @@ for tool in cc gcov cargo cmake nm; do
 done
 
 step=1
-for variant in h2 hw; do
-for port in trace hull link move svmove svphys svpush svwalk svmovetype; do
+for part in "${parts[@]}"; do
+	variant=${part%/*}
+	port=${part#*/}
 	# Each harness links its own archive: the hull harness supplies
 	# world_target.c, the trace harness does not, so world_hull stays out of
 	# the trace archive.  world_trace_hw selects HexenWorld's arms in both.
@@ -146,7 +162,6 @@ for port in trace hull link move svmove svphys svpush svwalk svmovetype; do
 		exit 1
 	fi
 	echo
-done
 done
 
 echo "== $step. the engine build: hexenwail, h2ded and hwsv =="

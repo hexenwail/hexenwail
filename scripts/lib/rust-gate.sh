@@ -10,6 +10,37 @@
 #
 # SPDX-License-Identifier: GPL-2.0-or-later
 
+# rust_gate_parts_selected PART...
+#
+# Prints, one per line and in the order given, the PARTs of a gate this run
+# executes.  RUST_GATE_PARTS (space-separated) narrows them -- that is how
+# scripts/check-rust.sh --shard hands a gate its share; unset or empty means
+# every part.  A name the gate does not have is an error (exit 2), so a typo
+# cannot turn a shard into one that silently skips its work.
+rust_gate_parts_selected() {
+	local want p found
+	if [ -z "${RUST_GATE_PARTS:-}" ]; then
+		printf '%s\n' "$@"
+		return 0
+	fi
+	for want in $RUST_GATE_PARTS; do
+		found=0
+		for p in "$@"; do
+			[ "$p" = "$want" ] && found=1
+		done
+		if [ "$found" -eq 0 ]; then
+			echo "error: RUST_GATE_PARTS names '$want', which is not a part of this gate" >&2
+			echo "       (parts: $*)" >&2
+			return 2
+		fi
+	done
+	for p in "$@"; do
+		case " $RUST_GATE_PARTS " in
+			*" $p "*) printf '%s\n' "$p" ;;
+		esac
+	done
+}
+
 # rust_gate_engine_build WORKDIR
 #
 # Prints the path of a CMake build of hexenwail, h2ded and hwsv.  With
