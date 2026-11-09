@@ -132,6 +132,9 @@ static void q_strlcpy (char *d, const char *s, size_t n) { snprintf (d, n, "%s",
 static GLuint next_name = 1;
 static void glGenTextures_fp (int n, GLuint *t) { (void)n; *t = next_name++; }
 static void glDeleteTextures_fp (int n, GLuint *t) { (void)n; (void)t; }
+/* gl_texbind.h (#338): GL_LoadTextureEx's cache-mismatch delete goes through
+ * the binding module so a recycled name cannot hit a stale shadow entry. */
+static void R_DeleteTextures (int n, const GLuint *t) { (void)n; (void)t; }
 static void GL_Bind (GLuint t) { (void)t; }
 static void GL_UploadCompressed (const imgreplace_t *r, unsigned f, gltexture_t *g)
 { (void)r; (void)f; (void)g; }

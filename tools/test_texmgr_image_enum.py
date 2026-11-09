@@ -85,6 +85,11 @@ static GLuint next_name = 1;
 static inline void glGenTextures_fp (int n, GLuint *t) { (void)n; *t = next_name++; }
 static inline void glDeleteTextures_fp (int n, GLuint *t) { (void)n; (void)t; deleted++; }
 static inline void glBindTexture_fp (GLenum a, GLuint b) { (void)a; (void)b; }
+/* gl_texbind.h (#338): gl_texmgr.c binds and deletes through the binding
+ * module, which forgets a deleted name before GL can recycle it.  A delete
+ * still counts as a delete here. */
+static inline void R_DeleteTextures (int n, const GLuint *t) { (void)n; (void)t; deleted++; }
+static inline void R_BindTextureSlot (GLuint slot, GLuint t) { (void)slot; (void)t; }
 static inline void glTexParameterf_fp (GLenum a, GLenum b, float c) { (void)a; (void)b; (void)c; }
 static inline void glTexImage2D_fp (GLenum a, int b, int c, int w, int h, int d,
 				    GLenum e, GLenum f, const void *p)
@@ -372,7 +377,11 @@ def source_check():
              "restore the previous binding"),
             (r"glGetIntegerv_fp\s*\(\s*GL_ACTIVE_TEXTURE.*glActiveTexture_fp\s*\(\s*\(GLenum\)\s*prev_unit",
              "restore the active texture unit"),
-            (r"currenttexture\s*=", "resync currenttexture")):
+            # GL_Bind's cache is the gl_texbind.c shadow since #338 (GL_Bind
+            # is R_BindTextureSlot (0, ...)), so the resync is forgetting
+            # that shadow, after the raw binding has been restored.
+            (r"glBindTexture_fp\s*\(\s*GL_TEXTURE_2D\s*,\s*\(GLuint\)\s*prev_tex.*R_ResetTextureBindings\s*\(\s*\)",
+             "resync the texture-binding shadow (R_ResetTextureBindings)")):
         if not re.search(pattern, dump, re.S):
             raise AssertionError(f"imagedump does not {what}")
     print("PASS: imagelist and imagedump walk both texture pools; imagedump restores GL state")

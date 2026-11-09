@@ -86,7 +86,11 @@ for want in ("R_ShowTris_Alias (e);", "R_ShowTris_Sprite (e);", "R_ViewModelBegi
         errors.append(f"R_ShowTris: missing {want}")
 raw = (ROOT / "engine/hexen2/gl_rmain.c").read_text()
 rt = raw[raw.index("static void R_ShowTris (void)"):]
-if not re.search(r"#ifdef USE_GLES\s*/\*.*?\*/\s*return;\s*#endif", rt[:rt.index("glPolygonMode_fp")], re.S):
+# The line-mode switch goes through the pipeline shadow since #337
+# (R_SetPolygonMode); the GLES early return must still come before it.
+if "R_SetPolygonMode (GL_LINE)" not in rt:
+    errors.append("R_ShowTris must switch to line mode through R_SetPolygonMode (GL_LINE) (#337)")
+elif not re.search(r"#ifdef USE_GLES\s*/\*.*?\*/\s*return;\s*#endif", rt[:rt.index("R_SetPolygonMode (GL_LINE)")], re.S):
     errors.append("R_ShowTris must return on GLES, where there is no line polygon mode")
 
 part = strip((ROOT / "engine/hexen2/r_part.c").read_text())
