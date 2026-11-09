@@ -60,13 +60,18 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-plan_n=
-shard=
+# Set/unset is tracked apart from the value: `--shard ''` (an empty matrix
+# expansion, say) must be refused, not read as "unsharded" and run the whole
+# gate in every job.
+plan_set=0; plan_n=
+shard_set=0; shard=
 while [ $# -gt 0 ]; do
 	case "$1" in
 		-h|--help) sed -n '2,/^# SPDX/p' "$0"; exit 0 ;;
-		--plan) plan_n=${2:-}; shift 2 || { echo "--plan needs N" >&2; exit 2; } ;;
-		--shard) shard=${2:-}; shift 2 || { echo "--shard needs I/N" >&2; exit 2; } ;;
+		--plan) [ $# -ge 2 ] || { echo "--plan needs N" >&2; exit 2; }
+			plan_set=1; plan_n=$2; shift 2 ;;
+		--shard) [ $# -ge 2 ] || { echo "--shard needs I/N" >&2; exit 2; }
+			shard_set=1; shard=$2; shift 2 ;;
 		*) echo "unknown argument: $1 (try --help)" >&2; exit 2 ;;
 	esac
 done
@@ -136,7 +141,7 @@ plan() {
 
 valid_count() { [[ $1 =~ ^[1-9][0-9]*$ ]]; }
 
-if [ -n "$plan_n" ]; then
+if [ "$plan_set" -eq 1 ]; then
 	valid_count "$plan_n" || { echo "--plan N: N must be a positive integer" >&2; exit 2; }
 	plan "$plan_n"
 	exit 0
@@ -146,9 +151,9 @@ fi
 run_core=1
 declare -A parts_for=()
 sharded=0
-if [ -n "$shard" ]; then
+if [ "$shard_set" -eq 1 ]; then
 	si=${shard%/*}; sn=${shard#*/}
-	if [ "$si" = "$shard" ] || ! valid_count "$si" || ! valid_count "$sn" || [ "$si" -gt "$sn" ]; then
+	if [ -z "$shard" ] || [ "$si" = "$shard" ] || ! valid_count "$si" || ! valid_count "$sn" || [ "$si" -gt "$sn" ]; then
 		echo "--shard I/N: need 1 <= I <= N, got '$shard'" >&2
 		exit 2
 	fi

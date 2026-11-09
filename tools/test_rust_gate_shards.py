@@ -107,10 +107,19 @@ for gate in ("sv-main", "world-trace"):
     if p.returncode != 2 or "nosuchpart" not in p.stderr:
         errors.append(f"check-rust-{gate}.sh with RUST_GATE_PARTS=nosuchpart: exit {p.returncode}, want 2 naming the part")
 
-for bad in ("0/6", "7/6", "x/6", "3", "3/0", ""):
-    p = run(["bash", str(GATE), "--shard", bad], check=False)
-    if p.returncode != 2:
-        errors.append(f"--shard {bad!r}: exit {p.returncode}, want 2")
+# Each must be refused by the argument check itself: exit 2 AND a message
+# naming the flag.  Exit 2 alone is not enough -- the tool check also exits
+# 2, so on a machine without cargo a bad value that slipped through would
+# still "pass", which is exactly how `--shard ''` (read as "unsharded", the
+# whole gate in every job) once passed here and failed on a CI runner.
+bad_args = [["--shard", b] for b in ("0/6", "7/6", "x/6", "3", "3/0", "", "/6", "6/")]
+bad_args += [["--plan", b] for b in ("", "0", "x")]
+bad_args += [["--shard"], ["--plan"]]
+for args in bad_args:
+    p = run(["bash", str(GATE)] + args, check=False)
+    if p.returncode != 2 or args[0] not in p.stderr:
+        errors.append(f"{args}: exit {p.returncode}, stderr {p.stderr.strip()[:80]!r}; "
+                      f"want exit 2 from the {args[0]} check")
 
 p = run(["bash", str(GATE), "--shard", "40/40"], check=False)
 if p.returncode != 0 or "no items" not in p.stdout:
