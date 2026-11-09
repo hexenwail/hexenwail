@@ -49,7 +49,13 @@ IMGBIND(1, r8) uniform writeonly image2D out_working_edges;
 uvec2 tiled_work_group_id ()
 {
 	const uint tile_width = 32;
-	uvec2 grid = gl_NumWorkGroups.xy;
+	/* The grid is derived, not read from gl_NumWorkGroups: HLSL has no such
+	 * builtin, so shadercross refuses to emit DXIL for a shader that uses it
+	 * (#448).  This is exact rather than an estimate because gl_ssao.c
+	 * dispatches this stage as ((ss_aow + 7) / 8, (ss_aoh + 7) / 8) and
+	 * u_viewport.xy is (ss_aow, ss_aoh); the 8 is local_size above.  Change
+	 * the dispatch or the local size and this must follow. */
+	uvec2 grid = (uvec2 (u_viewport.xy) + 7u) / 8u;
 	if (grid.x <= tile_width || grid.y == 1)
 		return gl_WorkGroupID.xy;
 	uint group_index = gl_WorkGroupID.y * grid.x + gl_WorkGroupID.x;
