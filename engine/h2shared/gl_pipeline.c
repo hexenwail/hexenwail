@@ -35,6 +35,7 @@ typedef struct {
 	double		depth_near, depth_far;
 	qboolean	cull;
 	GLenum		cull_face;
+	GLenum		polygon_mode;
 	qboolean	poly_offset_fill;
 	qboolean	poly_offset_line;
 	float		poly_factor, poly_units;
@@ -59,6 +60,7 @@ static rpipestate_t rp = {
 	0.0, 1.0,				/* depth range */
 	false,					/* cull */
 	GL_BACK,				/* cull_face */
+	GL_FILL,				/* polygon_mode */
 	false, false,				/* polygon offset fill / line */
 	0.0f, 0.0f,				/* polygon offset factor / units */
 	false,					/* stencil_test */
@@ -279,6 +281,21 @@ void R_SetPolygonOffsetLine (qboolean enable, float factor, float units)
 #endif	/* USE_GLES */
 }
 
+void R_SetPolygonMode (GLenum mode)
+{
+#ifdef USE_GLES
+	/* No glPolygonMode on the ES tier, and the showtris pass returns
+	 * early there anyway -- same shape as R_SetPolygonOffsetLine above,
+	 * whose enum is not even in <GLES3/gl3.h>. */
+	(void) mode;
+#else
+	if (rp.polygon_mode == mode)
+		return;
+	rp.polygon_mode = mode;
+	glPolygonMode_fp (GL_FRONT_AND_BACK, mode);
+#endif	/* USE_GLES */
+}
+
 /* ------------------------------------------------------------------ */
 /* Stencil                                                             */
 /* ------------------------------------------------------------------ */
@@ -383,6 +400,9 @@ void R_BindPipeline (const rpipeline_t *p)
 		R_SetCullFace (p->cull_face);
 	R_SetCull (p->cull);
 
+	if (p->polygon_mode != RP_KEEP_ENUM)
+		R_SetPolygonMode (p->polygon_mode);
+
 	R_SetAlphaToCoverage (p->alpha_to_coverage);
 }
 
@@ -402,6 +422,7 @@ void R_PipelineResetState (void)
 	glDepthRange_fp (0.0, 1.0);
 	glDisable_fp (GL_CULL_FACE);
 	glCullFace_fp (GL_BACK);
+	glPolygonMode_fp (GL_FRONT_AND_BACK, GL_FILL);
 	glDisable_fp (GL_POLYGON_OFFSET_FILL);
 	glPolygonOffset_fp (0.0f, 0.0f);
 	glDisable_fp (GL_STENCIL_TEST);
@@ -424,6 +445,7 @@ void R_PipelineResetState (void)
 	rp.depth_far = 1.0;
 	rp.cull = false;
 	rp.cull_face = GL_BACK;
+	rp.polygon_mode = GL_FILL;
 	rp.poly_offset_fill = false;
 	rp.poly_offset_line = false;
 	rp.poly_factor = 0.0f;

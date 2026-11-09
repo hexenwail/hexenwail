@@ -24,11 +24,15 @@
  *
  * The shadow is only correct as long as nothing writes these states behind
  * its back, so the raw glEnable/glDepthMask/glBlendFunc/... calls belong here
- * and nowhere else.  Two exceptions, both harmless: one-time context setup in
+ * and nowhere else.  Exceptions, all deliberate: one-time context setup in
  * gl_vidsdl.c for state this module does not track (multisample, debug
- * output), and three #if 0 fragments of the old fixed-function zfix hack
- * (gl_vidsdl.c GL_Init, gl_rsurf.c R_DrawBrushModel) which do not compile and
- * so cannot desync anything.
+ * output); three #if 0 fragments of the old fixed-function zfix hack
+ * (gl_vidsdl.c GL_Init, gl_rsurf.c R_DrawBrushModel) which do not compile
+ * and so cannot desync anything; and state that is deliberately not
+ * pipeline state -- sample shading (SDL_GPU has no API for it; GL-only
+ * path), scissor and viewport (dynamic command-buffer state in SDL_GPU,
+ * not pipeline state), and the web_canvas_gl2.c presentation canvas
+ * (a separate renderer path, raw GLES by design).
  */
 
 #ifndef GL_PIPELINE_H
@@ -58,6 +62,7 @@ typedef struct rpipeline_s {
 	GLenum		depth_func;		/* RP_KEEP_ENUM to leave alone */
 	qboolean	cull;
 	GLenum		cull_face;		/* RP_KEEP_ENUM to leave alone */
+	GLenum		polygon_mode;		/* RP_KEEP_ENUM to leave alone */
 	qboolean	alpha_to_coverage;
 } rpipeline_t;
 
@@ -85,6 +90,7 @@ void	R_SetCull (qboolean enable);
 void	R_SetCullFace (GLenum face);
 void	R_SetPolygonOffsetFill (qboolean enable, float factor, float units);
 void	R_SetPolygonOffsetLine (qboolean enable, float factor, float units);
+void	R_SetPolygonMode (GLenum mode);
 void	R_SetStencilTest (qboolean enable);
 void	R_SetStencilFunc (GLenum func, GLint ref, GLuint mask);
 void	R_SetStencilOp (GLenum sfail, GLenum dpfail, GLenum dppass);

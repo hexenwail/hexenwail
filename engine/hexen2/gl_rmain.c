@@ -7292,7 +7292,7 @@ static void R_ShowTris (void)
 
 		R_SetPolygonOffsetLine (true, units < 0 ? -1.0f : 1.0f, units);
 	}
-	glPolygonMode_fp (GL_FRONT_AND_BACK, GL_LINE);
+	R_SetPolygonMode (GL_LINE);
 
 	glBindVertexArray_fp (world_vao);
 	R_UseProgram (gl_shader_flat.program);
@@ -7361,7 +7361,7 @@ static void R_ShowTris (void)
 
 	R_DrawParticles_ShowTris ();
 
-	glPolygonMode_fp (GL_FRONT_AND_BACK, GL_FILL);
+	R_SetPolygonMode (GL_FILL);
 	if (r_showtris.value != 1)
 	{
 		R_SetPolygonOffsetLine (false, 0.0f, 0.0f);

@@ -89,6 +89,15 @@ typedef int64_t  GLint64;
 #ifndef GL_POLYGON
 #define GL_POLYGON				0x0009
 #endif
+/* Polygon mode.  GLES3/WebGL2 drops it, but the showtris pass still names
+ * its modes when routing them through R_SetPolygonMode, so they must keep
+ * their real GL values. */
+#ifndef GL_LINE
+#define GL_LINE					0x1B01
+#endif
+#ifndef GL_FILL
+#define GL_FILL					0x1B02
+#endif
 #endif
 
 #ifndef	GL_TEXTURE0
