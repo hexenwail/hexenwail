@@ -114,6 +114,12 @@ jobs:
       - name: Rust gate shards cover every item exactly once
         run: python3 tools/test_rust_gate_shards.py
 
+      # The differential harnesses kill a call that spins; timed by wall clock,
+      # a busy runner turned an ordinary return into a "spin" and failed
+      # sv_main_inv on a commit that passed on rerun.  CPU time only.
+      - name: Rust harnesses time spins by CPU, not wall clock
+        run: python3 tools/test_harness_cpu_timers.py
+
       # Data-free coverage for the unified multiplayer path. The harness
       # extracts the production C functions rather than maintaining a Python
       # reimplementation, then compiles them against narrow engine stubs.

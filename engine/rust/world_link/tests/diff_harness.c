@@ -451,12 +451,16 @@ static int run_child (const impl_t *impl, const op_t *ops, int nops, state_t *ou
 		size_t			left;
 
 		close (fds[0]);
+		/* A scenario takes microseconds.  CPU time, not wall-clock (as the
+		 * world_move harness does): a loaded CI runner must not turn a slow
+		 * return into a hang -- the ITIMER_REAL pattern flaked sv_main_inv's
+		 * harness.  SIGPROF's default action ends the child. */
 		memset (&it, 0, sizeof (it));
-		it.it_value.tv_sec = 2;		/* a scenario takes microseconds */
-		setitimer (ITIMER_REAL, &it, NULL);
+		it.it_value.tv_sec = 2;
+		setitimer (ITIMER_PROF, &it, NULL);
 		run (impl, ops, nops);
 		memset (&it, 0, sizeof (it));
-		setitimer (ITIMER_REAL, &it, NULL);
+		setitimer (ITIMER_PROF, &it, NULL);
 		save (out);
 		/* the census and the C's cursor go back with the state */
 		out->st[0] = st_leafcap; out->st[1] = st_item; out->st[2] = st_rotated;
@@ -475,7 +479,7 @@ static int run_child (const impl_t *impl, const op_t *ops, int nops, state_t *ou
 		got += (size_t) n;
 	close (fds[0]);
 	if (waitpid (pid, &status, 0) < 0) { perror ("waitpid"); exit (2); }
-	if (WIFSIGNALED (status) && WTERMSIG (status) == SIGALRM)
+	if (WIFSIGNALED (status) && WTERMSIG (status) == SIGPROF)
 		return RUN_HUNG;
 	/* only a memory fault is the C's undefined walk; anything else (an
 	 * abort from a harness stub, a short write) is the harness's own bug */
