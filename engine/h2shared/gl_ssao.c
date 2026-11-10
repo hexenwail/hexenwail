@@ -65,7 +65,7 @@ void R_SSAO_Init (void)
 
 #include "shaders_gen.h"
 
-#define SSAO_UBO_BINDING	3	/* 0 Hi-Z, 1 and 2 the shared vert/frag blocks */
+#define SSAO_UBO_BINDING	3	/* 0 Hi-Z, 1 and 2 the shared vert/frag blocks, 4 CullParams */
 #define SSAO_TEX_UNIT		8	/* the shaders' TEXBIND(8..11): clear of the units draws cache */
 #define SSAO_PYRAMID_LEVELS	5
 #define SSAO_VERSION		"#version 430 core\n"
