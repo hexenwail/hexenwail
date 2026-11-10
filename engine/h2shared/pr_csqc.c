@@ -15,6 +15,9 @@
  */
 
 #include "quakedef.h"
+#if defined(GLQUAKE)
+#include "gl_pipeline.h"	/* GL_SetScissor / GL_ResetScissor (#453) */
+#endif
 
 #if !defined(SERVERONLY)
 
@@ -147,8 +150,7 @@ static void PF_csqc_drawsetcliparea (void)
 	float h = G_FLOAT(OFS_PARM3);
 
 #if defined(GLQUAKE)
-	glEnable_fp (GL_SCISSOR_TEST);
-	glScissor_fp ((int)x, (int)(vid.height - y - h), (int)w, (int)h);
+	GL_SetScissor ((int)x, (int)(vid.height - y - h), (int)w, (int)h);
 #else	/* software rasterizer: the 2D layer has no scissor */
 	(void) x; (void) y; (void) w; (void) h;
 #endif
@@ -165,7 +167,7 @@ void drawresetcliparea(void)
 static void PF_csqc_drawresetcliparea (void)
 {
 #if defined(GLQUAKE)
-	glDisable_fp (GL_SCISSOR_TEST);
+	GL_ResetScissor ();
 #endif
 }
 

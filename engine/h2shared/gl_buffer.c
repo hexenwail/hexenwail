@@ -172,6 +172,35 @@ void GL_BindBuffersRange (GLenum target, GLuint first, GLsizei count,
 		GL_BindBufferRange (target, first + i, buffers[i], offsets[i], sizes[i]);
 }
 
+/* GPU particle resources (engine/hexen2/r_part.c, GitHub #453).
+ *
+ * r_part.c owns the particle SSBO/VAO names but may not call raw GL itself:
+ * every draw-affecting GL call lives in engine/h2shared/gl_*.c or
+ * engine/hexen2/gl_*.c, through the gl_func.h loader table, so a second
+ * backend (SDL_GPU, #447) has one place that knows the whole draw state.
+ * The SSBO is allocated empty -- the vertex shader reads particles from it
+ * and there are no vertex attributes, hence the empty VAO. */
+void GL_CreateParticleResources (GLuint *ssbo, GLuint *vao, GLsizeiptr size)
+{
+	glGenBuffers_fp (1, ssbo);
+	GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, *ssbo);
+	glBufferData_fp (GL_SHADER_STORAGE_BUFFER, size, NULL, GL_DYNAMIC_DRAW);
+	GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, 0);
+
+	/* Empty VAO -- vertex shader reads from SSBO, no vertex attributes */
+	glGenVertexArrays_fp (1, vao);
+}
+
+void GL_DeleteParticleResources (GLuint ssbo, GLuint vao)
+{
+	/* Caller calls GL_ForgetBuffer (ssbo) first: the indexed-binding cache
+	 * must not keep holding a name GL is about to hand back out. */
+	if (ssbo)
+		glDeleteBuffers_fp (1, &ssbo);
+	if (vao)
+		glDeleteVertexArrays_fp (1, &vao);
+}
+
 /* Drop any cached indexed binding that names `handle`.
  *
  * glDeleteBuffers resets every binding point the deleted buffer occupied back
@@ -520,6 +549,19 @@ void GL_BindBuffersRange (GLenum target, GLuint first, GLsizei count,
 {
 	(void)target; (void)first; (void)count;
 	(void)buffers; (void)offsets; (void)sizes;
+}
+
+/* No SSBO/VAO backing on the ES tier: the GPU particle path is compiled out
+ * there (r_part.c keeps stub init/shutdown symbols), so these are never
+ * called -- but the symbols must exist for the link.  GitHub #453. */
+void GL_CreateParticleResources (GLuint *ssbo, GLuint *vao, GLsizeiptr size)
+{
+	(void)ssbo; (void)vao; (void)size;
+}
+
+void GL_DeleteParticleResources (GLuint ssbo, GLuint vao)
+{
+	(void)ssbo; (void)vao;
 }
 
 #endif	/* USE_GLES */

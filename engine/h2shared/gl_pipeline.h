@@ -96,6 +96,12 @@ void	R_SetStencilFunc (GLenum func, GLint ref, GLuint mask);
 void	R_SetStencilOp (GLenum sfail, GLenum dpfail, GLenum dppass);
 void	R_SetColorMask (qboolean r, qboolean g, qboolean b, qboolean a);
 void	R_SetAlphaToCoverage (qboolean enable);
+
+/* Point size and scissor.  Unshadowed (see gl_pipeline.c): the only callers
+ * set them as balanced pairs.  GitHub #453. */
+void	GL_SetPointSize (float size);
+void	GL_SetScissor (int x, int y, int width, int height);
+void	GL_ResetScissor (void);
 void	R_UseProgram (GLuint program);
 
 /* Deleting a program invalidates the bound-program shadow: GL reuses names, so

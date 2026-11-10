@@ -355,6 +355,12 @@ void GL_BindBuffersRange (GLenum target, GLuint first, GLsizei count,
 			  const GLintptr *offsets,
 			  const GLsizeiptr *sizes);
 
+/* GPU particle SSBO + empty VAO (engine/hexen2/r_part.c).  The particle code
+ * owns the names but may not call raw GL itself; these wrappers are the only
+ * way it creates and deletes them.  GitHub #453. */
+void GL_CreateParticleResources (GLuint *ssbo, GLuint *vao, GLsizeiptr size);
+void GL_DeleteParticleResources (GLuint ssbo, GLuint vao);
+
 #ifndef GL_ZERO_TO_ONE
 #define GL_ZERO_TO_ONE			0x935F
 #endif

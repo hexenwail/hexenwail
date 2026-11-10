@@ -362,6 +362,38 @@ void R_SetAlphaToCoverage (qboolean enable)
 }
 
 /* ------------------------------------------------------------------ */
+/* Point size and scissor — unshadowed state                           */
+/* ------------------------------------------------------------------ */
+
+/* Deliberately outside the shadow above: both are always set as a balanced
+ * pair at the call site (point size 2.0 -> 1.0 around the square-particle
+ * batch, scissor enable -> disable around the CSQC clip area), so there is
+ * nothing for the shadow to deduplicate and no state for a later draw to
+ * inherit unknowingly.  They live here, not at the call sites, so no raw
+ * glFoo call sits outside the renderer modules: a second backend (SDL_GPU,
+ * #447) needs one place that knows the whole draw state.  GitHub #453. */
+void GL_SetPointSize (float size)
+{
+	/* No glPointSize on the ES tier (gl_func.h stubs it): point size comes
+	 * from the vertex shader's gl_PointSize output, so square-particle mode
+	 * draws at 1px there.  The call is still spelled the same on both tiers. */
+	glPointSize_fp (size);
+}
+
+void GL_SetScissor (int x, int y, int width, int height)
+{
+	/* Coordinates are GL-native (origin bottom-left); the caller flips from
+	 * Quake's top-left origin. */
+	glEnable_fp (GL_SCISSOR_TEST);
+	glScissor_fp (x, y, width, height);
+}
+
+void GL_ResetScissor (void)
+{
+	glDisable_fp (GL_SCISSOR_TEST);
+}
+
+/* ------------------------------------------------------------------ */
 /* Program                                                             */
 /* ------------------------------------------------------------------ */
 
