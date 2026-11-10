@@ -705,51 +705,19 @@ static int run_one (int kind, edict_t *ent, const vec3_t move0, int relink, int 
 	}
 }
 
-static void compare_case (void)
+/* The parity half, shared by the random cases and the directed boarding
+ * cases below: both sides ran from the same snapshot, so they must agree
+ * on the return, every edict, the area nodes, the globals, the return
+ * slot, the diagnostic log and the rand() stream.  The stats are from the
+ * C side, as compare_case took them. */
+static void compare_saved (int kind, int ec)
 {
-	int		kind, ec = 1 + (int) (rnd () % (NE - 1));
-	edict_t		*ent = &edicts[ec];
-	vec3_t		move;
-	int		relink = chance (50), noenemy = chance (30), set_trace = chance (50);
-	unsigned int	seed = rnd ();
-	int		k, rc, rr;
-	char		msg[600];
+	int	k;
+	char	msg[600];
 
-	n_cases++;
-	kind = chance (50) ? 0 : (chance (70) ? 1 : 2);
-	ent->free = false;
-	gen_monster (ent);
-	for (k = 0; k < 2; k++)
-		move[k] = chance (60) ? (float) ((int) (rnd () % 41) - 20) : frand (-40, 40);
-	move[2] = chance (70) ? 0 : frand (-20, 20);
-
-	/* the QuakeC calling convention: self, the distance in parm 0, and
-	 * trace globals left by whatever ran before */
-	g.self = ec * (int) sizeof (edict_t);
-	g.other = 0;
-	g.trace_fraction = frand (0, 1);
-	g.trace_plane_normal[0] = 1;
-	G_FLOAT(OFS_PARM0) = chance (85) ? (float) (rnd () % 32) : frand (-8, 64);
-	G_FLOAT(OFS_RETURN) = -7;
-	dbg_len = 0;
-	dbg[0] = 0;
-
-	save (&before, 0);
-	srand (seed);
-	rc = run_one (kind, ent, move, relink, noenemy, set_trace, 0);
-	save (&after_c, rc);
-	after_c.next_rand = rand ();
-	restore (&before);
-	srand (seed);
-	rr = run_one (kind, ent, move, relink, noenemy, set_trace, 1);
-	save (&after_rust, rr);
-	after_rust.next_rand = rand ();
-	canon_state (&after_c);
-	canon_state (&after_rust);
-
-	if (rc != rr)
+	if (after_c.ret != after_rust.ret)
 	{
-		snprintf (msg, sizeof (msg), "returns C %d Rust %d", rc, rr);
+		snprintf (msg, sizeof (msg), "returns C %d Rust %d", after_c.ret, after_rust.ret);
 		report (n_cases, "return", msg);
 	}
 	if (memcmp (after_c.edicts, after_rust.edicts, sizeof (edicts)) != 0)
@@ -786,7 +754,7 @@ static void compare_case (void)
 	/* outcomes, from the C side */
 	st_kind[kind]++;
 	if (kind != 0)
-		st_ret[rc != 0]++;
+		st_ret[after_c.ret != 0]++;
 	if (memcmp (before.edicts[ec].v.origin, after_c.edicts[ec].v.origin, sizeof (vec3_t)) != 0)
 		st_moved++;
 	if (memcmp (before.nodes, after_c.nodes, sizeof (sv_areanodes)) != 0)
@@ -803,6 +771,327 @@ static void compare_case (void)
 		for (k = 0; k < NMSGS; k++)
 			if (strstr (after_c.dbg, msgs[k]))
 				st_msg[k]++;
+	}
+}
+
+static void compare_case (void)
+{
+	int		kind, ec = 1 + (int) (rnd () % (NE - 1));
+	edict_t		*ent = &edicts[ec];
+	vec3_t		move;
+	int		relink = chance (50), noenemy = chance (30), set_trace = chance (50);
+	unsigned int	seed = rnd ();
+	int		k, rc, rr;
+
+	n_cases++;
+	kind = chance (50) ? 0 : (chance (70) ? 1 : 2);
+	ent->free = false;
+	gen_monster (ent);
+	for (k = 0; k < 2; k++)
+		move[k] = chance (60) ? (float) ((int) (rnd () % 41) - 20) : frand (-40, 40);
+	move[2] = chance (70) ? 0 : frand (-20, 20);
+
+	/* the QuakeC calling convention: self, the distance in parm 0, and
+	 * trace globals left by whatever ran before */
+	g.self = ec * (int) sizeof (edict_t);
+	g.other = 0;
+	g.trace_fraction = frand (0, 1);
+	g.trace_plane_normal[0] = 1;
+	G_FLOAT(OFS_PARM0) = chance (85) ? (float) (rnd () % 32) : frand (-8, 64);
+	G_FLOAT(OFS_RETURN) = -7;
+	dbg_len = 0;
+	dbg[0] = 0;
+
+	save (&before, 0);
+	srand (seed);
+	rc = run_one (kind, ent, move, relink, noenemy, set_trace, 0);
+	save (&after_c, rc);
+	after_c.next_rand = rand ();
+	restore (&before);
+	srand (seed);
+	rr = run_one (kind, ent, move, relink, noenemy, set_trace, 1);
+	save (&after_rust, rr);
+	after_rust.next_rand = rand ();
+	canon_state (&after_c);
+	canon_state (&after_rust);
+
+	compare_saved (kind, ec);
+}
+
+/* ------------------------------------------------------------------------ */
+/* directed boarding-boundary cases (#116)                                  */
+/* ------------------------------------------------------------------------ */
+
+/* A train deck is a SOLID_BSP MOVETYPE_PUSH brush whose top is the floor
+ * the monster steps onto.  These two cases pin the boarding boundary in
+ * the code as it stands: a flush deck (top at the floor) must step, a
+ * deck one step above the floor (top at floor + 24, past STEPSIZE 18)
+ * must refuse on the step-down trace, not in CheckBottom.  They assert
+ * current behaviour, C against Rust; they change nothing.  No map, no
+ * monster class, no deck height and no debug dump has arrived from the
+ * reporter (see #116 / #278), so there is no behaviour to fix against --
+ * a fix written now would guess at one of three mutually exclusive
+ * mechanisms.  The issue stays open pending that repro; when it arrives,
+ * the first question ("is the deck too high, or is the mover special?")
+ * is already answered by a number.
+ *
+ * Geometry, in world coordinates.  Every hull of both models is built
+ * the same, so the monster's .hull and the point traces agree, and every
+ * hull's clip_mins are zero, so the trace offset is just the entity
+ * origin and the step-down trace is of the origin point:
+ *
+ *   model 1, the world: a flat floor at z = 0 with a rectangular hole
+ *   where the deck sits, so the deck -- and only the deck -- is the
+ *   ground over its footprint.  Without the hole the world floor and the
+ *   deck top would tie at fraction 0.5 and groundentity would read the
+ *   world, not the deck, and the flush case could not name its ground.
+ *   model 2, the deck: a solid box, x 16..112, y -48..48, z -16..top.
+ *   The deck runs down below the floor so the raised case's step-down
+ *   trace still starts inside it (a thin deck would let the retry fall
+ *   through to a "walked off edge" refusal instead of the allsolid one
+ *   this case pins).
+ *
+ * The monster is a shipped player-hull box (mins -16,-16,0 / maxs
+ * 16,16,56, .hull HULL_PLAYER), FL_ONGROUND | FL_MONSTER, standing on
+ * the floor at the origin; one SV_movestep of (48,0,0) puts its feet at
+ * (48,0,0), over the deck.  Flush: the step-down trace meets the deck
+ * top at fraction 0.5 and lands on it, a DIST_EPSILON above the surface.
+ * Raised: the trace starts inside the deck (18 < 24), so it is
+ * startsolid, and the retry from feet starts inside it too -- the deck
+ * is taller than a step in both directions -- so it refuses on the
+ * step-down trace, and CheckBottom is never reached.  (The first trace
+ * is startsolid rather than allsolid because its end leaves the deck
+ * below: the trace crosses the deck's bottom plane into empty, which
+ * clears allsolid.  Either branch is the step-down refusal this case
+ * pins; this geometry takes the startsolid one.) */
+
+#define BOARD_DECK		1	/* edicts[] index of the deck */
+#define BOARD_MONSTER		2	/* edicts[] index of the monster */
+#define BOARD_DECK_TOP_FLUSH	0
+#define BOARD_DECK_TOP_RAISED	24
+
+static long	st_board_flush, st_board_raised;
+
+/* one axial plane: type is the axis, normal +1 on it, dist the offset */
+static void board_plane (mplane_t *p, int axis, float dist)
+{
+	memset (p, 0, sizeof (*p));
+	p->type = (byte) axis;
+	p->normal[axis] = 1;
+	p->dist = dist;
+}
+
+static void gen_boarding_world (int deck_top)
+{
+	int	m, h, i;
+
+	memset (models, 0, sizeof (models));
+	memset (&sv, 0, sizeof (sv));
+	memset (edicts, 0, sizeof (edicts));
+
+	/* the world: a flat floor at z = 0 with a hole under the deck */
+	for (h = 0; h < MAX_MAP_HULLS; h++)
+	{
+		hull_t		*hull = &models[1].hulls[h];
+		mplane_t	*pl = planes[1];
+		mclipnode_t	*nd = clipnodes[1][h];
+
+		board_plane (&pl[0], 0, 16);
+		board_plane (&pl[1], 0, 112);
+		board_plane (&pl[2], 1, -48);
+		board_plane (&pl[3], 1, 48);
+		board_plane (&pl[4], 2, 0);
+		nd[0].planenum = 0; nd[0].children[0] = 1; nd[0].children[1] = 4;
+		nd[1].planenum = 1; nd[1].children[0] = 4; nd[1].children[1] = 2;
+		nd[2].planenum = 2; nd[2].children[0] = 3; nd[2].children[1] = 4;
+		nd[3].planenum = 3; nd[3].children[0] = 4; nd[3].children[1] = CONTENTS_EMPTY;
+		nd[4].planenum = 4; nd[4].children[0] = CONTENTS_EMPTY; nd[4].children[1] = CONTENTS_SOLID;
+		hull->planes = pl;
+		hull->clipnodes = nd;
+		hull->firstclipnode = 0;
+		hull->lastclipnode = 4;
+		for (i = 0; i < 3; i++)
+			hull->clip_mins[i] = hull->clip_maxs[i] = 0;
+	}
+	models[1].type = mod_brush;
+	sv.models[1] = &models[1];
+
+	/* the deck: a solid box, top at deck_top */
+	for (h = 0; h < MAX_MAP_HULLS; h++)
+	{
+		hull_t		*hull = &models[2].hulls[h];
+		mplane_t	*pl = planes[2];
+		mclipnode_t	*nd = clipnodes[2][h];
+
+		board_plane (&pl[0], 0, 16);
+		board_plane (&pl[1], 0, 112);
+		board_plane (&pl[2], 1, -48);
+		board_plane (&pl[3], 1, 48);
+		board_plane (&pl[4], 2, -16);
+		board_plane (&pl[5], 2, (float) deck_top);
+		nd[0].planenum = 0; nd[0].children[0] = 1; nd[0].children[1] = CONTENTS_EMPTY;
+		nd[1].planenum = 1; nd[1].children[0] = CONTENTS_EMPTY; nd[1].children[1] = 2;
+		nd[2].planenum = 2; nd[2].children[0] = 3; nd[2].children[1] = CONTENTS_EMPTY;
+		nd[3].planenum = 3; nd[3].children[0] = CONTENTS_EMPTY; nd[3].children[1] = 4;
+		nd[4].planenum = 4; nd[4].children[0] = 5; nd[4].children[1] = CONTENTS_EMPTY;
+		nd[5].planenum = 5; nd[5].children[0] = CONTENTS_EMPTY; nd[5].children[1] = CONTENTS_SOLID;
+		hull->planes = pl;
+		hull->clipnodes = nd;
+		hull->firstclipnode = 0;
+		hull->lastclipnode = 5;
+		for (i = 0; i < 3; i++)
+			hull->clip_mins[i] = hull->clip_maxs[i] = 0;
+	}
+	models[2].type = mod_brush;
+	sv.models[2] = &models[2];
+
+	/* the rest of the model table, as gen_world leaves it */
+	for (m = 3; m < NMODELS; m++)
+		sv.models[m] = &models[m];
+
+	one_leaf.contents = CONTENTS_EMPTY;
+	models[1].nodes = (mnode_t *) &one_leaf;
+	models[1].leafs = &one_leaf;
+	for (i = 0; i < 3; i++)
+	{
+		models[1].mins[i] = -1024;
+		models[1].maxs[i] = 1024;
+	}
+	sv.worldmodel = &models[1];
+	sv.edicts = edicts;
+	sv.num_edicts = NE;
+	sv.time = 0;
+
+	edicts[0].v.solid = SOLID_BSP;
+	edicts[0].v.movetype = MOVETYPE_PUSH;
+	edicts[0].v.modelindex = 1;
+
+	SV_ClearWorld ();
+
+	/* the deck */
+	{
+		edict_t	*e = &edicts[BOARD_DECK];
+		e->v.classname = 1001;
+		e->v.solid = SOLID_BSP;
+		e->v.movetype = MOVETYPE_PUSH;
+		e->v.modelindex = 2;
+		e->v.mins[0] = 16; e->v.mins[1] = -48; e->v.mins[2] = -16;
+		e->v.maxs[0] = 112; e->v.maxs[1] = 48; e->v.maxs[2] = (float) deck_top;
+		for (i = 0; i < 3; i++)
+			e->v.size[i] = e->v.maxs[i] - e->v.mins[i];
+		SV_LinkEdict (e, false);
+	}
+
+	/* the monster */
+	{
+		edict_t	*e = &edicts[BOARD_MONSTER];
+		e->v.classname = 1002;
+		e->v.solid = SOLID_SLIDEBOX;
+		e->v.movetype = MOVETYPE_STEP;
+		e->v.mins[0] = -16; e->v.mins[1] = -16; e->v.mins[2] = 0;
+		e->v.maxs[0] = 16; e->v.maxs[1] = 16; e->v.maxs[2] = 56;
+		for (i = 0; i < 3; i++)
+			e->v.size[i] = e->v.maxs[i] - e->v.mins[i];
+		e->v.flags = (float) (FL_ONGROUND | FL_MONSTER);
+		e->v.hull = 2;	/* HULL_PLAYER, model.h */
+		SV_LinkEdict (e, false);
+	}
+}
+
+static void boarding_case (int deck_top)
+{
+	edict_t		*ent = &edicts[BOARD_MONSTER];
+	vec3_t		move = { 48, 0, 0 };
+	unsigned int	seed = 12345;
+	int		rc, rr;
+	char		msg[600];
+
+	n_cases++;
+	gen_boarding_world (deck_top);
+
+	/* the QuakeC calling convention, fixed: self is the monster, the
+	 * trace globals start cleared.  No rng is drawn here, so the random
+	 * loop below still draws the same stream as the unmodified harness */
+	g.self = BOARD_MONSTER * (int) sizeof (edict_t);
+	g.other = 0;
+	g.trace_fraction = 0;
+	g.trace_plane_normal[0] = 1;
+	G_FLOAT(OFS_PARM0) = 0;
+	G_FLOAT(OFS_RETURN) = -7;
+	dbg_len = 0;
+	dbg[0] = 0;
+
+	save (&before, 0);
+	srand (seed);
+	rc = c_SV_movestep (ent, move, 1, 1, 1);
+	save (&after_c, rc);
+	after_c.next_rand = rand ();
+	restore (&before);
+	srand (seed);
+	rr = SV_movestep (ent, move, 1, 1, 1);
+	save (&after_rust, rr);
+	after_rust.next_rand = rand ();
+	canon_state (&after_c);
+	canon_state (&after_rust);
+
+	/* the parity half: the same checks compare_case runs */
+	compare_saved (1, BOARD_MONSTER);
+
+	/* the behaviour half: what the step did, on the C side.  The parity
+	 * half above already proved the Rust agrees; these assert the engine
+	 * does what the issue needs pinned.  A miss here is a finding, not a
+	 * harness bug: the case fails loudly so the boundary is re-read, not
+	 * silently re-based. */
+	if (deck_top == BOARD_DECK_TOP_FLUSH)
+	{
+		/* the step lands on the deck: feet at (48, 0, 0 + DIST_EPSILON),
+		 * groundentity the deck edict */
+		if (after_c.ret != 1
+		    || after_c.edicts[BOARD_MONSTER].v.origin[0] != 48
+		    || after_c.edicts[BOARD_MONSTER].v.origin[1] != 0
+		    || after_c.edicts[BOARD_MONSTER].v.origin[2] < 0
+		    || after_c.edicts[BOARD_MONSTER].v.origin[2] > 0.1f
+		    || after_c.edicts[BOARD_MONSTER].v.groundentity != BOARD_DECK * (int) sizeof (edict_t))
+		{
+			snprintf (msg, sizeof (msg),
+				  "flush deck: returns %d, origin C %a %a %a, groundentity %d (want 1, 48 0 ~0, %d)\n--- log\n%.250s",
+				  after_c.ret,
+				  after_c.edicts[BOARD_MONSTER].v.origin[0],
+				  after_c.edicts[BOARD_MONSTER].v.origin[1],
+				  after_c.edicts[BOARD_MONSTER].v.origin[2],
+				  after_c.edicts[BOARD_MONSTER].v.groundentity,
+				  BOARD_DECK * (int) sizeof (edict_t),
+				  after_c.dbg);
+			report (n_cases, "boarding", msg);
+		}
+		else
+			st_board_flush++;
+	}
+	else
+	{
+		/* the step refuses on the step-down trace: the trace starts
+		 * inside the deck, so it is startsolid, and the retry from feet
+		 * starts inside it too, so it refuses there; CheckBottom is
+		 * never reached */
+		if (after_c.ret != 0
+		    || strstr (after_c.dbg, "step-down still startsolid") == NULL
+		    || strstr (after_c.dbg, "CheckBottom failed") != NULL
+		    || strstr (after_c.dbg, "walked off edge") != NULL
+		    || after_c.edicts[BOARD_MONSTER].v.origin[0] != 0
+		    || after_c.edicts[BOARD_MONSTER].v.origin[1] != 0
+		    || after_c.edicts[BOARD_MONSTER].v.origin[2] != 0)
+		{
+			snprintf (msg, sizeof (msg),
+				  "raised deck: returns %d, origin C %a %a %a (want 0, 0 0 0, step-down startsolid)\n--- log\n%.250s",
+				  after_c.ret,
+				  after_c.edicts[BOARD_MONSTER].v.origin[0],
+				  after_c.edicts[BOARD_MONSTER].v.origin[1],
+				  after_c.edicts[BOARD_MONSTER].v.origin[2],
+				  after_c.dbg);
+			report (n_cases, "boarding", msg);
+		}
+		else
+			st_board_raised++;
 	}
 }
 
@@ -839,6 +1128,12 @@ int main (void)
 	sv_globals.trace_inopen = &g.trace_inopen;
 	sv_globals.trace_inwater = &g.trace_inwater;
 
+	/* directed boarding-boundary cases (#116): pin the flush/raised
+	 * deck boundary before the random loop, so the random worlds still
+	 * draw the same rng stream as the unmodified harness */
+	boarding_case (BOARD_DECK_TOP_FLUSH);
+	boarding_case (BOARD_DECK_TOP_RAISED);
+
 	for (iw = 0; iw < 3000; iw++)
 	{
 		gen_world ();
@@ -865,6 +1160,8 @@ int main (void)
 	floor_check ("a call that set the trace globals", st_trace_set, 5000);
 	for (k = 0; k < NMSGS; k++)
 		floor_check (msgs[k], st_msg[k], 100);
+	floor_check ("a flush deck step succeeds", st_board_flush, 1);
+	floor_check ("a raised deck refused by step-down trace", st_board_raised, 1);
 
 	if (n_fail)
 	{
