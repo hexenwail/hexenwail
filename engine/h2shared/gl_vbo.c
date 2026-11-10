@@ -499,7 +499,18 @@ static void GL_ImmPushBlocks (const glprogram_t *shader, const float *mvp)
 		R_SetEyePos (r_origin);
 
 	if (shader->ub_vert >= 0)
+	{
+		float mv[16];
+
 		R_SetMVP (mvp);
+		/* spart_vert reads u_modelview (VertParams u_modelviewm); the
+		 * loose half below fetches the same matrix for programs that
+		 * still declare it loose.  No migrated file read it before this
+		 * slice, so feeding it here is harmless to s2d/sflat/sky -- the
+		 * shadow's dirty flags make an unchanged value free. */
+		GL_GetModelview(mv);
+		R_SetModelView (mv);
+	}
 
 	if (shader->ub_frag >= 0)
 	{
@@ -520,6 +531,10 @@ static void GL_ImmPushBlocks (const glprogram_t *shader, const float *mvp)
 		 * defect that got the first attempt at uniform blocks reverted. */
 		R_SetAlphaMask (imm_alpha_threshold >= 0.0f ? imm_alpha_threshold : 0.0f,
 				imm_force_opaque_alpha >= 0.0f ? imm_force_opaque_alpha : 0.0f);
+		/* spart_frag reads u_fog_density / u_fog_color (FragParams
+		 * u_ffogv); the loose half below pushes the same globals for
+		 * programs that still declare them loose. */
+		R_SetFog (r_fog_density, r_fog_color);
 	}
 
 	R_FlushUniforms ();
