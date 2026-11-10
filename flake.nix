@@ -866,7 +866,9 @@
             # Nor libsndfile (GitHub #168).  fluidsynth needs it only to
             # decode SF3 samples, and does so through sf_open_virtual with an
             # autodetected format, so a crafted soundfont reaches every
-            # libsndfile parser -- 1.2.2, five open CVEs, no release since
+            # libsndfile parser -- 1.2.2, five CVEs open against the pinned
+            # nixpkgs rev (two of them backported upstream since — see
+            # docs/security/libsndfile-audit-2026-11.md), no release since
             # 2023.  patches/fluidsynth-sf3-vorbisfile.patch decodes SF3
             # samples with libvorbisfile instead (already shipped for music),
             # opening Ogg Vorbis and nothing else, with libsndfile's peak
