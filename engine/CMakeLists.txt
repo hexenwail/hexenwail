@@ -1243,6 +1243,14 @@ if(BUILD_TESTING)
     target_compile_definitions(brush_render_state_test PRIVATE
         BRUSH_TEST_ENGINE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(NAME brush_render_state COMMAND brush_render_state_test)
+    # Lightmap gutter invariant (uhexen2-jwzf, issue #113).  Source-text
+    # shape again: the gutter lives in gl_rsurf.c, a TU that cannot link
+    # without SDL and the GL backend, and the guard pins AllocBlock's padded
+    # reservation, the gutter fill on every rebuild, and the page fit.
+    add_executable(lightmap_gutter_test tests/lightmap_gutter_test.c)
+    target_compile_definitions(lightmap_gutter_test PRIVATE
+        LIGHTMAP_TEST_ENGINE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME lightmap_gutter COMMAND lightmap_gutter_test)
     # LUMP_MODELS in Hexen II's or Quake's layout (#169): header-only too.
     add_executable(bsp_submodels_test tests/bsp_submodels_test.c)
     add_test(NAME bsp_submodels COMMAND bsp_submodels_test)

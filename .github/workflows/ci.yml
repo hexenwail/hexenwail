@@ -259,6 +259,14 @@ jobs:
             engine/tests/brush_render_state_test.c
           ./brush_render_state_test
 
+      - name: Unit test lightmap gutter invariant
+        run: |
+          set -euo pipefail
+          nix develop --command cc -Wall -Wextra -Werror \
+            -o lightmap_gutter_test \
+            engine/tests/lightmap_gutter_test.c
+          ./lightmap_gutter_test
+
       - name: Unit test BSP submodel layouts (Hexen II / Quake)
         run: |
           set -euo pipefail
