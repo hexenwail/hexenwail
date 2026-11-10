@@ -91,7 +91,6 @@ cvar_t	gl_hiz_cull = {"gl_hiz_cull", "1", CVAR_ARCHIVE};
  * the CPU — throttle with N >= 30 for normal use. */
 cvar_t	gl_hiz_stats = {"gl_hiz_stats", "0", CVAR_NONE};
 static GLuint	cull_stats_ssbo;	/* binding 7: stats[8] uints */
-static GLint	cull_mark_u_stats_enable;
 static int	hiz_stats_frame_counter;
 
 static GLuint	hiz_pyramid_tex;	/* binding 7 sampler in cull_mark */
@@ -125,27 +124,22 @@ static int	*cull_bucket_map;	/* surface index -> texture bucket */
 
 static qboolean	cull_initialized;
 
-/* uniform locations */
-static GLint	cull_mark_u_vieworg;
-static GLint	cull_mark_u_frustum;
-static GLint	cull_mark_u_framecount;
-static GLint	cull_mark_u_num_marksurfs;
-static GLint	cull_mark_u_num_buckets;
-static GLint	cull_mark_u_max_dst_indices;
-static GLint	cull_mark_u_prev_mvp;
-static GLint	cull_mark_u_hiz_size;
-static GLint	cull_mark_u_hiz_mip_count;
-static GLint	cull_mark_u_hiz_enable;
-static GLint	cull_mark_u_reverse_z;
-
-static GLint	cull_clear_u_num_buckets;
-
 /* ------------------------------------------------------------------ */
 /* Compute shader sources                                              */
 /* ------------------------------------------------------------------ */
 
 static const char clear_indirect_src[] =
 	"#version 430 core\n"
+	"layout(std140) uniform CullParams {\n"
+	"    ivec4 u_ccounts0;\n"
+	"    ivec4 u_ccounts1;\n"
+	"    vec4 u_cvieworg;\n"
+	"    vec4 u_cfrustum[4];\n"
+	"    mat4 u_cprevmvp;\n"
+	"    vec4 u_chizsize;\n"
+	"    ivec4 u_creduce;\n"
+	"    ivec4 u_creduce2;\n"
+	"};\n"
 	"layout(local_size_x = 64) in;\n"
 	"\n"
 	"struct IndirectCmd {\n"
@@ -160,17 +154,25 @@ static const char clear_indirect_src[] =
 	"    IndirectCmd cmds[];\n"
 	"};\n"
 	"\n"
-	"uniform int u_num_buckets;\n"
-	"\n"
 	"void main() {\n"
 	"    uint id = gl_GlobalInvocationID.x;\n"
-	"    if (id >= uint(u_num_buckets)) return;\n"
+	"    if (id >= uint(u_ccounts0.z)) return;\n"
 	"    cmds[id].count = 0u;\n"
 	"    cmds[id].instanceCount = 1u;\n"
 	"}\n";
 
 static const char cull_mark_src[] =
 	"#version 430 core\n"
+	"layout(std140) uniform CullParams {\n"
+	"    ivec4 u_ccounts0;\n"
+	"    ivec4 u_ccounts1;\n"
+	"    vec4 u_cvieworg;\n"
+	"    vec4 u_cfrustum[4];\n"
+	"    mat4 u_cprevmvp;\n"
+	"    vec4 u_chizsize;\n"
+	"    ivec4 u_creduce;\n"
+	"    ivec4 u_creduce2;\n"
+	"};\n"
 	"layout(local_size_x = 64) in;\n"
 	"\n"
 	"struct Surface {\n"
@@ -219,7 +221,7 @@ static const char cull_mark_src[] =
 	"};\n"
 	"/* Stats counters for cull-rate validation (uhexen2-cyu0).  Indices:\n"
 	" * 0 total, 1 pvs_rej, 2 flags_rej, 3 frust_rej, 4 hiz_rej, 5 accepted,\n"
-	" * 6 dedup_rej, 7 reserved.  Writes gated by u_stats_enable to keep\n"
+	" * 6 dedup_rej, 7 reserved.  Writes gated by u_ccounts1.w to keep\n"
 	" * cost zero in production. */\n"
 	"layout(std430, binding = 7) buffer StatsBuffer {\n"
 	"    uint stats[8];\n"
@@ -230,24 +232,11 @@ static const char cull_mark_src[] =
 	" * forward-Z max(depth). */\n"
 	"layout(binding = 1) uniform sampler2D u_hiz_pyramid;\n"
 	"\n"
-	"uniform vec3 u_vieworg;\n"
-	"uniform vec4 u_frustum[4];\n"
-	"uniform int u_framecount;\n"
-	"uniform int u_num_marksurfs;\n"
-	"uniform int u_num_buckets;\n"
-	"uniform int u_max_dst_indices;\n"
-	"uniform mat4 u_prev_mvp;\n"
-	"uniform vec2 u_hiz_size;\n"
-	"uniform int u_hiz_mip_count;\n"
-	"uniform int u_hiz_enable;\n"
-	"uniform int u_reverse_z;\n"
-	"uniform int u_stats_enable;\n"
-	"\n"
-	"#define STAT_INC(i) do { if (u_stats_enable != 0) atomicAdd(stats[i], 1u); } while(false)\n"
+	"#define STAT_INC(i) do { if (u_ccounts1.w != 0) atomicAdd(stats[i], 1u); } while(false)\n"
 	"\n"
 	"void main() {\n"
 	"    uint id = gl_GlobalInvocationID.x;\n"
-	"    if (id >= uint(u_num_marksurfs)) return;\n"
+	"    if (id >= uint(u_ccounts0.y)) return;\n"
 	"    STAT_INC(0);\n"
 	"\n"
 	"    MarkSurf ms = marksurfs[id];\n"
@@ -271,7 +260,7 @@ static const char cull_mark_src[] =
 	"\n"
 	"    /* Backface cull — disabled to avoid popping at grazing angles.\n"
 	"     * GPU rasterizer handles backfaces via winding order. */\n"
-	"    /* float d = dot(s.plane.xyz, u_vieworg) - s.plane.w;\n"
+	"    /* float d = dot(s.plane.xyz, u_cvieworg.xyz) - s.plane.w;\n"
 	"    bool planeback = (s.flags & 2) != 0;\n"
 	"    if (planeback && d > 0.01) return;\n"
 	"    if (!planeback && d < -0.01) return; */\n"
@@ -284,8 +273,8 @@ static const char cull_mark_src[] =
 	"     * prevents surface popping at frustum edges. */\n"
 	"    const float FSLACK = 512.0;\n"
 	"    for (int fi = 0; fi < 4; fi++) {\n"
-	"        vec3 fn = u_frustum[fi].xyz;\n"
-	"        float fd = u_frustum[fi].w;\n"
+	"        vec3 fn = u_cfrustum[fi].xyz;\n"
+	"        float fd = u_cfrustum[fi].w;\n"
 	"        vec3 pv = vec3(\n"
 	"            fn.x >= 0.0 ? s.maxs.x : s.mins.x,\n"
 	"            fn.y >= 0.0 ? s.maxs.y : s.mins.y,\n"
@@ -299,22 +288,22 @@ static const char cull_mark_src[] =
 	"     * Sample the pyramid at a mip whose texel size matches the rect,\n"
 	"     * compare; cull if the AABB sits entirely behind the occluder.\n"
 	"     * Any corner with w<=0 (behind near plane) disables the test. */\n"
-	"    if (u_hiz_enable != 0) {\n"
+	"    if (u_ccounts1.y != 0) {\n"
 	"        vec3 mn = s.mins.xyz;\n"
 	"        vec3 mx = s.maxs.xyz;\n"
 	"        float rx0 = 1.0, ry0 = 1.0, rx1 = -1.0, ry1 = -1.0;\n"
-	"        float dnear = (u_reverse_z != 0) ? 0.0 : 1.0;\n"
+	"        float dnear = (u_ccounts1.z != 0) ? 0.0 : 1.0;\n"
 	"        bool valid = true;\n"
 	"        for (int ci = 0; ci < 8; ci++) {\n"
 	"            vec3 c = vec3(\n"
 	"                ((ci & 1) != 0) ? mx.x : mn.x,\n"
 	"                ((ci & 2) != 0) ? mx.y : mn.y,\n"
 	"                ((ci & 4) != 0) ? mx.z : mn.z);\n"
-	"            vec4 clip = u_prev_mvp * vec4(c, 1.0);\n"
+	"            vec4 clip = u_cprevmvp * vec4(c, 1.0);\n"
 	"            if (clip.w <= 0.0) { valid = false; break; }\n"
 	"            vec3 ndc = clip.xyz / clip.w;\n"
-	"            float dn = (u_reverse_z != 0) ? ndc.z : (ndc.z * 0.5 + 0.5);\n"
-	"            if (u_reverse_z != 0) dnear = max(dnear, dn);\n"
+	"            float dn = (u_ccounts1.z != 0) ? ndc.z : (ndc.z * 0.5 + 0.5);\n"
+	"            if (u_ccounts1.z != 0) dnear = max(dnear, dn);\n"
 	"            else                  dnear = min(dnear, dn);\n"
 	"            rx0 = min(rx0, ndc.x); ry0 = min(ry0, ndc.y);\n"
 	"            rx1 = max(rx1, ndc.x); ry1 = max(ry1, ndc.y);\n"
@@ -323,23 +312,23 @@ static const char cull_mark_src[] =
 	"            /* Clip rect to NDC bounds [-1,1] before mapping to texels. */\n"
 	"            rx0 = clamp(rx0, -1.0, 1.0); ry0 = clamp(ry0, -1.0, 1.0);\n"
 	"            rx1 = clamp(rx1, -1.0, 1.0); ry1 = clamp(ry1, -1.0, 1.0);\n"
-	"            vec2 r0 = (vec2(rx0, ry0) * 0.5 + 0.5) * u_hiz_size;\n"
-	"            vec2 r1 = (vec2(rx1, ry1) * 0.5 + 0.5) * u_hiz_size;\n"
+	"            vec2 r0 = (vec2(rx0, ry0) * 0.5 + 0.5) * u_chizsize.xy;\n"
+	"            vec2 r1 = (vec2(rx1, ry1) * 0.5 + 0.5) * u_chizsize.xy;\n"
 	"            float dim = max(r1.x - r0.x, r1.y - r0.y);\n"
 	"            if (dim > 0.5) {\n"
 	"                int mip = int(ceil(log2(dim)));\n"
 	"                if (mip < 0) mip = 0;\n"
-	"                if (mip > u_hiz_mip_count - 1) mip = u_hiz_mip_count - 1;\n"
-	"                vec2 cuv = (r0 + r1) * 0.5 / u_hiz_size;\n"
+	"                if (mip > u_ccounts1.x - 1) mip = u_ccounts1.x - 1;\n"
+	"                vec2 cuv = (r0 + r1) * 0.5 / u_chizsize.xy;\n"
 	"                /* 2x2 textureLod sample at the chosen mip, reduced\n"
 	"                 * the same way the pyramid was built. */\n"
-	"                float texel = exp2(float(mip)) / max(u_hiz_size.x, u_hiz_size.y);\n"
+	"                float texel = exp2(float(mip)) / max(u_chizsize.x, u_chizsize.y);\n"
 	"                float occ;\n"
 	"                float s0 = textureLod(u_hiz_pyramid, cuv + vec2(-0.5,-0.5)*texel, float(mip)).r;\n"
 	"                float s1 = textureLod(u_hiz_pyramid, cuv + vec2( 0.5,-0.5)*texel, float(mip)).r;\n"
 	"                float s2 = textureLod(u_hiz_pyramid, cuv + vec2(-0.5, 0.5)*texel, float(mip)).r;\n"
 	"                float s3 = textureLod(u_hiz_pyramid, cuv + vec2( 0.5, 0.5)*texel, float(mip)).r;\n"
-	"                if (u_reverse_z != 0) {\n"
+	"                if (u_ccounts1.z != 0) {\n"
 	"                    occ = min(min(s0,s1), min(s2,s3));\n"
 	"                    /* AABB's nearest depth < occluder's min => fully behind */\n"
 	"                    if (dnear < occ) { STAT_INC(4); return; }\n"
@@ -354,20 +343,20 @@ static const char cull_mark_src[] =
 	"    /* Dedup: same surface can appear in multiple leaves.\n"
 	"     * atomicExchange the framecount — if it was already this\n"
 	"     * frame's value, another thread already emitted it. */\n"
-	"    int old = atomicExchange(dedup[si], u_framecount);\n"
-	"    if (old == u_framecount) { STAT_INC(6); return; }\n"
+	"    int old = atomicExchange(dedup[si], u_ccounts0.x);\n"
+	"    if (old == u_ccounts0.x) { STAT_INC(6); return; }\n"
 	"\n"
 	"    STAT_INC(5);\n"
 	"\n"
 	"    /* Bounds check texture bucket to prevent out-of-bounds writes */\n"
-	"    if (s.tex_bucket >= uint(u_num_buckets)) return;\n"
+	"    if (s.tex_bucket >= uint(u_ccounts0.z)) return;\n"
 	"\n"
 	"    /* Claim index slots in the texture bucket's indirect command */\n"
 	"    uint slot = atomicAdd(cmds[s.tex_bucket].count, uint(s.numindices));\n"
 	"    uint dst_base = cmds[s.tex_bucket].firstIndex + slot;\n"
 	"\n"
 	"    /* Bounds check destination buffer writes */\n"
-	"    if (dst_base + uint(s.numindices) > uint(u_max_dst_indices)) {\n"
+	"    if (dst_base + uint(s.numindices) > uint(u_ccounts0.w)) {\n"
 	"        /* Buffer overflow would occur - abort write */\n"
 	"        atomicAdd(cmds[s.tex_bucket].count, -int(s.numindices));\n"
 	"        return;\n"
@@ -394,55 +383,84 @@ static const char cull_mark_src[] =
  * index space. */
 #define HIZ_PARAMS_UBO_BINDING	0
 
+/* Uniform-block binding point for CullParams.  Same arrangement as
+ * HizParams above: the shader does not name the point, the C side assigns
+ * it once per program at compile time.  Binding 4 is the next free point
+ * after 0 (HizParams), 1/2 (the shared vert/frag blocks) and 3 (SsaoParams);
+ * see the binding comments in gl_shader.h and gl_ssao.c. */
+#define CULL_PARAMS_UBO_BINDING	4
+
 /* Mirrors the std140 HizParams block.  ivec4 rather than ivec2 so the padding
  * is explicit in both languages. */
 typedef struct {
 	GLint	size[4];	/* xy = scene extent, zw unused */
 } hiz_params_t;
 
-/* 2x2 reduction from mip N -> mip N+1.  Under reversed-Z (u_reverse_z!=0)
+/* Mirrors the std140 CullParams block.  All members vec4/mat4/ivec4, so
+ * the std140 offsets are exact by construction, pinned by
+ * COMPILE_TIME_ASSERT below and by tools/test_cullparams_block.py. */
+typedef struct {
+	GLint	counts0[4];	/* x framecount, y num_marksurfs, z num_buckets, w max_dst_indices */
+	GLint	counts1[4];	/* x hiz_mip_count, y hiz_enable, z reverse_z, w stats_enable */
+	float	vieworg[4];	/* xyz view origin, w unused */
+	float	frustum[4][4];	/* frustum planes (normal.xyz, -dist) */
+	float	prevmvp[16];	/* previous-frame MVP for Hi-Z reprojection */
+	float	hizsize[4];	/* xy Hi-Z pyramid size, zw unused */
+	GLint	reduce[4];	/* x src_w, y src_h, z dst_w, w dst_h */
+	GLint	reduce2[4];	/* x src_lod, y reverse_z, zw unused */
+} cull_params_t;		/* 224 bytes */
+
+COMPILE_TIME_ASSERT(cullparams_size, sizeof(cull_params_t) == 224);
+
+/* 2x2 reduction from mip N -> mip N+1.  Under reversed-Z (u_creduce2.y!=0)
  * the conservative occluder (the farthest point in eye space) has the
  * smallest stored value, so we take min; under forward-Z, max. */
 static const char hiz_reduce_src[] =
 	"#version 430 core\n"
+	"layout(std140) uniform CullParams {\n"
+	"    ivec4 u_ccounts0;\n"
+	"    ivec4 u_ccounts1;\n"
+	"    vec4 u_cvieworg;\n"
+	"    vec4 u_cfrustum[4];\n"
+	"    mat4 u_cprevmvp;\n"
+	"    vec4 u_chizsize;\n"
+	"    ivec4 u_creduce;\n"
+	"    ivec4 u_creduce2;\n"
+	"};\n"
 	"layout(local_size_x = 8, local_size_y = 8) in;\n"
 	"layout(binding = 0) uniform sampler2D u_src;\n"
 	"layout(binding = 0, r32f) uniform writeonly image2D u_dst;\n"
-	"uniform ivec2 u_src_size;\n"
-	"uniform ivec2 u_dst_size;\n"
-	"uniform int u_src_lod;\n"
-	"uniform int u_reverse_z;\n"
 	"void main() {\n"
 	"    ivec2 p = ivec2(gl_GlobalInvocationID.xy);\n"
-	"    if (p.x >= u_dst_size.x || p.y >= u_dst_size.y) return;\n"
+	"    if (p.x >= u_creduce.z || p.y >= u_creduce.w) return;\n"
 	"    ivec2 s = p * 2;\n"
-	"    ivec2 a = clamp(s + ivec2(0,0), ivec2(0), u_src_size - ivec2(1));\n"
-	"    ivec2 b = clamp(s + ivec2(1,0), ivec2(0), u_src_size - ivec2(1));\n"
-	"    ivec2 c = clamp(s + ivec2(0,1), ivec2(0), u_src_size - ivec2(1));\n"
-	"    ivec2 d = clamp(s + ivec2(1,1), ivec2(0), u_src_size - ivec2(1));\n"
-	"    float va = texelFetch(u_src, a, u_src_lod).r;\n"
-	"    float vb = texelFetch(u_src, b, u_src_lod).r;\n"
-	"    float vc = texelFetch(u_src, c, u_src_lod).r;\n"
-	"    float vd = texelFetch(u_src, d, u_src_lod).r;\n"
+	"    ivec2 a = clamp(s + ivec2(0,0), ivec2(0), u_creduce.xy - ivec2(1));\n"
+	"    ivec2 b = clamp(s + ivec2(1,0), ivec2(0), u_creduce.xy - ivec2(1));\n"
+	"    ivec2 c = clamp(s + ivec2(0,1), ivec2(0), u_creduce.xy - ivec2(1));\n"
+	"    ivec2 d = clamp(s + ivec2(1,1), ivec2(0), u_creduce.xy - ivec2(1));\n"
+	"    float va = texelFetch(u_src, a, u_creduce2.x).r;\n"
+	"    float vb = texelFetch(u_src, b, u_creduce2.x).r;\n"
+	"    float vc = texelFetch(u_src, c, u_creduce2.x).r;\n"
+	"    float vd = texelFetch(u_src, d, u_creduce2.x).r;\n"
 	"    float r;\n"
-	"    if (u_reverse_z != 0) r = min(min(va,vb), min(vc,vd));\n"
+	"    if (u_creduce2.y != 0) r = min(min(va,vb), min(vc,vd));\n"
 	"    else                  r = max(max(va,vb), max(vc,vd));\n"
 	"    /* odd-mip safety: if the parent dim is odd we also need to fold\n"
 	"     * in the dangling row/column so coverage stays conservative. */\n"
-	"    if (((u_src_size.x & 1) != 0) && (s.x + 2 < u_src_size.x)) {\n"
+	"    if (((u_creduce.x & 1) != 0) && (s.x + 2 < u_creduce.x)) {\n"
 	"        ivec2 e = ivec2(s.x + 2, s.y);\n"
-	"        ivec2 f = ivec2(s.x + 2, min(s.y + 1, u_src_size.y - 1));\n"
-	"        float ve = texelFetch(u_src, e, u_src_lod).r;\n"
-	"        float vf = texelFetch(u_src, f, u_src_lod).r;\n"
-	"        if (u_reverse_z != 0) r = min(r, min(ve, vf));\n"
+	"        ivec2 f = ivec2(s.x + 2, min(s.y + 1, u_creduce.y - 1));\n"
+	"        float ve = texelFetch(u_src, e, u_creduce2.x).r;\n"
+	"        float vf = texelFetch(u_src, f, u_creduce2.x).r;\n"
+	"        if (u_creduce2.y != 0) r = min(r, min(ve, vf));\n"
 	"        else                  r = max(r, max(ve, vf));\n"
 	"    }\n"
-	"    if (((u_src_size.y & 1) != 0) && (s.y + 2 < u_src_size.y)) {\n"
+	"    if (((u_creduce.y & 1) != 0) && (s.y + 2 < u_creduce.y)) {\n"
 	"        ivec2 e = ivec2(s.x, s.y + 2);\n"
-	"        ivec2 f = ivec2(min(s.x + 1, u_src_size.x - 1), s.y + 2);\n"
-	"        float ve = texelFetch(u_src, e, u_src_lod).r;\n"
-	"        float vf = texelFetch(u_src, f, u_src_lod).r;\n"
-	"        if (u_reverse_z != 0) r = min(r, min(ve, vf));\n"
+	"        ivec2 f = ivec2(min(s.x + 1, u_creduce.x - 1), s.y + 2);\n"
+	"        float ve = texelFetch(u_src, e, u_creduce2.x).r;\n"
+	"        float vf = texelFetch(u_src, f, u_creduce2.x).r;\n"
+	"        if (u_creduce2.y != 0) r = min(r, min(ve, vf));\n"
 	"        else                  r = max(r, max(ve, vf));\n"
 	"    }\n"
 	"    imageStore(u_dst, p, vec4(r, 0.0, 0.0, 0.0));\n"
@@ -451,6 +469,32 @@ static const char hiz_reduce_src[] =
 /* ------------------------------------------------------------------ */
 /* Build GPU data at map load                                          */
 /* ------------------------------------------------------------------ */
+
+/* Bind the CullParams block of a compute program to its binding point,
+ * once, at compile time; the binding dies with the program, so vid_restart
+ * is covered by construction.  Also asks the driver where it actually put
+ * the block and complains rather than rendering garbage if it disagrees
+ * with the C mirror (the RU_CheckBlockSize practice in gl_uniforms.c). */
+static void WC_BindCullParamsBlock (GLuint program)
+{
+	GLuint	idx;
+	GLint	size = 0;
+
+	if (!program || !glGetUniformBlockIndex_fp || !glUniformBlockBinding_fp)
+		return;
+	idx = glGetUniformBlockIndex_fp(program, "CullParams");
+	if (idx == GL_INVALID_INDEX)
+		return;
+	if (glGetActiveUniformBlockiv_fp)
+	{
+		glGetActiveUniformBlockiv_fp(program, idx, GL_UNIFORM_BLOCK_DATA_SIZE, &size);
+		if (size != (GLint)sizeof(cull_params_t))
+			Con_Printf("WARNING: uniform block CullParams is %d bytes on this driver, "
+				   "C mirror is %d -- uniforms will be wrong\n",
+				   (int)size, (int)sizeof(cull_params_t));
+	}
+	glUniformBlockBinding_fp(program, idx, CULL_PARAMS_UBO_BINDING);
+}
 
 void R_BuildWorldCull (void)
 {
@@ -476,20 +520,12 @@ void R_BuildWorldCull (void)
 		return;
 	}
 
-	/* Get uniform locations */
-	cull_clear_u_num_buckets = glGetUniformLocation_fp(cull_clear_prog, "u_num_buckets");
-	cull_mark_u_vieworg = glGetUniformLocation_fp(cull_mark_prog, "u_vieworg");
-	cull_mark_u_frustum = glGetUniformLocation_fp(cull_mark_prog, "u_frustum");
-	cull_mark_u_framecount = glGetUniformLocation_fp(cull_mark_prog, "u_framecount");
-	cull_mark_u_num_marksurfs = glGetUniformLocation_fp(cull_mark_prog, "u_num_marksurfs");
-	cull_mark_u_num_buckets = glGetUniformLocation_fp(cull_mark_prog, "u_num_buckets");
-	cull_mark_u_max_dst_indices = glGetUniformLocation_fp(cull_mark_prog, "u_max_dst_indices");
-	cull_mark_u_prev_mvp = glGetUniformLocation_fp(cull_mark_prog, "u_prev_mvp");
-	cull_mark_u_hiz_size = glGetUniformLocation_fp(cull_mark_prog, "u_hiz_size");
-	cull_mark_u_hiz_mip_count = glGetUniformLocation_fp(cull_mark_prog, "u_hiz_mip_count");
-	cull_mark_u_hiz_enable = glGetUniformLocation_fp(cull_mark_prog, "u_hiz_enable");
-	cull_mark_u_reverse_z = glGetUniformLocation_fp(cull_mark_prog, "u_reverse_z");
-	cull_mark_u_stats_enable = glGetUniformLocation_fp(cull_mark_prog, "u_stats_enable");
+	/* Bind the CullParams block on both programs (binding 4); the
+	 * binding dies with the program, so vid_restart is covered by
+	 * construction.  WC_BindCullParamsBlock also size-checks the block
+	 * against the C mirror. */
+	WC_BindCullParamsBlock(cull_clear_prog);
+	WC_BindCullParamsBlock(cull_mark_prog);
 
 	cull_num_surfs = m->numsurfaces;
 	cull_num_leaves = m->numleafs;
@@ -806,7 +842,10 @@ static qboolean R_HiZ_EnsureResources (int scene_w, int scene_h)
 		}
 	}
 	if (!hiz_reduce_prog)
+	{
 		hiz_reduce_prog = GL_LoadComputeProgram(NULL, hiz_reduce_src, "hiz_reduce");
+		WC_BindCullParamsBlock(hiz_reduce_prog);
+	}
 
 	if (!hiz_copy_prog || !hiz_reduce_prog)
 	{
@@ -1000,21 +1039,30 @@ void R_BuildHiZForNextFrame (void)
 	glActiveTexture_fp(GL_TEXTURE0);
 	glBindTexture_fp(GL_TEXTURE_2D, hiz_pyramid_tex);
 	{
-		GLint loc_src_size = glGetUniformLocation_fp(hiz_reduce_prog, "u_src_size");
-		GLint loc_dst_size = glGetUniformLocation_fp(hiz_reduce_prog, "u_dst_size");
-		GLint loc_src_lod  = glGetUniformLocation_fp(hiz_reduce_prog, "u_src_lod");
-		GLint loc_rev_z    = glGetUniformLocation_fp(hiz_reduce_prog, "u_reverse_z");
+		/* Per-mip CullParams upload (the HizParams pattern above):
+		 * zero-filled so the members this program never reads are
+		 * zero, never stale ring data. */
 		int src_w = scene_w, src_h = scene_h;
 		for (mip = 1; mip < hiz_mip_count; mip++)
 		{
 			int dst_w = src_w > 1 ? src_w >> 1 : 1;
 			int dst_h = src_h > 1 ? src_h >> 1 : 1;
+			cull_params_t params;
+			GLuint ubo;
+			GLintptr ofs;
+
 			glBindImageTexture_fp(0, hiz_pyramid_tex, mip, GL_FALSE, 0,
 					      GL_WRITE_ONLY, GL_R32F);
-			if (loc_src_size >= 0) glUniform2i_fp(loc_src_size, src_w, src_h);
-			if (loc_dst_size >= 0) glUniform2i_fp(loc_dst_size, dst_w, dst_h);
-			if (loc_src_lod  >= 0) glUniform1i_fp(loc_src_lod, mip - 1);
-			if (loc_rev_z    >= 0) glUniform1i_fp(loc_rev_z, gl_clipcontrol_able ? 1 : 0);
+			memset(&params, 0, sizeof(params));
+			params.reduce[0] = src_w;
+			params.reduce[1] = src_h;
+			params.reduce[2] = dst_w;
+			params.reduce[3] = dst_h;
+			params.reduce2[0] = mip - 1;
+			params.reduce2[1] = gl_clipcontrol_able ? 1 : 0;
+			GL_Upload(GL_UNIFORM_BUFFER, &params, sizeof(params), &ubo, &ofs);
+			GL_BindBufferRange(GL_UNIFORM_BUFFER, CULL_PARAMS_UBO_BINDING,
+					   ubo, ofs, sizeof(params));
 			glDispatchCompute_fp((dst_w + 7) / 8, (dst_h + 7) / 8, 1);
 			glMemoryBarrier_fp(GL_TEXTURE_FETCH_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
 			src_w = dst_w;
@@ -1043,6 +1091,11 @@ void R_DispatchWorldCull (void)
 	int		vis_size, i;
 	static int	framecount;
 	extern vec3_t	r_origin;
+	/* Hoisted for the CullParams upload below: the Hi-Z gate, the stats
+	 * gate and the frustum planes are each computed in their own block
+	 * but written into the mirror in one place, before the dispatch. */
+	qboolean	hiz_on, stats_on;
+	float		frust[16];	/* 4 vec4s */
 
 	if (!cull_initialized)
 		return;
@@ -1076,56 +1129,48 @@ void R_DispatchWorldCull (void)
 
 	/* Pass 1: clear indirect buffer */
 	R_UseProgram (cull_clear_prog);
-	glUniform1i_fp(cull_clear_u_num_buckets, cull_num_buckets);
+	{
+		/* CullParams, zero-filled (the HizParams pattern): only
+		 * u_ccounts0.z is read by this program. */
+		cull_params_t params;
+		GLuint ubo;
+		GLintptr ofs;
+
+		memset(&params, 0, sizeof(params));
+		params.counts0[2] = cull_num_buckets;
+		GL_Upload(GL_UNIFORM_BUFFER, &params, sizeof(params), &ubo, &ofs);
+		GL_BindBufferRange(GL_UNIFORM_BUFFER, CULL_PARAMS_UBO_BINDING,
+				   ubo, ofs, sizeof(params));
+	}
 	GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, cull_indirect_buf);
 	glDispatchCompute_fp((cull_num_buckets + 63) / 64, 1, 1);
 	glMemoryBarrier_fp(GL_SHADER_STORAGE_BARRIER_BIT);
 
 	/* Pass 2: cull + mark surfaces */
 	R_UseProgram (cull_mark_prog);
-	glUniform3f_fp(cull_mark_u_vieworg, r_origin[0], r_origin[1], r_origin[2]);
-	glUniform1i_fp(cull_mark_u_framecount, framecount);
-	glUniform1i_fp(cull_mark_u_num_marksurfs, cull_num_marksurfs);
-	if (cull_mark_u_num_buckets >= 0)
-		glUniform1i_fp(cull_mark_u_num_buckets, cull_num_buckets);
-	if (cull_mark_u_max_dst_indices >= 0)
-		glUniform1i_fp(cull_mark_u_max_dst_indices, cull_total_indices);
 
 	/* Hi-Z occlusion (uhexen2-xd87).  Sampler binding 1 = pyramid; the
 	 * enable flag is also gated by gl_hiz_cull/prev_mvp_valid CPU-side
 	 * so shaders early-out cheaply when not in use. */
+	hiz_on = gl_hiz_cull.integer && hiz_pyramid_tex && hiz_prev_mvp_valid;
+	if (hiz_on)
 	{
-		qboolean hiz_on = gl_hiz_cull.integer && hiz_pyramid_tex && hiz_prev_mvp_valid;
-		if (cull_mark_u_hiz_enable >= 0)
-			glUniform1i_fp(cull_mark_u_hiz_enable, hiz_on ? 1 : 0);
-		if (cull_mark_u_reverse_z >= 0)
-			glUniform1i_fp(cull_mark_u_reverse_z, gl_clipcontrol_able ? 1 : 0);
-		if (cull_mark_u_prev_mvp >= 0)
-			glUniformMatrix4fv_fp(cull_mark_u_prev_mvp, 1, GL_FALSE, hiz_prev_mvp);
-		if (cull_mark_u_hiz_size >= 0)
-			glUniform2f_fp(cull_mark_u_hiz_size, (float)hiz_width, (float)hiz_height);
-		if (cull_mark_u_hiz_mip_count >= 0)
-			glUniform1i_fp(cull_mark_u_hiz_mip_count, hiz_mip_count);
-		if (hiz_on)
-		{
-			glActiveTexture_fp(GL_TEXTURE1);
-			glBindTexture_fp(GL_TEXTURE_2D, hiz_pyramid_tex);
-			glActiveTexture_fp(GL_TEXTURE0);
-		}
+		glActiveTexture_fp(GL_TEXTURE1);
+		glBindTexture_fp(GL_TEXTURE_2D, hiz_pyramid_tex);
+		glActiveTexture_fp(GL_TEXTURE0);
 	}
 
-	/* Upload frustum planes */
+	/* Frustum planes (negate: shader uses dot(n,p)+d, engine uses
+	 * dot(n,p)-dist). */
 	{
 		extern mplane_t frustum[4];
-		float frust[16]; /* 4 vec4s */
 		for (i = 0; i < 4; i++)
 		{
 			frust[i*4+0] = frustum[i].normal[0];
 			frust[i*4+1] = frustum[i].normal[1];
 			frust[i*4+2] = frustum[i].normal[2];
-			frust[i*4+3] = -frustum[i].dist;  /* negate: shader uses dot(n,p)+d, engine uses dot(n,p)-dist */
+			frust[i*4+3] = -frustum[i].dist;
 		}
-		glUniform4fv_fp(cull_mark_u_frustum, 4, frust);
 	}
 
 	GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, cull_surf_ssbo);
@@ -1137,20 +1182,45 @@ void R_DispatchWorldCull (void)
 	GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 6, cull_dedup_ssbo);
 
 	/* Stats counters (uhexen2-cyu0).  Bind always; gating happens via
-	 * u_stats_enable in the shader so we don't pay for atomicAdds when
+	 * u_ccounts1.w in the shader so we don't pay for atomicAdds when
 	 * gl_hiz_stats is 0.  When enabled, zero the buffer before dispatch
 	 * so the readback sees only this frame's contributions. */
+	stats_on = (gl_hiz_stats.integer > 0) && cull_stats_ssbo;
+	if (stats_on)
 	{
-		qboolean stats_on = (gl_hiz_stats.integer > 0) && cull_stats_ssbo;
-		if (stats_on)
-		{
-			unsigned int zeros[8] = {0};
-			GL_BindBuffer(GL_SHADER_STORAGE_BUFFER, cull_stats_ssbo);
-			glBufferSubData_fp(GL_SHADER_STORAGE_BUFFER, 0, sizeof(zeros), zeros);
-		}
-		if (cull_mark_u_stats_enable >= 0)
-			glUniform1i_fp(cull_mark_u_stats_enable, stats_on ? 1 : 0);
-		GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 7, cull_stats_ssbo);
+		unsigned int zeros[8] = {0};
+		GL_BindBuffer(GL_SHADER_STORAGE_BUFFER, cull_stats_ssbo);
+		glBufferSubData_fp(GL_SHADER_STORAGE_BUFFER, 0, sizeof(zeros), zeros);
+	}
+	GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 7, cull_stats_ssbo);
+
+	/* CullParams: one per-dispatch upload, zero-filled so the members
+	 * this program never reads are zero, never stale ring data (the
+	 * HizParams pattern). */
+	{
+		cull_params_t params;
+		GLuint ubo;
+		GLintptr ofs;
+
+		memset(&params, 0, sizeof(params));
+		params.counts0[0] = framecount;
+		params.counts0[1] = cull_num_marksurfs;
+		params.counts0[2] = cull_num_buckets;
+		params.counts0[3] = cull_total_indices;
+		params.counts1[0] = hiz_mip_count;
+		params.counts1[1] = hiz_on ? 1 : 0;
+		params.counts1[2] = gl_clipcontrol_able ? 1 : 0;
+		params.counts1[3] = stats_on ? 1 : 0;
+		params.vieworg[0] = r_origin[0];
+		params.vieworg[1] = r_origin[1];
+		params.vieworg[2] = r_origin[2];
+		memcpy(params.frustum, frust, sizeof(params.frustum));
+		memcpy(params.prevmvp, hiz_prev_mvp, sizeof(params.prevmvp));
+		params.hizsize[0] = (float)hiz_width;
+		params.hizsize[1] = (float)hiz_height;
+		GL_Upload(GL_UNIFORM_BUFFER, &params, sizeof(params), &ubo, &ofs);
+		GL_BindBufferRange(GL_UNIFORM_BUFFER, CULL_PARAMS_UBO_BINDING,
+				   ubo, ofs, sizeof(params));
 	}
 
 	glDispatchCompute_fp((cull_num_marksurfs + 63) / 64, 1, 1);

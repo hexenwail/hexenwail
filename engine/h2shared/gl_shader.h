@@ -224,8 +224,8 @@ void	GL_ParticleGPU_SetUniforms (const gl_particle_gpu_prog_t *prog,
 #define ATTR_COLOR	3
 
 /* GL_UNIFORM_BUFFER binding points.  One global index space per context,
- * shared with the compute pipeline -- 0 is gl_worldcull.c's Hi-Z HizParams,
- * so the graphics blocks start at 1.  Keyed by stage rather than by program:
+ * shared with the compute pipeline -- 0 is gl_worldcull.c's Hi-Z HizParams
+ * and 4 is its CullParams, so the graphics blocks start at 1.  Keyed by stage rather than by program:
  * only one program is bound at a time, so each program's own vertex-stage
  * block is pinned to the same point rather than every program claiming a new
  * one.  A driver need only guarantee a handful of these.

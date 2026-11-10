@@ -202,6 +202,13 @@ jobs:
       # Lightstyles animated on the GPU, no lightmap rebuild (#439).
       - name: GPU lightstyles
         run: python3 tools/test_gpu_lightstyles.py
+
+      # The worldcull compute family rides one CullParams block (#19):
+      # no loose uniform uploads or location queries may remain in
+      # gl_worldcull.c outside the R_DrawWorldCulled world draws, and
+      # the C mirror must agree with the GLSL block member for member.
+      - name: CullParams block covers the worldcull compute family
+        run: python3 tools/test_cullparams_block.py
       - name: r_ssao entity contact occlusion (#188)
         run: python3 tools/test_ssao.py
 
