@@ -18,6 +18,16 @@
 #define UNIFORMS_VERT
 #include "uniforms.inc"
 
+/* Vulkan GLSL has no gl_VertexID; its gl_VertexIndex is the same value
+ * (both include the draw's first vertex / base vertex), so the alias is
+ * exact.  Note the particle index below is gl_VertexID / 3 on either API,
+ * so whoever wires this program's draw (r_part.c says it is not yet) must
+ * start it at vertex 0 or subtract the offset.  Without the alias the -V
+ * compile, and with it shaders_spirv, fails (#449). */
+#ifdef VULKAN
+#define gl_VertexID gl_VertexIndex
+#endif
+
 struct GpuParticle {
     vec4 pos_die;  /* xyz=position, w=die_time */
     vec4 color;    /* rgba, pre-converted from palette */
