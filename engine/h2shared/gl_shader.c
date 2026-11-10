@@ -794,7 +794,7 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 /* GLSL version header: desktop GL 4.3 vs WebGL2 (ES 3.0) */
 #ifdef USE_GLES
 #define GLSL_VERT_HEADER	"#version 300 es\nprecision highp float;\n"
-#define GLSL_FRAG_HEADER	"#version 300 es\nprecision mediump float;\n"
+#define GLSL_FRAG_HEADER	"#version 300 es\nprecision highp float;\n"
 /* GLSL ES 3.00 doesn't support early_fragment_tests */
 #define GLSL_EARLY_Z		""
 #define GLSL_EARLY_Z_OPAQUE	""
@@ -873,14 +873,17 @@ static const char sworld_vert[] =
 	 * would put a rotating platform's relief in its own local frame.  In eye
 	 * space the camera sits at the origin, so the view vector is just
 	 * -normalize(v_eyepos), and no eye-position uniform is needed. */
-	/* highp explicitly.  The ES tier's fragment stage runs at mediump by
-	 * default (GLSL_FRAG_HEADER), and mediump carries about 10 bits of
-	 * mantissa -- fine for a colour, useless for a position that can be
-	 * thousands of world units from the camera, whose screen-space
-	 * derivative is then the difference of two badly-rounded large numbers.
-	 * That is precisely the quantity the tangent frame is built from, so
-	 * without this the WebGL2 build gets a frame made of noise.  Desktop
-	 * GLSL accepts and ignores the qualifier.  uhexen2-mfql. */
+	/* highp explicitly.  The ES tier's fragment stage now defaults to highp
+	 * (GLSL_FRAG_HEADER, #151 (a)), matching the post-process header and
+	 * the canvas shader, but the explicit qualifier stays: it documents
+	 * that this quantity needs highp, and protects it against any future
+	 * default change.  mediump carries about 10 bits of mantissa -- fine
+	 * for a colour, useless for a position that can be thousands of world
+	 * units from the camera, whose screen-space derivative is then the
+	 * difference of two badly-rounded large numbers.  That is precisely
+	 * the quantity the tangent frame is built from, so without this the
+	 * WebGL2 build gets a frame made of noise.  Desktop GLSL accepts and
+	 * ignores the qualifier.  uhexen2-mfql. */
 	"out highp vec3 v_eyepos;\n"
 	/* invariant gl_Position: pin position math so within-shader vertex
 	 * transforms produce stable depth across draw calls.  Brush ents
