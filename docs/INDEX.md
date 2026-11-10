@@ -40,6 +40,7 @@ whether you may edit it freely.
 | File | What it covers |
 |---|---|
 | [`BUNDLED_GAMECODE.md`](BUNDLED_GAMECODE.md) | Why bundled gamecode works the way it does: findings, rejected designs, failure modes. Read "we recommend X" as "X is what shipped". Companion to `GAMECODE.md`. |
+| [`UNIFIED_BINARY.md`](UNIFIED_BINARY.md) | Whether one `hexenwail` binary can replace `h2ded`/`hwsv`: feasibility per binary, the `h2ed` and #340 corrections, and the decisions the maintainer still has to make. |
 
 ### Process
 
