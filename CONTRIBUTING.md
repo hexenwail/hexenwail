@@ -84,6 +84,13 @@ Running the equivalent locally before you push saves a round trip:
   fails silently rather than loudly. (The `if(EMSCRIPTEN)` uses in
   `engine/CMakeLists.txt` are CMake variables and are fine.)
 - A headless **smoke test** that launches the built binary.
+- **Compilation only, by design.** CI verifies that the engine builds and that
+  the built binary launches — it does not load a map. A map-load rung cannot
+  run here: the engine reaches GL init only after loading game data, and the
+  only licence covering that data forbids redistribution (`uhexen2-3vmk`; see
+  GitHub issue #156). Map loading is tested by hand instead, with the headless
+  harness (`tools/headless-drive.sh`, `scripts/demo-playback-smoke.sh`) and
+  your own demo or retail data.
 
 ## Code style
 
