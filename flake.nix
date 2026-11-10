@@ -286,6 +286,18 @@
           # OpenGL version (hexenwail) - NixOS build with Nix store rpaths
           # NOTE: Uses CMake build system
           nixos = pkgs.stdenv.mkDerivation (linuxBuildAttrs // {
+            # `nix flake check` (and every `nix build .#nixos`) runs this:
+            # the engine must install an executable hexenwail.  Kept on the
+            # `nixos` override only, not in linuxBuildAttrs -- h2ded
+            # and hwsv share those attrs with different binaries, so a
+            # shared check asserting hexenwail would fail them.  GitHub #481.
+            doInstallCheck = true;
+            installCheckPhase = ''
+              runHook preInstallCheck
+              test -x $out/bin/hexenwail
+              runHook postInstallCheck
+            '';
+
             installPhase = ''
               runHook preInstall
 
@@ -1799,30 +1811,27 @@ EOF
           '';
         };
 
+        # `nix flake check` builds (and install-checks) the engine.  The
+        # flake had no `checks` output, so `nix flake check` built nothing
+        # (GitHub #481).  The engine package, not `default`: the bundle is
+        # a runCommand copy with no install-check hook, and checking it
+        # would conflate engine-build and gamecode-copy failures.
+        checks = {
+          nixos = self.packages.${system}.nixos;
+        };
+
         # Development shell for building and testing
         devShells.default = pkgs.mkShell {
+          # Built from the engine package: inputsFrom pulls in its
+          # buildInputs and nativeBuildInputs, so the shell can no longer
+          # drift from the package when a dependency is added to one and
+          # forgotten in the other.  `nixos`, not `default`: the default is
+          # the engine-plus-gamecode bundle.  GitHub #481.
+          inputsFrom = [ self.packages.${system}.nixos ];
+
           buildInputs = with pkgs; [
-            sdl3
-            libGL
-
-            libvorbis
-            libogg
-
-            alsa-lib
-            fluidsynth
-            libsndfile
-            flac
-            libxmp
-            opusfile
-            soundfont-fluid
-            pkg-config
             gcc
             gnumake
-            cmake
-            # Rust toolchain for the consolidated engine/rust staticlib, which
-            # is on the default native build path.
-            cargo
-            rustc
 
             # Shader toolchain.  Present in the dev shell only, deliberately:
             # nothing in the build consumes it yet, because every shader in the
