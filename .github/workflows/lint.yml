@@ -86,6 +86,14 @@ jobs:
             exit 1
           fi
 
+      # A second backend (SDL_GPU, #447) needs one place that knows the
+      # whole draw state (gl_pipeline.h:20).  No glFoo_fp or raw glFoo call
+      # outside engine/h2shared/gl_*.c and engine/hexen2/gl_*.c, except
+      # the web canvas blit (web_canvas_gl2.c, raw GLES, no loader table).
+      # uhexen2-ibnq.8, GitHub #453.
+      - name: No GL calls outside the renderer modules
+        run: python3 tools/test_gl_call_sites.py
+
       # The linker already guarantees the software build *defines* every
       # renderer cvar shared code touches -- r_soft_web.c exists for that, and
       # CI builds the WEBSOFT config on every PR.  What nothing catches is a

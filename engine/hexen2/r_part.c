@@ -59,32 +59,23 @@ static GLuint           gpu_particle_vao;
 
 static void R_GPU_Particles_Init (void)
 {
-    glGenBuffers_fp(1, &gpu_particle_ssbo);
-    glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, gpu_particle_ssbo);
-    glBufferData_fp(GL_SHADER_STORAGE_BUFFER,
-                    GPU_MAX_PARTICLES * sizeof(gpu_particle_t),
-                    NULL, GL_DYNAMIC_DRAW);
-    glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, 0);
+	GL_CreateParticleResources (&gpu_particle_ssbo, &gpu_particle_vao,
+				    GPU_MAX_PARTICLES * sizeof(gpu_particle_t));
 
-    /* Empty VAO -- vertex shader reads from SSBO, no vertex attributes */
-    glGenVertexArrays_fp(1, &gpu_particle_vao);
-
-    Con_SafePrintf("GPU particles: SSBO ready (%d slots, %u KB)\n",
-                   GPU_MAX_PARTICLES,
-                   (unsigned)(GPU_MAX_PARTICLES * sizeof(gpu_particle_t) / 1024));
+	Con_SafePrintf("GPU particles: SSBO ready (%d slots, %u KB)\n",
+		       GPU_MAX_PARTICLES,
+		       (unsigned)(GPU_MAX_PARTICLES * sizeof(gpu_particle_t) / 1024));
 }
 
 void R_GPU_Particles_Shutdown (void)
 {
-    if (gpu_particle_ssbo) {
-        GL_ForgetBuffer(gpu_particle_ssbo);
-        glDeleteBuffers_fp(1, &gpu_particle_ssbo);
-        gpu_particle_ssbo = 0;
-    }
-    if (gpu_particle_vao) {
-        glDeleteVertexArrays_fp(1, &gpu_particle_vao);
-        gpu_particle_vao = 0;
-    }
+	/* GL_ForgetBuffer and GL_DeleteParticleResources both no-op on a zero
+	 * name, so this stays correct if only one of the pair is set. */
+	if (gpu_particle_ssbo)
+		GL_ForgetBuffer(gpu_particle_ssbo);
+	GL_DeleteParticleResources(gpu_particle_ssbo, gpu_particle_vao);
+	gpu_particle_ssbo = 0;
+	gpu_particle_vao = 0;
 }
 
 #else	/* USE_GLES */
@@ -1866,7 +1857,7 @@ static void R_DrawParticles_Real (qboolean showtris)
     if (square)
     {
         /* Square/point mode: batch points, flush when buffer nears full */
-        glPointSize_fp(2.0f);
+        GL_SetPointSize(2.0f);
         GL_ImmBegin();
         for (p = active_particles; p; p = p->next)
         {
@@ -1884,7 +1875,7 @@ static void R_DrawParticles_Real (qboolean showtris)
             GL_ImmVertex3f(p->org[0], p->org[1], p->org[2]);
         }
         GL_ImmEnd(GL_POINTS, prog);
-        glPointSize_fp(1.0f);
+        GL_SetPointSize(1.0f);
     }
     else
     {
