@@ -41,7 +41,28 @@ modules:
 
   - name: fluidsynth
     buildsystem: cmake-ninja
+    # SF3 without libsndfile (GitHub #168).  -Denable-libsndfile=off below
+    # keeps libsndfile's parsers (five open CVEs, no release since 2023) away
+    # from a crafted soundfont, but on its own it also turns SF3 off: stock
+    # FluidSynth answers a v3 font with "compiled without support for (v3.x)"
+    # and refuses to load it.  patches/fluidsynth-sf3-vorbisfile.patch is the
+    # one flake.nix's fluidsynthPortable applies for the Linux zip and
+    # AppImage: SF3 samples are decoded with libvorbisfile, which the runtime
+    # already ships for the engine's Ogg music, and which opens Ogg Vorbis and
+    # nothing else.  Against v2.4.6 the full render of FluidSynth's own SF3
+    # test font (136 presets) is byte-identical to a libsndfile build.
+    build-options:
+      cflags: -DHEXENWAIL_VORBISFILE
     config-opts:
+      # Library *names* go here rather than in build-options ldflags:
+      # those land in LDFLAGS, ahead of the objects, where the runtime's
+      # default --as-needed drops them.  STANDARD_LIBRARIES is appended
+      # after the objects.  CXX as well as C, because libfluidsynth has C++
+      # sources and is linked by the C++ driver, which reads only the CXX
+      # variable.  FluidSynth links with --no-undefined, so a library that
+      # goes missing here fails the build instead of the first SF3 load.
+      - -DCMAKE_C_STANDARD_LIBRARIES=-lvorbisfile -lvorbis -logg
+      - -DCMAKE_CXX_STANDARD_LIBRARIES=-lvorbisfile -lvorbis -logg
       - -DCMAKE_BUILD_TYPE=Release
       # Pin the libdir, or nothing here is ever linked.  FluidSynth's
       # DefaultDirs.cmake is a bare include(GNUInstallDirs), and GNUInstallDirs
@@ -88,6 +109,16 @@ modules:
         url: https://github.com/FluidSynth/fluidsynth.git
         tag: v2.4.6
         disable-submodules: true
+      - type: patch
+        path: ../patches/fluidsynth-sf3-vorbisfile.patch
+    post-install:
+      # The patch is only live if the decoder linked: a dropped define
+      # compiles the stock "no SF3" branch and links no vorbisfile at all.
+      # And libsndfile must not come back through a later option change.
+      - |
+        lib=/app/lib/libfluidsynth.so.3
+        grep -qa libvorbisfile.so.3 "$lib" || { echo "FATAL: $lib has no libvorbisfile -- SF3 soundfonts would not load (#168)"; exit 1; }
+        if grep -qa libsndfile.so "$lib"; then echo "FATAL: $lib links libsndfile again (#168)"; exit 1; fi
 
   # opusfile only.  libogg, libvorbis and libopus used to be built here too
   # and are not any more: org.freedesktop.Platform 25.08 already ships all

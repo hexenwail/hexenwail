@@ -380,3 +380,8 @@ jobs:
       # fails here instead of surfacing mid-#340.
       - name: SDL_GPU feasibility list holds for the vendored SDL3
         run: python3 tools/test_sdl_gpu_feasibility.py
+
+      # The Flatpak's FluidSynth has libsndfile off, so it must carry the
+      # vorbisfile SF3 patch too, or SF3 soundfonts are refused (#168).
+      - name: Flatpak FluidSynth decodes SF3 without libsndfile
+        run: python3 tools/test_flatpak_sf3.py
