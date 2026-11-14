@@ -182,6 +182,11 @@ Three environment knobs:
   it, not the engine's own readback. Run once plain and once with
   `SMOKE_ARGS="-fsaa 0 +gamma 0.6 +contrast 1.5 +r_softemu 1 +r_dither 1"`, and
   the post-process chain shows as a brighter, posterized frame.
+- `SMOKE_SCREENSHOT=1` (map mode, either browser) presses F12 through the
+  exported `Hexenwail_TouchKey`, then decodes the PNG the engine wrote with the
+  browser's own decoder. It fails unless more than half the pixels are
+  non-black. A shot read back after the frame was presented comes out black in
+  a browser; that was the bug #405 fixed.
 
 ## Run: the GUI lane (screenshots)
 

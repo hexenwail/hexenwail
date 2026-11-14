@@ -119,6 +119,8 @@ expect_json=$(python3 -c 'import json, sys; print(json.dumps(sys.argv[1]))' "$ex
 # placed before +map, e.g. "+r_softemu 1 +r_dither 1 +r_bloom 1" to compile and
 # run the post-process programs a plain load never builds.
 extra_json=$(python3 -c 'import json, sys; print(json.dumps(sys.argv[1].split()))' "${SMOKE_ARGS:-}")
+screenshot_flag=false
+[ "${SMOKE_SCREENSHOT:-0}" = 1 ] && screenshot_flag=true
 
 # The page reports through the console, one line per event, because the
 # engine's main loop never goes idle once a map is running: Chrome's
@@ -192,13 +194,61 @@ window.Module = {
 // Map mode: the engine has to have loaded the level and kept rendering it
 // for a while with no fatal and no trap.  EXPECT is matched against engine
 // output only, never this harness's own notes.
+// SMOKE_SCREENSHOT=1 adds #112's screenshot check: press F12 (bound to
+// "screenshot" in Raven's default.cfg) through the exported touch-key hook,
+// find the PNG the engine wrote into its filesystem, and decode it with the
+// browser's own decoder.  A shot read back after the frame was presented
+// comes out black in a browser, which is the bug #405 fixed.
+const SCREENSHOT = $screenshot_flag;
+const K_F12 = 146;
+function findShots(dir, out) {
+  const FS = Module.FS || window.FS;
+  for (const name of FS.readdir(dir)) {
+    if (name === '.' || name === '..') continue;
+    const path = (dir === '/' ? '' : dir) + '/' + name;
+    if (dir === '/' && (name === 'dev' || name === 'proc' || name === 'tmp')) continue;
+    let st; try { st = FS.stat(path); } catch (e) { continue; }
+    if (FS.isDir(st.mode)) findShots(path, out);
+    else if (/\.png$/i.test(name)) out.push(path);
+  }
+  return out;
+}
+async function checkScreenshot() {
+  const FS = Module.FS || window.FS;
+  const before = new Set(findShots('/', []));
+  Module._Hexenwail_TouchKey(K_F12, 1);
+  await new Promise(r => setTimeout(r, 200));
+  Module._Hexenwail_TouchKey(K_F12, 0);
+  await new Promise(r => setTimeout(r, 3000));
+  const shots = findShots('/', []).filter(p => !before.has(p));
+  if (!shots.length) return [false, 'F12 wrote no .png'];
+  const bytes = FS.readFile(shots[0]);
+  const bmp = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
+  const c = document.createElement('canvas');
+  c.width = bmp.width; c.height = bmp.height;
+  const ctx = c.getContext('2d');
+  ctx.drawImage(bmp, 0, 0);
+  const px = ctx.getImageData(0, 0, c.width, c.height).data;
+  let lit = 0;
+  for (let i = 0; i < px.length; i += 4)
+    if (px[i] > 16 || px[i + 1] > 16 || px[i + 2] > 16) lit++;
+  const frac = lit / (px.length / 4);
+  const what = shots[0] + ' ' + bmp.width + 'x' + bmp.height + ', ' +
+    (100 * frac).toFixed(1) + '% of pixels non-black';
+  return [frac > 0.5, what];
+}
 if (MODE === 'map') {
-  setTimeout(() => {
+  setTimeout(async () => {
     const text = engineLines.join('\n');
-    finish(text.includes(EXPECT), text.includes(EXPECT)
-      ? 'demo1 loaded, the client spawned, no fatal or trap'
-      : 'the local client never spawned in demo1');
-  }, 15000);
+    if (!text.includes(EXPECT)) return finish(false, 'the local client never spawned in demo1');
+    if (SCREENSHOT) {
+      let ok, why;
+      try { [ok, why] = await checkScreenshot(); } catch (e) { ok = false; why = 'screenshot check threw: ' + e; }
+      if (!ok) return finish(false, 'screenshot: ' + why);
+      return finish(true, 'demo1 loaded, the client spawned, screenshot ' + why);
+    }
+    finish(true, 'demo1 loaded, the client spawned, no fatal or trap');
+  }, SCREENSHOT ? 10000 : 15000);
 }
 </script>
 <script src="hexenwail.js"></script>
