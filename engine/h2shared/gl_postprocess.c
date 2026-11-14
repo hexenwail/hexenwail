@@ -2693,6 +2693,14 @@ static void PP_BlitWith3DEffects (GLuint src_tex, int w, int h, float warp, floa
 	pp_params.p1[2] = (float)realtime;	/* time */
 	pp_params.p2[0] = 1.0f / w;		/* rcpFrame */
 	pp_params.p2[1] = 1.0f / h;		/* rcpFrame.y */
+	/* No bloom here.  This pass (the 3D effects: motion blur, and water warp
+	 * when underwater) runs before EndFrame builds this frame's bloom.  It
+	 * never set the strength, so it inherited the previous frame's -- in the
+	 * shadow, as in the loose uniform before it -- and sampled whatever was
+	 * still on unit 2, the previous frame's bloom_tex[0].  So with r_bloom on
+	 * it composited LAST frame's bloom into the image this frame's bloom is
+	 * then extracted from and added to again: a second, stale bloom. */
+	pp_params.p3[2] = 0.0f;			/* u_bloom_strength */
 	{
 		float yaw   = cl.viewangles[1];
 		float pitch = cl.viewangles[0];

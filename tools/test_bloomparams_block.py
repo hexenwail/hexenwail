@@ -179,6 +179,13 @@ for fm in re.finditer(r"\n(?:static\s+)?\w[\w\s\*]*?\b(\w+)\s*\([^;{)]*\)\s*\{(.
     draw = body.find("GL_ImmDraw", push if push >= 0 else len(body))
     if push < 0 or draw < 0:
         errors.append(f"{fname}: needs PP_PushParams() after its last pp_params write and before GL_ImmDraw")
+# The native-resolution 3D-effects pass runs before this frame's bloom exists,
+# so it must not composite any: left alone it inherited the previous frame's
+# strength and sampled last frame's bloom_tex[0] on unit 2 -- a second, stale
+# bloom whenever motion blur or underwater warp was on with r_bloom.
+native = re.search(r"static void PP_BlitWith3DEffects \([^)]*\)\s*\{(.*?)\n\}", src, re.S)
+if not native or not re.search(r"pp_params\.p3\[2\]\s*=\s*0\.0f;", native.group(1)):
+    errors.append("PP_BlitWith3DEffects must zero the bloom strength (pp_params.p3[2] = 0.0f)")
 if funcs_with_writes != 2:
     errors.append(f"{funcs_with_writes} functions write pp_params, expected 2 (native and final pass)")
 for gone in ("pp_vert_src", "pp_frag_src", "PP_BITFIELD_REVERSE", "pp_loc_gamma", "pp_loc_mvp"):
