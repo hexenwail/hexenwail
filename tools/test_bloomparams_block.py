@@ -81,6 +81,38 @@ calls = len(re.findall(r"\bPP_PushBloomParams\s*\(", code)) - 1  # minus the def
 if calls != 3:
     errors.append(f"{calls} PP_PushBloomParams calls, expected 3 (bright, down, up)")
 
+# --- the OIT resolve's OitParams, the same arrangement (#450) --------------
+oinc = (SH / "oit_resolve.inc").read_text() if (SH / "oit_resolve.inc").exists() else ""
+oblocks = re.findall(r"uniform\s+OitParams\s*\{(.*?)\};", strip_comments(oinc), re.S)
+if len(oblocks) != 1 or re.findall(r"\b(ivec4|vec4)\s+(\w+)\s*;", oblocks[0]) != [("ivec4", "u_oitp")]:
+    errors.append("oit_resolve.inc must declare exactly OitParams { ivec4 u_oitp; }")
+if not re.search(r"#define\s+u_mboit\s+u_oitp\.x\b", oinc):
+    errors.append("u_mboit is not aliased to u_oitp.x")
+for stage in ("soit_resolve_frag.glsl", "soit_resolve_msaa_frag.glsl"):
+    t = (SH / stage).read_text() if (SH / stage).exists() else ""
+    if not re.search(r'^#include "oit_resolve\.inc"\s*$', strip_comments(t), re.M):
+        errors.append(f"{stage} does not #include \"oit_resolve.inc\"")
+    if re.search(r"uniform\s+int\s+u_mboit", t):
+        errors.append(f"{stage} still declares u_mboit loose")
+if "sizeof(oit_params_t) == 16" not in src:
+    errors.append("no COMPILE_TIME_ASSERT pinning sizeof(oit_params_t) == 16")
+if not re.search(r"#define OIT_PARAMS_UBO_BINDING\s+7\b", src):
+    errors.append("OIT_PARAMS_UBO_BINDING is not 7")
+if "7\n * is its OitParams" not in (ROOT / "engine/h2shared/gl_shader.h").read_text():
+    errors.append("gl_shader.h's binding registry does not list 7 as OitParams")
+for gone in ("oit_resolve_vert", "oit_resolve_frag", "loc_mboit"):
+    if re.search(rf"\b{gone}\b", code):
+        errors.append(f"{gone} is still in gl_postprocess.c")
+# the resolve's upload: its own buffer, never the ES-stubbed ring
+oit_use = re.search(r"OIT_PARAMS_UBO_BINDING, oit_ubo\)", code)
+if not oit_use:
+    errors.append("the OIT resolve does not bind oit_ubo at OIT_PARAMS_UBO_BINDING")
+if re.search(r"GL_BindBufferRange\s*\(\s*GL_UNIFORM_BUFFER\s*,\s*OIT_PARAMS_UBO_BINDING", code):
+    errors.append("OitParams is bound through the GL_Upload ring, a stub on the ES tier")
+for buf in ("oit_ubo", "bloom_ubo"):
+    if not re.search(rf"glDeleteBuffers_fp\s*\(\s*1\s*,\s*&{buf}\s*\)", code):
+        errors.append(f"{buf} is never freed")
+
 if errors:
     sys.exit("FAIL:\n  " + "\n  ".join(errors))
-print("PASS BloomParams carries the bloom passes' parameters on both tiers (#450)")
+print("PASS BloomParams and OitParams carry the bloom and OIT-resolve parameters on both tiers (#450)")

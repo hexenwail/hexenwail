@@ -45,11 +45,15 @@ const PROGRAM_SPECS = [
   ['sky_boxside', 'shader', 'ssky_side_vert', 'ssky_side_frag'],
   ['sky_cubemap', 'shader', 'ssky_cube_vert', 'ssky_cube_frag'],
   ['postprocess', 'postprocess', 'pp_vert_src', 'pp_frag_src'],
-  // The bloom stages are engine/shaders files since #450;
+  // The bloom and OIT-resolve stages are engine/shaders files since #450;
   // gl_postprocess.c compiles them with PP_CompileShaderSplit.
   ['bloom_bright', 'postprocess', 'sbloom_vert', 'sbloom_bright_frag'],
   ['bloom_down', 'postprocess', 'sbloom_vert', 'sbloom_down_frag'],
   ['bloom_up', 'postprocess', 'sbloom_vert', 'sbloom_up_frag'],
+  // The single-sample resolve runs on the ES tier whenever OIT does.  Its MSAA
+  // twin (soit_resolve_msaa_frag) is desktop-only -- sampler2DMS is ES 3.10 --
+  // and deliberately not listed.
+  ['oit_resolve', 'postprocess', 'soit_resolve_vert', 'soit_resolve_frag'],
 ];
 
 function tokenize(expression) {

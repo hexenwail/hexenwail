@@ -48,8 +48,11 @@ if "if (!OIT_KeepChains ())\n\t\t\tt->texturechain = NULL;" not in rs:
     errors.append("R_DrawWaterSurfaces must keep its chains on the MBOIT moment pass")
 if "GLenum	fmts[2] = { GL_R32F, GL_RGBA32F };" not in pp:
     errors.append("the moment targets must be 32-bit float")
-if pp.count('"    if (u_mboit != 0) revealage = exp(-max(revealage, 0.0));\\n"') != 2:
-    errors.append("both resolve programs must turn b0 into revealage as exp(-b0)")
+# The two resolve programs are engine/shaders files since #450.
+resolve_line = "if (u_mboit != 0) revealage = exp(-max(revealage, 0.0));"
+for stage in ("soit_resolve_frag.glsl", "soit_resolve_msaa_frag.glsl"):
+    if resolve_line not in read("engine/shaders/" + stage):
+        errors.append(f"{stage} must turn b0 into revealage as exp(-b0)")
 units = [int(x) for x in re.findall(r"#define MBOIT_TMU_\w+\s+(\d+)", read("engine/h2shared/gl_shader.h"))]
 if len(units) != 4 or len(set(units)) != 4 or min(units) <= 5:
     errors.append("the four MBOIT sampler units must be distinct and above the units draws bind (0-5)")

@@ -193,13 +193,15 @@ test('headless smoke gate compiles the actual engine WebGL shader sources', asyn
   assert.deepEqual(programs.map(({ name }) => name), [
     '2d', 'flat', 'world', 'world_opaque', 'alias', 'particle',
     'sky_layers', 'sky_boxside', 'sky_cubemap',
-    'postprocess', 'bloom_bright', 'bloom_down', 'bloom_up',
+    'postprocess', 'bloom_bright', 'bloom_down', 'bloom_up', 'oit_resolve',
   ]);
-  // The bloom stages are engine/shaders files since #450:
+  // The bloom and OIT-resolve stages are engine/shaders files since #450:
   // their bodies must arrive with the ES PP_*_HEADER in front and the block
   // aliases inlined, not as the old C arrays.
   assert.match(byName.bloom_bright.fragment, /^#version 300 es\n/);
   assert.match(byName.bloom_bright.fragment, /uniform BloomParams/);
+  assert.match(byName.oit_resolve.fragment, /uniform OitParams/);
+  assert.doesNotMatch(byName.oit_resolve.fragment, /sampler2DMS/);
   // Spot-check that macro expansion actually happened rather than silently
   // emitting the macro name -- these live behind GLSL_BICUBIC_LM_FN etc.
   assert.match(byName.world.fragment, /vec4 BicubicLightmap/);

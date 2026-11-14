@@ -406,8 +406,6 @@ static GLint	oit_resolve_loc_accum;
 static GLint	oit_resolve_loc_reveal;
 static GLint	oit_resolve_msaa_loc_accum;
 static GLint	oit_resolve_msaa_loc_reveal;
-static GLint	oit_resolve_loc_mboit;
-static GLint	oit_resolve_msaa_loc_mboit;
 static int	oit_samples;		/* >1 when accum/revealage are multisampled */
 static int	oit_width, oit_height;
 static qboolean	oit_available;		/* true if FBO + shader created OK */
@@ -423,62 +421,28 @@ static GLuint	mboit_fbo;
 static qboolean	mboit_available;
 static int	mboit_pass;		/* 0 none, 1 moments, 2 composite */
 
-/* OIT resolve shaders */
-static const char oit_resolve_vert[] =
-	PP_VERT_HEADER
-	"void main() {\n"
-	"    ivec2 v = ivec2(gl_VertexID & 1, gl_VertexID >> 1);\n"
-	"    gl_Position = vec4(vec2(v) * 4.0 - 1.0, 0.0, 1.0);\n"
-	"}\n";
-
-/* No stencil gate, no early_fragment_tests. WBOIT handles empty pixels
- * via math: accum=0, revealage=1 → alpha=0 → transparent → scene unchanged. */
-static const char oit_resolve_frag[] =
-	PP_FRAG_HEADER
-	"uniform sampler2D TexAccum;\n"
-	"uniform sampler2D TexReveal;\n"
-	"uniform int u_mboit;\n"	/* TexReveal holds MBOIT's b0 (#87) */
-	"layout(location=0) out vec4 out_fragcolor;\n"
-	"float max3(vec3 v) { return max(max(v.x, v.y), v.z); }\n"
-	"void main() {\n"
-	"    ivec2 coords = ivec2(gl_FragCoord.xy);\n"
-	"    float revealage = texelFetch(TexReveal, coords, 0).r;\n"
-	/* MBOIT: the scene shows through what the absorbance b0 leaves */
-	"    if (u_mboit != 0) revealage = exp(-max(revealage, 0.0));\n"
-	"    vec4 accumulation = texelFetch(TexAccum, coords, 0);\n"
-	"    if (isinf(max3(abs(accumulation.rgb))))\n"
-	"        accumulation.rgb = vec3(accumulation.a);\n"
-	"    vec3 average_color = accumulation.rgb / max(accumulation.a, 1e-5);\n"
-	"    out_fragcolor = vec4(average_color, 1.0 - revealage);\n"
-	"}\n";
-
-/* MSAA variant: per-sample resolve via sampler2DMS + gl_SampleID, used when
- * the OIT accum/revealage targets are GL_TEXTURE_2D_MULTISAMPLE.
+/* OIT resolve shaders: engine/shaders/soit_resolve_vert.glsl,
+ * soit_resolve_frag.glsl and the desktop-only soit_resolve_msaa_frag.glsl,
+ * via shaders_gen.h (#450).  The MSAA variant uses sampler2DMS and
+ * gl_SampleID, which are GLSL ES 3.10, and glTexImage2DMultisample_fp is a
+ * no-op on the ES tier, so oit_samples never exceeds 1 there and that program
+ * is never built on ES (OIT_InitShader).
  *
- * Absent on the ES tier: sampler2DMS and gl_SampleID are GLSL ES 3.10, and
- * glTexImage2DMultisample_fp is a no-op there, so oit_samples never exceeds 1
- * and this program could never be selected.  It used to be compiled anyway on
- * the theory that a failed build was harmless; it is not -- a driver handed a
- * shader it just rejected is a driver in a state nothing tests. */
-#ifndef USE_GLES
-static const char oit_resolve_frag_msaa[] =
-	PP_FRAG_HEADER
-	"uniform sampler2DMS TexAccum;\n"
-	"uniform sampler2DMS TexReveal;\n"
-	"uniform int u_mboit;\n"
-	"layout(location=0) out vec4 out_fragcolor;\n"
-	"float max3(vec3 v) { return max(max(v.x, v.y), v.z); }\n"
-	"void main() {\n"
-	"    ivec2 coords = ivec2(gl_FragCoord.xy);\n"
-	"    float revealage = texelFetch(TexReveal, coords, gl_SampleID).r;\n"
-	"    if (u_mboit != 0) revealage = exp(-max(revealage, 0.0));\n"
-	"    vec4 accumulation = texelFetch(TexAccum, coords, gl_SampleID);\n"
-	"    if (isinf(max3(abs(accumulation.rgb))))\n"
-	"        accumulation.rgb = vec3(accumulation.a);\n"
-	"    vec3 average_color = accumulation.rgb / max(accumulation.a, 1e-5);\n"
-	"    out_fragcolor = vec4(average_color, 1.0 - revealage);\n"
-	"}\n";
-#endif /* !USE_GLES */
+ * u_mboit, the loose int that said whether TexReveal holds MBOIT's b0 (#87),
+ * is now the OitParams block (oit_resolve.inc), GL binding point 7: 0 Hi-Z,
+ * 1/2 the shared blocks, 3 SsaoParams, 4 CullParams, 5 LcParams,
+ * 6 BloomParams.  Like BloomParams it lives in its own buffer, not the
+ * GL_Upload ring, because the resolve runs on the ES tier, where GL_Upload is
+ * a stub. */
+#define OIT_PARAMS_UBO_BINDING	7
+
+typedef struct {
+	GLint	p[4];	/* x: MBOIT (1) or WBOIT (0) */
+} oit_params_t;
+
+COMPILE_TIME_ASSERT(oitparams_size, sizeof(oit_params_t) == 16);
+
+static GLuint	oit_ubo;
 
 /* ------------------------------------------------------------------ */
 /* Bloom post-process shaders                                          */
@@ -999,28 +963,29 @@ static GLuint PP_CompileShaderSplit (GLenum type, const char *header, const char
 	return shader;
 }
 
-/* Pin a bloom program's BloomParams block to its binding point, checking the
- * driver's layout against bloom_params_t (the RU_CheckBlockSize practice).
- * The binding dies with the program, so vid_restart is covered. */
-static void PP_BindBloomBlock (GLuint prog)
+/* Pin a program's uniform block to its binding point, checking the driver's
+ * layout against the C mirror's size (the RU_CheckBlockSize practice).  The
+ * binding dies with the program, so vid_restart is covered.  Used by the
+ * bloom (BloomParams) and OIT-resolve (OitParams) programs. */
+static void PP_BindUniformBlock (GLuint prog, const char *block, GLuint binding, size_t mirror)
 {
 	GLuint	blk;
 	GLint	size = 0;
 
 	if (!prog || !glGetUniformBlockIndex_fp || !glUniformBlockBinding_fp)
 		return;
-	blk = glGetUniformBlockIndex_fp(prog, "BloomParams");
+	blk = glGetUniformBlockIndex_fp(prog, block);
 	if (blk == GL_INVALID_INDEX)
 		return;
 	if (glGetActiveUniformBlockiv_fp)
 	{
 		glGetActiveUniformBlockiv_fp(prog, blk, GL_UNIFORM_BLOCK_DATA_SIZE, &size);
-		if (size != (GLint)sizeof(bloom_params_t))
-			Con_Printf("WARNING: uniform block BloomParams is %d bytes on this driver, "
-				   "C mirror is %d -- bloom will be wrong\n",
-				   (int)size, (int)sizeof(bloom_params_t));
+		if (size != (GLint)mirror)
+			Con_Printf("WARNING: uniform block %s is %d bytes on this driver, "
+				   "C mirror is %d -- its uniforms will be wrong\n",
+				   block, (int)size, (int)mirror);
 	}
-	glUniformBlockBinding_fp(prog, blk, BLOOM_PARAMS_UBO_BINDING);
+	glUniformBlockBinding_fp(prog, blk, binding);
 }
 
 /* Write one bloom pass's parameters into bloom_ubo and bind it.
@@ -1125,7 +1090,7 @@ static qboolean PP_InitShader (void)
 	if (!bloom_bright_prog) return true;
 
 	bloom_bright_loc_scene = glGetUniformLocation_fp(bloom_bright_prog, "u_scene");
-	PP_BindBloomBlock(bloom_bright_prog);
+	PP_BindUniformBlock(bloom_bright_prog, "BloomParams", BLOOM_PARAMS_UBO_BINDING, sizeof(bloom_params_t));
 
 	vs = PP_CompileShaderSplit(GL_VERTEX_SHADER, PP_VERT_HEADER, sbloom_vert);
 	if (!vs) return true;
@@ -1137,7 +1102,7 @@ static qboolean PP_InitShader (void)
 	if (!bloom_down_prog) return true;
 
 	bloom_down_loc_scene = glGetUniformLocation_fp(bloom_down_prog, "u_scene");
-	PP_BindBloomBlock(bloom_down_prog);
+	PP_BindUniformBlock(bloom_down_prog, "BloomParams", BLOOM_PARAMS_UBO_BINDING, sizeof(bloom_params_t));
 
 	vs = PP_CompileShaderSplit(GL_VERTEX_SHADER, PP_VERT_HEADER, sbloom_vert);
 	if (!vs) return true;
@@ -1149,7 +1114,7 @@ static qboolean PP_InitShader (void)
 	if (!bloom_up_prog) return true;
 
 	bloom_up_loc_scene = glGetUniformLocation_fp(bloom_up_prog, "u_scene");
-	PP_BindBloomBlock(bloom_up_prog);
+	PP_BindUniformBlock(bloom_up_prog, "BloomParams", BLOOM_PARAMS_UBO_BINDING, sizeof(bloom_params_t));
 
 	/* GL 4.3 core profile requires a VAO bound for any draw call. */
 	glGenVertexArrays_fp(1, &bloom_dummy_vao);
@@ -2199,9 +2164,9 @@ static qboolean OIT_InitShader (void)
 	GLuint vs, fs, prog;
 	GLint linked;
 
-	vs = GL_CompileShader(GL_VERTEX_SHADER, oit_resolve_vert);
+	vs = PP_CompileShaderSplit(GL_VERTEX_SHADER, PP_VERT_HEADER, soit_resolve_vert);
 	if (!vs) return false;
-	fs = GL_CompileShader(GL_FRAGMENT_SHADER, oit_resolve_frag);
+	fs = PP_CompileShaderSplit(GL_FRAGMENT_SHADER, PP_FRAG_HEADER, soit_resolve_frag);
 	if (!fs) { glDeleteShader_fp(vs); return false; }
 
 	prog = glCreateProgram_fp();
@@ -2224,14 +2189,21 @@ static qboolean OIT_InitShader (void)
 	oit_resolve_prog = prog;
 	oit_resolve_loc_accum = glGetUniformLocation_fp(prog, "TexAccum");
 	oit_resolve_loc_reveal = glGetUniformLocation_fp(prog, "TexReveal");
-	oit_resolve_loc_mboit = glGetUniformLocation_fp(prog, "u_mboit");
+	PP_BindUniformBlock(prog, "OitParams", OIT_PARAMS_UBO_BINDING, sizeof(oit_params_t));
+	if (!oit_ubo)
+	{
+		glGenBuffers_fp(1, &oit_ubo);
+		GL_BindBuffer(GL_UNIFORM_BUFFER, oit_ubo);
+		glBufferData_fp(GL_UNIFORM_BUFFER, sizeof(oit_params_t), NULL, GL_DYNAMIC_DRAW);
+		GL_BindBuffer(GL_UNIFORM_BUFFER, 0);
+	}
 
 #ifndef USE_GLES
 	/* MSAA per-sample resolve variant — best-effort. If it fails to build
 	 * the MSAA OIT path is simply never selected, since oit_samples stays 0
 	 * then.  Not built at all on the ES tier — see oit_resolve_frag_msaa. */
-	vs = GL_CompileShader(GL_VERTEX_SHADER, oit_resolve_vert);
-	fs = vs ? GL_CompileShader(GL_FRAGMENT_SHADER, oit_resolve_frag_msaa) : 0;
+	vs = PP_CompileShaderSplit(GL_VERTEX_SHADER, PP_VERT_HEADER, soit_resolve_vert);
+	fs = vs ? PP_CompileShaderSplit(GL_FRAGMENT_SHADER, PP_FRAG_HEADER, soit_resolve_msaa_frag) : 0;
 	if (vs && fs)
 	{
 		prog = glCreateProgram_fp();
@@ -2244,7 +2216,7 @@ static qboolean OIT_InitShader (void)
 			oit_resolve_prog_msaa = prog;
 			oit_resolve_msaa_loc_accum = glGetUniformLocation_fp(prog, "TexAccum");
 			oit_resolve_msaa_loc_reveal = glGetUniformLocation_fp(prog, "TexReveal");
-			oit_resolve_msaa_loc_mboit = glGetUniformLocation_fp(prog, "u_mboit");
+			PP_BindUniformBlock(prog, "OitParams", OIT_PARAMS_UBO_BINDING, sizeof(oit_params_t));
 		}
 		else
 			glDeleteProgram_fp(prog);
@@ -2399,8 +2371,12 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 	if (loc_accum >= 0) glUniform1i_fp(loc_accum, 0);
 	if (loc_reveal >= 0) glUniform1i_fp(loc_reveal, 1);
 	{
-		GLint	loc = (oit_samples > 1) ? oit_resolve_msaa_loc_mboit : oit_resolve_loc_mboit;
-		if (loc >= 0) glUniform1i_fp(loc, mboit ? 1 : 0);
+		oit_params_t	op = {{ mboit ? 1 : 0, 0, 0, 0 }};
+
+		GL_BindBuffer(GL_UNIFORM_BUFFER, oit_ubo);
+		glBufferSubData_fp(GL_UNIFORM_BUFFER, 0, sizeof(op), &op);
+		GL_BindBuffer(GL_UNIFORM_BUFFER, 0);
+		GL_BindBufferBase(GL_UNIFORM_BUFFER, OIT_PARAMS_UBO_BINDING, oit_ubo);
 	}
 
 	/* Full-buffer for the resolve triangle, but SAVED and put back below.
@@ -2719,6 +2695,8 @@ void GL_PostProcess_Shutdown (void)
 	OIT_DeleteFBO();
 	if (oit_resolve_prog) { glDeleteProgram_fp(oit_resolve_prog); oit_resolve_prog = 0; }
 	if (oit_resolve_prog_msaa) { glDeleteProgram_fp(oit_resolve_prog_msaa); oit_resolve_prog_msaa = 0; }
+	if (oit_ubo) { GL_ForgetBuffer(oit_ubo); glDeleteBuffers_fp(1, &oit_ubo); oit_ubo = 0; }
+	if (bloom_ubo) { GL_ForgetBuffer(bloom_ubo); glDeleteBuffers_fp(1, &bloom_ubo); bloom_ubo = 0; }
 	PP_DeleteFBO();
 	PP_DeleteNativeFBO();
 	PP_DeleteSoftDepth();
