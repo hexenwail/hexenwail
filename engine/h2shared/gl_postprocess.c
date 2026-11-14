@@ -2685,7 +2685,7 @@ static void PP_BlitWith3DEffects (GLuint src_tex, int w, int h, float warp, floa
 	pp_params.p1[1] = warp;			/* waterwarp */
 	pp_params.p1[2] = (float)realtime;	/* time */
 	pp_params.p2[0] = 1.0f / w;		/* rcpFrame */
-	pp_params.p2[1] = 1.0f / h;
+	pp_params.p2[1] = 1.0f / h;		/* rcpFrame.y */
 	{
 		float yaw   = cl.viewangles[1];
 		float pitch = cl.viewangles[0];
@@ -2708,7 +2708,7 @@ static void PP_BlitWith3DEffects (GLuint src_tex, int w, int h, float warp, floa
 		if (dp >  0.03f) dp =  0.03f; else if (dp < -0.03f) dp = -0.03f;
 		pp_params.p3[0] = blur;		/* motionblur */
 		pp_params.p2[2] = dy;		/* viewdelta */
-		pp_params.p2[3] = dp;
+		pp_params.p2[3] = dp;		/* viewdelta.y */
 		pp_prev_yaw   = yaw;
 		pp_prev_pitch = pitch;
 	}
@@ -3088,7 +3088,7 @@ apply_shader:
 	pp_params.p1[2] = (float)realtime;			/* time */
 	pp_params.p1[3] = Cvar_VariableValue("gl_fxaa");	/* fxaa_on */
 	pp_params.p2[0] = 1.0f / glwidth;			/* rcpFrame */
-	pp_params.p2[1] = 1.0f / glheight;
+	pp_params.p2[1] = 1.0f / glheight;			/* rcpFrame.y */
 	{
 		float blur = 0, dy = 0, dp = 0;
 		if (!pp_native_active)
@@ -3118,7 +3118,7 @@ apply_shader:
 		}
 		pp_params.p3[0] = blur;		/* motionblur */
 		pp_params.p2[2] = dy;		/* viewdelta */
-		pp_params.p2[3] = dp;
+		pp_params.p2[3] = dp;		/* viewdelta.y */
 	}
 
 	/* bloom composite texture */

@@ -138,15 +138,49 @@ for name, target in ALIASES.items():
         errors.append(f"{name} is not aliased to {target}")
     if re.search(rf"uniform\s+\w+\s+{name}\s*;", strip_comments(ppf)):
         errors.append(f"{name} is still a loose uniform")
-# the C side writes the field each alias reads -- a swapped index compiles
-# and renders wrong, so pin the writes against the same table
-CWRITE = {"contrast": "p0[1] = PP_Contrast ()", "lutmax": "p0[3] = lutmax",
-          "softemu": "i0[0] = (int)r_softemu.value", "u_bloom_strength": "p3[2] = r_bloom.integer",
-          "fxaa_on": "p1[3] = Cvar_VariableValue(\"gl_fxaa\")", "gamma": "p0[0] = v_gamma.value",
-          "time": "p1[2] = (float)realtime", "scale": "p1[0] = scale"}
-for name, write in CWRITE.items():
-    if f"pp_params.{write}" not in src:
-        errors.append(f"gl_postprocess.c does not write {name} as pp_params.{write}")
+# The C side must write the field each alias reads -- a swapped index
+# compiles and renders wrong.  Every write in gl_postprocess.c carries a
+# trailing /* alias */ comment (".y" for the second half of a vec2 alias),
+# and each one is checked against the alias table above, in BOTH passes.
+# Then, per function: the push follows the last write, and the draw follows
+# the push.  (A first cut of this check pinned 8 writes by substring; a
+# reviewer's mutation test swapped three other fields and it still passed.)
+COMP = {"x": 0, "y": 1, "z": 2, "w": 3, "xy": 0, "zw": 2}
+def alias_slot(comment):
+    name, _, half = comment.partition(".")
+    target = ALIASES.get(name)
+    if not target:
+        return None
+    field, comp = target.split(".")
+    idx = COMP[comp] + (1 if half == "y" else 0)
+    return field.replace("pp_", "").replace("i0", "i0"), idx
+write_re = re.compile(r"pp_params\.(p[0-3]|i0)\[(\d)\]\s*=[^;]*;[ \t]*/\*\s*([\w.]+)\s*\*/")
+bare_re = re.compile(r"pp_params\.(p[0-3]|i0)\[(\d)\]\s*=")
+funcs_with_writes = 0
+for fm in re.finditer(r"\n(?:static\s+)?\w[\w\s\*]*?\b(\w+)\s*\([^;{)]*\)\s*\{(.*?)\n\}", src, re.S):
+    fname, body = fm.group(1), fm.group(2)
+    if not bare_re.search(body):
+        continue
+    funcs_with_writes += 1
+    bare = len(bare_re.findall(body))
+    writes = list(write_re.finditer(body))
+    if len(writes) != bare:
+        errors.append(f"{fname}: {bare - len(writes)} pp_params write(s) lack an /* alias */ comment")
+    for w in writes:
+        field, idx, comment = "p" + w.group(1)[1] if w.group(1) != "i0" else "i0", int(w.group(2)), w.group(3)
+        slot = alias_slot(comment)
+        if slot is None:
+            errors.append(f"{fname}: write commented /* {comment} */ names no PpParams alias")
+        elif slot != (field, idx):
+            errors.append(f"{fname}: /* {comment} */ is written to {field}[{idx}], "
+                          f"but the shader reads it from {slot[0]}[{slot[1]}]")
+    last = max(w.end() for w in bare_re.finditer(body))
+    push = body.find("PP_PushParams();", last)
+    draw = body.find("GL_ImmDraw", push if push >= 0 else len(body))
+    if push < 0 or draw < 0:
+        errors.append(f"{fname}: needs PP_PushParams() after its last pp_params write and before GL_ImmDraw")
+if funcs_with_writes != 2:
+    errors.append(f"{funcs_with_writes} functions write pp_params, expected 2 (native and final pass)")
 for gone in ("pp_vert_src", "pp_frag_src", "PP_BITFIELD_REVERSE", "pp_loc_gamma", "pp_loc_mvp"):
     if re.search(rf"\b{gone}\b", code):
         errors.append(f"{gone} is still in gl_postprocess.c")
