@@ -22,6 +22,9 @@
 #include "gl_vbo.h"
 #include "draw.h"
 
+/* sbloom_*[] -- the bloom family, engine/shaders/sbloom_*.glsl (#450) */
+#include "shaders_gen.h"
+
 /* GL defines that may be missing on some platforms (MinGW, ES3) */
 #ifndef GL_RGBA16F
 #define GL_RGBA16F 0x881A
@@ -137,9 +140,20 @@ static GLuint	bloom_down_prog;	/* downsample 4-tap box */
 static GLuint	bloom_up_prog;		/* upsample 3x3 tent + additive blend */
 
 /* Bloom shader uniform locations */
-static GLint	bloom_bright_loc_scene, bloom_bright_loc_threshold, bloom_bright_loc_rcpframe;
-static GLint	bloom_down_loc_scene, bloom_down_loc_rcpframe;
-static GLint	bloom_up_loc_scene, bloom_up_loc_prev, bloom_up_loc_rcpframe;
+static GLint	bloom_bright_loc_scene, bloom_down_loc_scene, bloom_up_loc_scene;
+
+/* The bloom passes' one uniform block (engine/shaders/bloom.inc), replacing
+ * the loose u_rcpframe / u_threshold the inline programs took (#450).  GL
+ * binding point 6: 0 Hi-Z, 1/2 the shared vert/frag blocks, 3 SsaoParams,
+ * 4 CullParams, 5 LcParams.  Assigned from C with glUniformBlockBinding,
+ * since ES 3.00 cannot name a block binding in the shader. */
+#define BLOOM_PARAMS_UBO_BINDING	6
+
+typedef struct {
+	float	p[4];	/* xy reciprocal source size, z bright-pass threshold */
+} bloom_params_t;
+
+COMPILE_TIME_ASSERT(bloomparams_size, sizeof(bloom_params_t) == 16);
 static GLuint	bloom_dummy_vao;		/* dummy VAO required for glDrawArrays in GL 4.3 core */
 
 /* Shader state */
@@ -470,64 +484,9 @@ static const char oit_resolve_frag_msaa[] =
 /* Bloom post-process shaders                                          */
 /* ------------------------------------------------------------------ */
 
-static const char bloom_vert_src[] =
-	PP_VERT_HEADER
-	"out vec2 v_uv;\n"
-	"void main() {\n"
-	"    ivec2 v = ivec2(gl_VertexID & 1, gl_VertexID >> 1);\n"
-	"    vec2 pos = vec2(v) * 4.0 - 1.0;\n"
-	"    v_uv = pos * 0.5 + 0.5;\n"
-	"    gl_Position = vec4(pos, 0.0, 1.0);\n"
-	"}\n";
-
-static const char bloom_bright_frag_src[] =
-	PP_FRAG_HEADER
-	"uniform sampler2D u_scene;\n"
-	"uniform float u_threshold;\n"
-	"uniform vec2 u_rcpframe;\n"
-	"in vec2 v_uv;\n"
-	"layout(location=0) out vec4 fragColor;\n"
-	"void main() {\n"
-	"    vec3 c = texture(u_scene, v_uv).rgb;\n"
-	"    float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));\n"
-	"    float w = max(0.0, lum - u_threshold);\n"
-	"    fragColor = vec4(c * (w / max(lum, 0.001)), 1.0);\n"
-	"}\n";
-
-static const char bloom_down_frag_src[] =
-	PP_FRAG_HEADER
-	"uniform sampler2D u_scene;\n"
-	"uniform vec2 u_rcpframe;\n"
-	"in vec2 v_uv;\n"
-	"layout(location=0) out vec4 fragColor;\n"
-	"void main() {\n"
-	"    vec2 h = u_rcpframe * 0.5;\n"
-	"    vec4 s = texture(u_scene, v_uv + vec2(-h.x,-h.y))\n"
-	"           + texture(u_scene, v_uv + vec2( h.x,-h.y))\n"
-	"           + texture(u_scene, v_uv + vec2(-h.x, h.y))\n"
-	"           + texture(u_scene, v_uv + vec2( h.x, h.y));\n"
-	"    fragColor = s * 0.25;\n"
-	"}\n";
-
-static const char bloom_up_frag_src[] =
-	PP_FRAG_HEADER
-	"uniform sampler2D u_scene;\n"
-	"uniform vec2 u_rcpframe;\n"
-	"in vec2 v_uv;\n"
-	"layout(location=0) out vec4 fragColor;\n"
-	"void main() {\n"
-	"    vec2 h = u_rcpframe;\n"
-	"    vec4 s = texture(u_scene, v_uv + vec2(-h.x, 0)) * 2.0\n"
-	"           + texture(u_scene, v_uv + vec2( h.x, 0)) * 2.0\n"
-	"           + texture(u_scene, v_uv + vec2(0, -h.y)) * 2.0\n"
-	"           + texture(u_scene, v_uv + vec2(0,  h.y)) * 2.0\n"
-	"           + texture(u_scene, v_uv + vec2(-h.x,-h.y))\n"
-	"           + texture(u_scene, v_uv + vec2( h.x,-h.y))\n"
-	"           + texture(u_scene, v_uv + vec2(-h.x, h.y))\n"
-	"           + texture(u_scene, v_uv + vec2( h.x, h.y));\n"
-	"    s /= 12.0;\n"
-	"    fragColor = s;\n"
-	"}\n";
+/* engine/shaders/sbloom_vert.glsl and sbloom_{bright,down,up}_frag.glsl, via
+ * shaders_gen.h (#450).  They carry no #version: PP_VERT_HEADER /
+ * PP_FRAG_HEADER go in as a separate chunk, so one file serves both tiers. */
 
 /* ------------------------------------------------------------------ */
 
@@ -1013,6 +972,83 @@ static GLuint PP_CompileShader (GLenum type, const char *source)
 	return shader;
 }
 
+/* PP_CompileShader for a body from engine/shaders: the tier header (#version
+ * and, on ES, the precision lines) goes first as its own glShaderSource
+ * chunk, which is how GL_LoadComputeProgram and GL_InitProgramSplit feed the
+ * other file-backed shaders. */
+static GLuint PP_CompileShaderSplit (GLenum type, const char *header, const char *body)
+{
+	GLuint shader;
+	GLint status;
+	char log[512];
+	const char *sources[2];
+
+	sources[0] = header;
+	sources[1] = body;
+	shader = glCreateShader_fp(type);
+	glShaderSource_fp(shader, 2, sources, NULL);
+	glCompileShader_fp(shader);
+	glGetShaderiv_fp(shader, GL_COMPILE_STATUS, &status);
+	if (!status)
+	{
+		glGetShaderInfoLog_fp(shader, sizeof(log), NULL, log);
+		Con_Printf("PostProcess shader compile error: %s\n", log);
+		glDeleteShader_fp(shader);
+		return 0;
+	}
+	return shader;
+}
+
+/* Pin a bloom program's BloomParams block to its binding point, checking the
+ * driver's layout against bloom_params_t (the RU_CheckBlockSize practice).
+ * The binding dies with the program, so vid_restart is covered. */
+static void PP_BindBloomBlock (GLuint prog)
+{
+	GLuint	blk;
+	GLint	size = 0;
+
+	if (!prog || !glGetUniformBlockIndex_fp || !glUniformBlockBinding_fp)
+		return;
+	blk = glGetUniformBlockIndex_fp(prog, "BloomParams");
+	if (blk == GL_INVALID_INDEX)
+		return;
+	if (glGetActiveUniformBlockiv_fp)
+	{
+		glGetActiveUniformBlockiv_fp(prog, blk, GL_UNIFORM_BLOCK_DATA_SIZE, &size);
+		if (size != (GLint)sizeof(bloom_params_t))
+			Con_Printf("WARNING: uniform block BloomParams is %d bytes on this driver, "
+				   "C mirror is %d -- bloom will be wrong\n",
+				   (int)size, (int)sizeof(bloom_params_t));
+	}
+	glUniformBlockBinding_fp(prog, blk, BLOOM_PARAMS_UBO_BINDING);
+}
+
+/* Write one bloom pass's parameters into bloom_ubo and bind it.
+ *
+ * NOT the GL_Upload frame ring that gl_worldcull.c and gl_lightcluster.c use:
+ * on the ES tier GL_Upload is a stub that hands back buffer 0 (gl_buffer.c,
+ * the USE_GLES arm), and bloom runs on both tiers.  Through the ring, the ES
+ * build read BloomParams as zeros -- threshold 0 and a zero step -- and
+ * bloomed every pixel, while the desktop build stayed pixel-identical.  So
+ * the bloom passes own one 16-byte buffer, the way gl_ssao.c owns ss_ubo.  A
+ * glBufferSubData between draws is ordered against the earlier draws by GL
+ * itself, so seven of them a frame are correct on every driver. */
+static GLuint	bloom_ubo;
+
+static void PP_PushBloomParams (float rcp_w, float rcp_h, float threshold)
+{
+	bloom_params_t	bp;
+
+	bp.p[0] = rcp_w;
+	bp.p[1] = rcp_h;
+	bp.p[2] = threshold;
+	bp.p[3] = 0.0f;
+	GL_BindBuffer(GL_UNIFORM_BUFFER, bloom_ubo);
+	glBufferSubData_fp(GL_UNIFORM_BUFFER, 0, sizeof(bp), &bp);
+	GL_BindBuffer(GL_UNIFORM_BUFFER, 0);
+	GL_BindBufferBase(GL_UNIFORM_BUFFER, BLOOM_PARAMS_UBO_BINDING, bloom_ubo);
+}
+
 static GLuint PP_LinkProgram (GLuint vert, GLuint frag)
 {
 	GLuint prog;
@@ -1078,10 +1114,10 @@ static qboolean PP_InitShader (void)
 	R_UseProgram (0);
 
 	/* Bloom shaders */
-	vs = PP_CompileShader(GL_VERTEX_SHADER, bloom_vert_src);
+	vs = PP_CompileShaderSplit(GL_VERTEX_SHADER, PP_VERT_HEADER, sbloom_vert);
 	if (!vs) return true;	/* bloom optional */
 
-	fs = PP_CompileShader(GL_FRAGMENT_SHADER, bloom_bright_frag_src);
+	fs = PP_CompileShaderSplit(GL_FRAGMENT_SHADER, PP_FRAG_HEADER, sbloom_bright_frag);
 	if (!fs) { glDeleteShader_fp(vs); return true; }
 	bloom_bright_prog = PP_LinkProgram(vs, fs);
 	glDeleteShader_fp(vs);
@@ -1089,12 +1125,11 @@ static qboolean PP_InitShader (void)
 	if (!bloom_bright_prog) return true;
 
 	bloom_bright_loc_scene = glGetUniformLocation_fp(bloom_bright_prog, "u_scene");
-	bloom_bright_loc_threshold = glGetUniformLocation_fp(bloom_bright_prog, "u_threshold");
-	bloom_bright_loc_rcpframe = glGetUniformLocation_fp(bloom_bright_prog, "u_rcpframe");
+	PP_BindBloomBlock(bloom_bright_prog);
 
-	vs = PP_CompileShader(GL_VERTEX_SHADER, bloom_vert_src);
+	vs = PP_CompileShaderSplit(GL_VERTEX_SHADER, PP_VERT_HEADER, sbloom_vert);
 	if (!vs) return true;
-	fs = PP_CompileShader(GL_FRAGMENT_SHADER, bloom_down_frag_src);
+	fs = PP_CompileShaderSplit(GL_FRAGMENT_SHADER, PP_FRAG_HEADER, sbloom_down_frag);
 	if (!fs) { glDeleteShader_fp(vs); return true; }
 	bloom_down_prog = PP_LinkProgram(vs, fs);
 	glDeleteShader_fp(vs);
@@ -1102,11 +1137,11 @@ static qboolean PP_InitShader (void)
 	if (!bloom_down_prog) return true;
 
 	bloom_down_loc_scene = glGetUniformLocation_fp(bloom_down_prog, "u_scene");
-	bloom_down_loc_rcpframe = glGetUniformLocation_fp(bloom_down_prog, "u_rcpframe");
+	PP_BindBloomBlock(bloom_down_prog);
 
-	vs = PP_CompileShader(GL_VERTEX_SHADER, bloom_vert_src);
+	vs = PP_CompileShaderSplit(GL_VERTEX_SHADER, PP_VERT_HEADER, sbloom_vert);
 	if (!vs) return true;
-	fs = PP_CompileShader(GL_FRAGMENT_SHADER, bloom_up_frag_src);
+	fs = PP_CompileShaderSplit(GL_FRAGMENT_SHADER, PP_FRAG_HEADER, sbloom_up_frag);
 	if (!fs) { glDeleteShader_fp(vs); return true; }
 	bloom_up_prog = PP_LinkProgram(vs, fs);
 	glDeleteShader_fp(vs);
@@ -1114,11 +1149,16 @@ static qboolean PP_InitShader (void)
 	if (!bloom_up_prog) return true;
 
 	bloom_up_loc_scene = glGetUniformLocation_fp(bloom_up_prog, "u_scene");
-	bloom_up_loc_prev = glGetUniformLocation_fp(bloom_up_prog, "u_prev");
-	bloom_up_loc_rcpframe = glGetUniformLocation_fp(bloom_up_prog, "u_rcpframe");
+	PP_BindBloomBlock(bloom_up_prog);
 
 	/* GL 4.3 core profile requires a VAO bound for any draw call. */
 	glGenVertexArrays_fp(1, &bloom_dummy_vao);
+
+	/* BloomParams storage; same lifetime as the programs and VAO above. */
+	glGenBuffers_fp(1, &bloom_ubo);
+	GL_BindBuffer(GL_UNIFORM_BUFFER, bloom_ubo);
+	glBufferData_fp(GL_UNIFORM_BUFFER, sizeof(bloom_params_t), NULL, GL_DYNAMIC_DRAW);
+	GL_BindBuffer(GL_UNIFORM_BUFFER, 0);
 
 	return true;
 }
@@ -3139,8 +3179,7 @@ void GL_PostProcess_EndFrame (void)
 		glActiveTexture_fp(GL_TEXTURE0);
 		glBindTexture_fp(GL_TEXTURE_2D, bloom_src);
 		if (bloom_bright_loc_scene >= 0) glUniform1i_fp(bloom_bright_loc_scene, 0);
-		if (bloom_bright_loc_threshold >= 0) glUniform1f_fp(bloom_bright_loc_threshold, r_bloom_threshold.value);
-		if (bloom_bright_loc_rcpframe >= 0) glUniform2f_fp(bloom_bright_loc_rcpframe, 1.0f / bloom_src_w, 1.0f / bloom_src_h);
+		PP_PushBloomParams(1.0f / bloom_src_w, 1.0f / bloom_src_h, r_bloom_threshold.value);
 		glDrawArrays_fp(GL_TRIANGLES, 0, 3);
 
 		/* Downsample chain: level 0 → 1 → 2 → 3 */
@@ -3152,7 +3191,7 @@ void GL_PostProcess_EndFrame (void)
 			glActiveTexture_fp(GL_TEXTURE0);
 			glBindTexture_fp(GL_TEXTURE_2D, bloom_tex[i-1]);
 			if (bloom_down_loc_scene >= 0) glUniform1i_fp(bloom_down_loc_scene, 0);
-			if (bloom_down_loc_rcpframe >= 0) glUniform2f_fp(bloom_down_loc_rcpframe, 1.0f / bloom_w[i-1], 1.0f / bloom_h[i-1]);
+			PP_PushBloomParams(1.0f / bloom_w[i-1], 1.0f / bloom_h[i-1], 0.0f);
 			glDrawArrays_fp(GL_TRIANGLES, 0, 3);
 		}
 
@@ -3172,7 +3211,7 @@ void GL_PostProcess_EndFrame (void)
 			glActiveTexture_fp(GL_TEXTURE0);
 			glBindTexture_fp(GL_TEXTURE_2D, bloom_tex[i + 1]);
 			if (bloom_up_loc_scene >= 0) glUniform1i_fp(bloom_up_loc_scene, 0);
-			if (bloom_up_loc_rcpframe >= 0) glUniform2f_fp(bloom_up_loc_rcpframe, 1.0f / bloom_w[i+1], 1.0f / bloom_h[i+1]);
+			PP_PushBloomParams(1.0f / bloom_w[i+1], 1.0f / bloom_h[i+1], 0.0f);
 			glDrawArrays_fp(GL_TRIANGLES, 0, 3);
 		}
 		R_SetBlend (false);

@@ -45,9 +45,11 @@ const PROGRAM_SPECS = [
   ['sky_boxside', 'shader', 'ssky_side_vert', 'ssky_side_frag'],
   ['sky_cubemap', 'shader', 'ssky_cube_vert', 'ssky_cube_frag'],
   ['postprocess', 'postprocess', 'pp_vert_src', 'pp_frag_src'],
-  ['bloom_bright', 'postprocess', 'bloom_vert_src', 'bloom_bright_frag_src'],
-  ['bloom_down', 'postprocess', 'bloom_vert_src', 'bloom_down_frag_src'],
-  ['bloom_up', 'postprocess', 'bloom_vert_src', 'bloom_up_frag_src'],
+  // The bloom stages are engine/shaders files since #450;
+  // gl_postprocess.c compiles them with PP_CompileShaderSplit.
+  ['bloom_bright', 'postprocess', 'sbloom_vert', 'sbloom_bright_frag'],
+  ['bloom_down', 'postprocess', 'sbloom_vert', 'sbloom_down_frag'],
+  ['bloom_up', 'postprocess', 'sbloom_vert', 'sbloom_up_frag'],
 ];
 
 function tokenize(expression) {
@@ -327,8 +329,14 @@ function splitHeaderFor(ctx, symbol) {
     if (args[3] === symbol) return args[2];
     if (args[5] === symbol) return args[4];
   }
+  // gl_postprocess.c's per-stage form: PP_CompileShaderSplit(type, header, body),
+  // which states the header just as explicitly.
+  const stageCall = /PP_CompileShaderSplit\s*\(\s*GL_\w+_SHADER\s*,\s*(\w+)\s*,\s*(\w+)\s*\)/g;
+  for (let match = stageCall.exec(ctx.source); match; match = stageCall.exec(ctx.source)) {
+    if (match[2] === symbol) return match[1];
+  }
   throw new Error(
-    `engine/shaders/${symbol}.glsl exists but no GL_InitProgramSplit() call in `
+    `engine/shaders/${symbol}.glsl exists but no GL_InitProgramSplit() or PP_CompileShaderSplit() call in `
     + `${ctx.name} names ${symbol}, so there is no way to know which #version `
     + 'header the engine compiles it with');
 }
