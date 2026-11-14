@@ -19,16 +19,29 @@ errors = []
 WORLDCULL = ROOT / "engine/h2shared/gl_worldcull.c"
 src = WORLDCULL.read_text()
 
-# --- 1. The GLSL block: exactly three copies, all identical ---------------
-blocks = re.findall(
-    r"layout\(std140\) uniform CullParams \{(.*?)\};", src, re.S)
-if len(blocks) != 3:
-    errors.append(f"CullParams block appears {len(blocks)} times, expected 3 "
-                  "(clear_indirect, cull_mark, hiz_reduce)")
-blocks = [re.sub(r'"', "", b) for b in blocks]
-if len(set(blocks)) != 1:
-    errors.append("the three CullParams declarations differ from each other")
+# --- 1. The GLSL block: one declaration, in cull.inc, used by all three ----
+# Since #450 the three programs are engine/shaders files that #include one
+# copy, so "the copies agree" now means "there is only one copy".
+SHADERS = ROOT / "engine/shaders"
+CULL_INC = SHADERS / "cull.inc"
+STAGES = ("cull_clear_comp.glsl", "cull_mark_comp.glsl", "hiz_reduce_comp.glsl")
+BLOCK_RE = r"uniform\s+CullParams\s*\{(.*?)\};"
+inc = CULL_INC.read_text() if CULL_INC.exists() else ""
+blocks = re.findall(BLOCK_RE, inc, re.S)
+if len(blocks) != 1:
+    errors.append(f"cull.inc declares CullParams {len(blocks)} times, expected 1")
 block = blocks[0] if blocks else ""
+if not re.search(r"^UBO\(0\)\s+uniform\s+CullParams\b", inc, re.M):
+    errors.append("cull.inc's CullParams is not UBO(0) (the SDL_GPU slot; "
+                  "GL's point 4 is assigned from C)")
+for stage in STAGES:
+    text = (SHADERS / stage).read_text() if (SHADERS / stage).exists() else ""
+    if '#include "cull.inc"' not in text:
+        errors.append(f"{stage} does not #include \"cull.inc\"")
+    if re.search(BLOCK_RE, text, re.S):
+        errors.append(f"{stage} declares its own CullParams copy")
+if re.search(r"uniform CullParams", src):
+    errors.append("gl_worldcull.c still carries an inline CullParams copy")
 
 # --- 2. std140 offsets of the GLSL members --------------------------------
 # All members are vec4/mat4/ivec4, so offsets are arithmetic: every member
@@ -38,6 +51,7 @@ GLSL_TYPE = {"ivec4": (16, 16), "vec4": (16, 16), "mat4": (16, 64)}
 
 def glsl_members(text):
     members = []
+    text = re.sub(r"/\*.*?\*/", " ", text, flags=re.S)
     for line in text.splitlines():
         line = line.replace("\\n", "").strip().rstrip(";").strip()
         m = re.match(r"(ivec4|vec4|mat4)\s+(\w+)(\[(\d+)\])?$", line)
@@ -141,8 +155,10 @@ for stale in ("u_vieworg", "u_frustum", "u_framecount", "u_num_marksurfs",
               "u_num_buckets", "u_max_dst_indices", "u_prev_mvp", "u_hiz_size",
               "u_hiz_mip_count", "u_hiz_enable", "u_reverse_z", "u_stats_enable",
               "u_src_size", "u_dst_size", "u_src_lod"):
-    if re.search(rf"\b{stale}\b", src):
-        errors.append(f"stale loose uniform name {stale} in gl_worldcull.c")
+    for name, text in [("gl_worldcull.c", src), ("cull.inc", inc)] + [
+            (s, (SHADERS / s).read_text()) for s in STAGES if (SHADERS / s).exists()]:
+        if re.search(rf"\b{stale}\b", text):
+            errors.append(f"stale loose uniform name {stale} in {name}")
 
 if errors:
     sys.exit("FAIL:\n  " + "\n  ".join(errors))

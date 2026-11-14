@@ -48,6 +48,36 @@
   #define UBO(b)            layout(std140)
 #endif
 
+/* Compute resources whose GL binding point and SDL_GPU slot differ.
+ *
+ * TEXBIND/IMGBIND/UBO above take one number because their callers so far
+ * happen to use the same index on both sides.  GL binding points are global
+ * and fixed by the C side (glBindBufferBase, glActiveTexture), while SDL_GPU
+ * renumbers each compute pipeline's resources from 0 within each set: set 0
+ * holds sampled textures, then read-only storage textures, then read-only
+ * storage buffers; set 1 holds read-write storage textures, then read-write
+ * storage buffers.  So a shader with eight SSBOs at GL points 0-7 and a
+ * sampler on unit 1 (gl_worldcull.c's cull_mark) needs both numbers spelled.
+ *
+ *   TEXBIND2(gl, vk)  sampled texture; vk is its index in set 0
+ *   SSBO_RO(gl, vk)   readonly storage buffer; vk follows set 0's textures
+ *   SSBO_RW(gl, vk)   storage buffer that is written (read-write or
+ *                     writeonly -- SDL_GPU has no write-only kind); set 1
+ *
+ * The GL arms use `gl` only, so the driver sees exactly the qualifiers it
+ * would from a hand-written layout(std430, binding = gl).  Storage blocks
+ * take layout(binding=) wherever compute exists (GL 4.3 / ES 3.1), unlike
+ * uniform blocks, so no arm needs C-side binding for them. */
+#ifdef VULKAN
+  #define TEXBIND2(gl, vk)  layout(set = 0, binding = vk)
+  #define SSBO_RO(gl, vk)   layout(std430, set = 0, binding = vk)
+  #define SSBO_RW(gl, vk)   layout(std430, set = 1, binding = vk)
+#else
+  #define TEXBIND2(gl, vk)  layout(binding = gl)
+  #define SSBO_RO(gl, vk)   layout(std430, binding = gl)
+  #define SSBO_RW(gl, vk)   layout(std430, binding = gl)
+#endif
+
 /* ------------------------------------------------------------------------
  * Graphics pipeline.  Separate macros rather than reuse of the compute ones
  * above, because SDL_GPU numbers a graphics pipeline's descriptor sets
