@@ -401,3 +401,9 @@ jobs:
       # the declaration the OIT splice searches for (#450).
       - name: Shader include bound and OIT splice marker
         run: python3 tools/test_embed_include_bound.py
+
+      # salias_vert reads VertParams: the C mirror matches the block member
+      # for member (sizes AND int/float kinds), all four alias builds compile
+      # the file, GL_ImmPushBlocks feeds it, MSL targets 2.1 (#450 S1).
+      - name: Alias vertex stage on VertParams
+        run: python3 tools/test_alias_vert_block.py

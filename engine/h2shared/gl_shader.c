@@ -601,7 +601,11 @@ static GLuint GL_LoadOITProgramSplit (const char *vert_header, const char *vert_
 
 	vs = GL_CompileShaderSplit (GL_VERTEX_SHADER, vert_header, vert_src);
 	if (!vs) return 0;
-	fs = GL_CompileOITFragShaderSplit (frag_header, frag_src);
+	/* frag_header NULL: the fragment body is still a C literal with its own
+	 * #version (salias_frag while the alias family moves stage by stage,
+	 * #450), so it takes the original splice. */
+	fs = frag_header ? GL_CompileOITFragShaderSplit (frag_header, frag_src)
+			 : GL_CompileOITFragShader (frag_src);
 	if (!fs) { glDeleteShader_fp (vs); return 0; }
 
 	prog = GL_LinkProgram (vs, fs);
@@ -1906,58 +1910,11 @@ static const char sworld_frag_opaque[] =
 	"}\n";
 
 /* --- shader_alias: vertex-colored, textured, fog (models) ---
- * invariant gl_Position pins the position math across draws so the
- * additive fullbright re-draw lands on the exact depth the base pass
- * wrote. Without it the GLSL compiler may reorder the matrix multiply
- * and produce slightly different Z, so fullbright fragments fail the
- * GL_LEQUAL/GL_GEQUAL test polygon-by-polygon and the model develops
- * blocky chunks (uhexen2-iir3). Mesa sometimes ignores the qualifier;
- * the fullbright pass also enables polygon offset as a backstop. */
-static const char salias_vert[] =
-	GLSL_VERT_HEADER
-	/* Affine texture mapping, the way the software rasteriser did it
-	 * (uhexen2-ktjv).  An interpolation qualifier is not something a uniform
-	 * can switch, so this is a compile-time variant -- the only stage of
-	 * r_softemu that needs one.  Empty object-like macro when NOPERSP is not
-	 * defined, so the qualifier simply is not there. */
-	"#ifdef NOPERSP\n"
-	"#define TCQUAL noperspective\n"
-	"#else\n"
-	"#define TCQUAL\n"
-	"#endif\n"
-	"in vec3 a_position;\n"
-	"in vec2 a_texcoord;\n"
-	"in vec4 a_color;\n"
-	"uniform mat4 u_mvp;\n"
-	"uniform mat4 u_modelview;\n"
-	/* Model-only matrix (entity rotation + scale_origin + scale, no view).
-	 * u_modelview is view*model, so it lands vertices in EYE space — sampling
-	 * caustics there would make the pattern swim with the camera.  C uploads
-	 * the same transform chain R_DrawAliasModel pushes onto the matrix stack,
-	 * rebuilt on an identity base.  Defaults to identity so the sprite / warp
-	 * / brush-poly batches that share this program (which submit world-space
-	 * positions already) stay correct.  uhexen2-0gn3. */
-	"uniform mat4 u_alias_model;\n"
-	"TCQUAL out vec2 v_texcoord;\n"
-	"out vec4 v_color;\n"
-	"out float v_fogdist;\n"
-	"out vec2 v_worldxy;\n"
-	/* EYE space -- u_modelview is view*model, so whatever entity transform
-	 * preceded it, this lands camera-relative with the camera at the origin.
-	 * u_alias_lightdir is uploaded in the matching frame.  uhexen2-4kcb. */
-	"out highp vec3 v_matpos;\n"
-	GLSL_ALIAS_DLIGHT_VS_OUT
-	"invariant gl_Position;\n"
-	"void main() {\n"
-	"    v_texcoord = a_texcoord;\n"
-	"    v_color = a_color;\n"
-	"    v_worldxy = (u_alias_model * vec4(a_position, 1.0)).xy;\n"
-	"    vec4 eyepos = u_modelview * vec4(a_position, 1.0);\n"
-	"    v_fogdist = length(eyepos.xyz);\n"
-	"    v_matpos = eyepos.xyz;\n"
-	GLSL_ALIAS_DLIGHT_VS_CALC
-	"    gl_Position = u_mvp * vec4(a_position, 1.0);\n"
-	"}\n";
+ * The vertex stage is engine/shaders/salias_vert.glsl (#450, alias slice S1),
+ * reaching us as salias_vert[] via shaders_gen.h; its header comment carries
+ * the invariant-gl_Position and u_alias_model notes that were here.  The
+ * fragment stage below is still a C literal; it moves in slice S2 of the plan
+ * on #450. */
 
 static const char salias_frag[] =
 	GLSL_FRAG_HEADER
@@ -2737,7 +2694,10 @@ void GL_Shaders_Init (void)
 							GLSL_FRAG_HEADER, sflat_frag);
 	GL_InitProgram(&gl_shader_world,    "world",    sworld_vert, sworld_frag);
 	GL_InitProgram(&gl_shader_world_opaque, "world_opaque", sworld_vert, sworld_frag_opaque);
-	GL_InitProgram(&gl_shader_alias,    "alias",    salias_vert, salias_frag);
+	/* The vertex stage is a file (#450); salias_frag is still a literal
+	 * with its own #version, hence the NULL fragment header. */
+	GL_InitProgramSplit(&gl_shader_alias, "alias", GLSL_VERT_HEADER, salias_vert,
+							NULL, salias_frag);
 #ifndef USE_GLES
 	/* Affine-mapping twin (uhexen2-ktjv).  Same sources, NOPERSP defined:
 	 * an interpolation qualifier cannot be switched by a uniform, so this
@@ -2752,8 +2712,18 @@ void GL_Shaders_Init (void)
 	 * twin has no program, so the ES tier simply does not get the effect --
 	 * which is the same answer the ES tier already gives for skeletal
 	 * models (uhexen2-dfay). */
-	GL_InitProgramDefines(&gl_shader_alias_np, "alias_np", salias_vert, salias_frag,
-			      "#define NOPERSP 1\n");
+	{
+		/* NOPERSP reaches the file-backed vertex stage through its header
+		 * chunk and the literal fragment stage through the splice. */
+		char *f = GL_SpliceDefines (salias_frag, "#define NOPERSP 1\n");
+		if (f)
+			GL_InitProgramSplit(&gl_shader_alias_np, "alias_np",
+					    GLSL_VERT_HEADER "#define NOPERSP 1\n", salias_vert,
+					    NULL, f);
+		else
+			Con_SafePrintf ("  alias_np: FAILED (preamble splice)\n");
+		free (f);
+	}
 #endif
 #ifndef USE_GLES
 	/* Skipped on the ES tier: sskeletal_vert reads its bone matrices from a
@@ -2859,13 +2829,14 @@ void GL_Shaders_Init (void)
 	 * there and could not have.  uhexen2-ha7n. */
 #ifndef USE_GLES
 	GL_InitOITProgram(&gl_shader_world_oit,    "world",    sworld_vert, sworld_frag);
-	GL_InitOITProgram(&gl_shader_alias_oit,    "alias",    salias_vert, salias_frag);
+	GL_InitOITProgramSplit(&gl_shader_alias_oit, "alias", GLSL_VERT_HEADER, salias_vert,
+							      NULL, salias_frag);
 	{
-		char *v = GL_SpliceDefines (salias_vert, "#define NOPERSP 1\n");
 		char *f = GL_SpliceDefines (salias_frag, "#define NOPERSP 1\n");
-		if (v && f)
-			GL_InitOITProgram(&gl_shader_alias_np_oit, "alias_np", v, f);
-		free (v);
+		if (f)
+			GL_InitOITProgramSplit(&gl_shader_alias_np_oit, "alias_np",
+					       GLSL_VERT_HEADER "#define NOPERSP 1\n", salias_vert,
+					       NULL, f);
 		free (f);
 	}
 	GL_InitOITProgram(&gl_shader_skeletal_oit, "skeletal", sskeletal_vert, salias_frag);

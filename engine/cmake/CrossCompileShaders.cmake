@@ -14,8 +14,13 @@
 #
 # Only the Vulkan dialect is cross-compiled.  The OpenGL SPIR-V is a check
 # artifact; DXIL and MSL must come from the Vulkan SPIR-V, which is the one
-# that carries descriptor sets.  MSL is left at shadercross's default version
-# (1.2.0).  DXBC and metallib are out of scope (#448): DXBC is the legacy
+# that carries descriptor sets.  MSL targets 2.1.0, not shadercross's default
+# 1.2.0: salias_vert's `invariant gl_Position` (which keeps the fullbright
+# redraw on the base pass's exact depth, uhexen2-iir3) is MSL 2.1 and up, and
+# SDL_GPU's Metal backend already requires MTLGPUFamilyMac2 hardware, which
+# supports MSL 2.1, so the floor costs no supported device (#450).  One
+# version for every stage, so the outputs never mix targets.  DXBC and
+# metallib are out of scope (#448): DXBC is the legacy
 # D3D11 format and metallib needs the Metal toolchain.
 #
 # Do not pass -c/--cull: culling changes the reflection output, and the JSON
@@ -51,9 +56,13 @@ foreach(spv ${VK_SPV})
     endif()
     foreach(dest DXIL MSL JSON)
         string(TOLOWER "${dest}" ext)
+        set(destopts)
+        if(dest STREQUAL "MSL")
+            set(destopts --msl-version 2.1.0)
+        endif()
         execute_process(
             COMMAND "${SHADERCROSS}" "${spv}"
-                    -s SPIRV -d ${dest} -t ${stage} -e main
+                    -s SPIRV -d ${dest} -t ${stage} -e main ${destopts}
                     -o "${CROSS_DIR}/${base}.${ext}"
             RESULT_VARIABLE rc
             OUTPUT_VARIABLE out

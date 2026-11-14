@@ -510,6 +510,13 @@ static void GL_ImmPushBlocks (const glprogram_t *shader, const float *mvp)
 		 * shadow's dirty flags make an unchanged value free. */
 		GL_GetModelview(mv);
 		R_SetModelView (mv);
+		/* salias_vert reads u_alias_model and u_alias_dlight from
+		 * VertParams since #450.  Both come from the same imm_* globals the
+		 * loose half below uploads for programs still declaring them loose,
+		 * so the value a batch sees is unchanged.  No other block program
+		 * reads either member, and an unchanged value costs nothing. */
+		R_SetModelMatrix (imm_alias_model);
+		R_SetAliasDlight (imm_alias_dlight);
 	}
 
 	if (shader->ub_frag >= 0)

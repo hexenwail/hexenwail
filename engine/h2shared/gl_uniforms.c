@@ -48,7 +48,7 @@ static qboolean		layout_checked;
 /* The mirrors are only trustworthy if they are the size std140 says they are.
  * Both are built from vec4/mat4/ivec4 only, so this is arithmetic rather than
  * hope: 4 mat4 + 5 vec4 + 1 ivec4, and 9 vec4. */
-COMPILE_TIME_ASSERT(vertparams_size, sizeof(r_vertparams_t) == 4 * 64 + 6 * 16);
+COMPILE_TIME_ASSERT(vertparams_size, sizeof(r_vertparams_t) == 4 * 64 + 7 * 16);
 COMPILE_TIME_ASSERT(fragparams_size, sizeof(r_fragparams_t) == 9 * 16);
 
 /* ------------------------------------------------------------------ */
@@ -138,6 +138,19 @@ void R_SetPoseVertType (int v)
 	if (vertparams.posei[2] != v)
 	{
 		vertparams.posei[2] = v;
+		vert_dirty = true;
+	}
+}
+
+/* salias_vert's u_alias_dlight (#450): the blocklight -> vertex-colour scale,
+ * 0 when the clustered dynamic-light path is off for the batch.  Desktop
+ * only in the shader (the ES arm of salias_vert does not read it), but the
+ * member exists on both tiers so the layout never varies. */
+void R_SetAliasDlight (float scale)
+{
+	if (vertparams.alias[0] != scale)
+	{
+		vertparams.alias[0] = scale;
 		vert_dirty = true;
 	}
 }

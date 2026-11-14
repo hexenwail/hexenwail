@@ -49,7 +49,8 @@ VERT_UBO(0) uniform VertParams {
     highp vec4  u_vvpn;         /* 304  xyz view forward */
     highp vec4  u_vporigin;     /* 320  xyz camera origin, w particle time */
     highp ivec4 u_vposei;       /* 336  x pose base, y instance base, z pose vertex type */
-};                              /* 352 bytes */
+    highp vec4  u_valias;       /* 352  x alias dynamic-light scale (#450) */
+};                              /* 368 bytes */
 
 #define u_mvp           u_mvpm
 #define u_modelview     u_modelviewm
@@ -65,6 +66,7 @@ VERT_UBO(0) uniform VertParams {
 #define u_pose_base     u_vposei.x
 #define u_inst_base     u_vposei.y
 #define u_poseverttype  u_vposei.z
+#define u_alias_dlight  u_valias.x
 #endif  /* UNIFORMS_VERT */
 
 #ifdef UNIFORMS_FRAG

@@ -52,7 +52,8 @@ typedef struct {
 	float	vpn[4];		/* 304  xyz view forward */
 	float	porigin[4];	/* 320  xyz camera origin, w particle time */
 	int	posei[4];	/* 336  x pose base, y instance base, z pose vertex type */
-} r_vertparams_t;		/* 352 */
+	float	alias[4];	/* 352  x alias dynamic-light scale (#450) */
+} r_vertparams_t;		/* 368 */
 
 typedef struct {
 	float	scene[4];	/*   0  xyz eye position, w cl.time */
@@ -94,6 +95,7 @@ void	R_SetParticleBasis (const float *pup, const float *pright,
 void	R_SetPoseBase (int v);
 void	R_SetInstBase (int v);
 void	R_SetPoseVertType (int v);
+void	R_SetAliasDlight (float scale);	/* u_alias_dlight, salias_vert (#450) */
 
 /* Both blocks -- see the header comment on why these two are duplicated. */
 void	R_SetEyePos (const float *xyz);
