@@ -34,6 +34,9 @@
  * program did.
  */
 
+#ifndef LAYOUT_INC
+#define LAYOUT_INC
+
 #ifdef VULKAN
   #define TEXBIND(b)        layout(set = 0, binding = b)
   #define IMGBIND(b, fmt)   layout(set = 1, binding = b, fmt)
@@ -140,3 +143,5 @@
   #define FRAG_TEX(b)
   #define FRAG_UBO(b)       layout(std140)
 #endif
+
+#endif /* LAYOUT_INC */

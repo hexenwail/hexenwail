@@ -14,6 +14,9 @@
  * block binding.  UBO(0) is the SDL_GPU slot: CullParams is each pipeline's
  * only uniform buffer.  Same split as SsaoParams (GL 3, slot 0).
  */
+#ifndef CULL_INC
+#define CULL_INC
+
 #include "layout.inc"
 
 UBO(0) uniform CullParams {
@@ -26,3 +29,5 @@ UBO(0) uniform CullParams {
     ivec4 u_creduce;	/* x src_w, y src_h, z dst_w, w dst_h */
     ivec4 u_creduce2;	/* x src_lod, y reverse_z */
 };
+
+#endif /* CULL_INC */

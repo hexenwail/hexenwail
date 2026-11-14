@@ -34,12 +34,20 @@ block = blocks[0] if blocks else ""
 if not re.search(r"^UBO\(0\)\s+uniform\s+CullParams\b", inc, re.M):
     errors.append("cull.inc's CullParams is not UBO(0) (the SDL_GPU slot; "
                   "GL's point 4 is assigned from C)")
+def uncommented(t):
+    return re.sub(r"//[^\n]*", " ", re.sub(r"/\*.*?\*/", " ", t, flags=re.S))
+
 for stage in STAGES:
     text = (SHADERS / stage).read_text() if (SHADERS / stage).exists() else ""
-    if '#include "cull.inc"' not in text:
+    if not re.search(r'^#include "cull\.inc"\s*$', uncommented(text), re.M):
         errors.append(f"{stage} does not #include \"cull.inc\"")
-    if re.search(BLOCK_RE, text, re.S):
-        errors.append(f"{stage} declares its own CullParams copy")
+# Exactly one CullParams declaration across every shader source, so a second
+# copy cannot reappear in some other stage or include.
+copies = [p.name for p in sorted(SHADERS.glob("*"))
+          if p.suffix in (".glsl", ".inc")
+          for _ in re.findall(BLOCK_RE, uncommented(p.read_text()), re.S)]
+if copies != ["cull.inc"]:
+    errors.append(f"CullParams is declared in {copies}, expected only cull.inc")
 if re.search(r"uniform CullParams", src):
     errors.append("gl_worldcull.c still carries an inline CullParams copy")
 
