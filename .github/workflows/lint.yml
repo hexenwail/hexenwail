@@ -385,3 +385,8 @@ jobs:
       # vorbisfile SF3 patch too, or SF3 soundfonts are refused (#168).
       - name: Flatpak FluidSynth decodes SF3 without libsndfile
         run: python3 tools/test_flatpak_sf3.py
+
+      # The light-cluster pass's LcParams block and its C mirror agree, and
+      # no loose uniform plumbing is left for it (#450).
+      - name: LcParams block covers the light-cluster pass
+        run: python3 tools/test_lcparams_block.py
