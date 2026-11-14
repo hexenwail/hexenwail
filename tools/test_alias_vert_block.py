@@ -62,13 +62,62 @@ body = sv.read_text() if sv.exists() else ""
 code = strip(body)
 if '#define UNIFORMS_VERT\n#include "uniforms.inc"' not in body:
     errors.append("salias_vert.glsl must #define UNIFORMS_VERT and include uniforms.inc")
-if re.search(r"^\s*uniform\s+(?!sampler)\w+\s+\w+\s*;", code, re.M):
+if re.search(r"^\s*uniform\s+(?:(?:highp|mediump|lowp)\s+)?(?!sampler|usampler|isampler)\w+\s+\w+\s*(?:\[\w*\])?\s*;", code, re.M):
     errors.append("salias_vert.glsl still declares a loose non-opaque uniform")
+# Every VertParams member is vec4 / ivec4 / mat4, so summing sizes equals the
+# std140 offsets.  A scalar or vec2/vec3 member would break that silently.
+if vb and re.search(r"\b(float|int|uint|bool|vec2|vec3|ivec2|ivec3|mat3)\s+\w+\s*;", vb.group(1)):
+    errors.append("VertParams gained a non-vec4/mat4 member; this check's offset arithmetic no longer holds")
 m = re.search(r"#ifndef GL_ES\n(.*?)#endif", code, re.S)
 if not m or "v_dlightscale" not in m.group(1) or "v_eyepos" not in m.group(1):
     errors.append("the dlight varyings must be declared under #ifndef GL_ES")
 
 src = (ROOT / "engine/h2shared/gl_shader.c").read_text()
+
+# The varying interface: salias_vert.glsl's outputs must match salias_frag's
+# inputs (still a C literal) by name, type and interpolation qualifier, on the
+# desktop tier, where a mismatch is a link failure at startup that leaves
+# every model undrawn with lint green.  The fragment side is the literal with
+# the desktop arm of GLSL_ALIAS_DLIGHT_FS_IN expanded.
+def c_literal_text(symbol):
+    m = re.search(rf"static const char {symbol}\[\] =\n(.*?)\";\n", src, re.S)
+    if not m:
+        return None
+    # One ordered scan: a string literal, a C comment (consumed whole, so text
+    # inside it is never mistaken for a literal or a macro), or a macro name.
+    out = []
+    for t in re.finditer(r'"((?:[^"\\]|\\.)*)"|/\*.*?\*/|//[^\n]*|\b([A-Z][A-Z0-9_]{3,})\b',
+                         m.group(1) + '"', re.S):
+        lit, macro = t.group(1), t.group(2)
+        if lit is not None:
+            out.append(lit.replace("\\n", "\n"))
+        elif macro:
+            out.append(f"@{macro}@")
+    return "".join(out)
+def desktop_macro(name):
+    m = re.search(rf"#define {name} \\\n((?:\t\".*\" \\\n)*\t\".*\")", src)
+    return "".join(re.findall(r'"((?:[^"\\]|\\.)*)"', m.group(1))).replace("\\n", "\n") if m else ""
+def varyings(text, kw):
+    found = {}
+    for line in text.splitlines():
+        line = re.sub(r"\b(VERT_OUT|FRAG_IN)\(\d+\)", "", line).strip()
+        m = re.match(rf"((?:(?:TCQUAL|flat|highp|mediump|noperspective)\s+)*){kw}\s+(?:highp\s+)?(\w+)\s+(\w+)\s*;", line)
+        if m:
+            quals = set(m.group(1).split()) & {"TCQUAL", "flat", "noperspective"}
+            found[m.group(3)] = (m.group(2), frozenset(quals))
+    return found
+frag = c_literal_text("salias_frag")
+if frag is None:
+    errors.append("cannot find the salias_frag literal to compare varyings against")
+else:
+    frag = frag.replace("@GLSL_ALIAS_DLIGHT_FS_IN@", desktop_macro("GLSL_ALIAS_DLIGHT_FS_IN"))
+    vo, fi = varyings(strip(body), "out"), varyings(frag, "in")
+    vo.pop("fragColor", None)
+    if not fi or not vo:
+        errors.append("could not parse the varying sets")
+    elif vo != fi:
+        errors.append(f"salias_vert outputs {sorted(vo.items())} != salias_frag inputs {sorted(fi.items())} (desktop link would fail)")
+
 if re.search(r"static const char salias_vert\[\]", src):
     errors.append("the inline salias_vert literal is back in gl_shader.c")
 builds = [

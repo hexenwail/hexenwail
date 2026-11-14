@@ -1560,7 +1560,15 @@ static const char sworld_vert[] =
 
 /* The varying pair the above needs, declared on both sides of the link.  Kept
  * out of the ES arm entirely: an `in` with no matching `out` is a link error,
- * and there is nothing on that tier to fill them. */
+ * and there is nothing on that tier to fill them.
+ *
+ * Since #450 alias slice S1 the plain alias program no longer uses VS_OUT or
+ * VS_CALC: engine/shaders/salias_vert.glsl declares the same pair itself
+ * under #ifndef GL_ES and reads u_alias_dlight from VertParams, NOT the loose
+ * uniform declared below.  VS_OUT's loose u_alias_dlight now serves
+ * sskeletal_vert and salias_inst_vert only.  FS_IN is still salias_frag's,
+ * for every vertex stage, and tools/test_alias_vert_block.py checks the
+ * file's outputs against it. */
 #define GLSL_ALIAS_DLIGHT_VS_OUT \
 	"out highp vec3 v_eyepos;\n" \
 	"flat out float v_dlightscale;\n" \
@@ -1569,8 +1577,9 @@ static const char sworld_vert[] =
 	"in highp vec3 v_eyepos;\n" \
 	"flat in float v_dlightscale;\n"
 
-/* Fills them, for the two vertex shaders that already have `eyepos` in hand.
- * salias_inst_vert does its own -- it works in world space and has a per-
+/* Fills them, for the vertex shader that already has `eyepos` in hand --
+ * sskeletal_vert, since salias_vert moved to a file (#450) and does the same
+ * two assignments itself.  salias_inst_vert does its own -- it works in world space and has a per-
  * instance switch to consult, so it has neither of this line's inputs. */
 #define GLSL_ALIAS_DLIGHT_VS_CALC \
 	"    v_eyepos = eyepos.xyz;\n" \
