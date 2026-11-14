@@ -16,8 +16,9 @@
  *
  * u_mvp, u_modelview, u_alias_model and u_alias_dlight were loose uniforms;
  * they are VertParams members now (uniforms.inc), fed per draw from the same
- * imm_* globals by GL_ImmPushBlocks.  The varyings must match salias_frag,
- * still a C literal, by name (the plain arm of VERT_OUT emits no location).
+ * imm_* globals by GL_ImmPushBlocks.  The varyings must match salias_frag.glsl
+ * by name (the plain arm of VERT_OUT emits no location) and, for SPIR-V, by
+ * location.
  */
 #include "layout.inc"
 #define UNIFORMS_VERT

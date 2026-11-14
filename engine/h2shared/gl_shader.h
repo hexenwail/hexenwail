@@ -111,6 +111,7 @@ typedef struct glprogram_s {
 	 * uniforms, and on any stage that declares no block at all. */
 	GLint	ub_vert;	    /* VertParams, at UBO_BINDING_VERT */
 	GLint	ub_frag;	    /* FragParams, at UBO_BINDING_FRAG */
+	GLint	ub_afrag;	    /* AliasFrag, at UBO_BINDING_ALIAS_FRAG: the ten programs linking salias_frag (#450) */
 } glprogram_t;
 
 /* Texture units of the MBOIT moment targets during the composite pass (#87);
@@ -166,38 +167,29 @@ extern glprogram_t	gl_shader_particle_oit;
 typedef struct {
 	GLuint	program;	/* shader program handle */
 	GLuint	ubo_shadedots;	/* SSBO handle for shadedots table */
-	GLint	u_fog_density;	/* fragment fog uniforms */
-	GLint	u_fog_color;
-	GLint	u_alpha_threshold;
+	/* salias_inst_vert's loose uniforms.  The fragment stage, salias_frag, is
+	 * engine/shaders/salias_frag.glsl since #450 slice S2 and reads every
+	 * non-opaque value from FragParams and AliasFrag, so its fog, alpha pair,
+	 * caustics, material, light direction, warp, span cell, soft params and
+	 * froxel lookup have no location here any more; R_DrawAliasInstanced
+	 * writes them through the R_Set* shadows instead. */
 	GLint	u_viewproj;	/* view-projection matrix (uhexen2-8pc2) */
 	GLint	u_inst_base;	/* base instance index for gl_InstanceID offset */
 	GLint	u_eyepos;	/* camera position for fog distance */
 	GLint	u_poseverttype;	/* vertex format: 0=PV_QUAKE1, 1=PV_MD3 */
-	GLint	u_force_opaque_alpha; /* uhexen2-khsa r13 */
-	GLint	u_alias_caustics; /* uhexen2-0gn3 — vec2(intensity, time); no model matrix needed, the instance world matrix already yields world space */
-	/* uhexen2-4kcb.  Same two names and meanings as on glprogram_t, except
-	 * that u_alias_lightdir is uploaded in WORLD space here because this
-	 * program's v_matpos is world space.  Duplicated for the same reason the
-	 * clustered-lighting four are: separate struct, separate location table. */
-	GLint	u_alias_material;
-	GLint	u_alias_lightdir;
-	/* Clustered dynamic lighting (uhexen2-waum).  Same four names and the
-	 * same meanings as on glprogram_t; duplicated because this program is a
-	 * separate struct with its own location table, and a program that misses
-	 * one of them draws its models next to identical ones lit differently. */
+	/* Clustered dynamic lighting (uhexen2-waum), the vertex half: the scale,
+	 * and the world -> eye matrix this path builds v_eyepos with, because it
+	 * has no u_modelview to derive it from.  The fragment stage has its own
+	 * copy of the same matrix in AliasFrag (u_aflightview), written from the
+	 * same lc_view by the same R_LightCluster_BindForAlias call. */
 	GLint	u_alias_dlight;	/* blocklight -> vertex-colour scale; 0 disables */
-	GLint	u_lightview;	/* world -> eye; this path has no u_modelview to derive it from */
-	GLint	u_lightgrid_xy;
-	GLint	u_lightgrid_z;
-	GLint	u_lightgrid;
-	/* salias_frag's three per-batch effects this path never turns on: liquid
-	 * warp, soft particles, softemu spans.  Looked up so the instanced draw
-	 * can write their resting values (0) explicitly instead of relying on a
-	 * fresh program's zeros -- which stops holding once salias_frag reads
-	 * them from a block shared with every other program (#450, hazard 1). */
-	GLint	u_turb;
-	GLint	u_soft_params;
-	GLint	u_spans;
+	GLint	u_lightview;
+	GLint	u_lightgrid;	/* usampler3D, texture unit LIGHT_GRID_TMU */
+	/* Block indices, as on glprogram_t.  The vertex stage declares no block,
+	 * so ub_vert is -1; FragParams and AliasFrag come from salias_frag. */
+	GLint	ub_vert;
+	GLint	ub_frag;
+	GLint	ub_afrag;
 } gl_alias_inst_prog_t;
 
 extern gl_alias_inst_prog_t gl_shader_alias_inst;
@@ -236,7 +228,7 @@ void	GL_ParticleGPU_SetUniforms (const gl_particle_gpu_prog_t *prog,
  * and 4 is its CullParams, 3 is gl_ssao.c's SsaoParams, 5 is
  * gl_lightcluster.c's LcParams, 6 is gl_postprocess.c's BloomParams, 7
  * is its OitParams, 8 its PpVert and 9 is its PpParams, so the graphics
- * blocks start at 1.  Keyed by stage rather than by program:
+ * blocks start at 1 and the alias family's own pick up at 10.  Keyed by stage rather than by program:
  * only one program is bound at a time, so each program's own vertex-stage
  * block is pinned to the same point rather than every program claiming a new
  * one.  A driver need only guarantee a handful of these.
@@ -247,6 +239,9 @@ void	GL_ParticleGPU_SetUniforms (const gl_particle_gpu_prog_t *prog,
  * defines are the only place the two sides meet. */
 #define UBO_BINDING_VERT	1
 #define UBO_BINDING_FRAG	2
+/* The alias family's own blocks (engine/shaders/alias.inc, #450): 11 is
+ * salias_frag's AliasFrag; 10 is held for the vertex stages' AliasVert. */
+#define UBO_BINDING_ALIAS_FRAG	11
 
 void	GL_Shaders_Init (void);
 void	GL_Shaders_Shutdown (void);

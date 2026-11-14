@@ -71,6 +71,7 @@
 #include "gl_pipeline.h"
 #include "gl_sky.h"		/* gl_farclip -- the projection far plane lives there */
 #include "gl_lightcluster.h"
+#include "gl_uniforms.h"	/* R_SetAliasLightGrid -- see R_LightCluster_BindForAlias */
 
 #ifndef USE_GLES
 
@@ -563,43 +564,16 @@ void R_LightCluster_BindForWorld (void)
 /* Phase C: handing the same grid to the alias family (uhexen2-waum)    */
 /* ------------------------------------------------------------------ */
 
-/* The froxel-lookup constants only.  The SCALE is deliberately not set here:
- * it is per-batch state that R_DrawAliasModel drives through GL_SetAliasDlight
- * and GL_ImmEnd pushes, because one entity may take dynamic light and the
- * sprite drawn after it must not.  These three change once a frame and are
- * read only when the scale is non-zero, so pushing them here costs one
- * R_UseProgram per program per frame and saves the draw path from caring. */
-static void LC_SetAliasUniforms (const glprogram_t *p)
-{
-	if (!p->program)
-		return;
-	/* Nothing to say to a program that did not link this half of the shader:
-	 * every one of these is -1 on the ES tier, where the macros expand to
-	 * nothing, and on the plain 2d / flat / sky programs. */
-	if (p->u_lightview < 0 && p->u_lightgrid_xy < 0 && p->u_lightgrid_z < 0)
-		return;
-	R_UseProgram (p->program);
-	if (p->u_lightview >= 0)
-		glUniformMatrix4fv_fp (p->u_lightview, 1, GL_FALSE, lc_view);
-	if (p->u_lightgrid_xy >= 0)
-		glUniform4f_fp (p->u_lightgrid_xy, lc_vp[0], lc_vp[1], lc_vp[2], lc_vp[3]);
-	if (p->u_lightgrid_z >= 0)
-		glUniform2f_fp (p->u_lightgrid_z, lc_zlogscale, lc_zlogbias);
-}
-
-/* The instanced programs are a different struct with their own location table
- * -- see the note on gl_alias_inst_prog_t.  Same three uniforms, same values. */
+/* The instanced vertex stage's own world -> eye matrix, which it builds
+ * v_eyepos with: salias_inst_vert is still a literal with a loose u_lightview
+ * (#450 slice S3 moves it).  The fragment stage's copy is AliasFrag's, set
+ * below from the same lc_view. */
 static void LC_SetAliasInstUniforms (const gl_alias_inst_prog_t *p)
 {
-	if (!p->program)
+	if (!p->program || p->u_lightview < 0)
 		return;
 	R_UseProgram (p->program);
-	if (p->u_lightview >= 0)
-		glUniformMatrix4fv_fp (p->u_lightview, 1, GL_FALSE, lc_view);
-	if (p->u_lightgrid_xy >= 0)
-		glUniform4f_fp (p->u_lightgrid_xy, lc_vp[0], lc_vp[1], lc_vp[2], lc_vp[3]);
-	if (p->u_lightgrid_z >= 0)
-		glUniform2f_fp (p->u_lightgrid_z, lc_zlogscale, lc_zlogbias);
+	glUniformMatrix4fv_fp (p->u_lightview, 1, GL_FALSE, lc_view);
 }
 
 void R_LightCluster_BindForAlias (void)
@@ -607,33 +581,32 @@ void R_LightCluster_BindForAlias (void)
 	if (!R_LightCluster_AliasActive ())
 		return;
 
-	/* EVERY PROGRAM THAT LINKS salias_frag, not just the ones that draw
-	 * models today.  A model reaches the screen through the plain program,
-	 * its NOPERSP twin under r_softemu_mdl_warp, either of their OIT variants
-	 * when translucent, the skeletal program for MD5, and the instanced
-	 * program when r_alias_gpu is on -- which of those it takes depends on
-	 * cvars and on the format the model shipped in.  Missing one shows up as
-	 * "this monster is lit differently from that identical monster", which is
-	 * the trap uhexen2-uxpp documents for caustics and uhexen2-mfql for
-	 * material maps. */
-	LC_SetAliasUniforms (&gl_shader_alias);
-	LC_SetAliasUniforms (&gl_shader_alias_np);
-	LC_SetAliasUniforms (&gl_shader_alias_oit);
-	LC_SetAliasUniforms (&gl_shader_alias_np_oit);
-	LC_SetAliasUniforms (&gl_shader_skeletal);
-	LC_SetAliasUniforms (&gl_shader_skeletal_np);
-	LC_SetAliasUniforms (&gl_shader_skeletal_oit);
-	LC_SetAliasUniforms (&gl_shader_skeletal_np_oit);
+	/* The froxel-lookup constants only.  The SCALE is deliberately not set
+	 * here: it is per-batch state that R_DrawAliasModel drives through
+	 * GL_SetAliasDlight and GL_ImmEnd pushes, because one entity may take
+	 * dynamic light and the sprite drawn after it must not.  These change
+	 * once a frame and are read only when the scale is non-zero.
+	 *
+	 * ONE WRITE for every program that links salias_frag.  It used to be ten
+	 * glUniform rounds, one per program, because missing one showed up as
+	 * "this monster is lit differently from that identical monster" (the
+	 * trap uhexen2-uxpp documents for caustics).  Since #450 the fragment
+	 * stage reads these from AliasFrag, which all ten share, so that trap is
+	 * gone by construction; the shadow reaches the GPU with the next alias
+	 * batch's flush.  A frame on which the grid is not live writes nothing
+	 * and leaves last frame's values, which nothing reads: the scale that
+	 * gates the lookup is 0 on such a frame (R_AliasDlightScale). */
+	R_SetAliasLightGrid (lc_view, lc_vp, lc_zlogscale, lc_zlogbias);
 	LC_SetAliasInstUniforms (&gl_shader_alias_inst);
 	LC_SetAliasInstUniforms (&gl_shader_alias_inst_np);
 	R_UseProgram (0);
 
-	/* GL_ImmEnd caches uniform values per program and did not see any of the
-	 * above.  Its cache keys on the program pointer, so without this the next
-	 * batch on a program we just touched would trust a stale entry.  In
-	 * practice the three uniforms here are not ones GL_ImmEnd tracks, but the
-	 * rule in this engine is that anything setting uniforms behind its back
-	 * says so -- see the header comment on GL_ImmInvalidateState. */
+	/* GL_ImmEnd caches uniform values per program and did not see the
+	 * instanced writes above.  Its cache keys on the program pointer, so
+	 * without this the next batch on a program we just touched would trust
+	 * a stale entry.  In practice u_lightview is not one GL_ImmEnd tracks,
+	 * but the rule in this engine is that anything setting uniforms behind
+	 * its back says so -- see the header comment on GL_ImmInvalidateState. */
 	GL_ImmInvalidateState ();
 
 	/* The SSBO and the grid texture are already bound for the frame by

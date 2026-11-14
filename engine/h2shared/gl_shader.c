@@ -601,11 +601,7 @@ static GLuint GL_LoadOITProgramSplit (const char *vert_header, const char *vert_
 
 	vs = GL_CompileShaderSplit (GL_VERTEX_SHADER, vert_header, vert_src);
 	if (!vs) return 0;
-	/* frag_header NULL: the fragment body is still a C literal with its own
-	 * #version (salias_frag while the alias family moves stage by stage,
-	 * #450), so it takes the original splice. */
-	fs = frag_header ? GL_CompileOITFragShaderSplit (frag_header, frag_src)
-			 : GL_CompileOITFragShader (frag_src);
+	fs = GL_CompileOITFragShaderSplit (frag_header, frag_src);
 	if (!fs) { glDeleteShader_fp (vs); return 0; }
 
 	prog = GL_LinkProgram (vs, fs);
@@ -789,6 +785,10 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 	 * came back -1 just now, which is what makes GL_ImmEnd take the block
 	 * path instead. */
 	R_BindProgramBlocks(p->program, &p->ub_vert, &p->ub_frag);
+	/* And the alias family's own (#450): >= 0 on exactly the programs that
+	 * link salias_frag, which is what GL_ImmEnd and R_SetSpanCell key their
+	 * AliasFrag writes on. */
+	p->ub_afrag = R_BindAliasFragBlock(p->program);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1408,59 +1408,12 @@ static const char sworld_vert[] =
 	"    if (u_dlight_scale > 0.0) lm.rgb = ClusteredDlight(lm.rgb, v_eyepos);\n"
 
 /* --- the alias family's half of the same grid (uhexen2-waum, phase C) ---
- *
- * WHAT THIS REPLACES.  Every alias model used to take the whole frame's
- * dynamic light as ONE number, computed once at the entity's ORIGIN
- * (R_DrawAliasModel's `add = radius - VectorLengthFast(e->origin - dl->origin)`
- * loop) and folded flat into the vertex colour.  A torch at a monster's feet
- * lit its head exactly as much as its boots, and a model straddling a light's
- * edge either took all of it or none.  This evaluates the same expression per
- * pixel instead, from the froxel grid phase A builds.
- *
- * IT IS NOT A REUSE OF ClusteredDlight ABOVE, and the bead that filed this
- * expected it to be.  Two reasons, both structural:
- *
- *  - THE FALLOFF IS A DIFFERENT FUNCTION.  The world one is R_AddDynamicLights'
- *    -- project the light onto the surface plane, subtract the perpendicular
- *    distance from the radius, then subtract the in-plane distance.  That shape
- *    exists because a lightmap luxel IS a point on a plane.  The alias CPU term
- *    this replaces is a plain `radius - distance`, and matching it is the whole
- *    point: the only thing phase C is meant to change is WHERE the expression
- *    is evaluated, not what it computes.
- *  - THE NORMAL WOULD BE WRONG.  ClusteredDlight recovers its plane from
- *    screen-space derivatives, which is exact for world surfaces because every
- *    BSP face is planar.  An alias model is not, so the same trick yields the
- *    flat triangle normal and the light would break into visible facets on
- *    exactly the low-poly meshes Hexen II is made of.
- *
- * WHAT DELIBERATELY DOES NOT CARRY OVER FROM THE CPU TERM.  There, the dlight
- * sum is added to the entity's static light BEFORE the vertex is multiplied by
- * the shadedots table (Quake's fake directional shading, keyed to the entity's
- * quantized yaw) and by the colorshade tint.  Here it is added after, so a
- * dynamic light is neither modulated by a fake light direction that has nothing
- * to do with where the torch actually is, nor tinted by a palette recolour that
- * belongs to the skin.  Both are defensible the other way; what is NOT
- * defensible is having the three alias paths disagree, and the shadedot is
- * recoverable in only two of them -- the legacy path streams a finished colour
- * through GL_ImmColor4f with the dot already multiplied in.  Uniformity decided
- * it.  Expect dynamic light on models to sit slightly flatter across a surface
- * and slightly stronger on faces turned away from the shadevector.
- *
- * u_alias_dlight is per-BATCH state and named apart from the world's
- * u_dlight_scale for the reason u_alias_caustics is named apart from
- * u_caustics: this fragment shader also serves sprites, particles, warp polys
- * and unlit brush polys through GL_ImmEnd, and a shared name would let one
- * path's value leak into another's draw.  It is a VERTEX-stage uniform -- the
- * fragment stage reads the scale off v_dlightscale instead, for the reason
- * below.
- *
- * v_dlightscale, not u_alias_dlight.x, is what the loop is gated on.  The
- * instanced path batches entities whose CPU lighting came from DIFFERENT arms
- * of R_DrawAliasModel's branch chain -- an MLS_ABSLIGHT model and an ordinary
- * one can share a draw call -- and only the ordinary arm ever accumulated
- * dlights.  A uniform cannot distinguish them; a flat varying the vertex shader
- * fills from the instance record can.  The other two paths set it from the
- * uniform unchanged. */
+ * Lives in engine/shaders/alias_dlight.inc since salias_frag became a file
+ * (#450, alias slice S2), with its header comment: why it is not a reuse of
+ * ClusteredDlight, and what of the CPU term deliberately does not carry over.
+ * The froxel lookup it calls is engine/shaders/lightgrid.inc, a copy of the
+ * code half of GLSL_LIGHTGRID_DECL / _FETCH_FN above that
+ * tools/test_alias_frag_block.py keeps token-identical. */
 /* GPU lightstyles (GitHub #439).  The atlas then holds each surface's first
  * style raw, the three layer atlases at the same UVs styles 2-4, and every
  * layer's alpha that layer's style index (255: none).  Summed here weighted
@@ -1503,79 +1456,34 @@ static const char sworld_vert[] =
 #define GLSL_LMSTYLES_APPLY \
 	"    if (u_lmstyles.x > 0.5) lm = LMStyles(lm, lmuv);\n"
 
-#define GLSL_ALIAS_DLIGHT_DECL \
-	GLSL_LIGHTGRID_DECL
+/* The froxel-grid sizes for the file-backed alias fragment stage, as #defines
+ * in its header chunk, because the file cannot see these C constants and
+ * MAX_LIGHTSTYLES differs per game.  lightgrid.inc's #ifndef defaults are only
+ * for the offline SPIR-V compile.  #450. */
+#define GLSL_LIGHTGRID_CONSTS \
+	"#define LIGHT_TILES_X " GLSL_STR(LIGHT_TILES_X) "\n" \
+	"#define LIGHT_TILES_Y " GLSL_STR(LIGHT_TILES_Y) "\n" \
+	"#define LIGHT_TILES_Z " GLSL_STR(LIGHT_TILES_Z) "\n" \
+	"#define MAX_LIGHTSTYLES " GLSL_STR(MAX_LIGHTSTYLES) "\n" \
+	"#define LIGHT_SSBO_BINDING " GLSL_STR(LIGHT_SSBO_BINDING) "\n"
 
-#define GLSL_ALIAS_DLIGHT_FN \
-	GLSL_LIGHTGRID_FETCH_FN \
-	"vec3 ClusteredAliasDlight(vec3 lit, highp vec3 p, float scale) {\n" \
-	"    uvec4 mask = LightGridMask(p);\n" \
-	"    for (int w = 0; w < 4; w++) {\n" \
-	"        uint bits = mask[w];\n" \
-	"        while (bits != 0u) {\n" \
-	"            int i = (w << 5) + findLSB(bits);\n" \
-	"            bits &= bits - 1u;\n"	/* clear that bit before any continue */ \
-	"            vec3 lpos = (u_lightview * vec4(Lights[i].origin, 1.0)).xyz;\n" \
-	"            float add = Lights[i].radius - distance(lpos, p);\n" \
-	"            if (add <= 0.0) continue;\n" \
-	/* Subtractive lights (dlight_t.dark) arrive with their colour negated by
-	 * the gather in gl_lightcluster.c, so one accumulate serves both kinds.
-	 * The clamp is inside the loop and against the RUNNING total, which is
-	 * what the CPU term did -- its dark arm clamps each channel at zero as it
-	 * subtracts, so a dark light cannot bank negative headroom that a later
-	 * bright one spends.  Ascending light index is the CPU's order too
-	 * (findLSB within a word, words in order), so the two agree even where a
-	 * dark light and a bright one overlap the same pixel. */ \
-	"            lit = max(lit + add * scale * Lights[i].color, vec3(0.0));\n" \
-	"        }\n" \
-	"    }\n" \
-	/* NO UPPER CLAMP, and that is a decision rather than an omission.
-	 * gl_overbright_models 0 makes the CPU clamp each lightcolor channel at
-	 * 192 after its dlight loop -- but it does that BEFORE the shadedots
-	 * multiply, and `lit` here is already past it: v_color carries
-	 * static * shadedot * tint, and shadedot runs to 2.0.  Re-applying the
-	 * same ceiling on this side of that multiply would cap a legitimately
-	 * bright vertex at 0.96 and visibly darken models that took no dynamic
-	 * light at all.  The faithful expression, min(static + dlight, 192) *
-	 * shadedot, needs the two factors separately and the legacy path has
-	 * already multiplied them together in GL_ImmColor4f.
-	 *
-	 * Leaving it off is consistent with the shadedot decision above -- a
-	 * dlight that is not modulated by the fake light direction has no reason
-	 * to be bounded by a ceiling derived from it -- and it costs little:
-	 * gl_overbright_models defaults to on, where the CPU path has no ceiling
-	 * either, and even at the worst case (a full-radius light one unit away)
-	 * the term adds about 1.0, which is where the CPU's own clamped result
-	 * lands too. */ \
-	"    return lit;\n" \
-	"}\n"
-
-/* Replaces `vec4 color = tex * v_color;` outright rather than adding a line
- * after it, so the ES arm below can be that statement verbatim and the two
- * tiers stay provably identical when the path is off. */
-#define GLSL_ALIAS_DLIGHT_APPLY \
-	"    vec3 lit = v_color.rgb;\n" \
-	"    if (v_dlightscale > 0.0) lit = ClusteredAliasDlight(lit, v_eyepos, v_dlightscale);\n" \
-	"    vec4 color = vec4(tex.rgb * lit, tex.a * v_color.a);\n"
-
-/* The varying pair the above needs, declared on both sides of the link.  Kept
- * out of the ES arm entirely: an `in` with no matching `out` is a link error,
- * and there is nothing on that tier to fill them.
+/* The varying pair the alias dlight needs, on the vertex side.  Kept out of
+ * the ES arm entirely: an `out` the fragment stage does not read is harmless,
+ * but there is nothing on that tier to fill the pair with, and the fragment
+ * stage's matching `in`s are desktop-only (#ifndef GL_ES in
+ * engine/shaders/salias_frag.glsl).
  *
  * Since #450 alias slice S1 the plain alias program no longer uses VS_OUT or
  * VS_CALC: engine/shaders/salias_vert.glsl declares the same pair itself
  * under #ifndef GL_ES and reads u_alias_dlight from VertParams, NOT the loose
  * uniform declared below.  VS_OUT's loose u_alias_dlight now serves
- * sskeletal_vert and salias_inst_vert only.  FS_IN is still salias_frag's,
- * for every vertex stage, and tools/test_alias_vert_block.py checks the
- * file's outputs against it. */
+ * sskeletal_vert and salias_inst_vert only, and
+ * tools/test_alias_vert_block.py checks every vertex stage's outputs against
+ * salias_frag.glsl's inputs. */
 #define GLSL_ALIAS_DLIGHT_VS_OUT \
 	"out highp vec3 v_eyepos;\n" \
 	"flat out float v_dlightscale;\n" \
 	"uniform float u_alias_dlight;\n"	/* blocklight -> vertex-colour scale; 0 = path off */
-#define GLSL_ALIAS_DLIGHT_FS_IN \
-	"in highp vec3 v_eyepos;\n" \
-	"flat in float v_dlightscale;\n"
 
 /* Fills them, for the vertex shader that already has `eyepos` in hand --
  * sskeletal_vert, since salias_vert moved to a file (#450) and does the same
@@ -1592,13 +1500,15 @@ static const char sworld_vert[] =
 #define GLSL_LMSTYLES_DECL	""	/* #439: needs the SSBO, desktop only */
 #define GLSL_LMSTYLES_FN	""
 #define GLSL_LMSTYLES_APPLY	""
-#define GLSL_ALIAS_DLIGHT_DECL	""
-#define GLSL_ALIAS_DLIGHT_FN	""
-#define GLSL_ALIAS_DLIGHT_APPLY	"    vec4 color = tex * v_color;\n"
+#define GLSL_LIGHTGRID_CONSTS	""	/* lightgrid.inc is #ifndef GL_ES */
 #define GLSL_ALIAS_DLIGHT_VS_OUT	""
-#define GLSL_ALIAS_DLIGHT_FS_IN		""
 #define GLSL_ALIAS_DLIGHT_VS_CALC	""
 #endif
+
+/* The header chunk every alias-family program compiles salias_frag.glsl with:
+ * the tier's version line, plus the froxel-grid sizes on desktop.  The five
+ * affine (NOPERSP) twins, all desktop-only, append "#define NOPERSP 1\n". */
+#define GLSL_ALIAS_FRAG_HEADER	GLSL_FRAG_HEADER GLSL_LIGHTGRID_CONSTS
 
 static const char sworld_frag[] =
 	GLSL_FRAG_HEADER
@@ -1919,181 +1829,14 @@ static const char sworld_frag_opaque[] =
 	"}\n";
 
 /* --- shader_alias: vertex-colored, textured, fog (models) ---
- * The vertex stage is engine/shaders/salias_vert.glsl (#450, alias slice S1),
- * reaching us as salias_vert[] via shaders_gen.h; its header comment carries
- * the invariant-gl_Position and u_alias_model notes that were here.  The
- * fragment stage below is still a C literal; it moves in slice S2 of the plan
- * on #450. */
-
-static const char salias_frag[] =
-	GLSL_FRAG_HEADER
-	/* Affine texture mapping, the way the software rasteriser did it
-	 * (uhexen2-ktjv).  An interpolation qualifier is not something a uniform
-	 * can switch, so this is a compile-time variant -- the only stage of
-	 * r_softemu that needs one.  Empty object-like macro when NOPERSP is not
-	 * defined, so the qualifier simply is not there. */
-	"#ifdef NOPERSP\n"
-	"#define TCQUAL noperspective\n"
-	"#else\n"
-	"#define TCQUAL\n"
-	"#endif\n"
-	"uniform sampler2D u_texture0;\n"
-	"uniform float u_fog_density;\n"
-	"uniform vec3 u_fog_color;\n"
-	"uniform float u_alpha_threshold;\n"
-	"uniform float u_force_opaque_alpha;\n"	/* uhexen2-khsa r13 */
-	"uniform vec2 u_alias_caustics;\n"	/* x=intensity (0=off), y=time (uhexen2-0gn3) */
-	"uniform vec2 u_turb;\n"		/* x=warp amplitude in texture units (0=off), y=time (uhexen2-9o7u) */
-	"uniform float u_spans;\n"		/* 0 except for brush polys and liquids under r_softemu_spans (#176) */
-	/* Soft particles (uhexen2-mf9u).  Explicitly highp: GLSL_FRAG_HEADER
-	 * defaults the ES tier to mediump, whose 10-bit mantissa cannot tell
-	 * two window-space depths apart, and the whole fade is a difference of
-	 * two of them.  Desktop GLSL accepts the qualifier and ignores it. */
-	"uniform highp sampler2D u_soft_depth;\n"
-	"uniform highp vec3 u_soft_params;\n"	/* x=1/fade distance (0=off), yz=depth linearization */
-	/* Material maps on model skins (uhexen2-4kcb).  Named apart from the
-	 * world's u_material for exactly the reason u_alias_caustics is named
-	 * apart from u_caustics: this program is also the sprite / particle /
-	 * warp-poly / unlit-brush-poly program, its value is per-batch state
-	 * pushed by GL_ImmEnd, and a shared name would let that clobber the
-	 * per-frame world value R_SetupFrame uploads. */
-	"uniform sampler2D u_texture3;\n"	/* normal map, flat sentinel when absent */
-	"uniform sampler2D u_texture4;\n"	/* gloss map, black sentinel when absent */
-	"uniform vec3 u_alias_material;\n"	/* xy=(normalmap, gloss) intensity (both 0 = off), z=gloss exponent */
-	/* The model light direction, in the same frame as v_matpos.  C rotates
-	 * it per frame per program: eye space for this program and the skeletal
-	 * one, world space for the instanced one.  See R_AliasMaterialLightDir. */
-	"uniform vec3 u_alias_lightdir;\n"
-	"TCQUAL in vec2 v_texcoord;\n"
-	"in vec4 v_color;\n"
-	"in float v_fogdist;\n"
-	"in vec2 v_worldxy;\n"
-	/* Camera-relative position for the material tangent frame.  Deliberately
-	 * NOT v_eyepos: that one is declared inside GLSL_ALIAS_DLIGHT_VS_OUT, so
-	 * it does not exist on the ES/WebGL2 tier at all, and on the instanced
-	 * path it is eye space via u_lightview -- a matrix only gl_lightcluster.c
-	 * uploads, and only when clustered lighting is live.  This one is filled
-	 * unconditionally by all three vertex shaders, each in its own native
-	 * frame.  uhexen2-4kcb. */
-	"in highp vec3 v_matpos;\n"
-	GLSL_ALIAS_DLIGHT_FS_IN
-	"out vec4 fragColor;\n"
-	GLSL_ALIAS_DLIGHT_DECL
-	GLSL_CAUSTICS_FN
-	GLSL_TURB_UV_FN
-	GLSL_SPAN_UV_FN
-	GLSL_MATERIAL_FN
-	GLSL_ALIAS_DLIGHT_FN
-	"void main() {\n"
-	/* Per-pixel liquid warp (uhexen2-9o7u).  Off unless C sets u_turb.x, which
-	 * only EmitWaterPolys does, and only under r_water_pixel_warp 1 -- every
-	 * other user of this program (models, sprites, brush polys) leaves it 0.
-	 * The maths, and why it is not just sin(), live on GLSL_TURB_UV_FN; a lit
-	 * liquid face takes the world program instead of this one and has to
-	 * ripple identically, so the two share one copy.  uhexen2-a5nn.2. */
-	"    highp vec2 uv = v_texcoord;\n"
-	/* The brush polys and unlit liquids this program draws were spans in
-	 * 1997 too (D_DrawSpans8, Turbulent8); models were not, and leave it 0.
-	 * Never set on the NOPERSP twins, whose texcoord is already affine. */
-	"    if (u_spans > 0.0) uv = SpanUV(v_texcoord, u_spans);\n"
-	"    if (u_turb.x > 0.0) uv = TurbUV(uv, u_turb);\n"
-	/* Point-sample one mip, offset half a texel.  The qualifier alone is not
-	 * the look: the rasteriser had no mip chain and no bilinear blend, and
-	 * upstream's variant takes both away too (Ironwail gl_shaders.h, the
-	 * ALIASSHADER_NOPERSP branch).  uhexen2-ktjv. */
-	"#ifdef NOPERSP\n"
-	"    uv -= 0.5 / vec2(textureSize(u_texture0, 0));\n"
-	"    vec4 tex = textureLod(u_texture0, uv, 0.0);\n"
-	"#else\n"
-	"    vec4 tex = texture(u_texture0, uv);\n"
-	"#endif\n"
-	GLSL_ALIAS_DLIGHT_APPLY
-	/* Material maps on the skin (uhexen2-4kcb).  Uniform-static branch, so a
-	 * model with no _norm/_bump/_gloss sidecar -- or r_materialmaps 0, or any
-	 * of the sprite / particle / warp / brush batches that share this program
-	 * and leave the uniform at its resting zero -- skips the derivatives, the
-	 * frame build and both texture fetches.
-	 *
-	 * Runs BEFORE the alpha-test discard, for the same reason sworld_frag
-	 * samples its fullbright mask early: this reads textures and takes
-	 * derivatives, and both are undefined in a 2x2 quad where some lanes have
-	 * already discarded.  Sampling after the discard draws dark outlines
-	 * along every cutout edge (Ironwail 017fdd2). */
-	"    vec3 matspec = vec3(0.0);\n"
-	"    if (u_alias_material.x > 0.0 || u_alias_material.y > 0.0) {\n"
-	"        vec4 m = MaterialShadeDir(u_texture3, u_texture4, uv, v_matpos,\n"
-	"                                  u_alias_lightdir,\n"
-	"                                  u_alias_material.xy, u_alias_material.z);\n"
-	/* Weight the highlight by the light that reaches the model, not by the
-	 * shaded colour, so a bright skin does not get a brighter highlight than
-	 * a dark one under the same lamp.  v_color.rgb is this path's analogue of
-	 * the lightmap sworld_frag weights by: the static light with shadedots
-	 * and the entity tint already folded in. */
-	"        matspec = m.yzw * v_color.rgb;\n"
-	"        color.rgb *= m.x;\n"
-	"    }\n"
-	/* uhexen2-khsa r20: revert r15's threshold gate.  r15 only ran the
-	 * discard for u_alpha_threshold > 0.5, exempting opaque batches.
-	 * Confirmed via bisect (bobberb): some alias models route through
-	 * the opaque path (threshold=0.01) yet have palette-255 cutout
-	 * texels in their skin — trees, viewmodel hands, etc.  r14's
-	 * unconditional test caught them; r15's gate let them render with
-	 * the cutout texels' RGB (black/white/teal depending on upload
-	 * path), which looked like the cutout area was filled in.  Restore
-	 * the r14 behavior. */
-	"    if (color.a < u_alpha_threshold) discard;\n"
-	/* Added rather than multiplied, and after the alpha test, exactly where
-	 * sworld_frag adds its own.  uhexen2-4kcb. */
-	"    color.rgb += matspec;\n"
-	/* Underwater caustics, same formula and same pre-fog position in the
-	 * chain as sworld_frag so a model and the floor it stands on receive
-	 * the identical highlight band.  v_worldxy is world space on every
-	 * vertex shader that links against this fragment shader.  Gated by
-	 * u_alias_caustics.x, which C leaves at 0 for every non-alias batch
-	 * that shares this program.  uhexen2-0gn3. */
-	"    if (u_alias_caustics.x > 0.0) {\n"
-	"        float c = Caustics(v_worldxy, u_alias_caustics.y);\n"
-	"        color.rgb += color.rgb * c * u_alias_caustics.x;\n"
-	"    }\n"
-	"    float fogfac = u_fog_density * v_fogdist;\n"
-	"    float fog = exp(-fogfac * fogfac);\n"
-	"    color.rgb = mix(u_fog_color, color.rgb, clamp(fog, 0.0, 1.0));\n"
-	/* Soft particles (uhexen2-mf9u).  A view-parallel billboard whose origin
-	 * sits on an impact surface has up to half its quad behind that surface
-	 * at any oblique view angle; depth-testing it per fragment slices the
-	 * sprite along a hard line.  Fade alpha with the distance to whatever
-	 * opaque geometry is behind instead, so it dissolves into the wall.
-	 *
-	 * u_soft_params.yz linearize a window-space depth to a positive
-	 * view-space distance as z = b / (a - d).  C derives a and b from the
-	 * live projection matrix with glDepthRange folded in, so the expression
-	 * is identical for the reversed-Z and forward-Z conventions and for the
-	 * mirror pass's split depth range.
-	 *
-	 * Deliberately after the alpha test: the cutout decision belongs to the
-	 * sprite's own texel alpha, and a texel faded to near-zero by proximity
-	 * must still blend rather than discard.  Gated by .x, which every
-	 * non-sprite user of this program leaves at 0. */
-	"    if (u_soft_params.x > 0.0) {\n"
-	"        highp float dscene = texelFetch(u_soft_depth, ivec2(gl_FragCoord.xy), 0).r;\n"
-	"        highp float zscene = u_soft_params.z / (u_soft_params.y - dscene);\n"
-	"        highp float zfrag  = u_soft_params.z / (u_soft_params.y - gl_FragCoord.z);\n"
-	"        color.a *= clamp((zscene - zfrag) * u_soft_params.x, 0.0, 1.0);\n"
-	"    }\n"
-	/* uhexen2-khsa r13: u_force_opaque_alpha replaces the old threshold-
-	 * based test.  Threshold > 0.5 was correct for fence cutouts but
-	 * caught opaque-as-translucent ents (CASTLE_TR.MDL etc.) that need
-	 * fragColor.a=1.0 to avoid bleeding a garbage color.a into FB.a
-	 * where any downstream pass (OIT compositor, post-process) could
-	 * read it as a transparency key.  C sets force_opaque_alpha=1 in
-	 * confirmed-opaque alias paths and =0 for ENTALPHA / DRF_TRANSLUCENT
-	 * which legitimately need blend-stage src.a from the shader. */
-	"#ifdef OIT\n"
-	"    fragColor = color;\n"
-	"#else\n"
-	"    fragColor = vec4(color.rgb, u_force_opaque_alpha > 0.5 ? 1.0 : color.a);\n"
-	"#endif\n"
-	"}\n";
+ * Both stages are files now: engine/shaders/salias_vert.glsl (#450, alias
+ * slice S1) and engine/shaders/salias_frag.glsl (slice S2), reaching us as
+ * salias_vert[] / salias_frag[] via shaders_gen.h.  Their header comments
+ * carry the notes that were here.  salias_frag is also the fragment stage of
+ * the skeletal and instanced programs below, whose vertex stages are still
+ * literals; it reads its non-opaque uniforms from FragParams and AliasFrag,
+ * so every path drawing with one of the ten writes the members it needs
+ * first -- see r_aliasfrag_t in gl_uniforms.h. */
 
 /* --- shader_skeletal: skeletal animation with bone-weighted deformation ---
  * Desktop only: the bone matrices arrive in a std430 shader storage block,
@@ -2270,9 +2013,11 @@ static const char salias_inst_vert[] =
 	/* World -> eye, the same matrix gl_lightcluster.c clustered the grid
 	 * with.  This path has no u_modelview to fall out of: it builds
 	 * gl_Position straight from u_viewproj and a world-space vertex, so eye
-	 * space has to be reconstructed explicitly for the froxel lookup.  Shared
-	 * by name with salias_frag's copy, which is one uniform after linking.
-	 * uhexen2-waum. */
+	 * space has to be reconstructed explicitly for the froxel lookup.
+	 * uhexen2-waum.  NOT the uniform salias_frag reads: since #450 that one
+	 * is AliasFrag's u_aflightview, a different name, so the two no longer
+	 * merge at link time.  R_LightCluster_BindForAlias writes both from the
+	 * same lc_view. */
 	"uniform mat4 u_lightview;\n"
 	"\n"
 	"TCQUAL out vec2 v_texcoord;\n"
@@ -2479,39 +2224,6 @@ static qboolean GL_InitProgram (glprogram_t *p, const char *name,
 	return GL_InitProgramSplit (p, name, NULL, vert_src, NULL, frag_src);
 }
 
-/*
-===============
-GL_InitProgramDefines
-
-GL_InitProgram with a preamble spliced into both stages, so one source can be
-compiled as more than one program.  Only the alias NOPERSP variants use it;
-it delegates rather than duplicating GL_InitProgram's uniform and sampler
-setup, which the variants must share exactly.  uhexen2-ktjv.
-
-Desktop-only, with the same guard as GL_SpliceDefines that it calls and as the
-two call sites in GL_Shaders_Init: `noperspective` is not in the GLSL ES 3.00
-language at all, so the ES tier compiles no NOPERSP variant to need this.
-Without the guard the ES tier failed to build outright -- the definition was
-visible there while its callee was not.
-===============
-*/
-#ifndef USE_GLES
-static void GL_InitProgramDefines (glprogram_t *p, const char *name,
-				   const char *vert_src, const char *frag_src,
-				   const char *defines)
-{
-	char	*v = GL_SpliceDefines (vert_src, defines);
-	char	*f = GL_SpliceDefines (frag_src, defines);
-
-	if (v && f)
-		GL_InitProgram (p, name, v, f);
-	else
-		Con_SafePrintf ("  %s: FAILED (preamble splice)\n", name);
-	free (v);
-	free (f);
-}
-#endif	/* !USE_GLES */
-
 #ifndef USE_GLES
 static qboolean GL_InitParticleGPUProgram (gl_particle_gpu_prog_t *p)
 {
@@ -2576,13 +2288,18 @@ static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p, const char *na
 					 const char *defines)
 {
 	GLuint vs, fs, prog;
+	char	frag_header[512];
 
 	/* `defines` is NULL for the ordinary program and "#define NOPERSP 1" for
-	 * the affine twin -- one source, two programs.  uhexen2-ktjv. */
+	 * the affine twin -- one source, two programs.  uhexen2-ktjv.  The vertex
+	 * stage is still a literal with its own #version, so the defines are
+	 * spliced into it; the fragment stage is salias_frag.glsl (#450), so they
+	 * ride its header chunk instead, as for the other eight. */
 	vs = defines ? GL_CompileShaderDefines(GL_VERTEX_SHADER, salias_inst_vert, defines)
 		     : GL_CompileShader(GL_VERTEX_SHADER, salias_inst_vert);
-	fs = defines ? GL_CompileShaderDefines(GL_FRAGMENT_SHADER, salias_frag, defines)
-		     : GL_CompileShader(GL_FRAGMENT_SHADER, salias_frag);
+	q_snprintf (frag_header, sizeof(frag_header), "%s%s",
+		    GLSL_ALIAS_FRAG_HEADER, defines ? defines : "");
+	fs = GL_CompileShaderSplit(GL_FRAGMENT_SHADER, frag_header, salias_frag);
 	if (!vs || !fs) {
 		if (vs) glDeleteShader_fp(vs);
 		if (fs) glDeleteShader_fp(fs);
@@ -2613,26 +2330,19 @@ static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p, const char *na
 
 	memset(p, 0, sizeof(*p));
 	p->program = prog;
-	p->u_fog_density = glGetUniformLocation_fp(prog, "u_fog_density");
-	p->u_fog_color = glGetUniformLocation_fp(prog, "u_fog_color");
-	p->u_alpha_threshold = glGetUniformLocation_fp(prog, "u_alpha_threshold");
 	p->u_viewproj = glGetUniformLocation_fp(prog, "u_viewproj");
 	p->u_inst_base = glGetUniformLocation_fp(prog, "u_inst_base");
 	p->u_eyepos = glGetUniformLocation_fp(prog, "u_eyepos");
 	p->u_poseverttype = glGetUniformLocation_fp(prog, "u_poseverttype");
-	p->u_force_opaque_alpha = glGetUniformLocation_fp(prog, "u_force_opaque_alpha");
-	p->u_alias_caustics = glGetUniformLocation_fp(prog, "u_alias_caustics");
-	p->u_alias_material = glGetUniformLocation_fp(prog, "u_alias_material");	/* uhexen2-4kcb */
-	p->u_alias_lightdir = glGetUniformLocation_fp(prog, "u_alias_lightdir");
 	/* uhexen2-waum */
 	p->u_alias_dlight = glGetUniformLocation_fp(prog, "u_alias_dlight");
 	p->u_lightview = glGetUniformLocation_fp(prog, "u_lightview");
-	p->u_lightgrid_xy = glGetUniformLocation_fp(prog, "u_lightgrid_xy");
-	p->u_lightgrid_z = glGetUniformLocation_fp(prog, "u_lightgrid_z");
 	p->u_lightgrid = glGetUniformLocation_fp(prog, "u_lightgrid");
-	p->u_turb = glGetUniformLocation_fp(prog, "u_turb");		/* #450 hazard 1 */
-	p->u_soft_params = glGetUniformLocation_fp(prog, "u_soft_params");
-	p->u_spans = glGetUniformLocation_fp(prog, "u_spans");
+	/* This program is linked by hand rather than by GL_InitProgramSplit, so
+	 * it binds its blocks by hand too (#450, hazard 9).  Without this its
+	 * FragParams and AliasFrag would sit at binding 0 -- Hi-Z's HizParams. */
+	R_BindProgramBlocks(prog, &p->ub_vert, &p->ub_frag);
+	p->ub_afrag = R_BindAliasFragBlock(prog);
 
 	/* Bind skin texture to unit 0 */
 	R_UseProgram (prog);
@@ -2706,10 +2416,9 @@ void GL_Shaders_Init (void)
 							GLSL_FRAG_HEADER, sflat_frag);
 	GL_InitProgram(&gl_shader_world,    "world",    sworld_vert, sworld_frag);
 	GL_InitProgram(&gl_shader_world_opaque, "world_opaque", sworld_vert, sworld_frag_opaque);
-	/* The vertex stage is a file (#450); salias_frag is still a literal
-	 * with its own #version, hence the NULL fragment header. */
+	/* Both stages are files (#450, alias slices S1 and S2). */
 	GL_InitProgramSplit(&gl_shader_alias, "alias", GLSL_VERT_HEADER, salias_vert,
-							NULL, salias_frag);
+							GLSL_ALIAS_FRAG_HEADER, salias_frag);
 #ifndef USE_GLES
 	/* Affine-mapping twin (uhexen2-ktjv).  Same sources, NOPERSP defined:
 	 * an interpolation qualifier cannot be switched by a uniform, so this
@@ -2724,18 +2433,10 @@ void GL_Shaders_Init (void)
 	 * twin has no program, so the ES tier simply does not get the effect --
 	 * which is the same answer the ES tier already gives for skeletal
 	 * models (uhexen2-dfay). */
-	{
-		/* NOPERSP reaches the file-backed vertex stage through its header
-		 * chunk and the literal fragment stage through the splice. */
-		char *f = GL_SpliceDefines (salias_frag, "#define NOPERSP 1\n");
-		if (f)
-			GL_InitProgramSplit(&gl_shader_alias_np, "alias_np",
-					    GLSL_VERT_HEADER "#define NOPERSP 1\n", salias_vert,
-					    NULL, f);
-		else
-			Con_SafePrintf ("  alias_np: FAILED (preamble splice)\n");
-		free (f);
-	}
+	/* NOPERSP reaches both file-backed stages through their header chunks. */
+	GL_InitProgramSplit(&gl_shader_alias_np, "alias_np",
+			    GLSL_VERT_HEADER "#define NOPERSP 1\n", salias_vert,
+			    GLSL_ALIAS_FRAG_HEADER "#define NOPERSP 1\n", salias_frag);
 #endif
 #ifndef USE_GLES
 	/* Skipped on the ES tier: sskeletal_vert reads its bone matrices from a
@@ -2746,9 +2447,20 @@ void GL_Shaders_Init (void)
 	 * with it yet (the PV_IQM dispatch is uhexen2-7ok0.3); whoever wires
 	 * that up owns giving the ES tier a UBO or texture-buffer skinning
 	 * path, or leaving skeletal models unsupported there.  uhexen2-dfay. */
-	GL_InitProgram(&gl_shader_skeletal, "skeletal", sskeletal_vert, salias_frag);
-	GL_InitProgramDefines(&gl_shader_skeletal_np, "skeletal_np", sskeletal_vert, salias_frag,
-			      "#define NOPERSP 1\n");
+	/* sskeletal_vert is still a literal with its own #version (NULL vertex
+	 * header); salias_frag is a file (#450).  For the affine twin NOPERSP is
+	 * spliced into the literal and rides the file's header chunk. */
+	GL_InitProgramSplit(&gl_shader_skeletal, "skeletal", NULL, sskeletal_vert,
+			    GLSL_ALIAS_FRAG_HEADER, salias_frag);
+	{
+		char *v = GL_SpliceDefines (sskeletal_vert, "#define NOPERSP 1\n");
+		if (v)
+			GL_InitProgramSplit(&gl_shader_skeletal_np, "skeletal_np", NULL, v,
+					    GLSL_ALIAS_FRAG_HEADER "#define NOPERSP 1\n", salias_frag);
+		else
+			Con_SafePrintf ("  skeletal_np: FAILED (preamble splice)\n");
+		free (v);
+	}
 #endif
 	GL_InitProgramSplit(&gl_shader_particle, "particle", GLSL_VERT_HEADER, spart_vert,
 							GLSL_FRAG_HEADER, spart_frag);
@@ -2842,23 +2554,18 @@ void GL_Shaders_Init (void)
 #ifndef USE_GLES
 	GL_InitOITProgram(&gl_shader_world_oit,    "world",    sworld_vert, sworld_frag);
 	GL_InitOITProgramSplit(&gl_shader_alias_oit, "alias", GLSL_VERT_HEADER, salias_vert,
-							      NULL, salias_frag);
-	{
-		char *f = GL_SpliceDefines (salias_frag, "#define NOPERSP 1\n");
-		if (f)
-			GL_InitOITProgramSplit(&gl_shader_alias_np_oit, "alias_np",
-					       GLSL_VERT_HEADER "#define NOPERSP 1\n", salias_vert,
-					       NULL, f);
-		free (f);
-	}
-	GL_InitOITProgram(&gl_shader_skeletal_oit, "skeletal", sskeletal_vert, salias_frag);
+							      GLSL_ALIAS_FRAG_HEADER, salias_frag);
+	GL_InitOITProgramSplit(&gl_shader_alias_np_oit, "alias_np",
+			       GLSL_VERT_HEADER "#define NOPERSP 1\n", salias_vert,
+			       GLSL_ALIAS_FRAG_HEADER "#define NOPERSP 1\n", salias_frag);
+	GL_InitOITProgramSplit(&gl_shader_skeletal_oit, "skeletal", NULL, sskeletal_vert,
+			       GLSL_ALIAS_FRAG_HEADER, salias_frag);
 	{
 		char *v = GL_SpliceDefines (sskeletal_vert, "#define NOPERSP 1\n");
-		char *f = GL_SpliceDefines (salias_frag, "#define NOPERSP 1\n");
-		if (v && f)
-			GL_InitOITProgram(&gl_shader_skeletal_np_oit, "skeletal_np", v, f);
+		if (v)
+			GL_InitOITProgramSplit(&gl_shader_skeletal_np_oit, "skeletal_np", NULL, v,
+					       GLSL_ALIAS_FRAG_HEADER "#define NOPERSP 1\n", salias_frag);
 		free (v);
-		free (f);
 	}
 	GL_InitOITProgramSplit(&gl_shader_particle_oit, "particle", GLSL_VERT_HEADER, spart_vert,
 							GLSL_FRAG_HEADER, spart_frag);

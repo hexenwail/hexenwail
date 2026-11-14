@@ -116,6 +116,13 @@
  *                    TEXBIND.  Empty in the plain arm; the C side assigns the
  *                    texture unit with glUniform1i, as it always has.
  *   uniform block    same three-way split as UBO above.
+ *   storage buffer   FRAG_SSBO(gl, vk): `gl` the GL binding point, which the
+ *                    plain arm spells because desktop GL 4.3 allows
+ *                    layout(binding=) on a storage block; `vk` its index in
+ *                    set 2, after the stage's sampled textures, which is
+ *                    where SDL_GPU puts a fragment stage's read-only storage
+ *                    buffers.  Storage blocks do not exist in ES 3.00 at all,
+ *                    so a caller keeps them under #ifndef GL_ES.
  * ------------------------------------------------------------------------ */
 
 #ifdef VULKAN
@@ -126,6 +133,7 @@
   #define FRAG_OUT(loc)     layout(location = loc)
   #define FRAG_TEX(b)       layout(set = 2, binding = b)
   #define FRAG_UBO(b)       layout(std140, set = 3, binding = b)
+  #define FRAG_SSBO(gl, vk) layout(std430, set = 2, binding = vk)
 #elif defined(GL_SPIRV)
   #define VERT_IN(loc)      layout(location = loc)
   #define VERT_OUT(loc)     layout(location = loc)
@@ -134,6 +142,7 @@
   #define FRAG_OUT(loc)     layout(location = loc)
   #define FRAG_TEX(b)       layout(binding = b)
   #define FRAG_UBO(b)       layout(std140, binding = b)
+  #define FRAG_SSBO(gl, vk) layout(std430, binding = gl)
 #else
   #define VERT_IN(loc)      layout(location = loc)
   #define VERT_OUT(loc)
@@ -142,6 +151,7 @@
   #define FRAG_OUT(loc)     layout(location = loc)
   #define FRAG_TEX(b)
   #define FRAG_UBO(b)       layout(std140)
+  #define FRAG_SSBO(gl, vk) layout(std430, binding = gl)
 #endif
 
 #endif /* LAYOUT_INC */

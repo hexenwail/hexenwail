@@ -366,16 +366,16 @@ export async function extractEngineWebGLPrograms() {
   // Clustered dynamic lighting (uhexen2-26bm world, uhexen2-waum alias) is
   // desktop-only -- it needs a compute shader and an SSBO, and the ES tier has
   // neither -- so every one of its macros has an empty ES arm and has to be
-  // named here.  The alias ones include the varying declarations, because an
-  // `in` with no matching `out` is a link error and the ES tier has nothing to
-  // fill them with.
+  // named here.  The alias ones are the vertex-side varying declarations the
+  // two literal vertex stages still splice, and the froxel-grid sizes the
+  // file-backed salias_frag takes in its header chunk (GLSL_ALIAS_FRAG_HEADER,
+  // #450); the fragment side keeps its own half under #ifndef GL_ES.
   for (const name of ['GLSL_VERT_HEADER', 'GLSL_FRAG_HEADER', 'GLSL_EARLY_Z', 'GLSL_EARLY_Z_OPAQUE',
                       'GLSL_BITFIELD_REVERSE',
                       'GLSL_DLIGHT_DECL', 'GLSL_DLIGHT_FN', 'GLSL_DLIGHT_APPLY',
                       'GLSL_LMSTYLES_DECL', 'GLSL_LMSTYLES_FN', 'GLSL_LMSTYLES_APPLY',
-                      'GLSL_ALIAS_DLIGHT_DECL', 'GLSL_ALIAS_DLIGHT_FN', 'GLSL_ALIAS_DLIGHT_APPLY',
-                      'GLSL_ALIAS_DLIGHT_VS_OUT', 'GLSL_ALIAS_DLIGHT_FS_IN',
-                      'GLSL_ALIAS_DLIGHT_VS_CALC']) {
+                      'GLSL_LIGHTGRID_CONSTS',
+                      'GLSL_ALIAS_DLIGHT_VS_OUT', 'GLSL_ALIAS_DLIGHT_VS_CALC']) {
     macros.set(name, readDefine(glesBranchDefining(shaderSource, name), name, macros, shaderCtx));
   }
   // gl_postprocess.c keeps its own headers; PP_ES_PRECISION feeds the other two.

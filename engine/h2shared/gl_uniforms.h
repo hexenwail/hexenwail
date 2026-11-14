@@ -68,6 +68,35 @@ typedef struct {
 	float	skydir[4];	/* 128  xyz cubemap wind direction, w cubemap yaw */
 } r_fragparams_t;		/* 144 */
 
+/* AliasFrag (engine/shaders/alias.inc), salias_frag's own block, at
+ * UBO_BINDING_ALIAS_FRAG (#450, alias slice S2).  A block member is GLOBAL,
+ * where the loose uniforms these replaced were per-program state, so every
+ * path that draws with an alias-family program writes what it reads first:
+ *
+ *   lightview, grid  R_LightCluster_BindForAlias, once a frame, before any
+ *                    alias draw.  Read only where v_dlightscale > 0, which
+ *                    needs R_LightCluster_AliasActive -- the same gate the
+ *                    write is behind.
+ *   warp xy (turb)   GL_ImmEnd from imm_turb; the skeletal and instanced
+ *                    draws write 0.
+ *   warp z (spans)   R_SetSpanCell around the brush-poly and liquid batches,
+ *                    back to 0 after each; the skeletal and instanced draws
+ *                    write 0.
+ *   material,        GL_ImmEnd from imm_alias_material / imm_alias_lightdir;
+ *   lightdir         the skeletal draw passes the same pair through; the
+ *                    instanced draw writes them per batch (world-space light),
+ *                    and 0 material for its fullbright pass.
+ *
+ * Seeded with material and lightdir (0,0,1), imm_*'s resting values. */
+typedef struct {
+	float	lightview[16];	/*   0  world -> eye, no entity transform */
+	float	grid[4];	/*  64  xy viewport origin, zw froxels per pixel */
+	float	gridz[4];	/*  80  xy zlogscale, zlogbias */
+	float	warp[4];	/*  96  xy liquid warp (amplitude, time), z span cell */
+	float	material[4];	/* 112  xyz normal-map, gloss intensity, gloss exponent */
+	float	lightdir[4];	/* 128  xyz model light direction */
+} r_aliasfrag_t;		/* 144 */
+
 void	R_Uniforms_Init (void);
 void	R_Uniforms_Shutdown (void);
 
@@ -81,6 +110,11 @@ void	R_Uniforms_Shutdown (void);
  * only place the binding point is chosen, and UBO_BINDING_* in gl_shader.h is
  * the only place the two sides meet. */
 void	R_BindProgramBlocks (GLuint program, GLint *out_vert, GLint *out_frag);
+
+/* The same for AliasFrag: its block index in `program`, pinned to
+ * UBO_BINDING_ALIAS_FRAG, or -1 if the program declares no such block, which
+ * is every program but the ten that link salias_frag. */
+GLint	R_BindAliasFragBlock (GLuint program);
 
 /* Setters.  Each writes the CPU shadow and marks its block dirty only when the
  * value actually changed; nothing reaches the GPU until R_FlushUniforms. */
@@ -123,11 +157,19 @@ void	R_SetSkyWind (float u, float v);
 void	R_SetSkyCubeWind (const float *dir3, float yaw);
 void	R_SetLightDebug (float fullbright, float lightmapdbg);
 
+/* AliasFrag */
+void	R_SetAliasLightGrid (const float *view16, const float *grid4,
+			     float zlogscale, float zlogbias);
+void	R_SetAliasTurb (float amplitude, float time);
+void	R_SetAliasSpans (float cell);
+void	R_SetAliasMaterialU (float normal, float gloss, float glossexp);
+void	R_SetAliasLightDirU (const float *dir3);
+
 /* Upload whichever blocks changed.  One push per dirty block, whole block,
  * immediately before the draw that reads it. */
 void	R_FlushUniforms (void);
 
-/* Force the next flush to re-upload both blocks and re-assert their bindings.
+/* Force the next flush to re-upload every block and re-assert its binding.
  * For context loss and for anything that may have moved the indexed uniform
  * bindings out from under us. */
 void	R_InvalidateUniforms (void);

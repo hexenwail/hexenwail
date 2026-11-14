@@ -1,5 +1,6 @@
 /* gl_uniforms.c -- the two std140 uniform blocks shared by every file-backed
- * draw program.  See gl_uniforms.h for the layout and the reasoning.
+ * draw program, and the alias family's AliasFrag.  See gl_uniforms.h for the
+ * layout and the reasoning.
  *
  * Copyright (C) 2026  Contributors of the uHexen2 project
  *
@@ -12,7 +13,7 @@
 #include "quakedef.h"
 #include "sdl_inc.h"
 #include "gl_matrix.h"
-#include "gl_shader.h"		/* UBO_BINDING_VERT / UBO_BINDING_FRAG */
+#include "gl_shader.h"		/* UBO_BINDING_VERT / _FRAG / _ALIAS_FRAG */
 #include "gl_uniforms.h"
 
 #ifndef GL_UNIFORM_BLOCK_DATA_SIZE
@@ -33,23 +34,29 @@
 
 #define RU_NAME_VERT	"VertParams"
 #define RU_NAME_FRAG	"FragParams"
+#define RU_NAME_AFRAG	"AliasFrag"
 
 static GLuint		ubo_vert;
 static GLuint		ubo_frag;
+static GLuint		ubo_afrag;
 
 static r_vertparams_t	vertparams;
 static r_fragparams_t	fragparams;
+static r_aliasfrag_t	aliasfrag;
 
 static qboolean		vert_dirty;
 static qboolean		frag_dirty;
+static qboolean		afrag_dirty;
 static qboolean		bindings_dirty;
 static qboolean		layout_checked;
+static qboolean		afrag_layout_checked;
 
 /* The mirrors are only trustworthy if they are the size std140 says they are.
  * Both are built from vec4/mat4/ivec4 only, so this is arithmetic rather than
- * hope: 4 mat4 + 5 vec4 + 1 ivec4, and 9 vec4. */
+ * hope: 4 mat4 + 6 vec4 + 1 ivec4, 9 vec4, and 1 mat4 + 5 vec4. */
 COMPILE_TIME_ASSERT(vertparams_size, sizeof(r_vertparams_t) == 4 * 64 + 7 * 16);
 COMPILE_TIME_ASSERT(fragparams_size, sizeof(r_fragparams_t) == 9 * 16);
+COMPILE_TIME_ASSERT(aliasfrag_size, sizeof(r_aliasfrag_t) == 64 + 5 * 16);
 
 /* ------------------------------------------------------------------ */
 /* Small helpers                                                       */
@@ -270,6 +277,53 @@ void R_SetLightDebug (float fullbright, float lightmapdbg)
 }
 
 /* ------------------------------------------------------------------ */
+/* AliasFrag setters                                                   */
+/* ------------------------------------------------------------------ */
+
+void R_SetAliasLightGrid (const float *view16, const float *grid4,
+			  float zlogscale, float zlogbias)
+{
+	int changed = 0;
+
+	changed |= RU_SetMat(aliasfrag.lightview, view16);
+	changed |= RU_Set4(aliasfrag.grid, grid4[0], grid4[1], grid4[2], grid4[3]);
+	changed |= RU_Set4(aliasfrag.gridz, zlogscale, zlogbias, 0.0f, 0.0f);
+	if (changed)
+		afrag_dirty = true;
+}
+
+void R_SetAliasTurb (float amplitude, float time)
+{
+	if (aliasfrag.warp[0] != amplitude || aliasfrag.warp[1] != time)
+	{
+		aliasfrag.warp[0] = amplitude;
+		aliasfrag.warp[1] = time;
+		afrag_dirty = true;
+	}
+}
+
+void R_SetAliasSpans (float cell)
+{
+	if (aliasfrag.warp[2] != cell)
+	{
+		aliasfrag.warp[2] = cell;
+		afrag_dirty = true;
+	}
+}
+
+void R_SetAliasMaterialU (float normal, float gloss, float glossexp)
+{
+	if (RU_Set4(aliasfrag.material, normal, gloss, glossexp, 0.0f))
+		afrag_dirty = true;
+}
+
+void R_SetAliasLightDirU (const float *dir3)
+{
+	if (RU_Set4(aliasfrag.lightdir, dir3[0], dir3[1], dir3[2], 0.0f))
+		afrag_dirty = true;
+}
+
+/* ------------------------------------------------------------------ */
 /* Upload                                                              */
 /* ------------------------------------------------------------------ */
 
@@ -302,6 +356,7 @@ void R_FlushUniforms (void)
 		bindings_dirty = false;
 		GL_BindBufferBase (GL_UNIFORM_BUFFER, UBO_BINDING_VERT, ubo_vert);
 		GL_BindBufferBase (GL_UNIFORM_BUFFER, UBO_BINDING_FRAG, ubo_frag);
+		GL_BindBufferBase (GL_UNIFORM_BUFFER, UBO_BINDING_ALIAS_FRAG, ubo_afrag);
 	}
 
 	if (vert_dirty)
@@ -318,12 +373,20 @@ void R_FlushUniforms (void)
 		glBufferData_fp (GL_UNIFORM_BUFFER, sizeof(fragparams), &fragparams,
 				 GL_STREAM_DRAW);
 	}
+	if (afrag_dirty)
+	{
+		afrag_dirty = false;
+		GL_BindBuffer (GL_UNIFORM_BUFFER, ubo_afrag);
+		glBufferData_fp (GL_UNIFORM_BUFFER, sizeof(aliasfrag), &aliasfrag,
+				 GL_STREAM_DRAW);
+	}
 }
 
 void R_InvalidateUniforms (void)
 {
 	vert_dirty = true;
 	frag_dirty = true;
+	afrag_dirty = true;
 	bindings_dirty = true;
 }
 
@@ -400,6 +463,21 @@ void R_BindProgramBlocks (GLuint program, GLint *out_vert, GLint *out_frag)
 	if (out_frag) *out_frag = fidx;
 }
 
+GLint R_BindAliasFragBlock (GLuint program)
+{
+	GLint	idx;
+
+	if (!program || !RU_HAVE_UBO_BIND)
+		return -1;
+	idx = RU_BindOne (program, RU_NAME_AFRAG, UBO_BINDING_ALIAS_FRAG);
+	if (idx >= 0 && !afrag_layout_checked)
+	{
+		afrag_layout_checked = true;
+		RU_CheckBlockSize (program, RU_NAME_AFRAG, sizeof(r_aliasfrag_t));
+	}
+	return idx;
+}
+
 /* ------------------------------------------------------------------ */
 /* Life cycle                                                          */
 /* ------------------------------------------------------------------ */
@@ -410,7 +488,9 @@ void R_Uniforms_Init (void)
 
 	memset (&vertparams, 0, sizeof(vertparams));
 	memset (&fragparams, 0, sizeof(fragparams));
+	memset (&aliasfrag, 0, sizeof(aliasfrag));
 	layout_checked = false;
+	afrag_layout_checked = false;
 
 	/* GL zero-initialises nothing useful here.  An all-zero model matrix
 	 * collapses every vertex to world (0,0), which is what the per-program
@@ -422,15 +502,25 @@ void R_Uniforms_Init (void)
 	memcpy (vertparams.modelview, ident, sizeof(ident));
 	memcpy (vertparams.model, ident, sizeof(ident));
 	memcpy (vertparams.viewproj, ident, sizeof(ident));
+	/* The resting material and light direction imm_* holds, (0,0,1): xy 0
+	 * is "no material maps", and a unit vector keeps the direction sane for
+	 * anything that reads it before its first write.  The loose uniforms
+	 * started at GL's zeros instead; both switch the material branch off,
+	 * which is the only thing either value decides. */
+	aliasfrag.material[2] = 1.0f;
+	aliasfrag.lightdir[2] = 1.0f;
+	memcpy (aliasfrag.lightview, ident, sizeof(ident));
 
 	glGenBuffers_fp (1, &ubo_vert);
 	glGenBuffers_fp (1, &ubo_frag);
+	glGenBuffers_fp (1, &ubo_afrag);
 
 	/* Seed both stores before anything binds them, so a program that draws
 	 * before its first setter call reads zeros and an identity rather than
 	 * an unspecified store. */
 	vert_dirty = true;
 	frag_dirty = true;
+	afrag_dirty = true;
 	bindings_dirty = true;
 	R_FlushUniforms ();
 }
@@ -449,6 +539,13 @@ void R_Uniforms_Shutdown (void)
 		glDeleteBuffers_fp (1, &ubo_frag);
 		ubo_frag = 0;
 	}
+	if (ubo_afrag)
+	{
+		GL_ForgetBuffer (ubo_afrag);
+		glDeleteBuffers_fp (1, &ubo_afrag);
+		ubo_afrag = 0;
+	}
 	layout_checked = false;
+	afrag_layout_checked = false;
 	bindings_dirty = true;
 }

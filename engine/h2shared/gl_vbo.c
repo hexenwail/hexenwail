@@ -542,6 +542,27 @@ static void GL_ImmPushBlocks (const glprogram_t *shader, const float *mvp)
 		 * u_ffogv); the loose half below pushes the same globals for
 		 * programs that still declare them loose. */
 		R_SetFog (r_fog_density, r_fog_color);
+
+		/* salias_frag reads the rest of its per-batch state from FragParams
+		 * and AliasFrag since #450.  Every value comes from the same imm_*
+		 * global the loose half below pushes for the world programs, and is
+		 * written unconditionally: the loose copies were per-program and
+		 * cached, so at every alias draw the program already held exactly
+		 * imm_*, and a write per batch is what gives a global block the
+		 * same property.  Gated on AliasFrag because only the ten programs
+		 * that link salias_frag read any of these.  Not written here: the
+		 * span cell, which R_SetSpanCell puts in AliasFrag around its own
+		 * batches, and the froxel lookup, which R_LightCluster_BindForAlias
+		 * writes once a frame. */
+		if (shader->ub_afrag >= 0)
+		{
+			R_SetAliasCausticsU (imm_alias_caustics[0], imm_alias_caustics[1]);
+			R_SetSoftParams (imm_soft[0], imm_soft[1], imm_soft[2]);
+			R_SetAliasTurb (imm_turb[0], imm_turb[1]);
+			R_SetAliasMaterialU (imm_alias_material[0], imm_alias_material[1],
+					    imm_alias_material[2]);
+			R_SetAliasLightDirU (imm_alias_lightdir);
+		}
 	}
 
 	R_FlushUniforms ();

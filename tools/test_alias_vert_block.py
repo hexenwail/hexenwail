@@ -13,6 +13,9 @@ Checks the pieces that have to move together:
   * the inline literal is gone, and all four alias builds (alias, alias_np,
     and both OIT twins) compile the file through GLSL_VERT_HEADER, with
     NOPERSP in the header for the two affine ones;
+  * the varyings of all three vertex stages that link salias_frag (this file,
+    and the sskeletal_vert / salias_inst_vert literals) match the inputs of
+    engine/shaders/salias_frag.glsl (#450 S2) by name, type and qualifier;
   * GL_ImmPushBlocks feeds u_alias_model and u_alias_dlight from imm_*;
   * the MSL cross-compile targets 2.1.0, which `invariant gl_Position` needs.
 """
@@ -74,11 +77,14 @@ if not m or "v_dlightscale" not in m.group(1) or "v_eyepos" not in m.group(1):
 
 src = (ROOT / "engine/h2shared/gl_shader.c").read_text()
 
-# The varying interface: salias_vert.glsl's outputs must match salias_frag's
-# inputs (still a C literal) by name, type and interpolation qualifier, on the
-# desktop tier, where a mismatch is a link failure at startup that leaves
-# every model undrawn with lint green.  The fragment side is the literal with
-# the desktop arm of GLSL_ALIAS_DLIGHT_FS_IN expanded.
+# The varying interface: every vertex stage linked with salias_frag must
+# output exactly its inputs, by name, type and interpolation qualifier, on the
+# desktop tier, where a mismatch is a link failure at startup that leaves every
+# model undrawn with lint green.  Since #450 S2 the fragment side is
+# engine/shaders/salias_frag.glsl; both arms of its #ifndef GL_ES are read,
+# which is the desktop set (the ES arm declares no input of its own).  The two
+# vertex stages still written as C literals are read with the desktop arm of
+# GLSL_ALIAS_DLIGHT_VS_OUT expanded.
 def c_literal_text(symbol):
     m = re.search(rf"static const char {symbol}\[\] =\n(.*?)\";\n", src, re.S)
     if not m:
@@ -106,31 +112,36 @@ def varyings(text, kw):
             quals = set(m.group(1).split()) & {"TCQUAL", "flat", "noperspective"}
             found[m.group(3)] = (m.group(2), frozenset(quals))
     return found
-frag = c_literal_text("salias_frag")
-if frag is None:
-    errors.append("cannot find the salias_frag literal to compare varyings against")
-else:
-    frag = frag.replace("@GLSL_ALIAS_DLIGHT_FS_IN@", desktop_macro("GLSL_ALIAS_DLIGHT_FS_IN"))
-    vo, fi = varyings(strip(body), "out"), varyings(frag, "in")
+sf = ROOT / "engine/shaders/salias_frag.glsl"
+fi = varyings(strip(sf.read_text()), "in") if sf.exists() else {}
+stages = {"salias_vert.glsl": varyings(strip(body), "out")}
+for lit in ("sskeletal_vert", "salias_inst_vert"):
+    t = c_literal_text(lit)
+    if t is None:
+        errors.append(f"cannot find the {lit} literal to compare varyings against")
+        continue
+    stages[lit] = varyings(t.replace("@GLSL_ALIAS_DLIGHT_VS_OUT@", desktop_macro("GLSL_ALIAS_DLIGHT_VS_OUT")), "out")
+if not fi:
+    errors.append("could not parse salias_frag.glsl's inputs")
+for name, vo in stages.items():
     vo.pop("fragColor", None)
-    if not fi or not vo:
-        errors.append("could not parse the varying sets")
+    if not vo:
+        errors.append(f"could not parse {name}'s outputs")
     elif vo != fi:
-        errors.append(f"salias_vert outputs {sorted(vo.items())} != salias_frag inputs {sorted(fi.items())} (desktop link would fail)")
+        errors.append(f"{name} outputs {sorted(vo.items())} != salias_frag inputs {sorted(fi.items())} (desktop link would fail)")
 
 if re.search(r"static const char salias_vert\[\]", src):
     errors.append("the inline salias_vert literal is back in gl_shader.c")
 builds = [
-    r'GL_InitProgramSplit\(&gl_shader_alias, "alias", GLSL_VERT_HEADER, salias_vert,\s*NULL, salias_frag\)',
+    r'GL_InitProgramSplit\(&gl_shader_alias, "alias", GLSL_VERT_HEADER, salias_vert,',
     r'GL_InitProgramSplit\(&gl_shader_alias_np, "alias_np",\s*GLSL_VERT_HEADER "#define NOPERSP 1\\n", salias_vert,',
-    r'GL_InitOITProgramSplit\(&gl_shader_alias_oit, "alias", GLSL_VERT_HEADER, salias_vert,\s*NULL, salias_frag\)',
+    r'GL_InitOITProgramSplit\(&gl_shader_alias_oit, "alias", GLSL_VERT_HEADER, salias_vert,',
     r'GL_InitOITProgramSplit\(&gl_shader_alias_np_oit, "alias_np",\s*GLSL_VERT_HEADER "#define NOPERSP 1\\n", salias_vert,',
 ]
 for b in builds:
     if not re.search(b, src):
         errors.append(f"alias build not found: {b[:60]}...")
-if not re.search(r"fs = frag_header \? GL_CompileOITFragShaderSplit \(frag_header, frag_src\)\s*:\s*GL_CompileOITFragShader \(frag_src\);", src):
-    errors.append("GL_LoadOITProgramSplit must fall back to the literal splice when frag_header is NULL")
+# The fragment headers are test_alias_frag_block.py's to pin (#450 S2).
 
 vbo = (ROOT / "engine/h2shared/gl_vbo.c").read_text()
 push = re.search(r"static void GL_ImmPushBlocks \([^)]*\)\s*\{(.*?)\n\}", vbo, re.S)

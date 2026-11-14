@@ -1490,58 +1490,53 @@ static void GL_DrawAliasSkeletal (entity_t *e, aliashdr_t *paliashdr,
 	if (prog->u_fullbright >= 0)
 		glUniform1f_fp (prog->u_fullbright, model_fullbright_pass ? 1.0f : 0.0f);
 
-	if (prog->u_fog_density >= 0)
-		glUniform1f_fp (prog->u_fog_density, r_fog_density);
-	if (prog->u_fog_color >= 0)
-		glUniform3f_fp (prog->u_fog_color,
-				r_fog_color[0], r_fog_color[1], r_fog_color[2]);
-	if (prog->u_alpha_threshold >= 0)
-		glUniform1f_fp (prog->u_alpha_threshold, GL_GetAlphaThreshold());
-	if (prog->u_force_opaque_alpha >= 0)
-		glUniform1f_fp (prog->u_force_opaque_alpha, GL_GetForceOpaqueAlpha());
-	if (prog->u_alias_caustics >= 0)
-		glUniform2f_fp (prog->u_alias_caustics, caustics[0], caustics[1]);
 	/* uhexen2-waum.  This path bypasses GL_ImmEnd -- there is no streamed
-	 * vertex data to end -- so it owns pushing the per-batch state itself, the
-	 * same way it already does for caustics, turb and the soft-particle fade.
+	 * vertex data to end -- so it owns pushing the per-batch state itself.
 	 * The froxel-lookup constants come from R_LightCluster_BindForAlias once a
-	 * frame; only the scale travels with the draw. */
+	 * frame; only the scale travels with the draw.  A vertex-stage uniform,
+	 * still loose in sskeletal_vert. */
 	if (prog->u_alias_dlight >= 0)
 		glUniform1f_fp (prog->u_alias_dlight, GL_GetAliasDlight ());
+
+	/* The fragment stage, salias_frag, reads FragParams and AliasFrag since
+	 * #450 slice S2.  Those are shared by every program, where the loose
+	 * uniforms these writes replace were this program's own, so the full
+	 * set salias_frag reads is written here, every draw, before the flush:
+	 * nothing may be inherited from whatever batch drew last (#19's lesson).
+	 * The values are the ones the loose writes made. */
+	R_SetFog (r_fog_density, r_fog_color);
+	/* Raw, as the loose writes passed them: by the time a model draws, both
+	 * have long been set non-negative, and a -1 would test the same as the 0
+	 * GL_ImmEnd resolves it to (alpha is never below 0, and -1 < 0.5). */
+	R_SetAlphaMask (GL_GetAlphaThreshold(), GL_GetForceOpaqueAlpha());
+	R_SetAliasCausticsU (caustics[0], caustics[1]);
 	/* Shared with the sprite path through salias_frag; nothing here wants
 	 * the soft-particle fade, and leaving a hot value would dissolve the
 	 * model against whatever is behind it. */
-	if (prog->u_soft_params >= 0)
-		glUniform3f_fp (prog->u_soft_params, 0.0f, 0.0f, 0.0f);
-	/* Same reasoning for the liquid warp: this program is shared with
-	 * EmitWaterPolys, and this path sets its uniforms directly rather than
-	 * through GL_ImmEnd, so it must clear it itself.  uhexen2-9o7u */
-	if (prog->u_turb >= 0)
-		glUniform2f_fp (prog->u_turb, 0.0f, 0.0f);
-	/* And the softemu span cell, which only R_SetSpanCell writes and only for
-	 * the ImmEnd alias/world programs -- so this program's copy has only ever
-	 * held its initial 0.  Stated explicitly for the same reason as the two
-	 * above, before salias_frag moves it into a shared block (#450, hazard 2).
-	 * Same value, so no change today. */
-	if (prog->u_spans >= 0)
-		glUniform1f_fp (prog->u_spans, 0.0f);
+	R_SetSoftParams (0.0f, 0.0f, 0.0f);
+	/* Same reasoning for the liquid warp (EmitWaterPolys, uhexen2-9o7u) and
+	 * the softemu span cell (R_SetSpanCell, #176): this path draws neither
+	 * and must not inherit a water poly's (#450, hazards 1 and 2). */
+	R_SetAliasTurb (0.0f, 0.0f);
+	R_SetAliasSpans (0.0f);
 	/* Material maps.  Unlike the three above this is PASSED THROUGH rather
 	 * than cleared: R_DrawAliasModel armed it for this entity's skin just
 	 * before dispatching here, and the skeletal program's v_matpos is eye
 	 * space exactly like salias_vert's, so the direction it staged applies
 	 * unchanged.  Read back rather than recomputed for the same reason
 	 * GL_GetAliasModelMatrix exists -- replaying the derivation here risks a
-	 * different answer than the batch beside it.  uhexen2-4kcb. */
+	 * different answer than the batch beside it.  uhexen2-4kcb.  Written
+	 * as a pair every draw, so neither a world-space direction from the
+	 * instanced path nor anyone else's survives into this one (hazard 5). */
 	{
 		float	mat[3], dir[3];
 
 		GL_GetAliasMaterial (mat);
 		GL_GetAliasLightDir (dir);
-		if (prog->u_alias_material >= 0)
-			glUniform3f_fp (prog->u_alias_material, mat[0], mat[1], mat[2]);
-		if (prog->u_alias_lightdir >= 0)
-			glUniform3f_fp (prog->u_alias_lightdir, dir[0], dir[1], dir[2]);
+		R_SetAliasMaterialU (mat[0], mat[1], mat[2]);
+		R_SetAliasLightDirU (dir);
 	}
+	R_FlushUniforms ();
 
 	GL_BindBufferBase (GL_SHADER_STORAGE_BUFFER, 4, gm->ssbo_bones);
 
@@ -4368,55 +4363,46 @@ static void R_DrawAliasInstanced (void)
 	/* Activate instanced shader */
 	R_UseProgram (prog->program);
 
-	/* Set uniforms (view-proj, fog, alpha threshold, eye position) */
+	/* Vertex-stage uniforms, still loose in salias_inst_vert. */
 	if (prog->u_viewproj >= 0)
 		glUniformMatrix4fv_fp(prog->u_viewproj, 1, GL_FALSE,
 				      alias_inst_view_proj);
-	/* Use r_fog_density (pre-scaled by Fog_SetupFrame) not raw Fog_GetDensity() */
-	if (prog->u_fog_density >= 0)
-		glUniform1f_fp(prog->u_fog_density, r_fog_density);
 	if (prog->u_eyepos >= 0)
 		glUniform3f_fp(prog->u_eyepos, r_origin[0], r_origin[1], r_origin[2]);
-	if (prog->u_fog_color >= 0)
-		glUniform3f_fp(prog->u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
-	/* R_CollectAliasInstance filters out EF_HOLEY/EF_TRANSPARENT/translucent
-	 * entities, so every batch here is opaque. Use the inert 0.01 threshold
-	 * (matches Ironwail's ALPHATEST=0 shader variant for non-holey alias) —
-	 * a global 0.666 would discard skin pixels whose alpha dips below 2/3 due
-	 * to bilinear filtering of palette index 255 or PNG alpha edges, even on
-	 * models that were never tagged as cutouts. uhexen2-6eab. */
-	if (prog->u_alpha_threshold >= 0)
-		glUniform1f_fp(prog->u_alpha_threshold, 0.01f);
-	/* uhexen2-khsa r13: instanced alias batch is opaque-only (collector
-	 * filters out DRF_TRANSLUCENT / EF_TRANSPARENT / EF_HOLEY / non-default
-	 * ENTALPHA), so we can force fragColor.a=1 unconditionally here. */
-	if (prog->u_force_opaque_alpha >= 0)
-		glUniform1f_fp(prog->u_force_opaque_alpha, 1.0f);
-	/* Underwater caustics.  Same intensity source as the world and legacy
-	 * alias paths; the instance world matrix already puts v_worldxy in world
-	 * space, so nothing else is needed here.  uhexen2-0gn3. */
-	if (prog->u_alias_caustics >= 0)
-		glUniform2f_fp(prog->u_alias_caustics,
-			       R_CausticsIntensity(), (float)cl.time);
 	/* Clustered dynamic light (uhexen2-waum).  One value for the whole draw:
 	 * WHETHER a given instance takes it is bit 8 of its shadedot_row, so what
 	 * this carries is only the scale and ceiling, and true is the right
 	 * argument here -- the per-entity decision was made in the collector. */
 	if (prog->u_alias_dlight >= 0)
 		glUniform1f_fp(prog->u_alias_dlight, R_AliasDlightScale (true));
-	/* The effects this path never turns on, at their resting values.  These
-	 * were never written here: the program's own zero-initialised uniforms
-	 * held them, since GL_ImmEnd (u_turb, u_soft_params) and R_SetSpanCell
-	 * (u_spans) only ever target the ImmEnd programs.  Written explicitly so
-	 * the instanced batch states its whole fragment state, which it must once
-	 * salias_frag reads these from a block every program shares (#450,
-	 * hazard 1).  Same values, so no change today. */
-	if (prog->u_turb >= 0)
-		glUniform2f_fp(prog->u_turb, 0.0f, 0.0f);
-	if (prog->u_soft_params >= 0)
-		glUniform3f_fp(prog->u_soft_params, 0.0f, 0.0f, 0.0f);
-	if (prog->u_spans >= 0)
-		glUniform1f_fp(prog->u_spans, 0.0f);
+
+	/* The fragment stage, salias_frag, reads FragParams and AliasFrag since
+	 * #450 slice S2: blocks every program shares, where these were this
+	 * program's own loose uniforms.  So the whole set it reads is written
+	 * here, before the first batch flushes, and nothing is inherited from
+	 * the draw before -- the instanced path used to lean on its program's
+	 * untouched zeros for the warp, the soft fade and the span cell, which a
+	 * shared block would have replaced with a water poly's (hazard 1).  Same
+	 * values the loose writes and those zeros gave. */
+	/* Use r_fog_density (pre-scaled by Fog_SetupFrame) not raw Fog_GetDensity() */
+	R_SetFog (r_fog_density, r_fog_color);
+	/* R_CollectAliasInstance filters out EF_HOLEY/EF_TRANSPARENT/translucent
+	 * entities, so every batch here is opaque. Use the inert 0.01 threshold
+	 * (matches Ironwail's ALPHATEST=0 shader variant for non-holey alias) —
+	 * a global 0.666 would discard skin pixels whose alpha dips below 2/3 due
+	 * to bilinear filtering of palette index 255 or PNG alpha edges, even on
+	 * models that were never tagged as cutouts. uhexen2-6eab.
+	 * uhexen2-khsa r13: instanced alias batch is opaque-only (collector
+	 * filters out DRF_TRANSLUCENT / EF_TRANSPARENT / EF_HOLEY / non-default
+	 * ENTALPHA), so we can force an opaque output alpha unconditionally. */
+	R_SetAlphaMask (0.01f, 1.0f);
+	/* Underwater caustics.  Same intensity source as the world and legacy
+	 * alias paths; the instance world matrix already puts v_worldxy in world
+	 * space, so nothing else is needed here.  uhexen2-0gn3. */
+	R_SetAliasCausticsU (R_CausticsIntensity(), (float)cl.time);
+	R_SetSoftParams (0.0f, 0.0f, 0.0f);
+	R_SetAliasTurb (0.0f, 0.0f);
+	R_SetAliasSpans (0.0f);
 
 	/* Bind shadedots SSBO at binding 2 (matches non-instanced GPU alias path) */
 	GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, prog->ubo_shadedots);
@@ -4470,7 +4456,11 @@ static void R_DrawAliasInstanced (void)
 		 * v_matpos is world_pos - u_eyepos, because it has no u_modelview and
 		 * its only eye-space vector rides u_lightview, which gl_lightcluster.c
 		 * uploads only while clustered lighting is live. */
-		if (prog->u_alias_material >= 0)
+		/* AliasFrag members since #450, so set in the shadow and flushed
+		 * with this batch below.  The light direction is written whenever
+		 * the material is on, in this path's world frame, and is only read
+		 * then (hazard 5). */
+		if (prog->ub_afrag >= 0)
 		{
 			if (r_materialmaps.integer &&
 			    (batch->norm_tex || batch->gloss_tex))
@@ -4490,17 +4480,12 @@ static void R_DrawAliasInstanced (void)
 					batch->gloss_tex ? batch->gloss_tex : gl_null_gloss_texture);
 				glActiveTexture_fp(GL_TEXTURE0);
 
-				glUniform3f_fp (prog->u_alias_material, nrm, gls,
-						q_max(1.0f, r_gloss_exponent.value));
-				if (prog->u_alias_lightdir >= 0)
-				{
-					R_AliasMaterialLightDirWorld (dir);
-					glUniform3f_fp (prog->u_alias_lightdir,
-							dir[0], dir[1], dir[2]);
-				}
+				R_SetAliasMaterialU (nrm, gls, q_max(1.0f, r_gloss_exponent.value));
+				R_AliasMaterialLightDirWorld (dir);
+				R_SetAliasLightDirU (dir);
 			}
 			else
-				glUniform3f_fp (prog->u_alias_material, 0.0f, 0.0f, 1.0f);
+				R_SetAliasMaterialU (0.0f, 0.0f, 1.0f);
 		}
 
 		/* Bind pose SSBO only if changed from last batch */
@@ -4526,6 +4511,10 @@ static void R_DrawAliasInstanced (void)
 
 		/* Use model's VAO (texcoords + IBO already set up) */
 		glBindVertexArray_fp(gm->vao);
+
+		/* This batch's fragment blocks.  Free when nothing changed: the
+		 * shadow only re-uploads a block it marked dirty. */
+		R_FlushUniforms ();
 
 		/* Draw! */
 		glDrawElementsInstanced_fp(GL_TRIANGLES, gm->num_indices,
@@ -4624,20 +4613,6 @@ static void R_DrawAliasInstanced (void)
 			if (prog->u_viewproj >= 0)
 				glUniformMatrix4fv_fp(prog->u_viewproj, 1, GL_FALSE,
 						      alias_inst_view_proj);
-			/* Use r_fog_density (pre-scaled by Fog_SetupFrame) not raw
-			 * Fog_GetDensity(). This pass blends GL_ONE,GL_ONE, so fog
-			 * must fade to black — a non-black fog color would be ADDED
-			 * over the whole silhouette. See Fog_StartAdditive. */
-			if (prog->u_fog_density >= 0)
-				glUniform1f_fp(prog->u_fog_density, r_fog_density);
-			if (prog->u_fog_color >= 0)
-				glUniform3f_fp(prog->u_fog_color, 0.0f, 0.0f, 0.0f);
-			if (prog->u_alpha_threshold >= 0)
-				glUniform1f_fp(prog->u_alpha_threshold, 0.01f);
-			/* uhexen2-khsa r13: fullbright pass is additive and we don't
-			 * want fragColor.a to leak garbage into FB.a. */
-			if (prog->u_force_opaque_alpha >= 0)
-				glUniform1f_fp(prog->u_force_opaque_alpha, 1.0f);
 			/* This pass reuses the main pass's program, and every uniform
 			 * it does not overwrite is still hot.  The dynamic light was
 			 * already added underneath by that pass, and this one's vertex
@@ -4645,14 +4620,35 @@ static void R_DrawAliasInstanced (void)
 			 * time.  uhexen2-waum. */
 			if (prog->u_alias_dlight >= 0)
 				glUniform1f_fp(prog->u_alias_dlight, 0.0f);
-			/* Same argument again for the relief, and it matters more here
-			 * than it does for the dlight: the per-batch loop below never
-			 * writes u_alias_material, so without this the last batch of the
-			 * MAIN pass leaves its value hot for every glow batch.  That
-			 * would scale the glow mask by the relief and add the specular a
-			 * second time.  uhexen2-4kcb. */
-			if (prog->u_alias_material >= 0)
-				glUniform3f_fp(prog->u_alias_material, 0.0f, 0.0f, 1.0f);
+
+			/* The fragment blocks, in full, as for the main pass (#450,
+			 * hazard 3): the shadow pass between the two may have drawn
+			 * through GL_ImmEnd, which rewrites FragParams, so nothing
+			 * the main pass left there can be assumed to have survived.
+			 *
+			 * Use r_fog_density (pre-scaled by Fog_SetupFrame) not raw
+			 * Fog_GetDensity(). This pass blends GL_ONE,GL_ONE, so fog
+			 * must fade to black — a non-black fog color would be ADDED
+			 * over the whole silhouette. See Fog_StartAdditive.  Put back
+			 * after the pass: FragParams' fog is every block program's. */
+			R_SetFog (r_fog_density, vec3_origin);
+			/* uhexen2-khsa r13: fullbright pass is additive and we don't
+			 * want a garbage output alpha leaking into FB.a. */
+			R_SetAlphaMask (0.01f, 1.0f);
+			/* The main pass's caustics, which its program used to keep. */
+			R_SetAliasCausticsU (R_CausticsIntensity(), (float)cl.time);
+			R_SetSoftParams (0.0f, 0.0f, 0.0f);
+			R_SetAliasTurb (0.0f, 0.0f);
+			R_SetAliasSpans (0.0f);
+			/* Same argument as the dlight for the relief, and it matters
+			 * more here: the per-batch loop below never writes the
+			 * material, so without this the last batch of the MAIN pass
+			 * leaves its value hot for every glow batch.  That would scale
+			 * the glow mask by the relief and add the specular a second
+			 * time.  uhexen2-4kcb.  The light direction is left as the
+			 * main pass left it; with the material off nothing reads it. */
+			R_SetAliasMaterialU (0.0f, 0.0f, 1.0f);
+			R_FlushUniforms ();
 
 			GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, prog->ubo_shadedots);
 			R_SetBlend (true);
@@ -4693,6 +4689,10 @@ static void R_DrawAliasInstanced (void)
 			R_SetDepthMask (true);
 			R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 			R_SetBlend (false);
+			/* The black additive fog went into FragParams, which every
+			 * block program reads; the scene's goes back into the shadow
+			 * for whichever flushes next (#450, hazard 3). */
+			R_SetFog (r_fog_density, r_fog_color);
 
 			glBindVertexArray_fp(0);
 			R_UseProgram (0);
@@ -7940,10 +7940,25 @@ float R_SpanCell (qboolean liquid)
 
 /* For the immediate-mode draws that override it around one batch: brush polys
  * and liquids through gl_shader_alias, lit liquids through the world program.
- * Nothing when the mode is off, so the default path does no uniform traffic. */
+ * Nothing when the mode is off, so the default path does no uniform traffic.
+ *
+ * Two arms (#450).  The world programs still declare u_spans loose, so theirs
+ * is written on the program.  salias_frag reads it from AliasFrag, which every
+ * alias-family program shares: the cell lands in the shadow and reaches the GPU
+ * with the batch's own flush in GL_ImmEnd.  That is the same value at the same
+ * draws only because every caller brackets one batch -- set, draw, back to 0
+ * -- so the block holds 0 everywhere else, and the skeletal and instanced
+ * draws, which never come through here, write 0 themselves. */
 void R_SetSpanCell (const glprogram_t *p, float cell)
 {
-	if (!r_softemu_spans.integer || !p->program || p->u_spans < 0)
+	if (!r_softemu_spans.integer || !p->program)
+		return;
+	if (p->ub_afrag >= 0)
+	{
+		R_SetAliasSpans (cell);
+		return;
+	}
+	if (p->u_spans < 0)
 		return;
 	R_UseProgram (p->program);
 	glUniform1f_fp (p->u_spans, cell);

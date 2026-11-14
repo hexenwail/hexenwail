@@ -11,8 +11,9 @@ in the commit that made the change):
 
   - SpanUV is highp in and out (the ES tier defaults to mediump) and falls
     back to the perspective coordinate when a cell's depth changes 8x;
-  - every world program and the alias program declare u_spans and route their
-    texture (and the world's lightmap) coordinate through SpanUV;
+  - every world program declares u_spans, the alias program reads it from
+    AliasFrag (#450), and all route their texture (and the world's lightmap)
+    coordinate through SpanUV;
   - R_SpanCell keeps 1997's proportion, 8/320 of the render width, doubled for
     liquids, 0 when off;
   - every alias-program brush/liquid batch and the lit-liquid world batch set
@@ -52,12 +53,18 @@ for name in ("sworld_frag", "sworld_frag_opaque"):
                  '"in highp vec2 v_lmcoord;', "lmc = v_lmcoord + clamp(lmc - v_lmcoord, -lmlim, lmlim);"):
         if want not in body:
             errors.append(f"{name}: missing {want}")
-start = shader.index("static const char salias_frag[] =")
-alias = shader[start:shader.index("\";\n", start)]
-for want in ('"uniform float u_spans;', "GLSL_SPAN_UV_FN", "if (u_spans > 0.0) uv = SpanUV(v_texcoord, u_spans);",
-             "highp vec2 uv = v_texcoord"):
+# The alias program's fragment stage is engine/shaders/salias_frag.glsl since
+# #450: u_spans is AliasFrag's u_afwarp.z, and SpanUV comes from span_uv.inc,
+# which tools/test_alias_frag_block.py keeps token-identical to GLSL_SPAN_UV_FN.
+alias = read("engine/shaders/salias_frag.glsl")
+for want in ('#include "alias.inc"', '#include "span_uv.inc"',
+             "if (u_spans > 0.0) uv = SpanUV(v_texcoord, u_spans);", "highp vec2 uv = v_texcoord"):
     if want not in alias:
-        errors.append(f"salias_frag: missing {want}")
+        errors.append(f"salias_frag.glsl: missing {want}")
+if not re.search(r"#define\s+u_spans\s+u_afwarp\.z\n", read("engine/shaders/alias.inc")):
+    errors.append("alias.inc: u_spans must be AliasFrag's u_afwarp.z")
+if not re.search(r"if \(p->ub_afrag >= 0\)\s*\{\s*R_SetAliasSpans \(cell\);", read("engine/hexen2/gl_rmain.c")):
+    errors.append("R_SetSpanCell must put the alias programs' cell in AliasFrag")
 
 rmain = strip(read("engine/hexen2/gl_rmain.c"))
 m = re.search(r"float R_SpanCell \(qboolean liquid\)\s*\{(.*?)\n\}", rmain, re.S)
