@@ -258,6 +258,17 @@ for _ in $(seq $((BROWSER_TIMEOUT * 2))); do
 	kill -0 "$chrome_pid" 2>/dev/null || break
 	sleep 0.5
 done
+# SMOKE_SHOT=<file.png>, Firefox only: grab the Xvfb screen while the page is
+# still up, i.e. the frame as the browser composited it, not the engine's own
+# readback.  Needs ImageMagick's `import`.
+if [ -n "${SMOKE_SHOT:-}" ] && [ "$browser_kind" = firefox ]; then
+	if command -v import >/dev/null; then
+		import -display ":$display_n" -window root "$SMOKE_SHOT" 2>/dev/null ||
+			echo "warning: SMOKE_SHOT capture failed" >&2
+	else
+		echo "warning: SMOKE_SHOT needs ImageMagick's import on PATH" >&2
+	fi
+fi
 kill "$chrome_pid" 2>/dev/null || true
 wait "$chrome_pid" 2>/dev/null || true
 

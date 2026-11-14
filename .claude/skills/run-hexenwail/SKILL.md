@@ -177,6 +177,11 @@ Three environment knobs:
   (`-fsaa 0` because OIT stands down under MSAA on this tier).
 - `SMOKE_LOG=<path>` keeps the raw browser log, which is otherwise deleted. It
   is the only way to audit what the error filter saw.
+- `SMOKE_SHOT=<file.png>` (Firefox only; add `nixpkgs#imagemagick` to the shell)
+  grabs the Xvfb screen at verdict time: the frame as the browser composited
+  it, not the engine's own readback. Run once plain and once with
+  `SMOKE_ARGS="-fsaa 0 +gamma 0.6 +contrast 1.5 +r_softemu 1 +r_dither 1"`, and
+  the post-process chain shows as a brighter, posterized frame.
 
 ## Run: the GUI lane (screenshots)
 
