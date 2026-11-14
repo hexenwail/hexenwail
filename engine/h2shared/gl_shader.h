@@ -190,6 +190,14 @@ typedef struct {
 	GLint	u_lightgrid_xy;
 	GLint	u_lightgrid_z;
 	GLint	u_lightgrid;
+	/* salias_frag's three per-batch effects this path never turns on: liquid
+	 * warp, soft particles, softemu spans.  Looked up so the instanced draw
+	 * can write their resting values (0) explicitly instead of relying on a
+	 * fresh program's zeros -- which stops holding once salias_frag reads
+	 * them from a block shared with every other program (#450, hazard 1). */
+	GLint	u_turb;
+	GLint	u_soft_params;
+	GLint	u_spans;
 } gl_alias_inst_prog_t;
 
 extern gl_alias_inst_prog_t gl_shader_alias_inst;

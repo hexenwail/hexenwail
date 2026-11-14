@@ -1518,6 +1518,13 @@ static void GL_DrawAliasSkeletal (entity_t *e, aliashdr_t *paliashdr,
 	 * through GL_ImmEnd, so it must clear it itself.  uhexen2-9o7u */
 	if (prog->u_turb >= 0)
 		glUniform2f_fp (prog->u_turb, 0.0f, 0.0f);
+	/* And the softemu span cell, which only R_SetSpanCell writes and only for
+	 * the ImmEnd alias/world programs -- so this program's copy has only ever
+	 * held its initial 0.  Stated explicitly for the same reason as the two
+	 * above, before salias_frag moves it into a shared block (#450, hazard 2).
+	 * Same value, so no change today. */
+	if (prog->u_spans >= 0)
+		glUniform1f_fp (prog->u_spans, 0.0f);
 	/* Material maps.  Unlike the three above this is PASSED THROUGH rather
 	 * than cleared: R_DrawAliasModel armed it for this entity's skin just
 	 * before dispatching here, and the skeletal program's v_matpos is eye
@@ -4397,6 +4404,19 @@ static void R_DrawAliasInstanced (void)
 	 * argument here -- the per-entity decision was made in the collector. */
 	if (prog->u_alias_dlight >= 0)
 		glUniform1f_fp(prog->u_alias_dlight, R_AliasDlightScale (true));
+	/* The effects this path never turns on, at their resting values.  These
+	 * were never written here: the program's own zero-initialised uniforms
+	 * held them, since GL_ImmEnd (u_turb, u_soft_params) and R_SetSpanCell
+	 * (u_spans) only ever target the ImmEnd programs.  Written explicitly so
+	 * the instanced batch states its whole fragment state, which it must once
+	 * salias_frag reads these from a block every program shares (#450,
+	 * hazard 1).  Same values, so no change today. */
+	if (prog->u_turb >= 0)
+		glUniform2f_fp(prog->u_turb, 0.0f, 0.0f);
+	if (prog->u_soft_params >= 0)
+		glUniform3f_fp(prog->u_soft_params, 0.0f, 0.0f, 0.0f);
+	if (prog->u_spans >= 0)
+		glUniform1f_fp(prog->u_spans, 0.0f);
 
 	/* Bind shadedots SSBO at binding 2 (matches non-instanced GPU alias path) */
 	GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, prog->ubo_shadedots);

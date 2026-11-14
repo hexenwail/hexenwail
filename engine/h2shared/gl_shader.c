@@ -2630,6 +2630,9 @@ static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p, const char *na
 	p->u_lightgrid_xy = glGetUniformLocation_fp(prog, "u_lightgrid_xy");
 	p->u_lightgrid_z = glGetUniformLocation_fp(prog, "u_lightgrid_z");
 	p->u_lightgrid = glGetUniformLocation_fp(prog, "u_lightgrid");
+	p->u_turb = glGetUniformLocation_fp(prog, "u_turb");		/* #450 hazard 1 */
+	p->u_soft_params = glGetUniformLocation_fp(prog, "u_soft_params");
+	p->u_spans = glGetUniformLocation_fp(prog, "u_spans");
 
 	/* Bind skin texture to unit 0 */
 	R_UseProgram (prog);
