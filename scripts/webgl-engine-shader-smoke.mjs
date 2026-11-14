@@ -44,7 +44,7 @@ const PROGRAM_SPECS = [
   ['sky_layers', 'shader', 'ssky_layers_vert', 'ssky_layers_frag'],
   ['sky_boxside', 'shader', 'ssky_side_vert', 'ssky_side_frag'],
   ['sky_cubemap', 'shader', 'ssky_cube_vert', 'ssky_cube_frag'],
-  ['postprocess', 'postprocess', 'pp_vert_src', 'pp_frag_src'],
+  ['postprocess', 'postprocess', 'spp_vert', 'spp_frag'],
   // The bloom and OIT-resolve stages are engine/shaders files since #450;
   // gl_postprocess.c compiles them with PP_CompileShaderSplit.
   ['bloom_bright', 'postprocess', 'sbloom_vert', 'sbloom_bright_frag'],
@@ -379,7 +379,7 @@ export async function extractEngineWebGLPrograms() {
     macros.set(name, readDefine(glesBranchDefining(shaderSource, name), name, macros, shaderCtx));
   }
   // gl_postprocess.c keeps its own headers; PP_ES_PRECISION feeds the other two.
-  for (const name of ['PP_VERT_HEADER', 'PP_FRAG_HEADER', 'PP_BITFIELD_REVERSE']) {
+  for (const name of ['PP_VERT_HEADER', 'PP_FRAG_HEADER']) {
     macros.set(name, readDefine(glesBranchDefining(postprocessSource, name), name, macros, postprocessCtx));
   }
 

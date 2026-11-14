@@ -16,14 +16,18 @@ ROOT = Path(__file__).resolve().parents[1]
 read = lambda p: (ROOT / p).read_text()
 errors = []
 pp = read("engine/h2shared/gl_postprocess.c")
-if '"    color.rgb *= contrast;\\n"' not in pp:
+# The post-process fragment shader is engine/shaders/spp_frag.glsl since #450.
+shader = read("engine/shaders/spp_frag.glsl")
+if "    color.rgb *= contrast;\n" not in shader:
     errors.append("the post-process shader must multiply by contrast")
-if "(color.rgb - 0.5) * contrast + 0.5" in pp:
+if "(color.rgb - 0.5) * contrast + 0.5" in shader + pp:
     errors.append("the mid-grey contrast stretch is still there")
+if not re.search(r"#define\s+contrast\s+pp_p0\.y\b", shader):
+    errors.append("contrast must alias PpParams' pp_p0.y")
 fn = re.search(r"static float PP_Contrast \(void\)\s*\{(.*?)\n\}", pp, re.S)
 if not fn or "if (c < 1.0f) c = 1.0f;" not in fn.group(1) or "if (c > 2.0f) c = 2.0f;" not in fn.group(1):
     errors.append("PP_Contrast must clamp to Ironwail's 1..2")
-if "glUniform1f_fp(pp_loc_contrast, PP_Contrast ());" not in pp or "PP_Contrast () != 1.0f" not in pp:
+if "pp_params.p0[1] = PP_Contrast ();" not in pp or "PP_Contrast () != 1.0f" not in pp:
     errors.append("the uniform and the post-process trigger must use the clamped contrast")
 menu = read("engine/hexen2/menu.c")
 if '{ DISP_CONTRAST,	"contrast",	1.0f, 2.0f,	1.0f, 2.0f,' not in menu or "if (f < 1)	f = 1;" not in menu:

@@ -164,13 +164,18 @@ test('every engine shader family carries an ES-tier header', async () => {
 
 test('post-process palette stays inside the WebGL2 fragment uniform budget', async () => {
   const postprocess = await readFile(new URL('../../engine/h2shared/gl_postprocess.c', import.meta.url), 'utf8');
+  // The post-process fragment shader is engine/shaders/spp_frag.glsl since #450.
+  const ppFrag = await readFile(new URL('../../engine/shaders/spp_frag.glsl', import.meta.url), 'utf8');
 
   // A vec3[256] is 256 uniform vectors on its own, over the 224 a WebGL2
   // implementation is only required to offer a fragment shader -- the whole
   // post-process program can fail to link.  The palette LUT carries resolved
   // colour instead.  d2c46f078.
-  assert.doesNotMatch(postprocess, /uniform vec3 palette\[/);
-  assert.match(postprocess, /texelFetch\(paletteLUT, idx, 0\)\.rgb/);
+  assert.doesNotMatch(postprocess + ppFrag, /uniform vec3 palette\[/);
+  assert.match(ppFrag, /texelFetch\(paletteLUT, idx, 0\)\.rgb/);
+  // The ES 3.00 tier has no bitfieldReverse: the file carries the polyfill,
+  // selected by the compiler's own GL_ES (#112 item 4, #450).
+  assert.match(ppFrag, /#ifdef GL_ES\n(?:[^#]*\n)?uint bitfieldReverse\(uint v\)/);
   // RGBA8, not RGB8: the compute LUT builder writes into this same texture
   // through glBindImageTexture, and rgb8 is not an image-storable format.
   // `feat(renderer): r_softemu_metric and a GPU palette LUT with three colour

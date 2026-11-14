@@ -109,10 +109,57 @@ if not oit_use:
     errors.append("the OIT resolve does not bind oit_ubo at OIT_PARAMS_UBO_BINDING")
 if re.search(r"GL_BindBufferRange\s*\(\s*GL_UNIFORM_BUFFER\s*,\s*OIT_PARAMS_UBO_BINDING", code):
     errors.append("OitParams is bound through the GL_Upload ring, a stub on the ES tier")
-for buf in ("oit_ubo", "bloom_ubo"):
+for buf in ("oit_ubo", "bloom_ubo", "pp_vert_ubo", "pp_frag_ubo"):
     if not re.search(rf"glDeleteBuffers_fp\s*\(\s*1\s*,\s*&{buf}\s*\)", code):
         errors.append(f"{buf} is never freed")
 
+# --- the main post-process program: PpVert + PpParams (#450) ---------------
+ppf = (SH / "spp_frag.glsl").read_text() if (SH / "spp_frag.glsl").exists() else ""
+ppv = (SH / "spp_vert.glsl").read_text() if (SH / "spp_vert.glsl").exists() else ""
+pblock = re.findall(r"uniform\s+PpParams\s*\{(.*?)\};", strip_comments(ppf), re.S)
+want = [("vec4", "pp_p0"), ("vec4", "pp_p1"), ("vec4", "pp_p2"), ("vec4", "pp_p3"), ("ivec4", "pp_i0")]
+if len(pblock) != 1 or re.findall(r"\b(ivec4|vec4)\s+(\w+)\s*;", pblock[0]) != want:
+    errors.append(f"spp_frag.glsl's PpParams must be exactly {want}")
+cm = re.search(r"typedef struct \{([^{}]*)\} pp_params_t;", src)
+cfields = re.findall(r"\b(float|GLint)\s+(\w+)\[4\];", cm.group(1)) if cm else []
+if cfields != [("float", "p0"), ("float", "p1"), ("float", "p2"), ("float", "p3"), ("GLint", "i0")]:
+    errors.append(f"pp_params_t does not mirror PpParams member for member: {cfields}")
+if "sizeof(pp_params_t) == 80" not in src:
+    errors.append("no COMPILE_TIME_ASSERT pinning sizeof(pp_params_t) == 80")
+if not re.search(r"uniform\s+PpVert\s*\{\s*mat4\s+u_ppmvp\s*;\s*\}", strip_comments(ppv)):
+    errors.append("spp_vert.glsl must declare PpVert { mat4 u_ppmvp; }")
+# every old loose name is an alias into the right component, and only that
+ALIASES = {"gamma": "pp_p0.x", "contrast": "pp_p0.y", "dither": "pp_p0.z", "lutmax": "pp_p0.w",
+           "scale": "pp_p1.x", "waterwarp": "pp_p1.y", "time": "pp_p1.z", "fxaa_on": "pp_p1.w",
+           "rcpFrame": "pp_p2.xy", "viewdelta": "pp_p2.zw", "motionblur": "pp_p3.x",
+           "hdr_exposure": "pp_p3.y", "u_bloom_strength": "pp_p3.z", "softemu": "pp_i0.x"}
+for name, target in ALIASES.items():
+    if not re.search(rf"#define\s+{name}\s+{re.escape(target)}\b", ppf):
+        errors.append(f"{name} is not aliased to {target}")
+    if re.search(rf"uniform\s+\w+\s+{name}\s*;", strip_comments(ppf)):
+        errors.append(f"{name} is still a loose uniform")
+# the C side writes the field each alias reads -- a swapped index compiles
+# and renders wrong, so pin the writes against the same table
+CWRITE = {"contrast": "p0[1] = PP_Contrast ()", "lutmax": "p0[3] = lutmax",
+          "softemu": "i0[0] = (int)r_softemu.value", "u_bloom_strength": "p3[2] = r_bloom.integer",
+          "fxaa_on": "p1[3] = Cvar_VariableValue(\"gl_fxaa\")", "gamma": "p0[0] = v_gamma.value",
+          "time": "p1[2] = (float)realtime", "scale": "p1[0] = scale"}
+for name, write in CWRITE.items():
+    if f"pp_params.{write}" not in src:
+        errors.append(f"gl_postprocess.c does not write {name} as pp_params.{write}")
+for gone in ("pp_vert_src", "pp_frag_src", "PP_BITFIELD_REVERSE", "pp_loc_gamma", "pp_loc_mvp"):
+    if re.search(rf"\b{gone}\b", code):
+        errors.append(f"{gone} is still in gl_postprocess.c")
+if not re.search(r"#define PP_VERT_UBO_BINDING\s+8\b", src) or not re.search(r"#define PP_FRAG_UBO_BINDING\s+9\b", src):
+    errors.append("PpVert/PpParams must be at binding points 8 and 9")
+if "9 is its PpParams" not in (ROOT / "engine/h2shared/gl_shader.h").read_text():
+    errors.append("gl_shader.h's binding registry does not list 8 and 9")
+push = re.search(r"static void PP_PushParams \(void\)\s*\{(.*?)\n\}", code, re.S)
+if not push or re.search(r"\bGL_Upload\s*\(|\bGL_BindBufferRange\s*\(", push.group(1)):
+    errors.append("PP_PushParams must exist and stay off the GL_Upload ring (ES stub)")
+if len(re.findall(r"\bPP_PushParams\s*\(\s*\)\s*;", code)) != 2:
+    errors.append("PP_PushParams must run before both pp_program draws (native and final)")
+
 if errors:
     sys.exit("FAIL:\n  " + "\n  ".join(errors))
-print("PASS BloomParams and OitParams carry the bloom and OIT-resolve parameters on both tiers (#450)")
+print("PASS BloomParams, OitParams and PpVert/PpParams carry the post-process parameters on both tiers (#450)")
