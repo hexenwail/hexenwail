@@ -2435,6 +2435,13 @@ void GL_PostProcess_Init (void)
 	soft_depth_w = soft_depth_h = 0;
 	soft_depth_fmt = 0;
 	soft_depth_valid = false;
+	/* The post-process uniform buffers (#450) are names in the same dead
+	 * context; their creation paths test for 0 (oit_ubo, pp_*_ubo) or
+	 * regenerate unconditionally (bloom_ubo). */
+	oit_ubo = 0;
+	bloom_ubo = 0;
+	pp_vert_ubo = 0;
+	pp_frag_ubo = 0;
 
 	/* GL 4.3: shaders always available */
 
