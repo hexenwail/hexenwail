@@ -98,7 +98,34 @@ def check_mirror(glsl_text, block, cstruct, total):
 
 
 af = check_mirror(alias_inc, "AliasFrag", "r_aliasfrag_t", 144)
-check_mirror(uniforms_inc, "FragParams", "r_fragparams_t", 144)
+fp = check_mirror(uniforms_inc, "FragParams", "r_fragparams_t", 144)
+
+# Sizes and kinds alone let two same-shaped members swap places (material and
+# lightdir, grid and gridz) and still pass, while the shader reads one where
+# the C wrote the other.  Pin each GLSL member to its C field by name.
+NAMES = {
+    "r_aliasfrag_t": {"u_aflightview": "lightview", "u_afgrid": "grid", "u_afgridz": "gridz",
+                      "u_afwarp": "warp", "u_afmaterial": "material", "u_aflightdir": "lightdir"},
+    "r_fragparams_t": {"u_fscene": "scene", "u_ffogv": "fog", "u_fmask": "mask",
+                       "u_fcaustics": "caustics", "u_fsoft": "soft", "u_fskyfog": "skyfog",
+                       "u_fsky": "sky", "u_fdebug": "debug", "u_fskydir": "skydir"},
+}
+for cstruct, glsl_members in (("r_aliasfrag_t", af), ("r_fragparams_t", fp)):
+    cm = re.search(rf"typedef struct \{{([^{{}}]*)\}} {cstruct};", uh)
+    cnames = re.findall(r"\b(?:float|int)\s+(\w+)\[\d+\];", cm.group(1)) if cm else []
+    want = [NAMES[cstruct].get(n, f"?{n}") for n, _, _ in glsl_members]
+    if want != cnames:
+        errors.append(f"{cstruct} fields {cnames} are not the C names of its GLSL members, in order, {want}")
+
+# The z-log pair: grid z is (zlogscale, zlogbias) in that order, as the shader's
+# LightGridMask divides by .x after subtracting .y.
+if not re.search(r"RU_Set4\(aliasfrag\.gridz,\s*zlogscale,\s*zlogbias,", uc):
+    errors.append("R_SetAliasLightGrid must store (zlogscale, zlogbias) into aliasfrag.gridz in that order")
+# AliasFrag's flush must upload into its OWN buffer.
+fl = re.search(r"if \(afrag_dirty[^{]*\{(.*?)\n\t\}", uc, re.S)
+if not fl or not re.search(r"GL_BindBuffer\s*\(\s*GL_UNIFORM_BUFFER\s*,\s*ubo_afrag\s*\)", fl.group(1)) \
+        or re.search(r"\bubo_(?:vert|frag)\b", fl.group(1)):
+    errors.append("R_FlushUniforms' afrag branch must bind and fill ubo_afrag, and only ubo_afrag")
 if "COMPILE_TIME_ASSERT(aliasfrag_size, sizeof(r_aliasfrag_t) == 64 + 5 * 16);" not in uc:
     errors.append("COMPILE_TIME_ASSERT must pin r_aliasfrag_t at 64 + 5*16")
 if not re.search(r"FRAG_UBO\(1\) uniform AliasFrag", alias_inc):
