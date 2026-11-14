@@ -407,3 +407,11 @@ jobs:
       # the file, GL_ImmPushBlocks feeds it, MSL targets 2.1 (#450 S1).
       - name: Alias vertex stage on VertParams
         run: python3 tools/test_alias_vert_block.py
+
+      # salias_frag reads FragParams and AliasFrag: the AliasFrag mirror and
+      # its own binding, the .inc copies of the world's GLSL helpers, all ten
+      # program builds, and every draw path writing the block members it reads
+      # before it draws, since they are global where the loose uniforms were
+      # per-program (#450 S2).
+      - name: Alias fragment stage on FragParams + AliasFrag
+        run: python3 tools/test_alias_frag_block.py
