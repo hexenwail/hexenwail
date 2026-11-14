@@ -278,7 +278,7 @@ export function expandShaderExpression(expression, source, sourceName = 'test so
 // (GLSL has no #include of its own: ARB_shading_language_include is not core
 // and does not exist in GLSL ES at all, which is why the expansion is offline.)
 async function expandShaderIncludes(name, body) {
-  for (let pass = 0; pass <= 8; pass += 1) {
+  for (let pass = 0; pass <= 31; pass += 1) {
     const match = /#include "([^"]+)"/.exec(body);
     if (!match) break;
     let included;

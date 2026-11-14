@@ -395,3 +395,9 @@ jobs:
       # upload avoids GL_Upload, which is a stub on the ES tier (#450).
       - name: BloomParams block covers the bloom passes on both tiers
         run: python3 tools/test_bloomparams_block.py
+
+      # The shader include expander and its WebGL-smoke mirror allow the same
+      # number of passes, no stage exceeds it, and no shader comment carries
+      # the declaration the OIT splice searches for (#450).
+      - name: Shader include bound and OIT splice marker
+        run: python3 tools/test_embed_include_bound.py

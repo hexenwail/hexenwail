@@ -69,8 +69,13 @@ foreach(shader ${SHADER_FILES})
     file(READ "${shader}" body)
 
     # Resolve includes.  Bounded rather than while(TRUE) so a cyclic include
-    # fails the build instead of hanging it.
-    foreach(pass RANGE 8)
+    # fails the build instead of hanging it.  Each pass resolves one distinct
+    # include name (every occurrence of it), so the bound is the most distinct
+    # includes one stage may pull in, transitively.  It was 9 (RANGE 8); the
+    # alias family's planned split of salias_frag needs about that many on its
+    # own (#450).  scripts/webgl-engine-shader-smoke.mjs mirrors this bound and
+    # tools/test_embed_include_bound.py keeps the two equal.
+    foreach(pass RANGE 31)
         if(NOT body MATCHES "#include \"([^\"]+)\"")
             break()
         endif()
