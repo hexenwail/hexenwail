@@ -485,3 +485,7 @@ jobs:
       # and reached only from those setups (#490).
       - name: Alias models flat under r_fullbright
         run: python3 tools/test_alias_fullbright.py
+      # The CPU alias glow draws at the base pass's pose blend, resolved once
+      # per draw for both passes, as the instanced glow does (#493).
+      - name: CPU alias glow at the base pass's blend
+        run: python3 tools/test_alias_fullbright_lerp.py

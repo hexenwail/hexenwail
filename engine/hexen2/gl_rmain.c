@@ -2205,7 +2205,7 @@ static void R_AliasResolveLerp (entity_t *e, aliashdr_t *paliashdr,
 	}
 	}
 
-	if (r_lerpmodels.integer && !model_fullbright_pass &&
+	if (r_lerpmodels.integer &&
 	    !(e->model->flags & MOD_NOLERP) && e->lerptime > 0.0f &&
 	    !R_AliasPairSnaps (e->model, e->previouspose, e->currentpose) &&
 	    (e != &cl.viewent || r_lerp_viewmodel.integer))
@@ -2249,15 +2249,15 @@ static void R_AliasResolveLerp (entity_t *e, aliashdr_t *paliashdr,
 =================
 R_SetupAliasFrame
 
+Draws the pose pair R_AliasResolveLerp resolved.  R_DrawAliasModel resolves
+once and hands the same pair to the base pass and the fullbright pass, so
+the glow sits on the mesh it lights mid-lerp, as the instanced path's does
+(GitHub #493).
 =================
 */
-static void R_SetupAliasFrame (entity_t *e, aliashdr_t *paliashdr)
+static void R_SetupAliasFrame (entity_t *e, aliashdr_t *paliashdr,
+			       int prevpose, int pose, float blend)
 {
-	int	pose, prevpose;
-	float	blend;
-
-	R_AliasResolveLerp (e, paliashdr, &prevpose, &pose, &blend);
-
 	/* Skeletal models blend their two poses inside the shader, so they take
 	 * the resolved pair as-is rather than going through the three-way
 	 * GL_DrawAliasFrame call below (which exists to normalize the trivertx
@@ -2586,6 +2586,8 @@ static void R_DrawAliasModel (entity_t *e)
 	 * r_vm_watch capture. */
 	qboolean	viewmodel = (e == &cl.viewent);
 	const char	*branch_taken = "(none)";	/* for r_aliasinfo */
+	int		lerp_prevpose, lerp_pose;
+	float		lerp_blend;
 
 	clmodel = e->model;
 
@@ -3100,6 +3102,12 @@ static void R_DrawAliasModel (entity_t *e)
 	else
 		R_ClearAliasMaterial ();
 
+	/* Once per draw, and both passes draw this pair: the glow has to sit on
+	 * the blend the skin under it was drawn at.  A second resolve is also
+	 * only idempotent by luck -- were anything to set LERP_RESETANIM2, the
+	 * first call would leave lerpstart 0 and the second reset it.  #493. */
+	R_AliasResolveLerp (e, paliashdr, &lerp_prevpose, &lerp_pose, &lerp_blend);
+
 	/* A skin with no opaque texels in it cannot occlude anything, and SoT
 	 * draws its mist eight times over the same volume -- with depth writes
 	 * on, each instance's own faint edge hard-rejects the next and the
@@ -3118,7 +3126,7 @@ static void R_DrawAliasModel (entity_t *e)
 		if (soft && !OIT_InPass())
 			R_SetDepthMask (false);
 
-		R_SetupAliasFrame (e, paliashdr);
+		R_SetupAliasFrame (e, paliashdr, lerp_prevpose, lerp_pose, lerp_blend);
 
 		if (soft && !OIT_InPass())
 			R_SetDepthMask (true);
@@ -3175,7 +3183,7 @@ static void R_DrawAliasModel (entity_t *e)
 			R_ClearAliasMaterial ();
 
 			model_fullbright_pass = true;
-			R_SetupAliasFrame (e, paliashdr);
+			R_SetupAliasFrame (e, paliashdr, lerp_prevpose, lerp_pose, lerp_blend);
 			model_fullbright_pass = false;
 			if (viewmodel)
 				r_vm_fullbright = true;
