@@ -2064,11 +2064,17 @@ the caller set up, so a mid-chain flush draws exactly what the terminal one
 would.  uhexen2-cj1s.
 =================
 */
-static void DrawTextureChains_FlushBatch (msurface_t **batch_surfs, int batch_count)
+static void DrawTextureChains_FlushBatch (qboolean world_state_set, msurface_t **batch_surfs, int batch_count)
 {
 	int	run_start = 0;
 	int	run_first_idx, run_total_idx;
 	int	k;
+
+	/* world_state_mvp / _mv belong to this DrawTextureChains call only while
+	 * its BindWorldState is live; otherwise they hold the previous call's
+	 * (the previous frame's, or the mirror view's).  #450 W1 review. */
+	if (!world_state_set)
+		Sys_Error ("%s: world state not bound", __thisfunc__);
 
 	if (batch_count <= 0)
 		return;
@@ -2742,7 +2748,7 @@ static void DrawTextureChains (entity_t *e)
 					{
 						if (batch_count == MAX_BATCH_SURFS)
 						{
-							DrawTextureChains_FlushBatch (batch_surfs, batch_count);
+							DrawTextureChains_FlushBatch (world_state_set, batch_surfs, batch_count);
 							batch_count = 0;
 						}
 						batch_surfs[batch_count++] = s;
@@ -2804,7 +2810,7 @@ static void DrawTextureChains (entity_t *e)
 				}
 
 				/* Merge contiguous IBO ranges and draw */
-				DrawTextureChains_FlushBatch (batch_surfs, batch_count);
+				DrawTextureChains_FlushBatch (world_state_set, batch_surfs, batch_count);
 				/* No per-chain teardown — state is reused by the next
 				 * fast-path chain and torn down once after the loop. */
 			}

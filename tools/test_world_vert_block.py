@@ -41,6 +41,15 @@ Checks the pieces that have to move together:
     the engine that names a world program and issues a glDraw* is one of
     these, so a new path has to be added here, and two of them (FlushBatch,
     DispatchBrushInstancedPass) are reached only from their pinned callers.
+  * the flow pass (end of file) checks the same three things by following
+    values and calls through every function the h2 client builds, rather
+    than by spelling: no function draws while a world program may be bound
+    -- handed in through a parameter, a local, a pointer or a return value,
+    or left bound by a caller -- unless it is a pinned path or GL_ImmEnd;
+    no block writer is reached through any chain of calls between a path's
+    flush and its draw; and DrawTextureChains reaches FlushBatch only with
+    world_state_set true on every path, FlushBatch refuses to draw without
+    it, and nothing in between can refill the pair it draws with.
 """
 from pathlib import Path
 import re
@@ -79,7 +88,8 @@ def functions(code):
     """(name, open, close) of every depth-0 brace block whose header ends in a
     parameter list -- the function definitions of a comment-stripped C file."""
     out, depth, start, last = [], 0, 0, 0
-    for i, ch in enumerate(code):
+    for mm in re.finditer(r"[{};]", code):
+        ch, i = mm.group(0), mm.start()
         if ch == "{":
             if depth == 0:
                 start = i
@@ -547,7 +557,1119 @@ for f in C_FILES:
             errors.append(f"{f.relative_to(ROOT)}:{n} names a world program and draws, but is not a pinned "
                           "path; write VertParams there and add it to PATHS")
 
+# ==================================================================== the flow pass
+# The checks above read each pinned path by its spelling.  This pass follows
+# the values and the calls instead, over every function the h2 client builds
+# (engine/h2shared + engine/hexen2, their own and their headers' macros
+# expanded), so a world program handed through a parameter, a local, a
+# pointer or a return value, or left bound for a callee, still counts:
+#   * a function that draws while a world program may be bound must be a
+#     pinned path (PATHS, or GL_ImmEnd, which writes the block itself);
+#   * a block writer reached through any chain of engine calls between a
+#     path's flush and its draw counts as a writer;
+#   * DrawTextureChains reaches FlushBatch only with world_state_set true,
+#     which only its own BindWorldState sets, so the saved pair is this call's.
+# What it cannot model -- a goto it cannot follow, a value stored where it
+# cannot follow it, a body it cannot parse -- is an error, never a pass.
+# Three choices are modelled rather than proven: a call through a pointer may
+# reach any address-taken function with as many parameters; a FUNC_NORETURN
+# call ends the path; and a nested frame (a console print repainting the
+# screen) is checked from its own entry instead of being charged to the
+# print's caller (FRAME_ROOTS).
+SCRUB = re.compile(r"/\*.*?\*/|//[^\n]*|\"(?:[^\"\\\n]|\\.)*\"|'(?:[^'\\\n]|\\.)*'", re.S)
+
+
+def scrub(t):
+    """Comments blanked, string and char literals emptied.  A newline inside a
+    comment becomes \\v\\n: a comment does not end a #define, and \\v is
+    whitespace to everything else here."""
+    def rep(m):
+        s = m.group(0)
+        if s[0] == '"':
+            return '""'
+        if s[0] == "'":
+            return "' '"
+        return "\v\n".join(" " * len(x) for x in s.split("\n"))
+    return SCRUB.sub(rep, t)
+
+
+class Unsupported(Exception):
+    pass
+
+
+CKEYS = {"if", "while", "for", "switch", "return", "sizeof", "do", "else", "case", "default", "goto",
+         "break", "continue", "defined", "__attribute__", "typeof", "__typeof__", "_Alignof", "void",
+         "char", "short", "int", "long", "float", "double", "signed", "unsigned", "const", "volatile",
+         "struct", "union", "enum", "static", "extern", "register", "inline", "__inline", "__inline__"}
+BINDS = {"R_UseProgram", "glUseProgram_fp"}
+BINDS_RE = r"\b(?:R_UseProgram|glUseProgram_fp)\b"
+GLDRAW = r"\b(?:glDraw(?!Buffers?_)\w*_fp|glMultiDraw\w*_fp)\b"
+CALL = re.compile(r"\b([A-Za-z_]\w*)\s*\(")
+PROTO = re.compile(r"\s*(?:(?:extern|static|const|struct|unsigned|signed)\s+)*\w+(?:\s+|\s*\*+\s*)\**\s*\w+\s*\([^=]*\)\s*")
+EMPTY = frozenset()
+
+
+def close_of(s, i):
+    """Index just past the bracket matching s[i]."""
+    depth = 0
+    for j in range(i, len(s)):
+        c = s[j]
+        if c in "([{":
+            depth += 1
+        elif c in ")]}":
+            depth -= 1
+            if depth == 0:
+                return j + 1
+    raise Unsupported("unbalanced brackets")
+
+
+def split_top(s, sep=","):
+    out, depth, last = [], 0, 0
+    for j, c in enumerate(s):
+        if c in "([{":
+            depth += 1
+        elif c in ")]}":
+            depth -= 1
+        elif c == sep and depth == 0:
+            out.append(s[last:j])
+            last = j + 1
+    out.append(s[last:])
+    return out
+
+
+def calls_in(text):
+    """(name, args, start, through_member) per call in text, innermost first."""
+    out = []
+    for m in CALL.finditer(text):
+        name = m.group(1)
+        if name in CKEYS:
+            continue
+        b = m.start() - 1
+        while b >= 0 and text[b] in " \t\n\v":
+            b -= 1
+        mem = b >= 0 and (text[b] == "." or (text[b] == ">" and b > 0 and text[b - 1] == "-"))
+        op = m.end() - 1
+        try:
+            z = close_of(text, op)
+        except Unsupported:
+            continue
+        inner = text[op + 1:z - 1]
+        out.append((z, name, split_top(inner) if inner.strip() else [], m.start(), mem))
+    out.sort()
+    return [(n, a, s, mem) for _, n, a, s, mem in out]
+
+
+class Parser:
+    """Statement-level C parser over one scrubbed, macro-expanded body."""
+
+    def __init__(self, s):
+        self.s = s
+
+    def ws(self, i):
+        s = self.s
+        while i < len(s) and s[i].isspace():
+            i += 1
+        return i
+
+    def word(self, i):
+        m = re.compile(r"[A-Za-z_]\w*").match(self.s, i)
+        return m.group(0) if m else None
+
+    def directive(self, i):
+        e = self.s.find("\n", i)
+        e = len(self.s) if e < 0 else e
+        m = re.match(r"#\s*(\w+)", self.s[i:e])
+        return (m.group(1) if m else ""), e
+
+    def block(self, i):
+        if self.s[i] != "{":
+            raise Unsupported("expected a block")
+        items, i = self.stmts(i + 1, "}")
+        return ("seq", items), i + 1
+
+    def stmts(self, i, end):
+        items = []
+        while True:
+            i = self.ws(i)
+            if i >= len(self.s):
+                raise Unsupported("ran off the end")
+            if end == "}" and self.s[i] == "}":
+                return items, i
+            if self.s[i] == "#" and self.directive(i)[0] in ("elif", "else", "endif"):
+                if end == "#":
+                    return items, i
+                raise Unsupported("#if splits a block")
+            node, i = self.stmt(i)
+            items.append(node)
+
+    def choice(self, i):
+        alts, seen_else = [], False
+        i = self.directive(i)[1]
+        while True:
+            items, i = self.stmts(i, "#")
+            alts.append(("seq", items))
+            kind, i = self.directive(i)
+            seen_else = seen_else or kind == "else"
+            if kind == "endif":
+                break
+        if not seen_else:
+            alts.append(("seq", []))
+        return ("choice", alts), i
+
+    def paren(self, i, what):
+        i = self.ws(i)
+        if self.s[i] != "(":
+            raise Unsupported(what + " without (")
+        z = close_of(self.s, i)
+        return self.s[i + 1:z - 1], i + 1, z
+
+    def stmt(self, i):
+        s = self.s
+        i = self.ws(i)
+        if s[i] == "{":
+            return self.block(i)
+        if s[i] == ";":
+            return ("seq", []), i + 1
+        if s[i] == "#":
+            kind, e = self.directive(i)
+            if kind in ("if", "ifdef", "ifndef"):
+                return self.choice(i)
+            if kind in ("elif", "else", "endif"):
+                raise Unsupported("stray #" + kind)
+            return ("seq", []), e
+        w = self.word(i)
+        if w == "if":
+            cond, cpos, k = self.paren(i + 2, "if")
+            then, k = self.stmt(k)
+            k2 = self.ws(k)
+            els = None
+            if self.word(k2) == "else":
+                els, k = self.stmt(k2 + 4)
+            return ("if", cond, cpos, then, els), k
+        if w == "for":
+            hdr, hpos, k = self.paren(i + 3, "for")
+            parts = split_top(hdr, ";")
+            if len(parts) != 3:
+                raise Unsupported("for header")
+            body, k = self.stmt(k)
+            offs = [hpos, hpos + len(parts[0]) + 1, hpos + len(parts[0]) + len(parts[1]) + 2]
+            return ("for", parts, offs, body), k
+        if w == "while":
+            cond, cpos, k = self.paren(i + 5, "while")
+            body, k = self.stmt(k)
+            return ("while", cond, cpos, body), k
+        if w == "do":
+            body, k = self.stmt(i + 2)
+            k = self.ws(k)
+            if self.word(k) != "while":
+                raise Unsupported("do without while")
+            cond, cpos, k = self.paren(k + 5, "do-while")
+            k = self.ws(k)
+            if s[k] != ";":
+                raise Unsupported("do-while without ;")
+            return ("do", body, cond, cpos), k + 1
+        if w == "switch":
+            cond, cpos, k = self.paren(i + 6, "switch")
+            body, k = self.stmt(k)
+            return ("switch", cond, cpos, body), k
+        if w == "case" or (w == "default" and s[self.ws(i + 7)] == ":"):
+            depth, k = 0, i
+            while s[k] != ":" or depth:
+                depth += {"(": 1, "[": 1, ")": -1, "]": -1}.get(s[k], 0)
+                k += 1
+            return ("case",), k + 1
+        if w in ("break", "continue"):
+            k = self.ws(i + len(w))
+            if s[k] != ";":
+                raise Unsupported(w)
+            return (w,), k + 1
+        if w == "goto":
+            m = re.compile(r"goto\s+(\w+)\s*;").match(s, i)
+            if not m:
+                raise Unsupported("computed goto")
+            return ("goto", m.group(1)), m.end()
+        if w == "else":
+            raise Unsupported("stray else")
+        if w and w not in CKEYS:
+            k = self.ws(i + len(w))
+            if k < len(s) and s[k] == ":" and s[k + 1:k + 2] != ":":
+                return ("label", w), k + 1
+        return self.simple(i, w == "return")
+
+    def simple(self, i, is_return):
+        s, k = self.s, i
+        while True:
+            if k >= len(s):
+                raise Unsupported("statement runs off the end")
+            ch = s[k]
+            if ch in "([":
+                k = close_of(s, k)
+                continue
+            if ch == "{":
+                before = s[i:k].rstrip()
+                if not before or before.endswith(("=", ",", "(", "return")) or \
+                        re.search(r"\b(?:struct|union|enum)(?:\s+\w+)?$", before):
+                    k = close_of(s, k)
+                    continue
+                # An unknown macro head with a body: a loop that may run 0..n times.
+                body, z = self.block(k)
+                return ("macro", s[i:k], i, body), z
+            if ch == "}":
+                raise Unsupported("statement without ;")
+            if ch == "#" and s[:k].rstrip(" \t\v").endswith("\n"):
+                kind, e = self.directive(k)
+                if kind in ("if", "ifdef", "ifndef", "elif", "else", "endif"):
+                    raise Unsupported("#" + kind + " inside a statement")
+                k = e
+                continue
+            if ch == ";":
+                if is_return:
+                    return ("return", s[i + 6:k], i + 6), k + 1
+                return ("simple", s[i:k], i), k + 1
+            k += 1
+
+
+def join(a, b):
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return a | b
+
+
+class Interp:
+    """Abstract interpretation of a parsed body over a set-valued domain:
+    dom.simple(text, pos, st) -> st, dom.cond(text, pos, st) -> (true, false).
+    None is unreachable.  Loops run to a fixed point; break, continue,
+    return, case labels and goto go where C sends them."""
+
+    def __init__(self, dom):
+        self.dom = dom
+
+    def run(self, node, st):
+        self.labels_in = {}
+        for _ in range(20):
+            self.loops, self.breaks, self.switch_in, self.ret, self.labels = [], [], [], None, {}
+            out = self.ex(node, st)
+            if self.labels == self.labels_in:
+                return join(out, self.ret)
+            self.labels_in = self.labels
+        raise Unsupported("goto did not converge")
+
+    def ex(self, n, st):
+        k, d = n[0], self.dom
+        if k == "seq":
+            for c in n[1]:
+                if c[0] == "case":
+                    st = join(st, self.switch_in[-1] if self.switch_in else None)
+                elif c[0] == "label":
+                    st = join(st, self.labels_in.get(c[1]))
+                else:
+                    st = self.ex(c, st)
+            return st
+        if k == "choice":
+            out = None
+            for alt in n[1]:
+                out = join(out, self.ex(alt, st))
+            return out
+        if k in ("case", "label"):
+            return self.ex(("seq", [n]), st)
+        if st is None:
+            return None
+        if k == "simple":
+            return d.simple(n[1], n[2], st)
+        if k == "return":
+            self.ret = join(self.ret, d.simple(n[1], n[2], st))
+            return None
+        if k == "goto":
+            self.labels[n[1]] = join(self.labels.get(n[1]), st)
+            return None
+        if k == "if":
+            t, f = d.cond(n[1], n[2], st)
+            a = self.ex(n[3], t) if t is not None else None
+            if n[4] is None:
+                return join(a, f)
+            return join(a, self.ex(n[4], f) if f is not None else None)
+        if k in ("break", "continue"):
+            if not self.breaks or (k == "continue" and not self.loops):
+                raise Unsupported(k + " outside a loop")
+            self.breaks[-1 if k == "break" else self.loops[-1]][k].append(st)
+            return None
+        if k == "switch":
+            st = d.simple(n[1], n[2], st)
+            frame = {"break": [], "continue": []}
+            self.breaks.append(frame)
+            self.switch_in.append(st)
+            out = self.ex(n[3], None)
+            self.switch_in.pop()
+            self.breaks.pop()
+            out = join(out, st)    # no case taken; harmless next to a default
+            for b in frame["break"]:
+                out = join(out, b)
+            return out
+        return self.loop(n, st)
+
+    def loop(self, n, st):
+        d, k, incr = self.dom, n[0], None
+        if k == "for":
+            (init, cond, incr), (pi, pc, pn), body = n[1], n[2], n[3]
+            st = d.simple(init, pi, st)
+        elif k in ("while", "macro"):
+            cond, pc, body = n[1], n[2], n[3]
+        else:
+            body, cond, pc = n[1], n[2], n[3]
+        head = st
+        for _ in range(50):
+            frame = {"break": [], "continue": []}
+            self.breaks.append(frame)
+            self.loops.append(len(self.breaks) - 1)
+            if k == "do":
+                out = self.ex(body, head)
+                for c in frame["continue"]:
+                    out = join(out, c)
+                back, f = d.cond(cond, pc, out) if out is not None else (None, None)
+            else:
+                t, f = d.cond(cond, pc, head) if cond.strip() else (head, None)
+                if k == "macro":
+                    f = t
+                out = self.ex(body, t) if t is not None else None
+                for c in frame["continue"]:
+                    out = join(out, c)
+                if incr is not None and out is not None:
+                    out = d.simple(incr, pn, out)
+                back = out
+            self.loops.pop()
+            self.breaks.pop()
+            nh = join(st, back)
+            if nh == head:
+                for b in frame["break"]:
+                    f = join(f, b)
+                return f
+            head = nh
+        raise Unsupported("loop did not converge")
+
+
+class Func:
+    def __init__(self, name, params, file, text, a, z):
+        self.name, self.file, self.text, self.a = name, file, text, a
+        self.body, self.params = text[a:z], params
+        self.ast = self.err = None
+
+    def where(self):
+        return f"{self.file}:{self.text.count(chr(10), 0, self.a) + 1} {self.name}"
+
+
+def param_names(ptext):
+    if ptext.strip() in ("", "void"):
+        return []
+    out = []
+    for p in split_top(ptext):
+        p = p.strip()
+        m = re.search(r"\(\s*\*\s*(\w+)\s*\)", p) or re.search(r"(\w+)\s*(?:\[[^\]]*\]\s*)*$", p)
+        out.append(m.group(1) if m and p != "..." else None)
+    return out
+
+
+IDENT = re.compile(r"[A-Za-z_]\w*")
+DEFINE = re.compile(r"^[ \t]*#[ \t]*define\b(?:[^\n]*[\\\v]\n)*[^\n]*", re.M)
+
+
+MACRO_CALL = re.compile(r"\b(?!sizeof\b|defined\b)[A-Za-z_]\w*\s*\(")
+
+
+def macro_defs(text, where, into):
+    """A text's #defines that can call or run statements into `into` (the
+    first wins: an #if's alternatives share one call surface).  A macro that
+    only computes cannot bind, draw or call, and is left as written; any
+    other macro that binds, draws or names a world program is an error."""
+    for m in DEFINE.finditer(text):
+        d = re.sub(r"[\\\v]\n", " ", m.group(0))
+        fm = re.match(r"\s*#\s*define\s+(\w+)\(([^)]*)\)(.*)", d, re.S)
+        om = re.match(r"\s*#\s*define\s+(\w+)\s(.*)", d, re.S)
+        if fm and not re.fullmatch(r"gl\w+_fp", fm.group(1)) and \
+                (";" in fm.group(3) or MACRO_CALL.search(fm.group(3))):
+            ps = [p.strip() for p in fm.group(2).split(",") if p.strip()]
+            if ps and ps[-1].endswith("..."):
+                ps[-1] = ps[-1][:-3].strip() or "__VA_ARGS__"
+                ps.append("...")
+            into.setdefault(fm.group(1), (ps, fm.group(3)))
+        elif not fm and om and ";" in om.group(2):
+            into.setdefault(om.group(1), (None, om.group(2)))
+        elif re.search(BINDS_RE + "|" + GLDRAW + "|" + WORLD_PROG, d) and \
+                not re.match(r"\s*#\s*define\s+gl\w+_fp\b", d):
+            errors.append(f"{where}: macro {d.split()[1]} binds, draws or names a world program "
+                          "in a form the flow pass does not expand")
+
+
+def expand(body, macros, rx):
+    """Macros expanded in place, nested ones included."""
+    if not macros.keys() & set(IDENT.findall(body)):
+        return body
+    for _ in range(8):
+        out, pos, hit = [], 0, False
+        for m in rx.finditer(body):
+            if m.start() < pos:
+                continue
+            params, rep = macros[m.group(1)]
+            if params is None:
+                out += [body[pos:m.start()], " " + rep + " "]
+                pos, hit = m.end(), True
+                continue
+            if not m.group(2):
+                continue
+            try:
+                z = close_of(body, m.end() - 1)
+            except Unsupported:
+                continue
+            inner = body[m.end():z - 1]
+            args = [x.strip() for x in split_top(inner)] if inner.strip() else []
+            names = params
+            if params and params[-1] == "...":
+                names = params[:-1]
+                args = args[:len(names) - 1] + [", ".join(args[len(names) - 1:])]
+            r = re.sub(r"\s*##\s*", "", re.sub(r"(?<!#)#\s*\w+", '""', rep))
+            if names:
+                tbl = dict(zip(names, args))
+                r = re.sub(r"\b(" + "|".join(map(re.escape, names)) + r")\b", lambda w: tbl.get(w.group(1), ""), r)
+            out += [body[pos:m.start()], " " + r + " "]
+            pos, hit = z, True
+        body = "".join(out + [body[pos:]])
+        if not hit:
+            return body
+    raise Unsupported("macro expansion did not terminate")
+
+
+SRC_DIRS = [ROOT / "engine/h2shared", ROOT / "engine/hexen2"]
+HEADER_MACROS, NORETURN = {}, set()
+for f in [h for d in SRC_DIRS for h in sorted(d.glob("*.h"))]:
+    ht = scrub(f.read_text(errors="replace"))
+    macro_defs(ht, str(f.relative_to(ROOT)), HEADER_MACROS)
+    NORETURN |= set(re.findall(r"FUNC_NORETURN\s+\w+\s+\**\s*(\w+)\s*\(", ht))
+if not {"Sys_Error", "Host_Error"} <= NORETURN:
+    errors.append("cannot read FUNC_NORETURN declarations for Sys_Error / Host_Error")
+INDEX, ALL, FPVARS, NAMED, MRX = {}, [], set(), set(), {}
+for f in [c for d in SRC_DIRS for c in sorted(d.glob("*.c"))]:
+    rel = str(f.relative_to(ROOT))
+    text = scrub(f.read_text(errors="replace"))
+    macros = {}
+    macro_defs(text, rel, macros)
+    for k, v in HEADER_MACROS.items():
+        macros.setdefault(k, v)
+    names = frozenset(macros)
+    if names not in MRX:
+        MRX[names] = re.compile(r"\b(" + "|".join(map(re.escape, sorted(names, key=len, reverse=True))) + r")\b(\s*\()?")
+    mrx = MRX[names]
+    text = DEFINE.sub(lambda m: "\n".join(" " * len(x) for x in m.group(0).split("\n")), text)
+    FPVARS |= set(re.findall(r"\(\s*\*\s*(\w+)\s*\)\s*\(", text))
+    NAMED |= set(re.findall(r"\b([A-Za-z_]\w*)\b(?!\s*\()", text))
+    depth, start, last = 0, 0, 0
+    for m in re.finditer(r"[{};]", text):
+        ch, i = m.group(0), m.start()
+        if ch == "{":
+            start = i if depth == 0 else start
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                h = re.search(r"\b(\w+)\s*\(([^;{}]*)\)\s*$", text[last:start])
+                if h and h.group(1) not in CKEYS:
+                    fn = Func(h.group(1), param_names(h.group(2)), rel, text, start, i + 1)
+                    try:
+                        fn.body = expand(fn.body, macros, mrx)
+                    except Unsupported as e:
+                        fn.err = str(e)
+                    INDEX.setdefault(fn.name, []).append(fn)
+                    ALL.append(fn)
+                elif re.search(WORLD_PROG + "|" + GLDRAW + "|" + BINDS_RE, text[start:i + 1]) or \
+                        re.search(WORLD_PROG + "|" + GLDRAW + "|" + BINDS_RE, expand(text[start:i + 1], macros, mrx)):
+                    errors.append(f"{rel}:{text.count(chr(10), 0, start) + 1}: a file-scope block names a world "
+                                  "program, binds or draws, and is not a function the flow pass can follow")
+                last = i + 1
+        elif depth == 0:
+            last = i + 1
+for need in list(PATHS) + ["GL_ImmEnd", "DrawTextureChains", "DrawTextureChains_BindWorldState", "SCR_UpdateScreen"]:
+    if need not in INDEX:
+        errors.append(f"the flow pass did not index {need}")
+
+
+def defs_of(name, caller):
+    defs = INDEX.get(name, [])
+    return [d for d in defs if d.file == caller.file] or defs
+
+
+# A call through a pointer reaches some function whose address is taken
+# somewhere (named other than in a call), with as many parameters.
+ADDR = {}
+for n in NAMED & set(INDEX):
+    for g in INDEX[n]:
+        ADDR.setdefault(len(g.params), []).append(g)
+VARIADIC = [g for gs in ADDR.values() for g in gs if g.params and g.params[-1] is None]
+# A console print may repaint the screen (CON_Printf -> SCR_UpdateScreen while
+# loading).  That nested frame is checked like every frame, from an entry that
+# may hold anything; what it leaves bound is not charged to the print's caller,
+# or every function that can print would inherit the whole renderer.
+FRAME_ROOTS = {"SCR_UpdateScreen"}
+
+
+def targets(name, nargs, mem, fn):
+    if mem or (name in FPVARS and name not in INDEX and not re.fullmatch(r"gl\w+_fp", name)):
+        return ADDR.get(nargs, []) + VARIADIC
+    return defs_of(name, fn)
+
+
+for fn in ALL:
+    fn.calls = calls_in(fn.body)
+    fn.binds = any(n in BINDS and not mem for n, _, _, mem in fn.calls)
+    fn.draws = any(re.fullmatch(GLDRAW, n) and not mem for n, _, _, mem in fn.calls)
+    fn.out = {id(g): g for n, a, _, mem in fn.calls if n not in BINDS for g in targets(n, len(a), mem, fn)}
+CALLERS = {}
+for fn in ALL:
+    for g in fn.out.values():
+        CALLERS.setdefault(id(g), []).append(fn)
+
+
+def reaching(seed, cut=None):
+    """Every function that reaches a seed through the call graph, seeds
+    included.  Not through a call that never returns (NORETURN), nor through
+    a nested frame (FRAME_ROOTS)."""
+    cut = NORETURN | FRAME_ROOTS if cut is None else cut
+    seen, work = {id(f): f for f in seed}, list(seed)
+    seeds = set(seen)
+    while work:
+        g = work.pop()
+        if g.name in cut and id(g) not in seeds:
+            continue
+        for c in CALLERS.get(id(g), []):
+            if id(c) not in seen:
+                seen[id(c)] = c
+                work.append(c)
+    return seen
+
+
+def reached(fn, cut=None):
+    """Every function fn reaches, with reaching()'s cuts."""
+    cut = NORETURN | FRAME_ROOTS if cut is None else cut
+    seen, work = {}, [fn]
+    while work:
+        for g in work.pop().out.values():
+            if id(g) not in seen and g.name not in cut:
+                seen[id(g)] = g
+                work.append(g)
+    return seen
+
+
+def pp_variant(body, pick):
+    """The body with every #if group resolved to its first or its last branch
+    (a group without #else has an empty last), other lines blanked."""
+    lines, groups, stack, info = body.split("\n"), [], [], {}
+    for n, ln in enumerate(lines):
+        m = re.match(r"\s*#\s*(if|ifdef|ifndef|elif|else|endif)\b", ln)
+        if m:
+            k = info[n] = m.group(1)
+            if k.startswith("if"):
+                groups.append([1, False])
+                stack.append(groups[-1])
+            elif stack and k == "endif":
+                stack.pop()
+            elif stack:
+                stack[-1][0] += 1
+                stack[-1][1] = stack[-1][1] or k == "else"
+    out, stack, gi = [], [], 0
+    for n, ln in enumerate(lines):
+        k = info.get(n)
+        if k:
+            if k.startswith("if"):
+                stack.append([groups[gi], 0])
+                gi += 1
+            elif stack and k == "endif":
+                stack.pop()
+            elif stack:
+                stack[-1][1] += 1
+            out.append("")
+            continue
+        live = all(br == (0 if pick == "first" else (g[0] - 1 if g[1] else -1)) for g, br in stack)
+        out.append(ln if live else "")
+    return "\n".join(out)
+
+
+REL = reaching([fn for fn in ALL if fn.binds or fn.draws])
+for fn in REL.values():
+    if fn.err:
+        continue
+    try:
+        fn.ast = Parser(fn.body).block(0)[0]
+    except (Unsupported, IndexError) as e:
+        if not re.search(r"(?m)^\s*#\s*if", fn.body):
+            fn.err = str(e)
+            continue
+        try:
+            fn.ast = ("choice", [Parser(pp_variant(fn.body, p)).block(0)[0] for p in ("first", "last")])
+        except (Unsupported, IndexError) as e2:
+            fn.err = f"{e}; per #if branch: {e2}"
+
+# ------------------------------------------------------------ world-program values
+# A value's atoms: "W" may be a world program (or its ->program handle),
+# ("P", i) is whatever parameter i holds.  For the bound program, "E" is
+# whatever was bound when the function was entered.
+WORLD_NAMES = {"gl_shader_world", "gl_shader_world_opaque", "gl_shader_world_oit"}
+ASSIGN = re.compile(r"(?<![=!<>+\-*/%&|^])=(?!=)")
+DECL_HEAD = re.compile(r"\s*(?:(?:const|static|volatile|register|struct|unsigned|signed|extern)\s+)*"
+                       r"(?!return\b|else\b|case\b|goto\b|sizeof\b)\w+\s*[\s*]\s*")
+
+
+def chunks(body):
+    body = re.sub(r"(?m)^[ \t]*#[^\n]*", " ", body)
+    out, depth, last = [], 0, 0
+    for m in re.finditer(r"[()\[\]{};]", body):
+        c = m.group(0)
+        if c in "([":
+            depth += 1
+        elif c in ")]":
+            depth -= 1
+        elif depth == 0:
+            out.append(body[last:m.start()])
+            last = m.end()
+    return out + [body[last:]]
+
+
+def lhs_of(c, e):
+    j = e - 1
+    while j >= 0:
+        ch = c[j]
+        if ch == "]":
+            d = 0
+            while j >= 0:
+                d += {"]": 1, "[": -1}.get(c[j], 0)
+                if d == 0:
+                    break
+                j -= 1
+            j -= 1
+        elif ch.isalnum() or ch in "_.* \t\n\v":
+            j -= 1
+        elif ch == ">" and j > 0 and c[j - 1] == "-":
+            j -= 2
+        else:
+            break
+    return c[j + 1:e].strip()
+
+
+def rhs_of(c, e):
+    depth, k = 0, e + 1
+    while k < len(c):
+        ch = c[k]
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            if depth == 0:
+                break
+            depth -= 1
+        elif ch in ",;" and depth == 0:
+            break
+        k += 1
+    return c[e + 1:k]
+
+
+for fn in ALL:
+    fn.assigns, fn.locals, fn.rets = [], {p for p in fn.params if p}, []
+    for c in chunks(fn.body):
+        if c.strip().startswith("return"):
+            fn.rets.append(c.strip()[6:])
+        dm = DECL_HEAD.match(c)
+        if dm and "(" not in c.split("=")[0]:
+            for piece in split_top(c[dm.end():]):
+                nm = re.match(r"\s*\**\s*(?:const\s+)?(\w+)", piece)
+                if nm:
+                    fn.locals.add(nm.group(1))
+        for m in ASSIGN.finditer(c):
+            lhs = lhs_of(c, m.start())
+            if lhs:
+                fn.assigns.append((lhs, rhs_of(c, m.start())))
+    fn.env = {p: frozenset({("P", i)}) for i, p in enumerate(fn.params) if p}
+    fn.ret, fn.loose, fn.stores, fn.sinks, fn.flows = EMPTY, {}, {}, {}, []
+
+
+CAST = re.compile(r"\(\s*(?:const\s+)?(?:struct\s+)?\w+\s*\**\s*\)\s*")
+TRUTH = re.compile(r"==|!=|<=|>=|&&|\|\||<|(?<!-)>")
+PAREN = re.compile(r"\((?:[^()]|\([^()]*\))*\)")
+BRACK = re.compile(r"\[[^\]]*\]")
+NAMEX = re.compile(r"(\w+)\s*((?:\[[^\]]*\]\s*)*)(?:(->|\.)\s*(\w+))?")
+CALLX = re.compile(r"(\w+)\s*\(")
+MEMBER = re.compile(r"\s*(?:\[[^\]]*\]\s*)*(?:->|\.)\s*(\w+)")
+LOOSE = re.compile(r"\b[A-Za-z_]\w*\b(?!\s*\()")
+RETS = set()       # names of functions that may return a value of interest
+
+
+def unparen(e):
+    e = e.strip()
+    while e:
+        m = CAST.match(e)
+        if m and m.end() < len(e):
+            e = e[m.end():].strip()
+        elif e[0] == "(" and close_of(e, 0) == len(e):
+            e = e[1:-1].strip()
+        elif e[0] in "&*" and e[1:2] != "=":
+            e = e[1:].strip()
+        else:
+            break
+    return e
+
+
+def env_atoms(name, fn):
+    return frozenset({"W"}) if name in WORLD_NAMES else fn.env.get(name, EMPTY)
+
+
+def subst(atoms, args, fn):
+    out = set()
+    for a in atoms:
+        if a == "W":
+            out.add("W")
+        elif a[1] < len(args):
+            out |= taint(args[a[1]], fn)
+    return frozenset(out)
+
+
+def taint(e, fn):
+    if not any(t in fn.env or t in WORLD_NAMES or t in RETS for t in IDENT.findall(e)):
+        return EMPTY
+    try:
+        e = unparen(e)
+    except Unsupported:
+        pass
+    if not e:
+        return EMPTY
+    q = split_top(e, "?")
+    if len(q) > 1:
+        rest = "?".join(q[1:])
+        alts = split_top(rest, ":")
+        return taint(alts[0], fn) | taint(":".join(alts[1:]), fn)
+    if e[0] == "{" and e[-1] == "}":
+        out = EMPTY
+        for x in split_top(e[1:-1]):
+            out |= taint(x, fn)
+        return out
+    top = BRACK.sub("", PAREN.sub("", e))
+    if e[0] == "!" or TRUTH.search(top):
+        return EMPTY        # a truth value, not a program
+    m = NAMEX.fullmatch(e)
+    if m:
+        if m.group(4) and m.group(4) != "program":
+            return EMPTY
+        return env_atoms(m.group(1), fn)
+    m = CALLX.match(e)
+    if m and close_of(e, m.end() - 1) == len(e):
+        inner = e[m.end():-1]
+        args = split_top(inner) if inner.strip() else []
+        out = EMPTY
+        for g in defs_of(m.group(1), fn):
+            out |= subst(g.ret, args, fn)
+        return out
+    # Any other form that touches a value of interest is one this pass does
+    # not model, and an error if that value can be a world program.
+    out = EMPTY
+    for w in LOOSE.finditer(e):
+        fm = MEMBER.match(e, w.end())
+        if not (fm and fm.group(1) != "program"):
+            out |= env_atoms(w.group(0), fn)
+    if out:
+        fn.loose[e] = out
+    return out
+
+
+LVAL = re.compile(r"(\w+)\s*(?:\[[^\]]*\]\s*)*")
+
+
+def values_of(fn):
+    for _ in range(20):
+        grew = False
+        for lhs, rhs in fn.assigns:
+            a = taint(rhs, fn)
+            if not a:
+                continue
+            dm = DECL_HEAD.match(lhs)
+            nm = LVAL.fullmatch(lhs[dm.end():] if dm else lhs)
+            if nm and (dm or nm.group(1) in fn.locals):
+                if not a <= fn.env.get(nm.group(1), EMPTY):
+                    fn.env[nm.group(1)] = fn.env.get(nm.group(1), EMPTY) | a
+                    grew = True
+            else:
+                fn.stores[lhs] = fn.stores.get(lhs, EMPTY) | a
+        if not grew:
+            break
+    r = EMPTY
+    for x in fn.rets:
+        r |= taint(x, fn)
+    return r
+
+
+for fn in ALL:
+    fn.ret = values_of(fn)
+    if fn.ret:
+        RETS.add(fn.name)
+for _ in range(20):
+    moved = False
+    for fn in ALL:
+        if any(g.ret for g in fn.out.values()):
+            r = values_of(fn)
+            if r != fn.ret:
+                fn.ret, moved = r, True
+                RETS.add(fn.name)
+    if not moved:
+        break
+else:
+    errors.append("the world-program value walk did not converge")
+for fn in ALL:
+    for name, args, _, mem in fn.calls:
+        if name in BINDS and not mem:
+            continue
+        gs = targets(name, len(args), mem, fn)
+        for i, x in enumerate(args):
+            a = taint(x, fn)
+            if a and gs:
+                fn.flows += [(g, i, a) for g in gs]
+            elif a and not re.fullmatch(r"gl\w+_fp", name):
+                fn.sinks[(name, " ".join(x.split()))] = a
+
+# ------------------------------------------------------------ the bound program
+PINNED = set(PATHS) | {"GL_ImmEnd"}
+SUM = {id(fn): (EMPTY, False) for fn in ALL}
+
+
+class ProgDom:
+    def __init__(self, fn):
+        self.fn, self.draws, self.sites = fn, {}, {}
+        self.cache = fn.__dict__.setdefault("evcache", {})
+
+    def events(self, text, pos):
+        key = (pos, text)
+        if key not in self.cache:
+            evs = []
+            if not PROTO.fullmatch(text):
+                for name, args, at, mem in calls_in(text):
+                    if name in BINDS and not mem:
+                        evs.append(("bind", taint(args[0], self.fn) if args else EMPTY))
+                    elif re.fullmatch(GLDRAW, name) and not mem:
+                        evs.append(("draw", pos + at))
+                    else:
+                        gs = targets(name, len(args), mem, self.fn)
+                        if gs:
+                            evs.append(("call", name, gs, [taint(x, self.fn) for x in args]))
+                        if name in NORETURN and not mem:
+                            evs.append(("stop",))
+            self.cache[key] = evs
+        return self.cache[key]
+
+    def simple(self, text, pos, st):
+        for ev in self.events(text, pos):
+            if ev[0] == "bind":
+                st = ev[1]
+            elif ev[0] == "draw":
+                self.draws[ev[1]] = self.draws.get(ev[1], EMPTY) | st
+            elif ev[0] == "stop":
+                return None
+            else:
+                atoms, kills = EMPTY, ev[1] not in FRAME_ROOTS
+                for g in ev[2]:
+                    self.sites[id(g)] = (g, self.sites.get(id(g), (g, EMPTY))[1] | st)
+                    if ev[1] in FRAME_ROOTS:
+                        continue
+                    ga, gk = SUM[id(g)]
+                    for a in ga:
+                        atoms |= {a} if a == "W" else (ev[3][a[1]] if a[1] < len(ev[3]) else EMPTY)
+                    kills = kills and gk
+                st = atoms if kills else st | atoms
+        return st
+
+    def cond(self, text, pos, st):
+        st = self.simple(text, pos, st)
+        return st, st
+
+
+work = list(REL.values())
+queued = {id(f) for f in work}
+for _ in range(200000):
+    if not work:
+        break
+    fn = work.pop()
+    queued.discard(id(fn))
+    if fn.err:
+        s = (frozenset({"W"}), False)
+    else:
+        fn.dom = ProgDom(fn)
+        try:
+            out = Interp(fn.dom).run(fn.ast, frozenset({"E"}))
+            s = ((out or EMPTY) - {"E"}, out is not None and "E" not in out)
+        except Unsupported as e:
+            fn.err, s = str(e), (frozenset({"W"}), False)
+    if s != SUM[id(fn)]:
+        SUM[id(fn)] = s
+        for c in CALLERS.get(id(fn), []):
+            if id(c) in REL and id(c) not in queued:
+                work.append(c)
+                queued.add(id(c))
+else:
+    errors.append("the bound-program walk did not converge")
+
+PT = {id(fn): set() for fn in ALL}
+ENTRY = {id(fn): fn.name in FRAME_ROOTS for fn in ALL}
+
+
+def world(atoms, fn):
+    return any(a == "W" or (a == "E" and ENTRY[id(fn)]) or (isinstance(a, tuple) and a[1] in PT[id(fn)])
+               for a in atoms)
+
+
+moved = True
+while moved:
+    moved = False
+    for fn in ALL:
+        for g, i, a in fn.flows:
+            if i not in PT[id(g)] and world(a, fn):
+                PT[id(g)].add(i)
+                moved = True
+    for fn in REL.values():
+        for g, st in (fn.dom.sites.values() if hasattr(fn, "dom") else ()):
+            if not ENTRY[id(g)] and world(st, fn):
+                ENTRY[id(g)] = moved = True
+
+# GL_ImmEnd keeps the last shader it saw only to compare the next one with.
+CACHE_OK = {("engine/h2shared/gl_vbo.c", "GL_ImmEnd", "imm_cache_shader")}
+vbo_c = strip_c(read("engine/h2shared/gl_vbo.c"))
+uses = re.findall(r"[^;{}]*\bimm_cache_shader\b[^;{}]*", vbo_c)
+if sorted(" ".join(u.split()) for u in uses) != sorted([
+        "static const glprogram_t *imm_cache_shader", "imm_cache_shader = NULL",
+        "if (shader != imm_cache_shader)", "imm_cache_shader = shader"]):
+    errors.append("imm_cache_shader is used for more than GL_ImmEnd's shader-changed compare "
+                  f"({[' '.join(u.split()) for u in uses]}); the flow pass would have to follow it")
+for fn in REL.values():
+    if fn.err:
+        errors.append(f"{fn.where()}: the flow pass cannot parse this function ({fn.err})")
+    elif fn.name not in PINNED:
+        for pos, st in fn.dom.draws.items():
+            if world(st, fn):
+                errors.append(f"{fn.where()} draws while a world program may be bound; write VertParams "
+                              "there and pin it in PATHS, or draw through GL_ImmEnd")
+                break
+for fn in ALL:
+    for what, table in (("stores", fn.stores), ("hands an unindexed callee", fn.sinks),
+                        ("computes with", fn.loose)):
+        for k, a in table.items():
+            if world(a, fn) and (fn.file, fn.name, k) not in CACHE_OK:
+                errors.append(f"{fn.where()} {what} a world-program value the flow pass cannot follow: {k}")
+
+# ------------------------------------------------------------ writers, transitively
+# A block writer is one of BLOCK_WRITERS or any engine function that reaches
+# one; R_FlushUniforms alone writes nothing.
+seeds = [g for n in BLOCK_WRITERS - {"R_FlushUniforms"} for g in INDEX.get(n, [])]
+WRITERS = reaching(seeds)
+if len(seeds) < len(BLOCK_WRITERS) - 3:
+    errors.append("the flow pass indexed too few block writers")
+
+
+def writer_between(fn_name, text):
+    """The first call in text that is, or reaches, a block writer."""
+    for name, args, _, mem in calls_in(text):
+        if name == "R_FlushUniforms" or name in BINDS:
+            continue
+        if name in BLOCK_WRITERS:
+            return name
+        for g in targets(name, len(args), mem, INDEX[fn_name][0]):
+            if id(g) in WRITERS:
+                return f"{name} (reaches a block writer)"
+    return None
+
+
+for name in list(PATHS) + ["GL_ImmEnd"]:
+    for fn in INDEX.get(name, []):
+        b = fn.body
+        fl = [m.end() for m in re.finditer(r"\bR_FlushUniforms\s*\(\s*\)", b)]
+        if name == "GL_ImmEnd":
+            fl = [m.end() for m in re.finditer(r"\bGL_ImmPushBlocks\s*\([^;]*\)", b)]
+        draws = [m.start() for m in re.finditer(GLDRAW, b)]
+        if len(fl) != 1 or not draws:
+            errors.append(f"{fn.where()}: the flow pass expects one flush and its draws ({len(fl)}, {len(draws)})")
+            continue
+        for dp in draws:
+            w = writer_between(name, b[fl[0]:dp]) if dp > fl[0] else None
+            if w:
+                errors.append(f"{fn.where()} calls {w} between its VertParams flush and a draw")
+                break
+
+# ------------------------------------------------------------ world_state_set
+# DrawTextureChains_FlushBatch draws with the pair the last BindWorldState
+# saved in two file statics.  That pair is this DrawTextureChains call's only
+# while the local world_state_set is true: false on entry, set only right
+# after BindWorldState, cleared wherever the state is torn down.  So: every
+# FlushBatch call is reached with it true on every path, FlushBatch refuses
+# to draw without it, and nothing DrawTextureChains calls can re-enter it or
+# re-bind behind its back.
+dtc = INDEX.get("DrawTextureChains", [None])[0]
+FLAG = "world_state_set"
+
+
+class FlagDom:
+    def __init__(self):
+        self.bad = []
+
+    def simple(self, text, pos, st):
+        t = " ".join(text.split())
+        for m in re.finditer(r"\bDrawTextureChains_FlushBatch\s*\(", text):
+            args = split_top(text[m.end():close_of(text, m.end() - 1) - 1])
+            if args[0].strip() != FLAG:
+                self.bad.append(f"FlushBatch is not handed {FLAG} ({t})")
+            elif st != {"T"}:
+                self.bad.append(f"FlushBatch is reached with {FLAG} possibly false ({t})")
+        a = re.fullmatch(rf"(?:qboolean )?{FLAG} = (true|false)", t)
+        if a:
+            return frozenset({"T" if a.group(1) == "true" else "F"})
+        rest = re.sub(r"\bDrawTextureChains_FlushBatch\s*\(\s*" + FLAG + r"\b", "", text)
+        if re.search(rf"\b{FLAG}\b", rest):
+            self.bad.append(f"{FLAG} is used in a form this check does not model ({t})")
+        return st
+
+    def cond(self, text, pos, st):
+        t = " ".join(text.split())
+        if t == FLAG:
+            return st & {"T"} or None, st & {"F"} or None
+        if t == "!" + FLAG:
+            return st & {"F"} or None, st & {"T"} or None
+        st = self.simple(text, pos, st)
+        return st, st
+
+
+if not (dtc and dtc.ast):
+    errors.append("the flow pass has no parsed DrawTextureChains to follow world_state_set through")
+else:
+    fd = FlagDom()
+    Interp(fd).run(dtc.ast, frozenset({"T", "F"}))
+    errors += [f"DrawTextureChains: {b}" for b in dict.fromkeys(fd.bad)]
+    db = " ".join(dtc.body.split())
+    if len(re.findall(rf"\bqboolean {FLAG} = false;", db)) != 1 or re.search(rf"\bstatic\b[^;]*\b{FLAG}\b", db):
+        errors.append(f"DrawTextureChains must declare one local `qboolean {FLAG} = false;`")
+    dense = re.sub(r"\s+", "", dtc.body)
+    n_set = dense.count(f"{FLAG}=true;")
+    if not n_set or dense.count(f"DrawTextureChains_BindWorldState();{FLAG}=true;") != n_set:
+        errors.append(f"every `{FLAG} = true;` must directly follow `DrawTextureChains_BindWorldState ();`")
+    if not re.search(r"\bDrawTextureChains_FlushBatch\s*\(", db):
+        errors.append("DrawTextureChains no longer calls DrawTextureChains_FlushBatch")
+    bw_callers = {c.name for c in CALLERS.get(id(INDEX["DrawTextureChains_BindWorldState"][0]), [])}
+    if bw_callers != {"DrawTextureChains"}:
+        errors.append(f"DrawTextureChains_BindWorldState is called from {sorted(bw_callers)}; only "
+                      "DrawTextureChains may refill the pair FlushBatch draws with")
+    inner = reached(dtc)
+    if id(dtc) in inner:
+        errors.append("DrawTextureChains can re-enter itself through its callees, which would refill the "
+                      "saved pair under the outer call's world_state_set")
+fbf = INDEX.get("DrawTextureChains_FlushBatch", [None])[0]
+if fbf:
+    if fbf.params[:1] != [FLAG]:
+        errors.append(f"DrawTextureChains_FlushBatch must take {FLAG} as its first parameter")
+    first = re.sub(r"^\{(?:\s*(?:const\s+)?\w+\s+[^;(){}=]*(?:=[^;(){}]*)?;)*\s*", "", fbf.body)
+    if not re.match(rf"if \(!{FLAG}\)\s*Sys_Error\s*\(", first):
+        errors.append(f"DrawTextureChains_FlushBatch must open with `if (!{FLAG}) Sys_Error (...)`: "
+                      "without the bind it would draw with another call's matrices")
+
 if errors:
     sys.exit("FAIL:\n  " + "\n  ".join(errors))
 print(f"PASS sworld_vert reads VertParams; mirror, file, inputs, varyings, builds and {len(PATHS) + 1} "
-      "draw paths agree (#450 W1)")
+      f"draw paths agree, and the flow pass over {len(ALL)} functions ({len(REL)} that bind or draw) "
+      "finds no other (#450 W1)")

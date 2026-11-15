@@ -453,6 +453,8 @@ jobs:
       # its outputs against both world fragment literals, the three world
       # builds, and every world draw path (GL_ImmEnd, the fast path, deferred,
       # brush model, instanced, GPU-culled) writing both matrices before an
-      # unconditional flush and its draws (#450 world slice W1).
+      # unconditional flush and its draws; and a flow pass that follows world
+      # programs and block writers through calls, pointers and locals, and
+      # world_state_set to every FlushBatch (#450 world slice W1).
       - name: World vertex stage on VertParams
         run: python3 tools/test_world_vert_block.py
