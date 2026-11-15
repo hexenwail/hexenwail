@@ -1,8 +1,9 @@
 /* ssky_layers fragment stage -- see ssky_layers_vert.glsl.
  *
- * u_skyfog is FragParams' u_fskyfog and u_wind is u_fsky.xy.  Nothing calls
- * R_SetSkyFog today, so u_skyfog reads zero -- exactly what the loose uniform
- * read before this moved, since no caller ever set that either.
+ * u_skyfog is FragParams' u_fskyfog and u_wind is u_fsky.xy.  Fog_SetupFrame
+ * writes u_skyfog every frame, Ironwail's skyfogdata: the fog colour, alpha
+ * r_skyfog (or worldspawn skyfog) clamped to 0..1, and 0 with fog off, which
+ * makes the mix below an exact no-op.  GitHub #486.
  *
  * No #version line here on purpose; gl_shader.c supplies the tier's own.
  */

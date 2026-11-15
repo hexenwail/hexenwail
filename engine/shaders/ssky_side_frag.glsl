@@ -2,7 +2,9 @@
  *
  * u_wind is FragParams' u_fsky.xy, fed from sky_wind_uv by GL_ImmPushBlocks.
  * No u_skyfog here on purpose: the skybox path fogs with a second flat pass
- * over the same quad (Sky_DrawSkyBox), not in this shader.
+ * over the same quad (Sky_DrawSkyBox), and the two-pass scrolling sky with a
+ * third over the same polys (gl_warp.c, Sky_LayerFogAlpha), not in this
+ * shader -- a fog term here would fog skybox faces twice.
  *
  * No #version line here on purpose; gl_shader.c supplies the tier's own.
  */

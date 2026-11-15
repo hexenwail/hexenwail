@@ -24,6 +24,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "mathlib.h"
 #include "gl_shader.h"
+#include "gl_uniforms.h"
+
+extern float skyfog;	/* gl_sky.c: r_skyfog, or the worldspawn key */
 
 #define CLAMP(min,val,max) ((val) < (min) ? (min) : ((val) > (max) ? (max) : (val)))
 
@@ -312,6 +315,14 @@ void Fog_SetupFrame (void)
 	 * eye is submerged, and vice versa.  Visible-across-the-waterline
 	 * is the correct look. */
 	r_fog_density = Fog_GetDensity() / 64.0;
+
+	/* Ironwail's skyfogdata.  Here, not in Sky_DrawSky, which returns early
+	 * on a map with no skybox: the scrolling sky's single-pass shader
+	 * (ssky_layers) is the reader, drawn from R_DrawSkyChain inside
+	 * R_DrawWorld.  Alpha 0 with fog off keeps that blend an exact no-op.
+	 * GitHub #486. */
+	R_SetSkyFog (c[0], c[1], c[2],
+		     Fog_GetDensity() > 0 ? CLAMP(0.0f, skyfog, 1.0f) : 0.0f);
 }
 
 /*

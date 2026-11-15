@@ -194,6 +194,12 @@ jobs:
       - name: r_fastsky reaches the classic sky
         run: python3 tools/test_fastsky_classic.py
 
+      # The scrolling sky ignored r_skyfog under fog: R_SetSkyFog had no
+      # caller and the two-pass layers had no fog pass (GitHub #486).  Pins
+      # the per-frame write in Fog_SetupFrame and both two-pass fog passes.
+      - name: Sky fog reaches the scrolling sky
+        run: python3 tools/test_skyfog_layers.py
+
       # r_softemu_spans: the 1997 span rasteriser's texture coordinates on the
       # world, brush polys and liquids, at 1997's proportion (GitHub #176).
       - name: Retro spans reach every span-drawn surface
