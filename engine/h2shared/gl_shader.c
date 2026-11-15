@@ -215,50 +215,6 @@ GLuint GL_LinkProgram (GLuint vert, GLuint frag)
 /* Compile an OIT variant of a fragment shader.
  * Injects `#define OIT 1` and OIT MRT outputs after the #version line,
  * replacing the `out vec4 fragColor;` declaration. */
-/*
-===============
-GL_SpliceDefines
-
-Return a malloc'd copy of `src` with `defines` inserted where a #define is
-legal: after the #version line, and after any default-precision declarations
-that follow it.  GLSL ES requires `precision <qual> <type>;` before the first
-use of that type, so splicing directly under #version is not safe in general --
-the OIT splice below learned that the hard way (uhexen2-g63k).
-
-Caller frees.  NULL on a source with no newline at all, which cannot be a
-valid shader.  uhexen2-ktjv.
-===============
-*/
-static char *GL_SpliceDefines (const char *src, const char *defines)
-{
-	const char	*rest = strchr (src, '\n');
-	size_t		head_len, total;
-	char		*buf;
-
-	if (!rest)
-		return NULL;
-	rest++;
-
-	while (!strncmp (rest, "precision ", 10))
-	{
-		const char *eol = strchr (rest, '\n');
-		if (!eol)
-			return NULL;
-		rest = eol + 1;
-	}
-
-	head_len = (size_t)(rest - src);
-	total = head_len + strlen (defines) + strlen (rest) + 1;
-	buf = (char *) malloc (total);
-	if (!buf)
-		Sys_Error ("%s: out of memory", __thisfunc__);
-
-	memcpy (buf, src, head_len);
-	memcpy (buf + head_len, defines, strlen (defines));
-	strcpy (buf + head_len + strlen (defines), rest);
-	return buf;
-}
-
 /* The OIT output block, shared by GL_CompileOITFragShader and
  * GL_CompileOITFragShaderSplit below.  Hoisted to file scope (it was a
  * function-local static) so the split variant can splice the same text;
@@ -748,17 +704,10 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 	p->u_alias_model      = glGetUniformLocation_fp(p->program, "u_alias_model");
 	p->u_soft_depth       = glGetUniformLocation_fp(p->program, "u_soft_depth");
 	p->u_soft_params      = glGetUniformLocation_fp(p->program, "u_soft_params");
-	/* Skeletal-only (uhexen2-7ok0.3); -1 on every other program. */
-	p->u_pose_base        = glGetUniformLocation_fp(p->program, "u_pose_base");
-	p->u_pose_base2       = glGetUniformLocation_fp(p->program, "u_pose_base2");
-	p->u_skel_blend       = glGetUniformLocation_fp(p->program, "u_skel_blend");
-	p->u_shadevector      = glGetUniformLocation_fp(p->program, "u_shadevector");
-	p->u_lightcolor       = glGetUniformLocation_fp(p->program, "u_lightcolor");
-	p->u_fullbright       = glGetUniformLocation_fp(p->program, "u_fullbright");
 
 	/* The two shared uniform blocks, for the shaders that have moved to
 	 * engine/shaders/.  Looked up on every program the same way the
-	 * skeletal-only and alias-only uniforms above are, and -1 on the ones
+	 * alias-only uniforms above are, and -1 on the ones
 	 * that declare no such block.  Whichever u_* fields a block absorbed
 	 * came back -1 just now, which is what makes GL_ImmEnd take the block
 	 * path instead. */
@@ -767,6 +716,10 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 	 * link salias_frag, which is what GL_ImmEnd and R_SetSpanCell key their
 	 * AliasFrag writes on. */
 	p->ub_afrag = R_BindAliasFragBlock(p->program);
+	/* AliasVert: >= 0 on the four skeletal programs, whose vertex stage reads
+	 * its lighting from it (#450 S4).  The instanced pair are linked by
+	 * GL_InitAliasInstProgram and bind it there. */
+	p->ub_avert = R_BindAliasVertBlock(p->program);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1445,33 +1398,6 @@ static const char sworld_vert[] =
 	"#define MAX_LIGHTSTYLES " GLSL_STR(MAX_LIGHTSTYLES) "\n" \
 	"#define LIGHT_SSBO_BINDING " GLSL_STR(LIGHT_SSBO_BINDING) "\n"
 
-/* The varying pair the alias dlight needs, on the vertex side.  Kept out of
- * the ES arm entirely: an `out` the fragment stage does not read is harmless,
- * but there is nothing on that tier to fill the pair with, and the fragment
- * stage's matching `in`s are desktop-only (#ifndef GL_ES in
- * engine/shaders/salias_frag.glsl).
- *
- * Since #450 alias slices S1 and S3 the plain and instanced alias programs no
- * longer use VS_OUT or VS_CALC: engine/shaders/salias_vert.glsl and
- * salias_inst_vert.glsl declare the same pair themselves and read
- * u_alias_dlight from VertParams, NOT the loose uniform declared below.
- * VS_OUT's loose u_alias_dlight now serves sskeletal_vert only, and
- * tools/test_alias_vert_block.py checks every vertex stage's outputs against
- * salias_frag.glsl's inputs. */
-#define GLSL_ALIAS_DLIGHT_VS_OUT \
-	"out highp vec3 v_eyepos;\n" \
-	"flat out float v_dlightscale;\n" \
-	"uniform float u_alias_dlight;\n"	/* blocklight -> vertex-colour scale; 0 = path off */
-
-/* Fills them, for the vertex shader that already has `eyepos` in hand --
- * sskeletal_vert, since salias_vert moved to a file (#450) and does the same
- * two assignments itself.  salias_inst_vert.glsl does its own -- it works in
- * world space and has a per-instance switch to consult, so it has neither of
- * this line's inputs. */
-#define GLSL_ALIAS_DLIGHT_VS_CALC \
-	"    v_eyepos = eyepos.xyz;\n" \
-	"    v_dlightscale = u_alias_dlight;\n"
-
 #else	/* ES/WebGL2: no SSBO, no findLSB, no compute pass to fill the grid */
 #define GLSL_DLIGHT_DECL	""
 #define GLSL_DLIGHT_FN		""
@@ -1480,8 +1406,6 @@ static const char sworld_vert[] =
 #define GLSL_LMSTYLES_FN	""
 #define GLSL_LMSTYLES_APPLY	""
 #define GLSL_LIGHTGRID_CONSTS	""	/* lightgrid.inc is #ifndef GL_ES */
-#define GLSL_ALIAS_DLIGHT_VS_OUT	""
-#define GLSL_ALIAS_DLIGHT_VS_CALC	""
 #endif
 
 /* The header chunk every alias-family program compiles salias_frag.glsl with:
@@ -1812,110 +1736,20 @@ static const char sworld_frag_opaque[] =
  * slice S1) and engine/shaders/salias_frag.glsl (slice S2), reaching us as
  * salias_vert[] / salias_frag[] via shaders_gen.h.  Their header comments
  * carry the notes that were here.  salias_frag is also the fragment stage of
- * the skeletal and instanced programs below, whose vertex stages are still
- * literals; it reads its non-opaque uniforms from FragParams and AliasFrag,
+ * the skeletal and instanced programs below, whose vertex stages are files
+ * too (slices S4 and S3); it reads its non-opaque uniforms from FragParams and AliasFrag,
  * so every path drawing with one of the ten writes the members it needs
  * first -- see r_aliasfrag_t in gl_uniforms.h. */
 
 /* --- shader_skeletal: skeletal animation with bone-weighted deformation ---
- * Desktop only: the bone matrices arrive in a std430 shader storage block,
- * which is GLSL ES 3.10 and absent from WebGL2 entirely.  See GL_Shaders_Init
- * and uhexen2-dfay. */
-#ifndef USE_GLES
-static const char sskeletal_vert[] =
-	GLSL_VERT_HEADER
-	/* Affine texture mapping, the way the software rasteriser did it
-	 * (uhexen2-ktjv).  An interpolation qualifier is not something a uniform
-	 * can switch, so this is a compile-time variant -- the only stage of
-	 * r_softemu that needs one.  Empty object-like macro when NOPERSP is not
-	 * defined, so the qualifier simply is not there. */
-	"#ifdef NOPERSP\n"
-	"#define TCQUAL noperspective\n"
-	"#else\n"
-	"#define TCQUAL\n"
-	"#endif\n"
-	/* Explicit locations, because the IQM VAO (GL_CreateAliasGPUMesh in
-	 * gl_mesh.c) hardcodes this layout and it does not match the generic
-	 * a_position/a_texcoord/a_lmcoord/a_color bindings GL_LoadProgram
-	 * applies to every other program.  A layout qualifier overrides
-	 * glBindAttribLocation, so this stays local to the skeletal program
-	 * and leaves the shared contract alone.  uhexen2-bynk. */
-	"layout(location=0) in vec3 a_position;\n"
-	"layout(location=1) in vec4 a_normal;\n"
-	"layout(location=2) in vec2 a_texcoord;\n"
-	"layout(location=3) in vec4 a_weights;\n"
-	"layout(location=4) in uvec4 a_indices;\n"
-	"\n"
-	"layout(std430, binding=4) restrict readonly buffer BoneBuffer {\n"
-	"    mat3x4 bones[];\n"
-	"};\n"
-	"\n"
-	"uniform mat4 u_mvp;\n"
-	"uniform mat4 u_modelview;\n"
-	"uniform mat4 u_alias_model;\n"	/* see salias_vert (uhexen2-0gn3) */
-	/* Pose selection.  Two bases rather than one so an MD5 model lerps
-	 * between keyframes like every other alias model does: u_pose_base is
-	 * the pose R_AliasResolveLerp resolved as current, u_pose_base2 the one
-	 * it is blending away from, and u_skel_blend runs 0..1 from the latter
-	 * to the former.  Both are already multiplied by numbones CPU-side.
-	 * uhexen2-7ok0.3. */
-	"uniform int u_pose_base;\n"
-	"uniform int u_pose_base2;\n"
-	"uniform float u_skel_blend;\n"
-	/* Lighting.  The legacy path looks up shadedots[lightnormalindex],
-	 * a table of `1.0 + dot(normal, shadevector)` with negative dots scaled
-	 * by 0.3.  A skinned vertex has a real normal rather than an index into
-	 * Quake's 162-normal set, so evaluate the same expression directly and
-	 * the two paths agree on the same model to within the table's
-	 * quantization.  u_shadevector is in MODEL space, matching the
-	 * -e->angles[1] construction in R_DrawAliasModel. */
-	"uniform vec3 u_shadevector;\n"
-	"uniform vec4 u_lightcolor;\n"	/* rgb = light (tint + scale folded in), a = entity alpha */
-	"uniform float u_fullbright;\n"	/* 1.0 during the additive fullbright re-draw */
-	"\n"
-	"TCQUAL out vec2 v_texcoord;\n"
-	"out vec4 v_color;\n"
-	"out float v_fogdist;\n"
-	"out vec2 v_worldxy;\n"
-	"out highp vec3 v_matpos;\n"	/* eye space, as salias_vert (uhexen2-4kcb) */
-	GLSL_ALIAS_DLIGHT_VS_OUT
-	"invariant gl_Position;\n"
-	"\n"
-	/* Bone matrix for influence `i`, already blended across the two poses.
-	 * mat3x4 supports scalar multiply and matrix add, so the blend is a
-	 * plain linear combination -- mix() is genType-only and does not accept
-	 * matrices.  Linear blending of two adjacent keyframes' skinning
-	 * matrices is the standard approximation and is what the equivalent
-	 * vertex-lerp does on the trivertx path. */
-	"mat3x4 BonePose(uint i) {\n"
-	"    return bones[u_pose_base  + int(i)] * u_skel_blend +\n"
-	"           bones[u_pose_base2 + int(i)] * (1.0 - u_skel_blend);\n"
-	"}\n"
-	"\n"
-	"void main() {\n"
-	"    mat3x4 blend = BonePose(a_indices.x) * a_weights.x;\n"
-	"    if (a_weights.y > 0.0) blend += BonePose(a_indices.y) * a_weights.y;\n"
-	"    if (a_weights.z > 0.0) blend += BonePose(a_indices.z) * a_weights.z;\n"
-	"    if (a_weights.w > 0.0) blend += BonePose(a_indices.w) * a_weights.w;\n"
-	"\n"
-	"    mat4x3 mat_3x4 = transpose(blend);\n"
-	"    vec3 skinned_pos = mat_3x4 * vec4(a_position, 1.0);\n"
-	"    vec3 skinned_normal = normalize(mat_3x4 * vec4(a_normal.xyz, 0.0));\n"
-	"\n"
-	"    float d = dot(skinned_normal, u_shadevector);\n"
-	"    if (d < 0.0) d *= 0.3;\n"
-	"    vec3 lit = u_lightcolor.rgb * (1.0 + d);\n"
-	"\n"
-	"    v_texcoord = a_texcoord;\n"
-	"    v_color = vec4(mix(lit, vec3(1.0), u_fullbright), u_lightcolor.a);\n"
-	"    v_worldxy = (u_alias_model * vec4(skinned_pos, 1.0)).xy;\n"
-	"    vec4 eyepos = u_modelview * vec4(skinned_pos, 1.0);\n"
-	"    v_fogdist = length(eyepos.xyz);\n"
-	"    v_matpos = eyepos.xyz;\n"
-	GLSL_ALIAS_DLIGHT_VS_CALC
-	"    gl_Position = u_mvp * vec4(skinned_pos, 1.0);\n"
-	"}\n";
-#endif /* !USE_GLES */
+ * Lives in engine/shaders/sskeletal_vert.glsl since #450 alias slice S4,
+ * paired with salias_frag.glsl, and reaches us as sskeletal_vert[] via
+ * shaders_gen.h.  Its storage buffer, blocks and varyings are listed in that
+ * file's header comment.  Desktop only: the bone matrices arrive in a std430
+ * shader storage block, which is GLSL ES 3.10 and absent from WebGL2
+ * entirely.  See GL_Shaders_Init and uhexen2-dfay.  Its header chunk is the
+ * tier's version line; the affine twins append "#define NOPERSP 1\n", as for
+ * the other alias programs. */
 
 /* --- shader_particle: textured triangles with per-vertex color ---
  * Lives in engine/shaders/spart_vert.glsl and spart_frag.glsl, and reaches us
@@ -2256,20 +2090,13 @@ void GL_Shaders_Init (void)
 	 * with it yet (the PV_IQM dispatch is uhexen2-7ok0.3); whoever wires
 	 * that up owns giving the ES tier a UBO or texture-buffer skinning
 	 * path, or leaving skeletal models unsupported there.  uhexen2-dfay. */
-	/* sskeletal_vert is still a literal with its own #version (NULL vertex
-	 * header); salias_frag is a file (#450).  For the affine twin NOPERSP is
-	 * spliced into the literal and rides the file's header chunk. */
-	GL_InitProgramSplit(&gl_shader_skeletal, "skeletal", NULL, sskeletal_vert,
+	/* Both stages are files (#450, alias slices S4 and S2); NOPERSP reaches
+	 * the affine twin's two through their header chunks. */
+	GL_InitProgramSplit(&gl_shader_skeletal, "skeletal", GLSL_VERT_HEADER, sskeletal_vert,
 			    GLSL_ALIAS_FRAG_HEADER, salias_frag);
-	{
-		char *v = GL_SpliceDefines (sskeletal_vert, "#define NOPERSP 1\n");
-		if (v)
-			GL_InitProgramSplit(&gl_shader_skeletal_np, "skeletal_np", NULL, v,
-					    GLSL_ALIAS_FRAG_HEADER "#define NOPERSP 1\n", salias_frag);
-		else
-			Con_SafePrintf ("  skeletal_np: FAILED (preamble splice)\n");
-		free (v);
-	}
+	GL_InitProgramSplit(&gl_shader_skeletal_np, "skeletal_np",
+			    GLSL_VERT_HEADER "#define NOPERSP 1\n", sskeletal_vert,
+			    GLSL_ALIAS_FRAG_HEADER "#define NOPERSP 1\n", salias_frag);
 #endif
 	GL_InitProgramSplit(&gl_shader_particle, "particle", GLSL_VERT_HEADER, spart_vert,
 							GLSL_FRAG_HEADER, spart_frag);
@@ -2367,15 +2194,11 @@ void GL_Shaders_Init (void)
 	GL_InitOITProgramSplit(&gl_shader_alias_np_oit, "alias_np",
 			       GLSL_VERT_HEADER "#define NOPERSP 1\n", salias_vert,
 			       GLSL_ALIAS_FRAG_HEADER "#define NOPERSP 1\n", salias_frag);
-	GL_InitOITProgramSplit(&gl_shader_skeletal_oit, "skeletal", NULL, sskeletal_vert,
+	GL_InitOITProgramSplit(&gl_shader_skeletal_oit, "skeletal", GLSL_VERT_HEADER, sskeletal_vert,
 			       GLSL_ALIAS_FRAG_HEADER, salias_frag);
-	{
-		char *v = GL_SpliceDefines (sskeletal_vert, "#define NOPERSP 1\n");
-		if (v)
-			GL_InitOITProgramSplit(&gl_shader_skeletal_np_oit, "skeletal_np", NULL, v,
-					       GLSL_ALIAS_FRAG_HEADER "#define NOPERSP 1\n", salias_frag);
-		free (v);
-	}
+	GL_InitOITProgramSplit(&gl_shader_skeletal_np_oit, "skeletal_np",
+			       GLSL_VERT_HEADER "#define NOPERSP 1\n", sskeletal_vert,
+			       GLSL_ALIAS_FRAG_HEADER "#define NOPERSP 1\n", salias_frag);
 	GL_InitOITProgramSplit(&gl_shader_particle_oit, "particle", GLSL_VERT_HEADER, spart_vert,
 							GLSL_FRAG_HEADER, spart_frag);
 #endif

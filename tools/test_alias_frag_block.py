@@ -344,10 +344,10 @@ builds = {
     "alias_np": rf'GL_InitProgramSplit\(&gl_shader_alias_np, "alias_np",\s*GLSL_VERT_HEADER "#define NOPERSP 1\\n", salias_vert,\s*{NP}, salias_frag\)',
     "alias_oit": rf'GL_InitOITProgramSplit\(&gl_shader_alias_oit, "alias", GLSL_VERT_HEADER, salias_vert,\s*{H}, salias_frag\)',
     "alias_np_oit": rf'GL_InitOITProgramSplit\(&gl_shader_alias_np_oit, "alias_np",\s*GLSL_VERT_HEADER "#define NOPERSP 1\\n", salias_vert,\s*{NP}, salias_frag\)',
-    "skeletal": rf'GL_InitProgramSplit\(&gl_shader_skeletal, "skeletal", NULL, sskeletal_vert,\s*{H}, salias_frag\)',
-    "skeletal_np": rf'GL_SpliceDefines \(sskeletal_vert, "#define NOPERSP 1\\n"\);\s*if \(v\)\s*GL_InitProgramSplit\(&gl_shader_skeletal_np, "skeletal_np", NULL, v,\s*{NP}, salias_frag\)',
-    "skeletal_oit": rf'GL_InitOITProgramSplit\(&gl_shader_skeletal_oit, "skeletal", NULL, sskeletal_vert,\s*{H}, salias_frag\)',
-    "skeletal_np_oit": rf'GL_SpliceDefines \(sskeletal_vert, "#define NOPERSP 1\\n"\);\s*if \(v\)\s*GL_InitOITProgramSplit\(&gl_shader_skeletal_np_oit, "skeletal_np", NULL, v,\s*{NP}, salias_frag\)',
+    "skeletal": rf'GL_InitProgramSplit\(&gl_shader_skeletal, "skeletal", GLSL_VERT_HEADER, sskeletal_vert,\s*{H}, salias_frag\)',
+    "skeletal_np": rf'GL_InitProgramSplit\(&gl_shader_skeletal_np, "skeletal_np",\s*GLSL_VERT_HEADER "#define NOPERSP 1\\n", sskeletal_vert,\s*{NP}, salias_frag\)',
+    "skeletal_oit": rf'GL_InitOITProgramSplit\(&gl_shader_skeletal_oit, "skeletal", GLSL_VERT_HEADER, sskeletal_vert,\s*{H}, salias_frag\)',
+    "skeletal_np_oit": rf'GL_InitOITProgramSplit\(&gl_shader_skeletal_np_oit, "skeletal_np",\s*GLSL_VERT_HEADER "#define NOPERSP 1\\n", sskeletal_vert,\s*{NP}, salias_frag\)',
 }
 for name, b in builds.items():
     if not re.search(b, gl_shader):

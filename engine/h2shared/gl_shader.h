@@ -93,13 +93,6 @@ typedef struct glprogram_s {
 	 * the fade, so the enable lives in the uniform rather than the program. */
 	GLint	u_soft_depth;	    /* alias FS: opaque-scene depth snapshot, texture unit 1 */
 	GLint	u_soft_params;	    /* alias FS: vec3(1/fade_distance, zparam_a, zparam_b); x=0 disables */
-	/* Skeletal (PV_IQM) VS only — -1 on every other program.  uhexen2-7ok0.3. */
-	GLint	u_pose_base;	    /* current pose's first bone index (pose * numbones) */
-	GLint	u_pose_base2;	    /* pose being blended away from, same scaling */
-	GLint	u_skel_blend;	    /* 0 = fully pose_base2, 1 = fully pose_base */
-	GLint	u_shadevector;	    /* model-space light direction for the shadedots expression */
-	GLint	u_lightcolor;	    /* vec4(light rgb with tint+scale folded in, entity alpha) */
-	GLint	u_fullbright;	    /* 1.0 during the additive fullbright re-draw */
 	/* Indices of the two SHARED uniform blocks (gl_uniforms.h), for the
 	 * shaders that have moved out of C string literals into engine/shaders/.
 	 * Those declare their non-opaque uniforms inside a block, because Vulkan
@@ -112,6 +105,7 @@ typedef struct glprogram_s {
 	GLint	ub_vert;	    /* VertParams, at UBO_BINDING_VERT */
 	GLint	ub_frag;	    /* FragParams, at UBO_BINDING_FRAG */
 	GLint	ub_afrag;	    /* AliasFrag, at UBO_BINDING_ALIAS_FRAG: the ten programs linking salias_frag (#450) */
+	GLint	ub_avert;	    /* AliasVert, at UBO_BINDING_ALIAS_VERT: the four skeletal programs (#450 S4) */
 } glprogram_t;
 
 /* Texture units of the MBOIT moment targets during the composite pass (#87);

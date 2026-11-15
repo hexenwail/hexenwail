@@ -3,7 +3,8 @@
 
 Checks the pieces that have to move together:
   * AliasVert in engine/shaders/alias.inc and r_aliasvert_t in gl_uniforms.h
-    agree member for member, by NAME as well as size and kind (64 bytes), and
+    agree member for member, by NAME as well as size and kind (96 bytes since
+    S4 added the skeletal lighting), and
     VertParams and r_vertparams_t likewise -- test_alias_vert_block.py pins
     VertParams' sizes and kinds only, which let two same-shaped mat4s (model
     and viewproj) swap places and still pass;
@@ -78,7 +79,7 @@ if not vert:
 SIZE = {"mat4": 64, "vec4": 16, "ivec4": 16}
 KIND = {"mat4": "float", "vec4": "float", "ivec4": "int"}
 NAMES = {
-    "r_aliasvert_t": {"u_avlightview": "lightview"},
+    "r_aliasvert_t": {"u_avlightview": "lightview", "u_avshade": "shade", "u_avlight": "light"},
     "r_vertparams_t": {"u_mvpm": "mvp", "u_modelviewm": "modelview", "u_modelm": "model",
                        "u_viewprojm": "viewproj", "u_vscene": "scene", "u_vpup": "pup",
                        "u_vpright": "pright", "u_vvpn": "vpn", "u_vporigin": "porigin",
@@ -108,10 +109,10 @@ def check_mirror(glsl_text, block, cstruct, total):
         errors.append(f"{cstruct} fields {[n for n, _, _ in c]} are not the C names of {block}'s members, in order, {want}")
 
 
-check_mirror(alias_inc, "AliasVert", "r_aliasvert_t", 64)
+check_mirror(alias_inc, "AliasVert", "r_aliasvert_t", 96)
 check_mirror(uniforms_inc, "VertParams", "r_vertparams_t", 368)
-if "COMPILE_TIME_ASSERT(aliasvert_size, sizeof(r_aliasvert_t) == 64);" not in uc:
-    errors.append("COMPILE_TIME_ASSERT must pin r_aliasvert_t at 64")
+if "COMPILE_TIME_ASSERT(aliasvert_size, sizeof(r_aliasvert_t) == 64 + 2 * 16);" not in uc:
+    errors.append("COMPILE_TIME_ASSERT must pin r_aliasvert_t at 64 + 2*16")
 uv = re.search(r"#ifdef UNIFORMS_VERT\n(.*?)#endif", alias_inc, re.S)
 if not uv or not re.search(r"VERT_UBO\(1\) uniform AliasVert", uv.group(1)):
     errors.append("AliasVert must be VERT_UBO(1), after VertParams' 0, under #ifdef UNIFORMS_VERT")

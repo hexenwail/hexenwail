@@ -6,9 +6,9 @@
  *
  * Linked by all ten alias-family programs: alias, alias_np, both OIT twins,
  * skeletal x4 and alias_instanced x2.  The vertex stages are salias_vert.glsl,
- * and sskeletal_vert / salias_inst_vert, still C literals in gl_shader.c; all
- * three fill the varyings below by name (the plain arm of FRAG_IN emits no
- * location).
+ * sskeletal_vert.glsl and salias_inst_vert.glsl (#450 S1, S4, S3); all three
+ * fill the varyings below by name (the plain arm of FRAG_IN emits no
+ * location) and, for SPIR-V, by location.
  *
  * No #version line; gl_shader.c passes GLSL_ALIAS_FRAG_HEADER, the tier's
  * GLSL_FRAG_HEADER plus the froxel-grid sizes on desktop, with

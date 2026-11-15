@@ -57,12 +57,13 @@ static qboolean		afrag_layout_checked;
 static qboolean		avert_layout_checked;
 
 /* The mirrors are only trustworthy if they are the size std140 says they are.
- * Both are built from vec4/mat4/ivec4 only, so this is arithmetic rather than
- * hope: 4 mat4 + 6 vec4 + 1 ivec4, 9 vec4, and 1 mat4 + 5 vec4. */
+ * All are built from vec4/mat4/ivec4 only, so this is arithmetic rather than
+ * hope: 4 mat4 + 6 vec4 + 1 ivec4, 9 vec4, 1 mat4 + 5 vec4, and 1 mat4 +
+ * 2 vec4. */
 COMPILE_TIME_ASSERT(vertparams_size, sizeof(r_vertparams_t) == 4 * 64 + 7 * 16);
 COMPILE_TIME_ASSERT(fragparams_size, sizeof(r_fragparams_t) == 9 * 16);
 COMPILE_TIME_ASSERT(aliasfrag_size, sizeof(r_aliasfrag_t) == 64 + 5 * 16);
-COMPILE_TIME_ASSERT(aliasvert_size, sizeof(r_aliasvert_t) == 64);
+COMPILE_TIME_ASSERT(aliasvert_size, sizeof(r_aliasvert_t) == 64 + 2 * 16);
 
 /* ------------------------------------------------------------------ */
 /* Small helpers                                                       */
@@ -128,11 +129,14 @@ void R_SetParticleBasis (const float *pup, const float *pright,
 		vert_dirty = true;
 }
 
-void R_SetPoseBase (int v)
+void R_SetSkelPose (int base, int base2, float blend)
 {
-	if (vertparams.posei[0] != v)
+	if (vertparams.posei[0] != base || vertparams.posei[3] != base2
+	 || vertparams.alias[1] != blend)
 	{
-		vertparams.posei[0] = v;
+		vertparams.posei[0] = base;
+		vertparams.posei[3] = base2;
+		vertparams.alias[1] = blend;
 		vert_dirty = true;
 	}
 }
@@ -332,6 +336,20 @@ void R_SetAliasLightDirU (const float *dir3)
 {
 	if (RU_Set4(aliasfrag.lightdir, dir3[0], dir3[1], dir3[2], 0.0f))
 		afrag_dirty = true;
+}
+
+/* ------------------------------------------------------------------ */
+/* AliasVert setters (R_SetAliasLightGrid above writes its lightview)  */
+/* ------------------------------------------------------------------ */
+
+void R_SetSkelLight (const float *shadevec3, const float *light4, float fullbright)
+{
+	int changed = 0;
+
+	changed |= RU_Set4(aliasvert.shade, shadevec3[0], shadevec3[1], shadevec3[2], fullbright);
+	changed |= RU_Set4(aliasvert.light, light4[0], light4[1], light4[2], light4[3]);
+	if (changed)
+		avert_dirty = true;
 }
 
 /* ------------------------------------------------------------------ */

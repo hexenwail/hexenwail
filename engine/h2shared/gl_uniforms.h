@@ -51,8 +51,9 @@ typedef struct {
 	float	pright[4];	/* 288  xyz particle billboard right */
 	float	vpn[4];		/* 304  xyz view forward */
 	float	porigin[4];	/* 320  xyz camera origin, w particle time */
-	int	posei[4];	/* 336  x pose base, y instance base, z pose vertex type */
-	float	alias[4];	/* 352  x alias dynamic-light scale (#450) */
+	int	posei[4];	/* 336  x pose base, y instance base, z pose vertex type,
+				 *      w skeletal blend-from pose base */
+	float	alias[4];	/* 352  x alias dynamic-light scale (#450), y skeletal pose blend */
 } r_vertparams_t;		/* 368 */
 
 typedef struct {
@@ -98,19 +99,26 @@ typedef struct {
 } r_aliasfrag_t;		/* 144 */
 
 /* AliasVert (engine/shaders/alias.inc), the alias vertex stages' own block, at
- * UBO_BINDING_ALIAS_VERT (#450, alias slice S3).  Read by salias_inst_vert
- * only.  The vertex stage reads it on every vertex to build v_eyepos; only the
- * fragment stage's use of that varying is gated on v_dlightscale > 0:
+ * UBO_BINDING_ALIAS_VERT (#450, alias slices S3 and S4):
  *
- *   lightview  R_LightCluster_BindForAlias through R_SetAliasLightGrid, once a
- *              frame, the same lc_view as AliasFrag's copy.
+ *   lightview    salias_inst_vert's.  R_LightCluster_BindForAlias through
+ *                R_SetAliasLightGrid, once a frame, the same lc_view as
+ *                AliasFrag's copy.  The stage reads it on every vertex to
+ *                build v_eyepos; only the fragment stage's use of that
+ *                varying is gated on v_dlightscale > 0.
+ *   shade, light sskeletal_vert's.  GL_DrawAliasSkeletal through
+ *                R_SetSkelLight, every skeletal draw, before its flush.
  *
- * Seeded with an identity.  The loose uniform it replaced started at GL's
- * zeros; either value only reaches v_eyepos, which the fragment stage ignores
- * while the scale is 0, and the scale is 0 whenever the grid is not live. */
+ * Seeded with an identity lightview and zero lighting.  The loose lightview it
+ * replaced started at GL's zeros; either value only reaches v_eyepos, which
+ * the fragment stage ignores while the scale is 0, and the scale is 0
+ * whenever the grid is not live.  The lighting seed is never read: no
+ * skeletal draw reaches its flush without writing both. */
 typedef struct {
 	float	lightview[16];	/*   0  world -> eye, no entity transform */
-} r_aliasvert_t;		/* 64 */
+	float	shade[4];	/*  64  xyz model-space shade vector, w fullbright pass */
+	float	light[4];	/*  80  rgb light (tint and scale folded in), a entity alpha */
+} r_aliasvert_t;		/* 96 */
 
 void	R_Uniforms_Init (void);
 void	R_Uniforms_Shutdown (void);
@@ -132,7 +140,7 @@ void	R_BindProgramBlocks (GLuint program, GLint *out_vert, GLint *out_frag);
 GLint	R_BindAliasFragBlock (GLuint program);
 
 /* The same for AliasVert, at UBO_BINDING_ALIAS_VERT; -1 for every program but
- * the two instanced ones (#450 S3). */
+ * the two instanced ones (#450 S3) and the four skeletal ones (S4). */
 GLint	R_BindAliasVertBlock (GLuint program);
 
 /* Setters.  Each writes the CPU shadow and marks its block dirty only when the
@@ -145,7 +153,12 @@ void	R_SetModelMatrix (const float *m16);
 void	R_SetViewProj (const float *m16);
 void	R_SetParticleBasis (const float *pup, const float *pright,
 			    const float *vpn, const float *origin, float ptime);
-void	R_SetPoseBase (int v);
+/* sskeletal_vert's pose selection (#450 S4): the current and blend-from pose
+ * bases, both already multiplied by numbones, and the 0..1 blend from the
+ * latter to the former.  One setter for all three, for the reason
+ * R_SetAlphaMask is one: a skeletal draw that set the pair without the blend
+ * would inherit the previous skeletal entity's. */
+void	R_SetSkelPose (int base, int base2, float blend);
 void	R_SetInstBase (int v);
 void	R_SetPoseVertType (int v);
 void	R_SetAliasDlight (float scale);	/* u_alias_dlight, salias_vert (#450) */
@@ -183,6 +196,13 @@ void	R_SetAliasTurb (float amplitude, float time);
 void	R_SetAliasSpans (float cell);
 void	R_SetAliasMaterialU (float normal, float gloss, float glossexp);
 void	R_SetAliasLightDirU (const float *dir3);
+
+/* AliasVert: sskeletal_vert's lighting (#450 S4).  shadevec3 is the model-
+ * space shade vector, light4 the rgb light with tint and scale folded in plus
+ * the entity alpha, fullbright 1 during the additive fullbright redraw.  One
+ * call writes the whole set, so none of it can be inherited from the last
+ * skeletal draw. */
+void	R_SetSkelLight (const float *shadevec3, const float *light4, float fullbright);
 
 /* Upload whichever blocks changed.  One push per dirty block, whole block,
  * immediately before the draw that reads it. */

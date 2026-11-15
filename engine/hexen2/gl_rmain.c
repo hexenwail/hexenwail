@@ -1463,47 +1463,38 @@ static void GL_DrawAliasSkeletal (entity_t *e, aliashdr_t *paliashdr,
 
 	R_UseProgram (prog->program);
 
-	if (prog->u_mvp >= 0)
-		glUniformMatrix4fv_fp (prog->u_mvp, 1, GL_FALSE, mvp);
-	if (prog->u_modelview >= 0)
-		glUniformMatrix4fv_fp (prog->u_modelview, 1, GL_FALSE, mv);
-	if (prog->u_alias_model >= 0)
-		glUniformMatrix4fv_fp (prog->u_alias_model, 1, GL_FALSE, model);
-
-	if (prog->u_pose_base >= 0)
-		glUniform1i_fp (prog->u_pose_base, posenum * gm->numbones);
-	if (prog->u_pose_base2 >= 0)
-		glUniform1i_fp (prog->u_pose_base2, prevposenum * gm->numbones);
-	if (prog->u_skel_blend >= 0)
-		glUniform1f_fp (prog->u_skel_blend, lerpfrac);
-
-	if (prog->u_shadevector >= 0)
-		glUniform3f_fp (prog->u_shadevector,
-				shadevector[0], shadevector[1], shadevector[2]);
+	/* Both stages read blocks since #450 (sskeletal_vert.glsl in slice S4,
+	 * salias_frag.glsl in S2).  A block member is shared by every program,
+	 * where the loose uniforms these writes replace were this program's own,
+	 * so every member either stage reads is written here, every draw, before
+	 * the flush: nothing may be inherited from whatever batch drew last
+	 * (#19's lesson).  The values are the ones the loose writes made.
+	 *
+	 * The vertex stage first: VertParams' matrices and pose selection, and
+	 * AliasVert's lighting. */
+	R_SetMVP (mvp);
+	R_SetModelView (mv);
+	R_SetModelMatrix (model);
+	R_SetSkelPose (posenum * gm->numbones, prevposenum * gm->numbones, lerpfrac);
 	/* lightcolor already carries R_AliasLightScale's /200 (and the overbright
 	 * boost); the per-entity colorshade tint is the one factor the immediate
 	 * path applies per vertex, so fold it in here instead. */
-	if (prog->u_lightcolor >= 0)
-		glUniform4f_fp (prog->u_lightcolor,
-				lightcolor[0] * r, lightcolor[1] * g, lightcolor[2] * b,
-				model_constant_alpha);
-	if (prog->u_fullbright >= 0)
-		glUniform1f_fp (prog->u_fullbright, model_fullbright_pass ? 1.0f : 0.0f);
+	{
+		float	light[4];
 
+		light[0] = lightcolor[0] * r;
+		light[1] = lightcolor[1] * g;
+		light[2] = lightcolor[2] * b;
+		light[3] = model_constant_alpha;
+		R_SetSkelLight (shadevector, light, model_fullbright_pass ? 1.0f : 0.0f);
+	}
 	/* uhexen2-waum.  This path bypasses GL_ImmEnd -- there is no streamed
 	 * vertex data to end -- so it owns pushing the per-batch state itself.
 	 * The froxel-lookup constants come from R_LightCluster_BindForAlias once a
-	 * frame; only the scale travels with the draw.  A vertex-stage uniform,
-	 * still loose in sskeletal_vert. */
-	if (prog->u_alias_dlight >= 0)
-		glUniform1f_fp (prog->u_alias_dlight, GL_GetAliasDlight ());
+	 * frame; only the scale travels with the draw. */
+	R_SetAliasDlight (GL_GetAliasDlight ());
 
-	/* The fragment stage, salias_frag, reads FragParams and AliasFrag since
-	 * #450 slice S2.  Those are shared by every program, where the loose
-	 * uniforms these writes replace were this program's own, so the full
-	 * set salias_frag reads is written here, every draw, before the flush:
-	 * nothing may be inherited from whatever batch drew last (#19's lesson).
-	 * The values are the ones the loose writes made. */
+	/* Then the fragment stage's FragParams and AliasFrag. */
 	R_SetFog (r_fog_density, r_fog_color);
 	/* Raw, as the loose writes passed them: by the time a model draws, both
 	 * have long been set non-negative, and a -1 would test the same as the 0

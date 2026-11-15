@@ -48,8 +48,9 @@ VERT_UBO(0) uniform VertParams {
     highp vec4  u_vpright;      /* 288  xyz particle billboard right */
     highp vec4  u_vvpn;         /* 304  xyz view forward */
     highp vec4  u_vporigin;     /* 320  xyz camera origin, w particle time */
-    highp ivec4 u_vposei;       /* 336  x pose base, y instance base, z pose vertex type */
-    highp vec4  u_valias;       /* 352  x alias dynamic-light scale (#450) */
+    highp ivec4 u_vposei;       /* 336  x pose base, y instance base, z pose vertex type,
+                                 *      w skeletal blend-from pose base */
+    highp vec4  u_valias;       /* 352  x alias dynamic-light scale (#450), y skeletal pose blend */
 };                              /* 368 bytes */
 
 #define u_mvp           u_mvpm
@@ -66,7 +67,9 @@ VERT_UBO(0) uniform VertParams {
 #define u_pose_base     u_vposei.x
 #define u_inst_base     u_vposei.y
 #define u_poseverttype  u_vposei.z
+#define u_pose_base2    u_vposei.w
 #define u_alias_dlight  u_valias.x
+#define u_skel_blend    u_valias.y
 #endif  /* UNIFORMS_VERT */
 
 #ifdef UNIFORMS_FRAG

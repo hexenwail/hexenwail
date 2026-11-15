@@ -23,11 +23,14 @@
  * permanent ones flushed by R_FlushUniforms, not the GL_Upload ring, which is
  * a stub on the ES tier the alias program runs on.
  *
- * WHY AliasVert IS ITS OWN BLOCK and not a VertParams member: its one member
- * is the froxel grid's world -> eye matrix, written once a frame, while the
- * instanced draw re-flushes VertParams once per batch for u_inst_base.  Kept
- * out, it rides that per-batch upload zero times instead of every time, and
- * VertParams, which every block program on every tier reads, does not grow.
+ * WHY AliasVert IS ITS OWN BLOCK and not a VertParams member: its first
+ * member is the froxel grid's world -> eye matrix, written once a frame, while
+ * the instanced draw re-flushes VertParams once per batch for u_inst_base.
+ * Kept out, it rides that per-batch upload zero times instead of every time,
+ * and VertParams, which every block program on every tier reads, does not
+ * grow.  The skeletal stage's lighting (slice S4) is here for the second half
+ * of that reason: three values only the skeletal programs read, which
+ * VertParams has no spare lanes for.
  *
  * EVERY MEMBER IS vec4 OR mat4, for the reason uniforms.inc gives.  The
  * lightgrid members exist on both tiers so the layout never varies; only the
@@ -61,16 +64,25 @@ FRAG_UBO(1) uniform AliasFrag {
 #endif  /* UNIFORMS_FRAG */
 
 #ifdef UNIFORMS_VERT
-/* Only salias_inst_vert reads it so far: that stage builds gl_Position from
+/* u_avlightview is salias_inst_vert's: that stage builds gl_Position from
  * u_viewproj and a world-space vertex, so it has no u_modelview to take eye
  * space from and reconstructs it with this for the froxel lookup
  * (uhexen2-waum).  The same lc_view as AliasFrag's u_aflightview, written by
- * the same R_SetAliasLightGrid call, so the two stages cannot disagree. */
+ * the same R_SetAliasLightGrid call, so the two stages cannot disagree.
+ *
+ * u_avshade and u_avlight are sskeletal_vert's per-draw lighting (#450 S4):
+ * GL_DrawAliasSkeletal writes both, as one call, before every skeletal draw.
+ * Nothing else reads them. */
 VERT_UBO(1) uniform AliasVert {
     highp mat4 u_avlightview;   /*   0  world -> eye, no entity transform (froxel grid) */
-};                              /*  64 bytes */
+    highp vec4 u_avshade;       /*  64  xyz model-space shade vector, w fullbright pass */
+    highp vec4 u_avlight;       /*  80  rgb light (tint and scale folded in), a entity alpha */
+};                              /*  96 bytes */
 
 #define u_lightview       u_avlightview
+#define u_shadevector     u_avshade.xyz
+#define u_fullbright      u_avshade.w
+#define u_lightcolor      u_avlight
 #endif  /* UNIFORMS_VERT */
 
 #endif /* ALIAS_INC */
