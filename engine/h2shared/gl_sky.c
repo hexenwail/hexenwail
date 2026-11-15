@@ -1896,7 +1896,12 @@ void Sky_DrawSky (void)
 	//
 	// render skybox
 	//
-	if (!r_fastsky.value && !(Fog_GetDensity() > 0 && skyfog >= 1))
+	/* Not skipped at skyfog >= 1, as QuakeSpasm does: it had painted the sky
+	 * surfaces the fog colour first, but here they only write depth and
+	 * stencil, so a skipped box left the sky the clear colour (black).  As in
+	 * Ironwail, the box always draws and its flat fog pass at alpha
+	 * CLAMP(0, skyfog, 1) turns it solid fog colour at 1.  GitHub #487. */
+	if (!r_fastsky.value)
 	{
 		R_SetBlend (false);
 		GL_ImmColor4f(1, 1, 1, 1);

@@ -196,7 +196,8 @@ jobs:
 
       # The scrolling sky ignored r_skyfog under fog: R_SetSkyFog had no
       # caller and the two-pass layers had no fog pass (GitHub #486).  Pins
-      # the per-frame write in Fog_SetupFrame and both two-pass fog passes.
+      # the per-frame write in Fog_SetupFrame and both two-pass fog passes;
+      # and the skybox is never skipped on skyfog (GitHub #487).
       - name: Sky fog reaches the scrolling sky
         run: python3 tools/test_skyfog_layers.py
 

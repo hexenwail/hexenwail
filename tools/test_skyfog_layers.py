@@ -25,7 +25,11 @@ This source check fails if:
   - either two-pass path (R_DrawSkyChain, EmitSkyPolysMulti) loses its flat
     fog pass after the front layer, inside the blend, or
   - a shader other than ssky_layers_frag.glsl reads u_skyfog (the skybox
-    faces would then be fogged twice: their shader and their flat pass).
+    faces would then be fogged twice: their shader and their flat pass), or
+  - Sky_DrawSky gates the skybox on skyfog again (GitHub #487).  QuakeSpasm
+    skips the box at skyfog >= 1 because it had painted the sky surfaces the
+    fog colour; here they only write depth and stencil, so the skip left the
+    sky black.  Ironwail always draws the box; r_fastsky is the only gate.
 
 Optional argument: --root DIR, a tree to check instead of this one (the
 mutation runs use it).
@@ -202,6 +206,24 @@ def check(root):
         failures.append("ssky_layers_frag.glsl: lost 'color = mix(color, "
                         "u_skyfog.rgb, u_skyfog.a)'")
 
+    # 6. The skybox is drawn whatever skyfog is; only r_fastsky skips it.
+    draw = function(sky_c, "void Sky_DrawSky (void)")
+    if re.search(r"\bskyfog\b", draw):
+        failures.append("Sky_DrawSky: reads skyfog; the skybox must not be "
+                        "skipped on it (#487: the sky surfaces are not painted, "
+                        "so a skipped box leaves the sky black)")
+    calls = [m.start() for m in re.finditer(r"\bSky_DrawSkyBox\s*\(\s*\)\s*;", draw)]
+    gate = re.search(r"\bif\s*\(\s*!\s*r_fastsky\.value\s*\)", draw)
+    if len(calls) != 1 or not gate:
+        failures.append("Sky_DrawSky: expected one Sky_DrawSkyBox () call inside "
+                        "'if (!r_fastsky.value)'")
+    else:
+        guarded = block_after(draw, gate.end())
+        start = gate.end() + draw[gate.end():].index(guarded[0])
+        if not start <= calls[0] < start + len(guarded):
+            failures.append("Sky_DrawSky: Sky_DrawSkyBox () is not inside "
+                            "'if (!r_fastsky.value)'")
+
     return failures
 
 
@@ -216,7 +238,8 @@ def main():
     if failures:
         print("FAIL:\n  " + "\n  ".join(failures))
         return 1
-    print("PASS: sky fog is set every frame and reaches both scrolling-sky paths")
+    print("PASS: sky fog is set every frame, reaches both scrolling-sky paths, "
+          "and never skips the skybox")
     return 0
 
 
