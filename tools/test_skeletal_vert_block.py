@@ -7,14 +7,20 @@ Checks the pieces that have to move together:
     and int/float kind (96 and 368 bytes), with COMPILE_TIME_ASSERT pinning
     the AliasVert mirror and the driver check sized from it;
   * every old loose name the stage reads aliases the member its setter writes,
-    the stage reads exactly that set, and no lane is written by two setters
-    (u_vposei.w and u_valias.y are spare lanes of members other setters own);
+    the stage (the whole file, not just main) reads exactly that set, and no
+    lane is written by two setters (u_vposei.w and u_valias.y are spare lanes
+    of members other setters own) -- in any form: assignment, compound
+    assignment, ++/--, &lane, or the bare member or struct as a pointer for
+    memcpy/memset/RU_Set*;
+  * each setter writes its set with no early exit and dirties only its own
+    block;
   * engine/shaders/sskeletal_vert.glsl has no #version, declares no loose
     non-opaque uniform, puts its bones on VERT_SSBO(4, 0) -- GL binding 4,
     which GL_DrawAliasSkeletal binds, and Vulkan set 0 index 0, since the
     stage samples no texture -- and gives every input an explicit VERT_IN
     equal to the slot, width and integer-ness of the IQM VAO in gl_mesh.c,
-    which is NOT the ATTR_* contract the other programs share;
+    which is NOT the ATTR_* contract the other programs share, and its
+    BonePose and main match a pinned token stream (GOLDEN);
   * the literal, GL_SpliceDefines and the GLSL_ALIAS_DLIGHT_VS_* splices are
     gone, all four skeletal programs compile the file through
     GLSL_VERT_HEADER (NOPERSP appended for the two affine ones) inside a
@@ -22,10 +28,14 @@ Checks the pieces that have to move together:
     skeletal-only locations, and GL_InitProgramUniforms binds AliasVert;
   * GL_DrawAliasSkeletal makes no loose glUniform write, writes every member
     the stage reads (each through its setter, from the values the loose
-    writes used) after the pose clamp and before one unconditional
-    R_FlushUniforms at the draw's own brace depth, then binds the bones and
-    draws -- a block member is global, so a value left by an earlier draw is
-    a bug, where the loose uniform was this program's own;
+    writes used, each matrix filled by its own getter) after the pose clamp
+    and before one R_FlushUniforms at the draw's own brace depth, then binds
+    the bones and draws.  Setters, getters, flush and draw are all
+    unconditional: no braceless or braced if/else/for/while/do/switch/#if
+    over them, no enclosing block that is a conditional's body (a plain
+    scoping block is fine), and no exit between the clamp and the draw -- a
+    block member is global, so a value left by an earlier draw is a bug,
+    where the loose uniform was this program's own;
   * R_SetSkelPose and R_SetSkelLight write their whole set in one call and
     have no caller but GL_DrawAliasSkeletal.
 The fragment stage's writes on the same path are test_alias_frag_block.py's,
@@ -137,55 +147,122 @@ READS = {
 for old, (text, new, _, _, _) in READS.items():
     if not re.search(rf"#define\s+{old}\s+{re.escape(new)}\s*\n", text):
         errors.append(f"{old} must alias {new}")
-main = vcode[vcode.find("mat3x4 BonePose"):] if "mat3x4 BonePose" in vcode else ""
-used = set(re.findall(r"\bu_\w+", main))
+# The whole file, not just from BonePose down: a helper above it reading a
+# member nobody on this path writes is the same leak.  vcode holds no block
+# declaration (those are the includes'), so every u_ name in it is a read.
+used = set(re.findall(r"\bu_\w+", vcode))
 if used != set(READS):
     errors.append(f"sskeletal_vert.glsl reads {sorted(used)}; this check (and the draw it pins) "
                   f"covers exactly {sorted(READS)}")
 
 SETTERS = {
     "R_SetSkelPose": (r"\(int base, int base2, float blend\)",
-                      [r"vertparams\.posei\[0\] = base;", r"vertparams\.posei\[3\] = base2;",
-                       r"vertparams\.alias\[1\] = blend;", r"vert_dirty = true;"]),
+                      [r"\bvertparams\.posei\[0\] = base;", r"\bvertparams\.posei\[3\] = base2;",
+                       r"\bvertparams\.alias\[1\] = blend;", r"\bvert_dirty = true;"], "vert_dirty"),
     "R_SetSkelLight": (r"\(const float \*shadevec3, const float \*light4, float fullbright\)",
-                       [r"RU_Set4\(aliasvert\.shade, shadevec3\[0\], shadevec3\[1\], shadevec3\[2\], fullbright\)",
-                        r"RU_Set4\(aliasvert\.light, light4\[0\], light4\[1\], light4\[2\], light4\[3\]\)",
-                        r"avert_dirty = true;"]),
-    "R_SetMVP": (r"\(const float \*m16\)", [r"RU_SetMat\(vertparams\.mvp, m16\)"]),
-    "R_SetModelView": (r"\(const float \*m16\)", [r"RU_SetMat\(vertparams\.modelview, m16\)"]),
-    "R_SetModelMatrix": (r"\(const float \*m16\)", [r"RU_SetMat\(vertparams\.model, m16\)"]),
-    "R_SetAliasDlight": (r"\(float scale\)", [r"vertparams\.alias\[0\] = scale;"]),
+                       [r"\bRU_Set4\(aliasvert\.shade, shadevec3\[0\], shadevec3\[1\], shadevec3\[2\], fullbright\)",
+                        r"\bRU_Set4\(aliasvert\.light, light4\[0\], light4\[1\], light4\[2\], light4\[3\]\)",
+                        r"\bavert_dirty = true;"], "avert_dirty"),
+    "R_SetMVP": (r"\(const float \*m16\)", [r"\bRU_SetMat\(vertparams\.mvp, m16\)"], "vert_dirty"),
+    "R_SetModelView": (r"\(const float \*m16\)", [r"\bRU_SetMat\(vertparams\.modelview, m16\)"], "vert_dirty"),
+    "R_SetModelMatrix": (r"\(const float \*m16\)", [r"\bRU_SetMat\(vertparams\.model, m16\)"], "vert_dirty"),
+    "R_SetAliasDlight": (r"\(float scale\)", [r"\bvertparams\.alias\[0\] = scale;"], "vert_dirty"),
 }
-for fn, (sig, wants) in SETTERS.items():
+for fn, (sig, wants, flag) in SETTERS.items():
     b = body_of(uc, rf"\nvoid {fn} {sig}\s*\{{")
     if b is None:
         errors.append(f"gl_uniforms.c: no void {fn} {sig.replace(chr(92), '')}")
         continue
+    sb = strip(b)
     for w in wants:
-        if not re.search(w, strip(b)):
+        if not re.search(w, sb):
             errors.append(f"{fn} must write {w}")
+    # A setter that can leave early writes part of its set and reports the
+    # call done: the draw's unconditional call is then only half a write.
+    if re.search(r"\b(?:return|goto|longjmp)\b", sb):
+        errors.append(f"{fn} has an early exit; every call must reach its writes")
+    flags = set(re.findall(r"\b\w+_dirty\b", sb))
+    if flags != {flag}:
+        errors.append(f"{fn} names dirty flags {sorted(flags)}; it owns one block, so exactly {{{flag!r}}}")
     if fn == "R_SetSkelPose" and not re.search(
-            r"if \(vertparams\.posei\[0\] != base \|\| vertparams\.posei\[3\] != base2\s*\|\| vertparams\.alias\[1\] != blend\)",
-            strip(b)):
+            r"\bif \(vertparams\.posei\[0\] != base \|\| vertparams\.posei\[3\] != base2\s*\|\| vertparams\.alias\[1\] != blend\)",
+            sb):
         errors.append("R_SetSkelPose must compare all three lanes before skipping the write")
-    if fn == "R_SetSkelLight" and not re.search(r"if \(changed\)\s*avert_dirty = true;", strip(b)):
+    if fn == "R_SetSkelLight" and not re.search(r"\bif \(changed\)\s*\bavert_dirty = true;", sb):
         errors.append("R_SetSkelLight must mark AliasVert dirty when either vec4 changed")
 if re.search(r"\bR_SetPoseBase\b", strip(uc) + strip(uh)):
     errors.append("R_SetPoseBase is back: it writes the pose base without base2 and blend")
+
+
+def functions(code):
+    """(name, open, close) of every depth-0 brace block whose header ends in a
+    parameter list -- the function definitions of a comment-stripped C file."""
+    out, depth, start, last = [], 0, 0, 0
+    for i, ch in enumerate(code):
+        if ch == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                hdr = code[last:start]
+                m = re.search(r"\b(\w+)\s*\([^;{}]*\)\s*$", hdr)
+                out.append((m.group(1) if m else None, start, i))
+                last = i + 1
+        elif ch == ";" and depth == 0:
+            last = i + 1
+    return out
+
+
+def enclosing_fn(fns, pos):
+    for name, a, z in fns:
+        if a < pos < z:
+            return name or "?"
+    return None
+
+
 # One owner per lane: a second writer of posei[3], alias[1] or the skeletal
 # AliasVert members would leak into the next skeletal draw's unwritten half.
+# A reference counts as a READ only when it is one literal lane, not assigned,
+# incremented or address-taken; anything else -- an assignment, a compound
+# assignment, the bare member decaying to a pointer (memcpy/memset/RU_Set*
+# targets), &lane -- is a write, and only the owner (or R_Uniforms_Init's
+# zeroing) may make it.
 ucode = strip(uc)
-for pat, owner in ((r"vertparams\.posei\[3\]\s*=", "R_SetSkelPose"), (r"vertparams\.alias\[1\]\s*=", "R_SetSkelPose"),
-                   (r"vertparams\.alias\[0\]\s*=", "R_SetAliasDlight"), (r"vertparams\.posei\[0\]\s*=", "R_SetSkelPose"),
-                   (r"aliasvert\.(?:shade|light)\b", "R_SetSkelLight")):
-    for m in re.finditer(pat, ucode):
-        fn = re.findall(r"\nvoid (\w+) \(", ucode[:m.start()])
-        if not fn or fn[-1] != owner:
-            if fn and fn[-1] == "R_Uniforms_Init":
-                continue
-            errors.append(f"{pat} is written in {fn[-1] if fn else '?'}, not only {owner}")
-if re.search(r"RU_Set4\(vertparams\.(?:alias|posei)\b", ucode):
-    errors.append("a whole-vec4 write of VertParams' alias/posei would clobber a lane another setter owns")
+ufns = functions(ucode)
+LANES = {("vertparams", "posei", 0): "R_SetSkelPose", ("vertparams", "posei", 3): "R_SetSkelPose",
+         ("vertparams", "alias", 0): "R_SetAliasDlight", ("vertparams", "alias", 1): "R_SetSkelPose",
+         ("aliasvert", "shade", None): "R_SetSkelLight", ("aliasvert", "light", None): "R_SetSkelLight"}
+ASSIGN = r"\s*(?:=(?!=)|[-+*/%&|^]=|<<=|>>=|\+\+|--)"
+for struct, member in sorted({(s, m) for s, m, _ in LANES}):
+    for m in re.finditer(rf"\b{struct}\s*\.\s*{member}\b(?:\s*\[\s*([^\]]*?)\s*\])?", ucode):
+        idx = m.group(1)
+        before = ucode[:m.start()].rstrip()
+        write = (idx is None or not idx.isdigit()
+                 or re.match(ASSIGN, ucode[m.end():]) is not None
+                 or re.search(r"(?<!&)&$|\+\+$|--$", before) is not None)
+        if not write:
+            continue
+        lanes = [k for k in LANES if k[:2] == (struct, member)
+                 and (k[2] is None or idx is None or not idx.isdigit() or int(idx) == k[2])]
+        fn = enclosing_fn(ufns, m.start())
+        for lane in lanes:
+            if fn != LANES[lane] and fn != "R_Uniforms_Init":
+                errors.append(f"{struct}.{member}{'' if lane[2] is None else f'[{lane[2]}]'} is written "
+                              f"({m.group(0)!r}) in {fn or 'file scope'}, not only {LANES[lane]}")
+# The whole struct as a pointer is a write of every lane at once.  Its
+# declaration, sizeof, the flush's upload and R_Uniforms_Init's zeroing are
+# the only legitimate whole-struct references.
+for struct in ("vertparams", "aliasvert"):
+    t = re.sub(rf"\bstatic r_\w+_t\s+{struct}\s*;", " ", ucode)
+    t = re.sub(rf"\bglBufferData_fp \(GL_UNIFORM_BUFFER, sizeof\({struct}\), &{struct},", "@", t)
+    t = re.sub(rf"\bsizeof\s*\(\s*{struct}\s*\)", "@", t)
+    tf = functions(t)
+    for m in re.finditer(rf"\b{struct}\b(?!\s*\.)", t):
+        fn = enclosing_fn(tf, m.start())
+        if fn != "R_Uniforms_Init":
+            errors.append(f"{struct} is referenced whole in {fn or 'file scope'}; a pointer to it can write any lane")
 for fn in ("R_SetSkelPose", "R_SetSkelLight"):
     for f in sorted((ROOT / "engine").rglob("*.c")):
         if f.name == "gl_uniforms.c":
@@ -223,6 +300,49 @@ if "invariant gl_Position;" not in vcode:
     errors.append("sskeletal_vert.glsl lost `invariant gl_Position` (uhexen2-iir3)")
 if not re.search(r"#ifdef NOPERSP\s*#define TCQUAL noperspective\s*#else\s*#define TCQUAL\s*#endif", vcode):
     errors.append("sskeletal_vert.glsl must define TCQUAL from NOPERSP")
+
+# The body, pinned as a token stream (comments and whitespace do not count).
+# Derived from the file at S4 and token-identical to the inline literal it
+# replaced, GLSL_ALIAS_DLIGHT_VS_CALC's desktop arm expanded; the u_ names
+# resolve through the aliases checked above, of the loose uniforms' types.
+# A DELIBERATE shader change updates this golden in the same commit.
+GOLDEN = {
+    r"\bmat3x4\s+BonePose\s*\(":
+        "mat3x4 BonePose ( uint i ) { return bones [ u_pose_base + int ( i ) ] * u_skel_blend + "
+        "bones [ u_pose_base2 + int ( i ) ] * ( 1.0 - u_skel_blend ) ; }",
+    r"\bvoid\s+main\s*\(":
+        "void main ( ) { mat3x4 blend = BonePose ( a_indices . x ) * a_weights . x ; "
+        "if ( a_weights . y > 0.0 ) blend += BonePose ( a_indices . y ) * a_weights . y ; "
+        "if ( a_weights . z > 0.0 ) blend += BonePose ( a_indices . z ) * a_weights . z ; "
+        "if ( a_weights . w > 0.0 ) blend += BonePose ( a_indices . w ) * a_weights . w ; "
+        "mat4x3 mat_3x4 = transpose ( blend ) ; "
+        "vec3 skinned_pos = mat_3x4 * vec4 ( a_position , 1.0 ) ; "
+        "vec3 skinned_normal = normalize ( mat_3x4 * vec4 ( a_normal . xyz , 0.0 ) ) ; "
+        "float d = dot ( skinned_normal , u_shadevector ) ; "
+        "if ( d < 0.0 ) d *= 0.3 ; "
+        "vec3 lit = u_lightcolor . rgb * ( 1.0 + d ) ; "
+        "v_texcoord = a_texcoord ; "
+        "v_color = vec4 ( mix ( lit , vec3 ( 1.0 ) , u_fullbright ) , u_lightcolor . a ) ; "
+        "v_worldxy = ( u_alias_model * vec4 ( skinned_pos , 1.0 ) ) . xy ; "
+        "vec4 eyepos = u_modelview * vec4 ( skinned_pos , 1.0 ) ; "
+        "v_fogdist = length ( eyepos . xyz ) ; "
+        "v_matpos = eyepos . xyz ; "
+        "v_eyepos = eyepos . xyz ; "
+        "v_dlightscale = u_alias_dlight ; "
+        "gl_Position = u_mvp * vec4 ( skinned_pos , 1.0 ) ; }",
+}
+TOK = r"\d+\.\d*(?:[eE][-+]?\d+)?|\.\d+(?:[eE][-+]?\d+)?|\d+|\w+|[-+*/%<>=!&|^]=|&&|\|\||\+\+|--|<<|>>|\S"
+for head, want in GOLDEN.items():
+    hm = list(re.finditer(head, vcode))
+    body = body_of(vcode, head) if len(hm) == 1 else None
+    got = ""
+    if body:
+        start = hm[0].start()
+        got = " ".join(re.findall(TOK, vcode[start:vcode.index("{", start) + len(body)]))
+    if got != want:
+        errors.append(f"sskeletal_vert.glsl's {want.split(' ( ')[0]} differs from the pinned body "
+                      f"(found {len(hm)} definitions); a deliberate change updates GOLDEN with it.\n"
+                      f"    got:  {got}\n    want: {want}")
 
 # Every input against the IQM VAO GL_MakeAliasGPUMesh builds: same slot, same
 # width, and an integer attribute exactly where the VAO uses the I pointer.
@@ -323,8 +443,8 @@ else:
         errors.append("GL_DrawAliasSkeletal still makes a loose glUniform write; both stages read blocks now")
     if re.search(r"prog->u_\w+", draw):
         errors.append("GL_DrawAliasSkeletal still reads a per-program uniform location")
-    flushes = [m.start() for m in re.finditer(r"R_FlushUniforms \(\);", draw)]
-    dm = re.search(r"glDrawElements_fp \(GL_TRIANGLES, gm->num_indices, GL_UNSIGNED_SHORT, NULL\);", draw)
+    flushes = [m.start() for m in re.finditer(r"\bR_FlushUniforms \(\);", draw)]
+    dm = re.search(r"\bglDrawElements_fp \(GL_TRIANGLES, gm->num_indices, GL_UNSIGNED_SHORT, NULL\);", draw)
     if len(flushes) != 1 or not dm:
         errors.append(f"GL_DrawAliasSkeletal must flush exactly once ({len(flushes)}) and draw gm->num_indices")
     else:
@@ -332,44 +452,107 @@ else:
 
         def depth_at(i):
             return draw[:i].count("{") - draw[:i].count("}")
-        stmt = max(draw.rfind(";", 0, fpos), draw.rfind("{", 0, fpos), draw.rfind("}", 0, fpos))
+
+        def stmt_prefix(i):
+            """The text between the statement delimiter (; { } outside parens)
+            before `i` and `i`, preprocessor lines dropped."""
+            parens, j = 0, i - 1
+            while j > 0:
+                c = draw[j]
+                if c == ")":
+                    parens += 1
+                elif c == "(":
+                    parens -= 1
+                elif c in ";{}" and parens == 0:
+                    break
+                j -= 1
+            return re.sub(r"(?m)^\s*#.*$", " ", draw[j + 1:i]).strip()
+
+        def conditional(i):
+            """Why the statement at `i` can be skipped, or None.  Its own
+            statement must start with it (no braceless if/else/for/while/
+            switch/case, no ?: or && around it), every enclosing block must be
+            a plain scoping block standing as a statement on its own, and no
+            #if may be open around it."""
+            pre = stmt_prefix(i)
+            if pre:
+                return f"it is governed by {pre!r}"
+            d, j = 0, i - 1
+            while j > 0:                       # draw[0] is the function's own brace
+                if draw[j] == "}":
+                    d += 1
+                elif draw[j] == "{":
+                    if d == 0:
+                        pre = stmt_prefix(j)
+                        if pre:
+                            return f"its enclosing block is the body of {pre!r}"
+                    else:
+                        d -= 1
+                j -= 1
+            pp = 0
+            for m in re.finditer(r"(?m)^\s*#\s*(if|ifdef|ifndef|endif)\b", draw[:i]):
+                pp += -1 if m.group(1) == "endif" else 1
+            if pp:
+                return "it sits inside a preprocessor conditional"
+            return None
         if fpos > dpos:
             errors.append("GL_DrawAliasSkeletal flushes after its draw")
-        if depth_at(fpos) != depth_at(dpos) or re.search(r"\b(?:if|else|for|while)\b", draw[stmt + 1:fpos]):
-            errors.append("GL_DrawAliasSkeletal's R_FlushUniforms must be unconditional, at the draw's brace depth")
-        if re.search(r"\breturn\b", draw[fpos:dpos]):
-            errors.append("GL_DrawAliasSkeletal can return between its flush and its draw")
-        clamp = re.search(r"if \(posenum\s+< 0 \|\| posenum\s+>= gm->numposes\) posenum\s+= 0;\s*"
+        for what, at in (("R_FlushUniforms", fpos), ("glDrawElements_fp", dpos)):
+            why = conditional(at)
+            if why:
+                errors.append(f"GL_DrawAliasSkeletal's {what} must be unconditional: {why}")
+        if depth_at(fpos) != depth_at(dpos):
+            errors.append("GL_DrawAliasSkeletal's R_FlushUniforms must be at the draw's brace depth")
+        clamp = re.search(r"\bif \(posenum\s+< 0 \|\| posenum\s+>= gm->numposes\) posenum\s+= 0;\s*"
                           r"if \(prevposenum < 0 \|\| prevposenum >= gm->numposes\) prevposenum = posenum;", draw)
         if not clamp:
             errors.append("GL_DrawAliasSkeletal lost its pose clamp (an out-of-range pose reads past the bone SSBO)")
+        # The two early returns (no mesh, no program) precede the clamp; past
+        # it nothing may leave, or a conditional exit skips setters and flush.
+        if clamp and re.search(r"\b(?:return|goto|break|continue|longjmp)\b", draw[clamp.end():dpos]):
+            errors.append("GL_DrawAliasSkeletal can leave between its pose clamp and its draw")
         for old, (_, _, _, setter, w) in READS.items():
             if w is None:
                 continue
-            ms = list(re.finditer(w, draw))
+            ms = list(re.finditer(r"\b" + w, draw))
             if len(ms) != 1:
                 errors.append(f"GL_DrawAliasSkeletal must write {old} once through {w} (found {len(ms)})")
                 continue
             p = ms[0].start()
             if p > fpos:
                 errors.append(f"GL_DrawAliasSkeletal writes {old} after its flush")
-            if depth_at(p) > depth_at(fpos) + (1 if setter == "R_SetSkelLight" else 0):
-                errors.append(f"GL_DrawAliasSkeletal's {setter} write is conditional")
+            why = conditional(p)
+            if why:
+                errors.append(f"GL_DrawAliasSkeletal's {setter} write is conditional: {why}")
             if clamp and setter == "R_SetSkelPose" and p < clamp.end():
                 errors.append("GL_DrawAliasSkeletal writes the pose bases before clamping them")
+        # Which getter fills each matrix: the variable is declared, filled by
+        # its own getter, unconditionally, and handed to its setter, with no
+        # other mention -- so a swapped fetch or a second writer fails.
+        for var, getter, setter in (("mvp", "GL_GetMVP", "R_SetMVP"), ("mv", "GL_GetModelview", "R_SetModelView"),
+                                    ("model", "GL_GetAliasModelMatrix", "R_SetModelMatrix")):
+            occ = list(re.finditer(rf"\b{var}\b", draw))
+            want = (rf"{var}\[16\]", rf"(?<=\b{getter} \(){var}\);", rf"(?<=\b{setter} \(){var}\);")
+            if len(occ) != 3 or not all(re.compile(w).match(draw, o.start()) for w, o in zip(want, occ)):
+                errors.append(f"GL_DrawAliasSkeletal must declare {var}[16], fill it with {getter} ({var}) and pass "
+                              f"it to {setter} ({var}), mentioning it nowhere else (found {len(occ)} mentions)")
+                continue
+            why = conditional(draw.rindex(getter, 0, occ[1].start()))
+            if why:
+                errors.append(f"GL_DrawAliasSkeletal's {getter} is conditional: {why}")
         # The light vector the loose u_lightcolor write built, slot for slot.
         lw = re.search(r"\{\s*float\s+light\[4\];\s*light\[0\] = lightcolor\[0\] \* r;\s*light\[1\] = lightcolor\[1\] \* g;\s*"
                        r"light\[2\] = lightcolor\[2\] \* b;\s*light\[3\] = model_constant_alpha;\s*R_SetSkelLight \(", draw)
         if not lw:
             errors.append("GL_DrawAliasSkeletal must build light[] as (lightcolor * tint, model_constant_alpha) "
                           "immediately before R_SetSkelLight")
-        bind = re.search(r"GL_BindBufferBase \(GL_SHADER_STORAGE_BUFFER, 4, gm->ssbo_bones\);", draw)
-        unbind = re.search(r"GL_BindBufferBase \(GL_SHADER_STORAGE_BUFFER, 4, 0\);", draw)
+        bind = re.search(r"\bGL_BindBufferBase \(GL_SHADER_STORAGE_BUFFER, 4, gm->ssbo_bones\);", draw)
+        unbind = re.search(r"\bGL_BindBufferBase \(GL_SHADER_STORAGE_BUFFER, 4, 0\);", draw)
         if not bind or not unbind or not (bind.start() < dpos < unbind.start()):
             errors.append("GL_DrawAliasSkeletal must bind gm->ssbo_bones at 4 (the file's VERT_SSBO gl slot) "
                           "before the draw and unbind it after")
-        use = draw.find("R_UseProgram (prog->program);")
-        if use < 0 or use > fpos:
+        use = re.search(r"\bR_UseProgram \(prog->program\);", draw)
+        if not use or use.start() > fpos:
             errors.append("GL_DrawAliasSkeletal must bind its program before the flush and draw")
 
 if errors:
