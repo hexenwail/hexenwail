@@ -548,7 +548,7 @@ static void MD5_LoadSkin(aliashdr_t *hdr, const char *modelname, const char *sha
 	byte		*rgba;
 	int		w = 0, h = 0, i;
 	qboolean	has_alpha = false;
-	GLuint		tex;
+	GLuint		tex, fbtex = 0;
 
 	q_strlcpy(stripped, shader, sizeof(stripped));
 
@@ -566,6 +566,26 @@ static void MD5_LoadSkin(aliashdr_t *hdr, const char *modelname, const char *sha
 		tex = GL_LoadTexture(stripped, rgba, w, h,
 		                     TEX_MIPMAP | TEX_RGBA | (has_alpha ? TEX_ALPHA : 0));
 		free(rgba);
+
+		/* The glow layer, as MD3_LoadSkin takes it: an RGBA skin has no
+		 * palette fullbrights to mask out, so it comes from the skin's
+		 * <skin>_glow / <skin>_luma sidecar or not at all.  R_DrawAliasModel's
+		 * fullbright pass draws it through GL_DrawAliasSkeletal like any
+		 * other alias glow.  Loaded whatever gl_fullbrights says, because
+		 * that pass tests it every frame and nothing reloads these skins
+		 * when it changes.  GitHub #492. */
+		{
+			imgreplace_t	glow;
+
+			if (IMG_LoadReplacementGlow(stripped, NULL, &glow))
+			{
+				char	fbname[MAX_QPATH];
+
+				q_snprintf(fbname, sizeof(fbname), "%s_fb", stripped);
+				fbtex = GL_LoadReplacement(fbname, &glow, TEX_MIPMAP | TEX_ALPHA);
+				IMG_FreeReplacement(&glow);
+			}
+		}
 	}
 	else
 	{
@@ -587,7 +607,10 @@ static void MD5_LoadSkin(aliashdr_t *hdr, const char *modelname, const char *sha
 	 * model untextured three frames out of four. */
 	hdr->numskins = 1;
 	for (i = 0; i < 4; i++)
+	{
 		hdr->gl_texturenum[0][i] = tex;
+		hdr->gl_fb_texturenum[0][i] = fbtex;
+	}
 }
 
 /* Take the top-4 weights for a vertex by magnitude and pack into

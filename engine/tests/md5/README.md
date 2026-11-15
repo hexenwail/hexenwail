@@ -38,5 +38,11 @@ It loads `chain` and checks every joint's world position in both frames. That
 covers the `bindpose` block `md5mesh.c` keeps for `r_showskel`, which the GPU
 never reads, so nothing else would catch a bad value there.
 
+Then it reloads `chain` to check the skin: no skin image gives the white
+sentinel and no glow; a skin gives its texture; a skin with a `_glow` /
+`_luma` sidecar puts the glow in all four `gl_fb_texturenum` slots, looked up
+from the shader's skin path (`models/test/chain`). The image loaders are
+stubs, so this checks the wiring, not the decode. GitHub #492.
+
 Alternatively, load the models in the engine with `developer 1` and read the
 `MD5_LoadMesh:` line.
