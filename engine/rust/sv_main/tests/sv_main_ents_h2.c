@@ -7,6 +7,10 @@
  * engine/rust/src/sv_main_ents.rs (#469 slice B).  tools/test_sv_maxdatagram.py
  * pins SV_PrepareClientEntities' trailer reserve here.
  *
+ * One edit since the move: SV_EntityPriority's clamp takes a NaN key (#471),
+ * as the port does, so the two are compared on a NaN box instead of the
+ * reference dying on it.
+ *
  * (from sv_main.c -- server main program)
  *
  * Copyright (C) 1996-1997  Id Software, Inc.
@@ -182,7 +186,12 @@ static int SV_EntityPriority (edict_t *ent, const vec3_t org, qboolean is_clent)
 		size = 1.0f;
 
 	dist = 8.0f * sqrt(sqrt(dist / size));
-	if (dist >= (float)(NETSORT_BINS - 1))
+	/* `!(dist < 255)', not `dist >= 255': the same test for every number,
+	 * and true for a NaN (a NaN box, from QuakeC's setorigin on 0/0 or an
+	 * absmax - absmin of two infinities), which (int) would make INT_MIN and
+	 * the measuring pass would index binbytes[] with (#471).  Ironwail's
+	 * q_min (dist, 255.f) takes the same branch. */
+	if (!(dist < (float)(NETSORT_BINS - 1)))
 		return NETSORT_BINS - 1;
 
 	return (int) dist;

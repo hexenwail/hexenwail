@@ -63,13 +63,15 @@
 //     and skips the rewrite for a name under five; it does what the C does
 //     for every name the C handles defined.
 //   * SV_EntityPriority's clamp, on a key that is not a number -- see it
-//     below.  The C's `dist >= NETSORT_BINS - 1' is false for a NaN, so it
-//     returns (int) of one, INT_MIN, and the measuring pass indexes
-//     binbytes[] with it, some 8 GB below the array, and the server dies.
+//     below.  sv_main.c's `dist >= NETSORT_BINS - 1' is false for a NaN, so
+//     it returned (int) of one, INT_MIN, and the measuring pass indexed
+//     binbytes[] with it, some 8 GB below the array, and the server died.
 //     The port takes a non-finite key as the least important bin, which is
 //     what Ironwail's own `(int) q_min (dist, 255.f)' does, and what a box
 //     its priority cannot be computed for deserves.  A crash becomes a shed
-//     entity, and the harness holds both sides of it.
+//     entity.  The harness's C reference, sv_main_ents_h2.c, carries the
+//     same clamp (#471), so the two are compared on NaN boxes like any
+//     other input.
 
 use core::ffi::{c_char, c_int, c_long, c_uint};
 
@@ -496,8 +498,8 @@ unsafe fn entity_priority(ent: *mut u8, org: &[f32; 3], is_clent: bool) -> c_int
     // this test is for.  A NaN box (QuakeC's setorigin on 0/0, or
     // absmax - absmin of two infinities) leaves the key NaN, and (int) of
     // one is INT_MIN, which the measuring pass writes binbytes[INT_MIN]
-    // with, far below the array: the C dies there.  The entity becomes the
-    // least important in the frame instead.  See the header.
+    // with, far below the array: sv_main.c died there.  The entity becomes
+    // the least important in the frame instead.  See the header.
     if !(dist < (NETSORT_BINS - 1) as f32) {
         return NETSORT_BINS - 1;
     }
@@ -966,13 +968,12 @@ pub unsafe extern "C" fn SV_PrepareClientEntities(client: *mut u8, clent: *mut u
 
             if measuring {
                 // Total the demand; do not truncate it.  A NaN box used to
-                // make prio INT_MIN (cvt_c), which the C writes through, far
-                // outside binbytes[], and dies there.  entity_priority's
+                // make prio INT_MIN (cvt_c), which sv_main.c wrote through,
+                // far outside binbytes[], and died there.  entity_priority's
                 // `!(dist < (NETSORT_BINS - 1) as f32)` guard takes a
                 // non-finite key as the least important bin instead, so
                 // prio is always in [0, NETSORT_BINS) and this indexes
-                // safely.  The C's crash is its own fix (#473); this is the
-                // ported side of it.
+                // safely (#471).
                 binbytes[prio as usize] += bytes;
                 if bcount >= MAX_CLIENT_STATES as c_int {
                     break;
