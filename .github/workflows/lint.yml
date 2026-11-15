@@ -423,3 +423,11 @@ jobs:
       # passes (#450 S3).
       - name: Instanced alias vertex stage on VertParams + AliasVert
         run: python3 tools/test_alias_inst_vert_block.py
+
+      # sskeletal_vert reads VertParams and AliasVert: both mirrors by member
+      # name, one setter per lane, the bones on VERT_SSBO, every input pinned
+      # to the IQM VAO's slot, width and integer-ness, all four skeletal
+      # builds, and GL_DrawAliasSkeletal writing every member the stage reads
+      # before one unconditional flush and its draw (#450 S4).
+      - name: Skeletal alias vertex stage on VertParams + AliasVert
+        run: python3 tools/test_skeletal_vert_block.py
