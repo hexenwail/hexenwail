@@ -415,3 +415,11 @@ jobs:
       # per-program (#450 S2).
       - name: Alias fragment stage on FragParams + AliasFrag
         run: python3 tools/test_alias_frag_block.py
+
+      # salias_inst_vert reads VertParams and AliasVert: both mirrors by
+      # member name, the vertex-stage SSBO macros, the ShadedotRow constants
+      # pinned to gl_shader.h, both instanced builds, and the per-batch
+      # instance base set and flushed before every instanced draw in both
+      # passes (#450 S3).
+      - name: Instanced alias vertex stage on VertParams + AliasVert
+        run: python3 tools/test_alias_inst_vert_block.py
