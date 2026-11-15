@@ -444,12 +444,6 @@ static void GL_InitOITProgram (glprogram_t *p, const char *name,
 		if (p->u_lmlayer2 >= 0) glUniform1i_fp(p->u_lmlayer2, LMSTYLE_TMU + 1);
 		if (p->u_lmlayer3 >= 0) glUniform1i_fp(p->u_lmlayer3, LMSTYLE_TMU + 2);
 		if (p->u_soft_depth >= 0) glUniform1i_fp(p->u_soft_depth, 1);	/* uhexen2-mf9u */
-		if (p->u_alias_model >= 0)	/* uhexen2-0gn3, see GL_InitProgram */
-		{
-			float ident[16];
-			Mat4_Identity(ident);
-			glUniformMatrix4fv_fp(p->u_alias_model, 1, GL_FALSE, ident);
-		}
 		/* MBOIT moment targets (#87): their own units, the 2D and the
 		 * multisample pair apart, so the two sampler types never share a
 		 * unit -- that is an error at draw time even when one is unused */
@@ -565,12 +559,6 @@ static void GL_InitOITProgramSplit (glprogram_t *p, const char *name,
 		if (p->u_lmlayer2 >= 0) glUniform1i_fp(p->u_lmlayer2, LMSTYLE_TMU + 1);
 		if (p->u_lmlayer3 >= 0) glUniform1i_fp(p->u_lmlayer3, LMSTYLE_TMU + 2);
 		if (p->u_soft_depth >= 0) glUniform1i_fp(p->u_soft_depth, 1);	/* uhexen2-mf9u */
-		if (p->u_alias_model >= 0)	/* uhexen2-0gn3, see GL_InitProgram */
-		{
-			float ident[16];
-			Mat4_Identity(ident);
-			glUniformMatrix4fv_fp(p->u_alias_model, 1, GL_FALSE, ident);
-		}
 		/* MBOIT moment targets (#87): their own units, the 2D and the
 		 * multisample pair apart, so the two sampler types never share a
 		 * unit -- that is an error at draw time even when one is unused */
@@ -668,7 +656,6 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 	p->u_modelview       = glGetUniformLocation_fp(p->program, "u_modelview");
 	p->u_time            = glGetUniformLocation_fp(p->program, "u_time");
 	p->u_skyfog          = glGetUniformLocation_fp(p->program, "u_skyfog");
-	p->u_eyepos          = glGetUniformLocation_fp(p->program, "u_eyepos");
 	p->u_wind            = glGetUniformLocation_fp(p->program, "u_wind");
 	p->u_wind3           = glGetUniformLocation_fp(p->program, "u_wind3");
 	p->u_skyrot          = glGetUniformLocation_fp(p->program, "u_skyrot");
@@ -695,19 +682,13 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 	p->u_lightgrid_xy    = glGetUniformLocation_fp(p->program, "u_lightgrid_xy");
 	p->u_lightgrid_z     = glGetUniformLocation_fp(p->program, "u_lightgrid_z");
 	p->u_lightgrid       = glGetUniformLocation_fp(p->program, "u_lightgrid");
-	p->u_alias_dlight    = glGetUniformLocation_fp(p->program, "u_alias_dlight");	/* uhexen2-waum */
 	p->u_force_opaque_alpha = glGetUniformLocation_fp(p->program, "u_force_opaque_alpha");
-	p->u_alias_caustics   = glGetUniformLocation_fp(p->program, "u_alias_caustics");
-	p->u_alias_material   = glGetUniformLocation_fp(p->program, "u_alias_material");	/* uhexen2-4kcb */
-	p->u_alias_lightdir   = glGetUniformLocation_fp(p->program, "u_alias_lightdir");
 	p->u_turb             = glGetUniformLocation_fp(p->program, "u_turb");
-	p->u_alias_model      = glGetUniformLocation_fp(p->program, "u_alias_model");
 	p->u_soft_depth       = glGetUniformLocation_fp(p->program, "u_soft_depth");
-	p->u_soft_params      = glGetUniformLocation_fp(p->program, "u_soft_params");
 
 	/* The two shared uniform blocks, for the shaders that have moved to
 	 * engine/shaders/.  Looked up on every program the same way the
-	 * alias-only uniforms above are, and -1 on the ones
+	 * loose uniforms above are, and -1 on the ones
 	 * that declare no such block.  Whichever u_* fields a block absorbed
 	 * came back -1 just now, which is what makes GL_ImmEnd take the block
 	 * path instead. */
@@ -1851,15 +1832,6 @@ static qboolean GL_InitProgramSplit (glprogram_t *p, const char *name,
 	 * gl_shader_alias has no u_texture1 — so the depth snapshot can sit
 	 * there permanently and only the sprite path ever binds to it. */
 	if (p->u_soft_depth >= 0) glUniform1i_fp(p->u_soft_depth, 1);
-	/* GL zero-initialises mat4 uniforms, which would collapse every vertex
-	 * to world (0,0).  Identity keeps v_worldxy meaningful for the batches
-	 * that submit world-space positions directly.  uhexen2-0gn3. */
-	if (p->u_alias_model >= 0)
-	{
-		float ident[16];
-		Mat4_Identity(ident);
-		glUniformMatrix4fv_fp(p->u_alias_model, 1, GL_FALSE, ident);
-	}
 	R_UseProgram (0);
 
 	Con_SafePrintf("  shader '%s' loaded (program %u)\n", name, p->program);
@@ -2086,10 +2058,11 @@ void GL_Shaders_Init (void)
 	 * `layout(std430) buffer`, and shader storage blocks are GLSL ES 3.10,
 	 * not 3.00 — WebGL2 has none at all.  Compiling it there only produced a
 	 * guaranteed failure on every startup, and left the driver linking a
-	 * program built from a shader it had already rejected.  Nothing draws
-	 * with it yet (the PV_IQM dispatch is uhexen2-7ok0.3); whoever wires
-	 * that up owns giving the ES tier a UBO or texture-buffer skinning
-	 * path, or leaving skeletal models unsupported there.  uhexen2-dfay. */
+	 * program built from a shader it had already rejected.  On desktop
+	 * GL_DrawAliasSkeletal draws PV_IQM models with it (uhexen2-7ok0.3);
+	 * its ES arm is an empty stub, so skeletal models stay unsupported on
+	 * that tier until it gets a UBO or texture-buffer skinning path.
+	 * uhexen2-dfay. */
 	/* Both stages are files (#450, alias slices S4 and S2); NOPERSP reaches
 	 * the affine twin's two through their header chunks. */
 	GL_InitProgramSplit(&gl_shader_skeletal, "skeletal", GLSL_VERT_HEADER, sskeletal_vert,

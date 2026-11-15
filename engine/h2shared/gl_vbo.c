@@ -440,19 +440,9 @@ static float	imm_cache_mvp[16];
 static float	imm_cache_mv[16];
 static float	imm_cache_alpha = -2.0f;
 static float	imm_cache_force_opaque_alpha = -2.0f;
-static float	imm_cache_alias_caustics[2] = { -1.0f, -1.0f };	/* uhexen2-0gn3 */
-static float	imm_cache_alias_dlight = -1.0f;	/* uhexen2-waum */
-static float	imm_cache_soft[3] = { -1.0f, -1.0f, -1.0f };	/* uhexen2-mf9u */
-/* uhexen2-4kcb.  -1 is unreachable for an intensity (clamped at 0) and for a
- * unit direction component, so it is a safe "never pushed" sentinel for both. */
-static float	imm_cache_alias_material[3] = { -1.0f, -1.0f, -1.0f };
-static float	imm_cache_alias_lightdir[3] = { -2.0f, -2.0f, -2.0f };
-static float	imm_cache_alias_model[16];
-static qboolean	imm_cache_alias_model_set;
 static float	imm_cache_fog_density = -1.0f;
 static float	imm_cache_fog_color[3] = { -1.0f, -1.0f, -1.0f };
 static float	imm_cache_time = -1.0f;
-static float	imm_cache_eyepos[3] = { -99999.0f, -99999.0f, -99999.0f };
 static float	imm_cache_wind[2] = { -99999.0f, -99999.0f };
 static float	imm_cache_wind3[3] = { -99999.0f, -99999.0f, -99999.0f };
 static float	imm_cache_skyrot = -99999.0f;
@@ -510,11 +500,11 @@ static void GL_ImmPushBlocks (const glprogram_t *shader, const float *mvp)
 		 * shadow's dirty flags make an unchanged value free. */
 		GL_GetModelview(mv);
 		R_SetModelView (mv);
-		/* salias_vert reads u_alias_model and u_alias_dlight from
-		 * VertParams since #450.  Both come from the same imm_* globals the
-		 * loose half below uploads for programs still declaring them loose,
-		 * so the value a batch sees is unchanged.  No other block program
-		 * reads either member, and an unchanged value costs nothing. */
+		/* The alias vertex stages read u_alias_model and u_alias_dlight
+		 * from VertParams since #450, and no program declares either
+		 * loose any more, so this is their only feed.  No other block
+		 * program reads either member, and an unchanged value costs
+		 * nothing. */
 		R_SetModelMatrix (imm_alias_model);
 		R_SetAliasDlight (imm_alias_dlight);
 	}
@@ -544,12 +534,12 @@ static void GL_ImmPushBlocks (const glprogram_t *shader, const float *mvp)
 		R_SetFog (r_fog_density, r_fog_color);
 
 		/* salias_frag reads the rest of its per-batch state from FragParams
-		 * and AliasFrag since #450.  Every value comes from the same imm_*
-		 * global the loose half below pushes for the world programs, and is
-		 * written unconditionally: the loose copies were per-program and
-		 * cached, so at every alias draw the program already held exactly
-		 * imm_*, and a write per batch is what gives a global block the
-		 * same property.  Gated on AliasFrag because only the ten programs
+		 * and AliasFrag since #450.  Every value comes from an imm_* global
+		 * (u_turb's is the one the loose half below pushes for the world
+		 * programs), and is written unconditionally: the loose copies were
+		 * per-program and cached, so at every alias draw the program
+		 * already held exactly imm_*, and a write per batch is what gives a
+		 * global block the same property.  Gated on AliasFrag because only the ten programs
 		 * that link salias_frag read any of these.  Not written here: the
 		 * span cell, which R_SetSpanCell puts in AliasFrag around its own
 		 * batches, and the froxel lookup, which R_LightCluster_BindForAlias
@@ -582,17 +572,10 @@ void GL_ImmInvalidateState (void)
 	imm_cache_shader = NULL;
 	imm_cache_alpha = -2.0f;
 	imm_cache_force_opaque_alpha = -2.0f;
-	imm_cache_alias_caustics[0] = imm_cache_alias_caustics[1] = -1.0f;
-	imm_cache_alias_dlight = -1.0f;
 	imm_cache_turb[0] = imm_cache_turb[1] = -1.0f;
-	imm_cache_soft[0] = imm_cache_soft[1] = imm_cache_soft[2] = -1.0f;
-	imm_cache_alias_material[0] = imm_cache_alias_material[1] = imm_cache_alias_material[2] = -1.0f;
-	imm_cache_alias_lightdir[0] = imm_cache_alias_lightdir[1] = imm_cache_alias_lightdir[2] = -2.0f;
-	imm_cache_alias_model_set = false;
 	imm_cache_fog_density = -1.0f;
 	imm_cache_fog_color[0] = imm_cache_fog_color[1] = imm_cache_fog_color[2] = -1.0f;
 	imm_cache_time = -1.0f;
-	imm_cache_eyepos[0] = imm_cache_eyepos[1] = imm_cache_eyepos[2] = -99999.0f;
 	imm_cache_wind[0] = imm_cache_wind[1] = -99999.0f;
 	imm_cache_wind3[0] = imm_cache_wind3[1] = imm_cache_wind3[2] = -99999.0f;
 	imm_cache_skyrot = -99999.0f;
@@ -634,24 +617,18 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 	{
 		imm_cache_shader = shader;
 		imm_cache_alpha = -2.0f;
-	imm_cache_force_opaque_alpha = -2.0f;
-	imm_cache_alias_caustics[0] = imm_cache_alias_caustics[1] = -1.0f;
-	imm_cache_alias_dlight = -1.0f;
-	/* Uniform state is per-program, so a cached value proves nothing about the
-	 * program we are about to use.  Every other cache here is reset for that
-	 * reason; u_turb was missed, and it stopped mattering only because
-	 * gl_shader_alias was the one program that had one.  Lit water gives the
-	 * world program a u_turb too (uhexen2-a5nn.2), and a stale cache would
-	 * then leave one of the two unwarped. */
-	imm_cache_turb[0] = imm_cache_turb[1] = -1.0f;
-	imm_cache_soft[0] = imm_cache_soft[1] = imm_cache_soft[2] = -1.0f;
-	imm_cache_alias_material[0] = imm_cache_alias_material[1] = imm_cache_alias_material[2] = -1.0f;
-	imm_cache_alias_lightdir[0] = imm_cache_alias_lightdir[1] = imm_cache_alias_lightdir[2] = -2.0f;
-	imm_cache_alias_model_set = false;
+		imm_cache_force_opaque_alpha = -2.0f;
+		/* Uniform state is per-program, so a cached value proves nothing
+		 * about the program we are about to use.  Every other cache here
+		 * is reset for that reason; u_turb was missed, and it stopped
+		 * mattering only because gl_shader_alias was the one program that
+		 * had one.  Lit water gives the world program a u_turb too
+		 * (uhexen2-a5nn.2), and a stale cache would then leave one of the
+		 * two unwarped. */
+		imm_cache_turb[0] = imm_cache_turb[1] = -1.0f;
 		imm_cache_fog_density = -1.0f;
 		imm_cache_fog_color[0] = imm_cache_fog_color[1] = imm_cache_fog_color[2] = -1.0f;
 		imm_cache_time = -1.0f;
-		imm_cache_eyepos[0] = imm_cache_eyepos[1] = imm_cache_eyepos[2] = -99999.0f;
 		imm_cache_wind[0] = imm_cache_wind[1] = -99999.0f;
 		imm_cache_wind3[0] = imm_cache_wind3[1] = imm_cache_wind3[2] = -99999.0f;
 		imm_cache_skyrot = -99999.0f;
@@ -704,92 +681,15 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 		imm_cache_force_opaque_alpha = imm_force_opaque_alpha;
 	}
 
-	/* uhexen2-0gn3.  Both sit at their resting values (0 intensity,
-	 * identity matrix) unless an alias draw asked for caustics, so on dry
-	 * land these only fire on a program switch, never per batch. */
-	if (shader->u_alias_caustics >= 0 &&
-	    (imm_alias_caustics[0] != imm_cache_alias_caustics[0] ||
-	     imm_alias_caustics[1] != imm_cache_alias_caustics[1]))
-	{
-		glUniform2f_fp(shader->u_alias_caustics,
-			       imm_alias_caustics[0], imm_alias_caustics[1]);
-		imm_cache_alias_caustics[0] = imm_alias_caustics[0];
-		imm_cache_alias_caustics[1] = imm_alias_caustics[1];
-	}
-
-	/* uhexen2-waum.  Same shape again: zero at rest, so with r_lightclusters
-	 * off or no dlights alive this fires once per program switch and never
-	 * per batch. */
-	if (shader->u_alias_dlight >= 0 && imm_alias_dlight != imm_cache_alias_dlight)
-	{
-		glUniform1f_fp(shader->u_alias_dlight, imm_alias_dlight);
-		imm_cache_alias_dlight = imm_alias_dlight;
-	}
-
 	/* uhexen2-9o7u.  Resting amplitude is 0, so with r_water_pixel_warp off
-	 * this fires once per program switch and never again -- same shape as the
-	 * caustics push above. */
+	 * this fires once per program switch and never again.  Only the world
+	 * programs declare u_turb loose; salias_frag takes it from AliasFrag. */
 	if (shader->u_turb >= 0 &&
 	    (imm_turb[0] != imm_cache_turb[0] || imm_turb[1] != imm_cache_turb[1]))
 	{
 		glUniform2f_fp(shader->u_turb, imm_turb[0], imm_turb[1]);
 		imm_cache_turb[0] = imm_turb[0];
 		imm_cache_turb[1] = imm_turb[1];
-	}
-
-	/* uhexen2-mf9u.  Resting value is 0 intensity, so on a build with
-	 * r_softparticles off this fires once per program switch and never
-	 * again — same shape as the caustics push above. */
-	if (shader->u_soft_params >= 0 &&
-	    (imm_soft[0] != imm_cache_soft[0] ||
-	     imm_soft[1] != imm_cache_soft[1] ||
-	     imm_soft[2] != imm_cache_soft[2]))
-	{
-		glUniform3f_fp(shader->u_soft_params,
-			       imm_soft[0], imm_soft[1], imm_soft[2]);
-		imm_cache_soft[0] = imm_soft[0];
-		imm_cache_soft[1] = imm_soft[1];
-		imm_cache_soft[2] = imm_soft[2];
-	}
-
-	/* uhexen2-4kcb.  Resting intensity is 0, so on a build with no material
-	 * sidecars anywhere -- or r_materialmaps 0 -- this fires once per program
-	 * switch and never again, the same shape as the caustics push above.  The
-	 * light direction only moves when the camera does, so it costs one push
-	 * per program per frame while any model is actually wearing a sidecar. */
-	if (shader->u_alias_material >= 0 &&
-	    (imm_alias_material[0] != imm_cache_alias_material[0] ||
-	     imm_alias_material[1] != imm_cache_alias_material[1] ||
-	     imm_alias_material[2] != imm_cache_alias_material[2]))
-	{
-		glUniform3f_fp(shader->u_alias_material,
-			       imm_alias_material[0], imm_alias_material[1],
-			       imm_alias_material[2]);
-		imm_cache_alias_material[0] = imm_alias_material[0];
-		imm_cache_alias_material[1] = imm_alias_material[1];
-		imm_cache_alias_material[2] = imm_alias_material[2];
-	}
-
-	if (shader->u_alias_lightdir >= 0 &&
-	    (imm_alias_lightdir[0] != imm_cache_alias_lightdir[0] ||
-	     imm_alias_lightdir[1] != imm_cache_alias_lightdir[1] ||
-	     imm_alias_lightdir[2] != imm_cache_alias_lightdir[2]))
-	{
-		glUniform3f_fp(shader->u_alias_lightdir,
-			       imm_alias_lightdir[0], imm_alias_lightdir[1],
-			       imm_alias_lightdir[2]);
-		imm_cache_alias_lightdir[0] = imm_alias_lightdir[0];
-		imm_cache_alias_lightdir[1] = imm_alias_lightdir[1];
-		imm_cache_alias_lightdir[2] = imm_alias_lightdir[2];
-	}
-
-	if (shader->u_alias_model >= 0 &&
-	    (!imm_cache_alias_model_set ||
-	     memcmp(imm_alias_model, imm_cache_alias_model, sizeof(imm_alias_model)) != 0))
-	{
-		glUniformMatrix4fv_fp(shader->u_alias_model, 1, GL_FALSE, imm_alias_model);
-		memcpy(imm_cache_alias_model, imm_alias_model, sizeof(imm_alias_model));
-		imm_cache_alias_model_set = true;
 	}
 
 	if (shader->u_fog_density >= 0 && r_fog_density != imm_cache_fog_density)
@@ -812,17 +712,6 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 	{
 		glUniform1f_fp(shader->u_time, cl.time);
 		imm_cache_time = cl.time;
-	}
-
-	if (shader->u_eyepos >= 0 &&
-	    (r_origin[0] != imm_cache_eyepos[0] ||
-	     r_origin[1] != imm_cache_eyepos[1] ||
-	     r_origin[2] != imm_cache_eyepos[2]))
-	{
-		glUniform3f_fp(shader->u_eyepos, r_origin[0], r_origin[1], r_origin[2]);
-		imm_cache_eyepos[0] = r_origin[0];
-		imm_cache_eyepos[1] = r_origin[1];
-		imm_cache_eyepos[2] = r_origin[2];
 	}
 
 	if (shader->u_wind >= 0 &&

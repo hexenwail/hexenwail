@@ -431,3 +431,10 @@ jobs:
       # before one unconditional flush and its draw (#450 S4).
       - name: Skeletal alias vertex stage on VertParams + AliasVert
         run: python3 tools/test_skeletal_vert_block.py
+
+      # No alias-family program regains a loose non-opaque uniform: the names
+      # the four alias stages read from blocks (derived, minus every name a
+      # live shader still declares loose) have no location field, lookup,
+      # glUniform write or GL_ImmEnd cache anywhere in C (#450 S5).
+      - name: Alias family has no loose uniform plumbing
+        run: python3 tools/test_alias_no_loose.py

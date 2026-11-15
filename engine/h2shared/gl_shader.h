@@ -41,7 +41,6 @@ typedef struct glprogram_s {
 	GLint	u_modelview;
 	GLint	u_time;
 	GLint	u_skyfog;
-	GLint	u_eyepos;
 	GLint	u_wind;		/* sky shader: per-skybox wind UV offset (uhexen2-typa) */
 	GLint	u_wind3;	/* sky cubemap: the same wind as a direction offset (uhexen2-ctk9) */
 	GLint	u_skyrot;	/* sky cubemap: r_skybox_speed as a yaw angle (uhexen2-ctk9) */
@@ -64,35 +63,15 @@ typedef struct glprogram_s {
 	GLint	u_lightgrid_xy;	/* vec4(viewport x, viewport y, froxel columns per pixel, froxel rows per pixel) */
 	GLint	u_lightgrid_z;	/* vec2(zlogscale, zlogbias) -- the depth-slice mapping, which must match gl_lightcluster.c exactly */
 	GLint	u_lightgrid;	/* usampler3D of per-froxel light bitmasks, texture unit LIGHT_GRID_TMU */
-	/* The alias family's half of the same grid (uhexen2-waum).  Per-BATCH,
-	 * unlike the world uniforms above, and named apart from u_dlight_scale
-	 * for the reason u_alias_caustics is named apart from u_caustics: this
-	 * program is also the sprite / particle / warp-poly / unlit-brush-poly
-	 * program, and those batches must not inherit a model's value. */
-	GLint	u_alias_dlight;	/* alias VS: blocklight -> vertex-colour scale; 0 disables.  The FS reads it off the v_dlightscale varying, which the instanced path fills per instance. */
-	GLint	u_force_opaque_alpha; /* alias/world FS: when > 0.5, fragColor.a is forced to 1.0 regardless of color.a.  Set to 1 by C for confirmed-opaque draws, to 0 for ENTALPHA / DRF_TRANSLUCENT / OIT translucent paths that need color.a preserved for blend.  uhexen2-khsa r13. */
-	/* Alias caustics (uhexen2-0gn3).  Deliberately NOT named u_caustics:
-	 * gl_shader_alias is the generic textured+vertex-color program and is
-	 * also used for sprites, warp polys and unlit brush polys, so its
-	 * caustics value is per-batch state pushed by GL_ImmEnd.  A shared name
-	 * would make GL_ImmEnd clobber the per-frame world u_caustics that
-	 * R_SetupFrame uploads. */
-	GLint	u_alias_caustics;   /* alias FS: vec2(intensity, time); x=0 disables */
-	/* Material maps on model skins (uhexen2-4kcb).  Named apart from the
-	 * world's u_material for the same reason u_alias_caustics is named apart
-	 * from u_caustics: this program is shared with sprites, particles, warp
-	 * polys and unlit brush polys, so the value is per-batch state pushed by
-	 * GL_ImmEnd rather than the per-frame world value R_SetupFrame uploads. */
-	GLint	u_alias_material;   /* alias FS: vec3(normalmap intensity, gloss intensity, gloss exponent); xy both 0 disables */
-	GLint	u_alias_lightdir;   /* alias FS: model light direction, in v_matpos's frame (eye space on this program) */
-	GLint	u_turb;            /* alias FS: vec2(warp amplitude in texture units, time); x=0 disables (uhexen2-9o7u) */
-	GLint	u_alias_model;	    /* alias VS: model-only matrix (no view), needed because u_modelview is view*model and caustics must be sampled in world XY */
-	/* Soft particles (uhexen2-mf9u).  Same per-batch-state reasoning as
-	 * u_alias_caustics: gl_shader_alias is shared by sprites, warp polys,
-	 * unlit brush polys and alias models, and only the sprite path wants
-	 * the fade, so the enable lives in the uniform rather than the program. */
-	GLint	u_soft_depth;	    /* alias FS: opaque-scene depth snapshot, texture unit 1 */
-	GLint	u_soft_params;	    /* alias FS: vec3(1/fade_distance, zparam_a, zparam_b); x=0 disables */
+	GLint	u_force_opaque_alpha; /* world FS: when > 0.5, fragColor.a is forced to 1.0 regardless of color.a.  Set to 1 by C for confirmed-opaque draws, to 0 for ENTALPHA / DRF_TRANSLUCENT / OIT translucent paths that need color.a preserved for blend.  uhexen2-khsa r13. */
+	GLint	u_turb;            /* world FS: vec2(warp amplitude in texture units, time); x=0 disables (uhexen2-9o7u) */
+	/* The alias family's per-batch values -- dlight scale, caustics,
+	 * material, light direction, model matrix, soft-particle fade -- have no
+	 * field here: since #450 every stage that reads them takes them from
+	 * VertParams / FragParams / AliasFrag (GL_ImmPushBlocks), and no live
+	 * shader declares those names loose.  tools/test_alias_no_loose.py keeps
+	 * it that way.  Only the alias family's samplers keep a location. */
+	GLint	u_soft_depth;	    /* alias FS: opaque-scene depth snapshot, texture unit 1 (uhexen2-mf9u) */
 	/* Indices of the two SHARED uniform blocks (gl_uniforms.h), for the
 	 * shaders that have moved out of C string literals into engine/shaders/.
 	 * Those declare their non-opaque uniforms inside a block, because Vulkan
