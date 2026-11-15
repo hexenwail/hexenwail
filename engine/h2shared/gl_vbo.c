@@ -442,10 +442,6 @@ static float	imm_cache_alpha = -2.0f;
 static float	imm_cache_force_opaque_alpha = -2.0f;
 static float	imm_cache_fog_density = -1.0f;
 static float	imm_cache_fog_color[3] = { -1.0f, -1.0f, -1.0f };
-static float	imm_cache_time = -1.0f;
-static float	imm_cache_wind[2] = { -99999.0f, -99999.0f };
-static float	imm_cache_wind3[3] = { -99999.0f, -99999.0f, -99999.0f };
-static float	imm_cache_skyrot = -99999.0f;
 static float	imm_cache_overbright = -1.0f;	/* uhexen2-f29y */
 static qboolean	imm_cache_mvp_set;
 static qboolean	imm_cache_mv_set;
@@ -481,10 +477,13 @@ static void GL_ImmPushBlocks (const glprogram_t *shader, const float *mvp)
 {
 	/* Eye position and the sky wind used to reach the sky programs as loose
 	 * uniforms pushed from the same globals in the glUniform* half of
-	 * GL_ImmEnd.  Writing them here unconditionally is what keeps that
-	 * behaviour: the shadow's dirty flags make an unchanged value free, and
-	 * only the ssky_* stages read these members, so no other program sees a
-	 * difference.  R_SetEyePos fills both blocks' copies from one value. */
+	 * GL_ImmEnd; this is now their only feed on that path.  Written
+	 * unconditionally, because the shadow's dirty flags make an unchanged
+	 * value free.  The wind members are read only by the ssky_* stages.  The
+	 * eye position is also read by salias_inst_vert (u_eyepos, VertParams
+	 * u_vscene), whose draw path sets the same r_origin itself, so this
+	 * changes nothing it sees.  R_SetEyePos fills both blocks' copies from
+	 * one value. */
 	if (shader->ub_vert >= 0 || shader->ub_frag >= 0)
 		R_SetEyePos (r_origin);
 
@@ -575,10 +574,6 @@ void GL_ImmInvalidateState (void)
 	imm_cache_turb[0] = imm_cache_turb[1] = -1.0f;
 	imm_cache_fog_density = -1.0f;
 	imm_cache_fog_color[0] = imm_cache_fog_color[1] = imm_cache_fog_color[2] = -1.0f;
-	imm_cache_time = -1.0f;
-	imm_cache_wind[0] = imm_cache_wind[1] = -99999.0f;
-	imm_cache_wind3[0] = imm_cache_wind3[1] = imm_cache_wind3[2] = -99999.0f;
-	imm_cache_skyrot = -99999.0f;
 	imm_cache_overbright = -1.0f;
 	imm_cache_mvp_set = false;
 	imm_cache_mv_set = false;
@@ -628,10 +623,6 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 		imm_cache_turb[0] = imm_cache_turb[1] = -1.0f;
 		imm_cache_fog_density = -1.0f;
 		imm_cache_fog_color[0] = imm_cache_fog_color[1] = imm_cache_fog_color[2] = -1.0f;
-		imm_cache_time = -1.0f;
-		imm_cache_wind[0] = imm_cache_wind[1] = -99999.0f;
-		imm_cache_wind3[0] = imm_cache_wind3[1] = imm_cache_wind3[2] = -99999.0f;
-		imm_cache_skyrot = -99999.0f;
 		imm_cache_overbright = -1.0f;
 		imm_cache_mvp_set = false;
 		imm_cache_mv_set = false;
@@ -706,41 +697,6 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 		imm_cache_fog_color[0] = r_fog_color[0];
 		imm_cache_fog_color[1] = r_fog_color[1];
 		imm_cache_fog_color[2] = r_fog_color[2];
-	}
-
-	if (shader->u_time >= 0 && cl.time != imm_cache_time)
-	{
-		glUniform1f_fp(shader->u_time, cl.time);
-		imm_cache_time = cl.time;
-	}
-
-	if (shader->u_wind >= 0 &&
-	    (sky_wind_uv[0] != imm_cache_wind[0] ||
-	     sky_wind_uv[1] != imm_cache_wind[1]))
-	{
-		glUniform2f_fp(shader->u_wind, sky_wind_uv[0], sky_wind_uv[1]);
-		imm_cache_wind[0] = sky_wind_uv[0];
-		imm_cache_wind[1] = sky_wind_uv[1];
-	}
-
-	/* The same wind as a direction offset, for the cubemap sky.  Only
-	 * gl_shader_sky_cubemap declares it, so this folds away everywhere else.
-	 * uhexen2-ctk9. */
-	if (shader->u_skyrot >= 0 && sky_box_rot != imm_cache_skyrot)
-	{
-		glUniform1f_fp(shader->u_skyrot, sky_box_rot);
-		imm_cache_skyrot = sky_box_rot;
-	}
-
-	if (shader->u_wind3 >= 0 &&
-	    (sky_wind_vec[0] != imm_cache_wind3[0] ||
-	     sky_wind_vec[1] != imm_cache_wind3[1] ||
-	     sky_wind_vec[2] != imm_cache_wind3[2]))
-	{
-		glUniform3f_fp(shader->u_wind3, sky_wind_vec[0], sky_wind_vec[1], sky_wind_vec[2]);
-		imm_cache_wind3[0] = sky_wind_vec[0];
-		imm_cache_wind3[1] = sky_wind_vec[1];
-		imm_cache_wind3[2] = sky_wind_vec[2];
 	}
 
 	if (shader->u_overbright >= 0)

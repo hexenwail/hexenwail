@@ -138,8 +138,8 @@ static float skywind_period = 30.0f;	/* seconds per oscillation cycle */
  * through us and through Ironwail, which does use it. */
 static float skywind_pitch  = 0.0f;	/* vertical direction, degrees */
 
-/* Per-frame wind UV offset.  GL_ImmFlush pushes it to u_wind on whichever
- * program declares one, which is both sky programs (uhexen2-a5nn.4). */
+/* Per-frame wind UV offset.  GL_ImmPushBlocks writes it into FragParams
+ * (u_wind, u_fsky.xy), which both sky programs read (uhexen2-a5nn.4). */
 float sky_wind_uv[2] = { 0.0f, 0.0f };
 /* The same wind as an offset applied to the cubemap sample direction, in the
  * shader's swizzled space.  uhexen2-ctk9. */

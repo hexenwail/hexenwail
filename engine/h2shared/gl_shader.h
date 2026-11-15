@@ -34,16 +34,10 @@ typedef struct glprogram_s {
 	GLint	u_texture3;	/* normal-map sampler for world (uhexen2-mfql) */
 	GLint	u_texture4;	/* gloss-map sampler for world (uhexen2-mfql) */
 	GLint	u_material;	/* world FS: vec3(normalmap intensity, gloss intensity, gloss exponent).  x and y both 0 disables the whole path. */
-	GLint	u_color;
 	GLint	u_fog_density;
 	GLint	u_fog_color;
 	GLint	u_alpha_threshold;
 	GLint	u_modelview;
-	GLint	u_time;
-	GLint	u_skyfog;
-	GLint	u_wind;		/* sky shader: per-skybox wind UV offset (uhexen2-typa) */
-	GLint	u_wind3;	/* sky cubemap: the same wind as a direction offset (uhexen2-ctk9) */
-	GLint	u_skyrot;	/* sky cubemap: r_skybox_speed as a yaw angle (uhexen2-ctk9) */
 	GLint	u_caustics;	/* world shader: vec2(intensity, time) for underwater caustics (uhexen2-6bfm) */
 	GLint	u_overbright;	/* world shader: lightmap multiplier (1.0 = off, 2.0 = on); Ironwail parity (uhexen2-f29y) */
 	GLint	u_lightmap_bicubic; /* world shader: 0.0 = hardware bilinear, 1.0 = 4-tap B-spline bicubic lightmap fetch (uhexen2-b2f0) */

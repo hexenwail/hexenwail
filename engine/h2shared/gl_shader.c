@@ -649,16 +649,10 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 	p->u_texture3        = glGetUniformLocation_fp(p->program, "u_texture3");
 	p->u_texture4        = glGetUniformLocation_fp(p->program, "u_texture4");
 	p->u_material        = glGetUniformLocation_fp(p->program, "u_material");
-	p->u_color           = glGetUniformLocation_fp(p->program, "u_color");
 	p->u_fog_density     = glGetUniformLocation_fp(p->program, "u_fog_density");
 	p->u_fog_color       = glGetUniformLocation_fp(p->program, "u_fog_color");
 	p->u_alpha_threshold = glGetUniformLocation_fp(p->program, "u_alpha_threshold");
 	p->u_modelview       = glGetUniformLocation_fp(p->program, "u_modelview");
-	p->u_time            = glGetUniformLocation_fp(p->program, "u_time");
-	p->u_skyfog          = glGetUniformLocation_fp(p->program, "u_skyfog");
-	p->u_wind            = glGetUniformLocation_fp(p->program, "u_wind");
-	p->u_wind3           = glGetUniformLocation_fp(p->program, "u_wind3");
-	p->u_skyrot          = glGetUniformLocation_fp(p->program, "u_skyrot");
 	p->u_caustics        = glGetUniformLocation_fp(p->program, "u_caustics");
 	p->u_overbright      = glGetUniformLocation_fp(p->program, "u_overbright");
 	p->u_lightmap_bicubic = glGetUniformLocation_fp(p->program, "u_lightmap_bicubic");

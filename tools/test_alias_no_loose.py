@@ -44,11 +44,11 @@ And for the alias-family programs themselves:
   * GL_InitProgramUniforms looks every field up under its own name, as one
     plain literal, and only names some live shader declares loose.
 Every glprogram_t location must name a uniform some live shader still
-declares loose, unless it is in NON_ALIAS_DEAD -- dead plumbing the migrated
-2d / sky programs left behind; that list fails when an entry goes stale, so it
-can only shrink.  Every imm_cache_* in gl_vbo.c must sit under an
-`if (shader->u_X ...)` whose u_X is such a location: a cache tied to nothing
-is a cache for a value no program has loose.
+declares loose, unless it is in NON_ALIAS_DEAD -- a known-dead leftover
+outside the alias family; that list fails when an entry goes stale, so it can
+only shrink, and it is empty now.  Every imm_cache_* in gl_vbo.c must sit
+under an `if (shader->u_X ...)` whose u_X is such a location: a cache tied to
+nothing is a cache for a value no program has loose.
 """
 from pathlib import Path
 import re
@@ -72,11 +72,11 @@ FLOOR = {"u_alias_caustics", "u_alias_dlight", "u_alias_lightdir", "u_alias_mate
          "u_alias_model", "u_eyepos", "u_fullbright", "u_inst_base", "u_lightcolor",
          "u_pose_base", "u_pose_base2", "u_poseverttype", "u_shadevector",
          "u_skel_blend", "u_soft_params", "u_viewproj"}
-# Loose-lookup fields with no live declarer that are NOT alias-family names:
-# s2d's u_color and the sky programs' u_time / u_skyfog / u_wind / u_wind3 /
-# u_skyrot, all block members since their files moved.  Out of scope for #450's
-# alias slices; listed so their deadness is explicit, not silent.
-NON_ALIAS_DEAD = {"u_color", "u_time", "u_skyfog", "u_wind", "u_wind3", "u_skyrot"}
+# Loose-lookup fields with no live declarer that are NOT alias-family names,
+# listed so their deadness is explicit rather than silent.  It held s2d's
+# u_color and the sky programs' u_time / u_skyfog / u_wind / u_wind3 /
+# u_skyrot until their plumbing went too (#450); keep it empty.
+NON_ALIAS_DEAD = set()
 # The non-opaque loose uniforms the OIT preamble splices into every OIT
 # fragment stage -- the four alias-family OIT programs' included.  Mode
 # switches, written by GL_SetOITMode; nothing alias-specific may join them.
