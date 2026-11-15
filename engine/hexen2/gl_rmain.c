@@ -3645,8 +3645,8 @@ void R_CollectBrushInstances (void)
 
 }
 
-/* Walk a sorted-by-(instance, texture, first) key array, uploading the
- * per-instance mvp/mv uniforms once per entity, binding each texture
+/* Walk a sorted-by-(instance, texture, first) key array, writing the
+ * per-instance mvp/mv to VertParams once per entity, binding each texture
  * once per (instance, texture) group, and run-coalescing contiguous
  * (firstIndex, count) ranges into single glDrawElements calls.  Used
  * twice — once for the opaque pass, once for the fence pass.  Reuses
@@ -3655,18 +3655,20 @@ void R_CollectBrushInstances (void)
  * cross-shader z-fight, no polygon-offset backstop needed. */
 #ifndef USE_GLES
 static void R_DispatchBrushInstancedPass (
-	const world_surf_key_t *keys, int num_keys, glprogram_t *prog)
+	const world_surf_key_t *keys, int num_keys)
 {
+	/* Draws with whichever world program the caller bound; since #450 W1
+	 * nothing here is per-program, so the program is not a parameter. */
 	int i = 0;
 	while (i < num_keys)
 	{
 		GLuint inst = keys[i].instance;
-		if (prog->u_mvp >= 0)
-			glUniformMatrix4fv_fp(prog->u_mvp, 1, GL_FALSE,
-					      world_instances[inst].mvp);
-		if (prog->u_modelview >= 0)
-			glUniformMatrix4fv_fp(prog->u_modelview, 1, GL_FALSE,
-					      world_instances[inst].mv);
+		/* sworld_vert reads both from VertParams (#450 W1), so they go
+		 * through the block, once per instance, before its draws; the
+		 * texture binds between here and them write no block. */
+		R_SetMVP (world_instances[inst].mvp);
+		R_SetModelView (world_instances[inst].mv);
+		R_FlushUniforms ();
 		while (i < num_keys && keys[i].instance == inst)
 		{
 			GLuint cur_tex = keys[i].tex;
@@ -3784,7 +3786,7 @@ void R_DrawBrushInstanced (void)
 		/* uhexen2-khsa r13: world opaque pass forces fragColor.a=1. */
 		if (prog_opaque->u_force_opaque_alpha >= 0)
 			glUniform1f_fp(prog_opaque->u_force_opaque_alpha, 1.0f);
-		R_DispatchBrushInstancedPass(world_surf_keys, num_world_surf_keys, prog_opaque);
+		R_DispatchBrushInstancedPass(world_surf_keys, num_world_surf_keys);
 	}
 
 	/* Fence pass: cutout program (has discard), threshold 0.666, optional A2C. */
@@ -3804,7 +3806,7 @@ void R_DrawBrushInstanced (void)
 			glUniform1f_fp(prog_cutout->u_force_opaque_alpha, 1.0f);
 		if (r_alphatocoverage.integer)
 			R_SetAlphaToCoverage (true);
-		R_DispatchBrushInstancedPass(world_surf_keys_fence, num_world_surf_keys_fence, prog_cutout);
+		R_DispatchBrushInstancedPass(world_surf_keys_fence, num_world_surf_keys_fence);
 		if (r_alphatocoverage.integer)
 			R_SetAlphaToCoverage (false);
 	}

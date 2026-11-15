@@ -13,7 +13,9 @@ The alias names are DERIVED: every block macro an alias stage (or a helper
 .inc it pulls in) actually reads, minus every name that some live shader --
 any engine/shaders file, or any string literal in gl_shader.c, both tiers --
 still declares as a loose `uniform`.  Those shared names (u_turb, u_spans,
-u_mvp, ...) are the world programs' and legitimately keep their loose path.
+u_overbright, ...) are the world programs' and legitimately keep their loose
+path.  u_mvp and u_modelview left that set when sworld_vert, their last loose
+declarer, moved onto VertParams (#450 W1), so they are alias names now too.
 FLOOR pins today's full derived set, so a name cannot leave it silently --
 which is exactly what re-declaring it loose somewhere would do.
 
@@ -71,7 +73,9 @@ BLOCK_INCS = ("uniforms.inc", "alias.inc", "layout.inc")
 FLOOR = {"u_alias_caustics", "u_alias_dlight", "u_alias_lightdir", "u_alias_material",
          "u_alias_model", "u_eyepos", "u_fullbright", "u_inst_base", "u_lightcolor",
          "u_pose_base", "u_pose_base2", "u_poseverttype", "u_shadevector",
-         "u_skel_blend", "u_soft_params", "u_viewproj"}
+         "u_skel_blend", "u_soft_params", "u_viewproj",
+         # since #450 W1: no live shader declares the matrices loose
+         "u_modelview", "u_mvp"}
 # Loose-lookup fields with no live declarer that are NOT alias-family names,
 # listed so their deadness is explicit rather than silent.  It held s2d's
 # u_color and the sky programs' u_time / u_skyfog / u_wind / u_wind3 /
@@ -359,7 +363,7 @@ for f in sorted(SH.iterdir()):
         for kind, typ, name in uniform_decls(strip(f.read_text())):
             if kind == "decl":
                 live_loose.setdefault(name, set()).add(typ)
-if "u_turb" not in live_loose or "u_mvp" not in live_loose:
+if "u_turb" not in live_loose or "u_overbright" not in live_loose:
     errors.append("cannot see sworld_*'s loose uniforms in gl_shader.c's literals; the scan is broken")
 if not oit:
     errors.append("cannot find oit_preamble in gl_shader.c")

@@ -436,15 +436,11 @@ void GL_ImmVertex2f (float x, float y)
  * invalidated when the shader changes (different uniform locations)
  * and via GL_ImmInvalidateState() at context boundaries. */
 static const glprogram_t *imm_cache_shader;
-static float	imm_cache_mvp[16];
-static float	imm_cache_mv[16];
 static float	imm_cache_alpha = -2.0f;
 static float	imm_cache_force_opaque_alpha = -2.0f;
 static float	imm_cache_fog_density = -1.0f;
 static float	imm_cache_fog_color[3] = { -1.0f, -1.0f, -1.0f };
 static float	imm_cache_overbright = -1.0f;	/* uhexen2-f29y */
-static qboolean	imm_cache_mvp_set;
-static qboolean	imm_cache_mv_set;
 
 void GL_ImmResetState (void)
 {
@@ -491,12 +487,12 @@ static void GL_ImmPushBlocks (const glprogram_t *shader, const float *mvp)
 	{
 		float mv[16];
 
+		/* u_mvp and u_modelview (VertParams u_mvpm / u_modelviewm): the
+		 * only feed on this path for every program, the world family
+		 * included since sworld_vert moved to a file (#450 W1) -- no
+		 * program declares either loose any more.  Both written every
+		 * batch; the shadow's dirty flags make an unchanged value free. */
 		R_SetMVP (mvp);
-		/* spart_vert reads u_modelview (VertParams u_modelviewm); the
-		 * loose half below fetches the same matrix for programs that
-		 * still declare it loose.  No migrated file read it before this
-		 * slice, so feeding it here is harmless to s2d/sflat/sky -- the
-		 * shadow's dirty flags make an unchanged value free. */
 		GL_GetModelview(mv);
 		R_SetModelView (mv);
 		/* The alias vertex stages read u_alias_model and u_alias_dlight
@@ -575,8 +571,6 @@ void GL_ImmInvalidateState (void)
 	imm_cache_fog_density = -1.0f;
 	imm_cache_fog_color[0] = imm_cache_fog_color[1] = imm_cache_fog_color[2] = -1.0f;
 	imm_cache_overbright = -1.0f;
-	imm_cache_mvp_set = false;
-	imm_cache_mv_set = false;
 }
 
 void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
@@ -624,39 +618,17 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 		imm_cache_fog_density = -1.0f;
 		imm_cache_fog_color[0] = imm_cache_fog_color[1] = imm_cache_fog_color[2] = -1.0f;
 		imm_cache_overbright = -1.0f;
-		imm_cache_mvp_set = false;
-		imm_cache_mv_set = false;
 	}
 
 	GL_GetMVP(mvp);
 
 	/* Dual path, keyed on whether this program has a block index and never
-	 * on which shader it is.  gl_shader_world and the other programs still
-	 * inline in gl_shader.c declare loose uniforms and must keep
-	 * working through the glUniform* half below while the migrated programs
-	 * take the block half. */
+	 * on which shader it is.  The world programs take both halves: their
+	 * vertex stage is a file reading VertParams (#450 W1), while their
+	 * fragment stages are still inline in gl_shader.c with loose uniforms,
+	 * which the glUniform* half below keeps feeding. */
 	if (shader->ub_vert >= 0 || shader->ub_frag >= 0)
 		GL_ImmPushBlocks(shader, mvp);
-
-	if (shader->u_mvp >= 0 &&
-	    (!imm_cache_mvp_set || memcmp(mvp, imm_cache_mvp, sizeof(mvp)) != 0))
-	{
-		glUniformMatrix4fv_fp(shader->u_mvp, 1, GL_FALSE, mvp);
-		memcpy(imm_cache_mvp, mvp, sizeof(mvp));
-		imm_cache_mvp_set = true;
-	}
-
-	if (shader->u_modelview >= 0)
-	{
-		float mv[16];
-		GL_GetModelview(mv);
-		if (!imm_cache_mv_set || memcmp(mv, imm_cache_mv, sizeof(mv)) != 0)
-		{
-			glUniformMatrix4fv_fp(shader->u_modelview, 1, GL_FALSE, mv);
-			memcpy(imm_cache_mv, mv, sizeof(mv));
-			imm_cache_mv_set = true;
-		}
-	}
 
 	if (imm_alpha_threshold >= 0.0f && shader->u_alpha_threshold >= 0 &&
 	    imm_alpha_threshold != imm_cache_alpha)

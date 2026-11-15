@@ -27,7 +27,9 @@ GLuint	GL_LoadProgramHeaders (const char *vert_header, const char *vert_src,
 /* Shader programs */
 typedef struct glprogram_s {
 	GLuint	program;
-	GLint	u_mvp;
+	/* No u_mvp / u_modelview: sworld_vert, the last stage declaring them
+	 * loose, reads them from VertParams since #450 W1, so every draw writes
+	 * them with R_SetMVP / R_SetModelView and flushes. */
 	GLint	u_texture0;
 	GLint	u_texture1;
 	GLint	u_texture2;	/* fullbright mask sampler for world (uhexen2-sjvf) */
@@ -37,7 +39,6 @@ typedef struct glprogram_s {
 	GLint	u_fog_density;
 	GLint	u_fog_color;
 	GLint	u_alpha_threshold;
-	GLint	u_modelview;
 	GLint	u_caustics;	/* world shader: vec2(intensity, time) for underwater caustics (uhexen2-6bfm) */
 	GLint	u_overbright;	/* world shader: lightmap multiplier (1.0 = off, 2.0 = on); Ironwail parity (uhexen2-f29y) */
 	GLint	u_lightmap_bicubic; /* world shader: 0.0 = hardware bilinear, 1.0 = 4-tap B-spline bicubic lightmap fetch (uhexen2-b2f0) */

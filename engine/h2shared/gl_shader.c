@@ -410,58 +410,6 @@ static GLuint GL_CompileOITFragShader (const char *frag_src)
 	}
 }
 
-static GLuint GL_LoadOITProgram (const char *vert_src, const char *frag_src)
-{
-	GLuint vs, fs, prog;
-
-	vs = GL_CompileShader(GL_VERTEX_SHADER, vert_src);
-	if (!vs) return 0;
-	fs = GL_CompileOITFragShader(frag_src);
-	if (!fs) { glDeleteShader_fp(vs); return 0; }
-
-	prog = GL_LinkProgram(vs, fs);
-	glDeleteShader_fp(vs);
-	glDeleteShader_fp(fs);
-	return prog;
-}
-
-static void GL_InitOITProgram (glprogram_t *p, const char *name,
-			       const char *vert_src, const char *frag_src)
-{
-	p->program = GL_LoadOITProgram(vert_src, frag_src);
-	if (p->program)
-	{
-		GL_InitProgramUniforms(p);
-		/* bind texture unit defaults (mirrors GL_InitProgram) */
-		R_UseProgram (p->program);
-		if (p->u_texture0 >= 0) glUniform1i_fp(p->u_texture0, 0);
-		if (p->u_texture1 >= 0) glUniform1i_fp(p->u_texture1, 1);
-		if (p->u_texture2 >= 0) glUniform1i_fp(p->u_texture2, 2);
-		if (p->u_texture3 >= 0) glUniform1i_fp(p->u_texture3, 3);	/* uhexen2-mfql */
-		if (p->u_texture4 >= 0) glUniform1i_fp(p->u_texture4, 4);
-		if (p->u_lightgrid >= 0) glUniform1i_fp(p->u_lightgrid, LIGHT_GRID_TMU);	/* uhexen2-26bm */
-		if (p->u_lmlayer1 >= 0) glUniform1i_fp(p->u_lmlayer1, LMSTYLE_TMU);	/* #439 */
-		if (p->u_lmlayer2 >= 0) glUniform1i_fp(p->u_lmlayer2, LMSTYLE_TMU + 1);
-		if (p->u_lmlayer3 >= 0) glUniform1i_fp(p->u_lmlayer3, LMSTYLE_TMU + 2);
-		if (p->u_soft_depth >= 0) glUniform1i_fp(p->u_soft_depth, 1);	/* uhexen2-mf9u */
-		/* MBOIT moment targets (#87): their own units, the 2D and the
-		 * multisample pair apart, so the two sampler types never share a
-		 * unit -- that is an error at draw time even when one is unused */
-		if (p->u_oit_mode >= 0)     glUniform1i_fp(p->u_oit_mode, 0);
-		if (p->u_mboit_ms >= 0)     glUniform1i_fp(p->u_mboit_ms, 0);
-		if (p->u_mboit_b0 >= 0)     glUniform1i_fp(p->u_mboit_b0, MBOIT_TMU_B0);
-		if (p->u_mboit_mom >= 0)    glUniform1i_fp(p->u_mboit_mom, MBOIT_TMU_MOM);
-		if (p->u_mboit_b0_ms >= 0)  glUniform1i_fp(p->u_mboit_b0_ms, MBOIT_TMU_B0_MS);
-		if (p->u_mboit_mom_ms >= 0) glUniform1i_fp(p->u_mboit_mom_ms, MBOIT_TMU_MOM_MS);
-		R_UseProgram (0);
-		Con_SafePrintf("  %s_oit: OK (prog=%u)\n", name, p->program);
-	}
-	else
-	{
-		Con_SafePrintf("  %s_oit: FAILED\n", name);
-	}
-}
-
 /*
 ===============
 GL_CompileOITFragShaderSplit
@@ -529,7 +477,11 @@ static GLuint GL_LoadOITProgramSplit (const char *vert_header, const char *vert_
 
 	vs = GL_CompileShaderSplit (GL_VERTEX_SHADER, vert_header, vert_src);
 	if (!vs) return 0;
-	fs = GL_CompileOITFragShaderSplit (frag_header, frag_src);
+	/* frag_header NULL: the fragment body is still a C literal with its own
+	 * #version (sworld_frag while the world family moves stage by stage,
+	 * #450), so it takes the original splice. */
+	fs = frag_header ? GL_CompileOITFragShaderSplit (frag_header, frag_src)
+			 : GL_CompileOITFragShader (frag_src);
 	if (!fs) { glDeleteShader_fp (vs); return 0; }
 
 	prog = GL_LinkProgram (vs, fs);
@@ -547,7 +499,7 @@ static void GL_InitOITProgramSplit (glprogram_t *p, const char *name,
 	if (p->program)
 	{
 		GL_InitProgramUniforms (p);
-		/* bind texture unit defaults (mirrors GL_InitProgram) */
+		/* bind texture unit defaults (mirrors GL_InitProgramSplit) */
 		R_UseProgram (p->program);
 		if (p->u_texture0 >= 0) glUniform1i_fp(p->u_texture0, 0);
 		if (p->u_texture1 >= 0) glUniform1i_fp(p->u_texture1, 1);
@@ -642,7 +594,6 @@ GLuint GL_LoadProgram (const char *vert_src, const char *frag_src)
 
 static void GL_InitProgramUniforms (glprogram_t *p)
 {
-	p->u_mvp             = glGetUniformLocation_fp(p->program, "u_mvp");
 	p->u_texture0        = glGetUniformLocation_fp(p->program, "u_texture0");
 	p->u_texture1        = glGetUniformLocation_fp(p->program, "u_texture1");
 	p->u_texture2        = glGetUniformLocation_fp(p->program, "u_texture2");
@@ -652,7 +603,6 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 	p->u_fog_density     = glGetUniformLocation_fp(p->program, "u_fog_density");
 	p->u_fog_color       = glGetUniformLocation_fp(p->program, "u_fog_color");
 	p->u_alpha_threshold = glGetUniformLocation_fp(p->program, "u_alpha_threshold");
-	p->u_modelview       = glGetUniformLocation_fp(p->program, "u_modelview");
 	p->u_caustics        = glGetUniformLocation_fp(p->program, "u_caustics");
 	p->u_overbright      = glGetUniformLocation_fp(p->program, "u_overbright");
 	p->u_lightmap_bicubic = glGetUniformLocation_fp(p->program, "u_lightmap_bicubic");
@@ -753,64 +703,14 @@ static void GL_InitProgramUniforms (glprogram_t *p)
  * upload it by hand (the sky stencil pass in gl_rsurf.c and r_showtris in
  * gl_rmain.c) go through R_SetMVP + R_FlushUniforms instead. */
 
-/* --- shader_world: textured + lightmap multitexture, with fog --- */
-static const char sworld_vert[] =
-	GLSL_VERT_HEADER
-	"in vec3 a_position;\n"
-	"in vec2 a_texcoord;\n"
-	"in vec2 a_lmcoord;\n"
-	"in vec4 a_color;\n"
-	"uniform mat4 u_mvp;\n"
-	"uniform mat4 u_modelview;\n"
-	"out highp vec2 v_texcoord;\n"	/* highp: the material tangent frame differentiates this; see v_eyepos (uhexen2-mfql) */
-	"out highp vec2 v_lmcoord;\n"	/* highp: SpanUV extrapolates it across a cell (#176) */
-	"out vec4 v_color;\n"
-	"out float v_fogdist;\n"
-	/* World-space XY for caustics sampling.  For world surfaces a_position
-	 * IS world space.  For brush ents R_RotateForEntity multiplies into
-	 * u_modelview, not into a_position, so a_position here is still
-	 * model-local for brush ents — caustics will tile with the brush ent's
-	 * local frame, which is acceptable for moving func_* ents (the effect
-	 * is subtle and rarely visible mid-motion).  uhexen2-6bfm. */
-	"out vec2 v_worldxy;\n"
-	/* Eye-space position, for the material-map tangent frame (uhexen2-mfql).
-	 * EYE space and not world: the frame, the view vector and the geometric
-	 * normal all have to live in one space, and eye space is the only one
-	 * this shader can produce for BOTH world surfaces and brush ents.  For a
-	 * brush ent the entity transform is inside u_modelview and never reaches
-	 * a_position -- which is exactly why v_worldxy above is documented as
-	 * wrong for brush ents -- so anything derived from a_position directly
-	 * would put a rotating platform's relief in its own local frame.  In eye
-	 * space the camera sits at the origin, so the view vector is just
-	 * -normalize(v_eyepos), and no eye-position uniform is needed. */
-	/* highp explicitly.  The ES tier's fragment stage now defaults to highp
-	 * (GLSL_FRAG_HEADER, #151 (a)), matching the post-process header and
-	 * the canvas shader, but the explicit qualifier stays: it documents
-	 * that this quantity needs highp, and protects it against any future
-	 * default change.  mediump carries about 10 bits of mantissa -- fine
-	 * for a colour, useless for a position that can be thousands of world
-	 * units from the camera, whose screen-space derivative is then the
-	 * difference of two badly-rounded large numbers.  That is precisely
-	 * the quantity the tangent frame is built from, so without this the
-	 * WebGL2 build gets a frame made of noise.  Desktop GLSL accepts and
-	 * ignores the qualifier.  uhexen2-mfql. */
-	"out highp vec3 v_eyepos;\n"
-	/* invariant gl_Position: pin position math so within-shader vertex
-	 * transforms produce stable depth across draw calls.  Brush ents
-	 * share this same compiled program (uhexen2-mf45), so the
-	 * within-shader guarantee covers coplanar joins between brush ents
-	 * and world surfaces — no cross-shader 1-ULP drift. */
-	"invariant gl_Position;\n"
-	"void main() {\n"
-	"    v_texcoord = a_texcoord;\n"
-	"    v_lmcoord = a_lmcoord;\n"
-	"    v_color = a_color;\n"
-	"    v_worldxy = a_position.xy;\n"
-	"    vec4 eyepos = u_modelview * vec4(a_position, 1.0);\n"
-	"    v_eyepos = eyepos.xyz;\n"
-	"    v_fogdist = length(eyepos.xyz);\n"
-	"    gl_Position = u_mvp * vec4(a_position, 1.0);\n"
-	"}\n";
+/* --- shader_world: textured + lightmap multitexture, with fog ---
+ * The vertex stage is engine/shaders/sworld_vert.glsl (#450, world slice W1),
+ * reaching us as sworld_vert[] via shaders_gen.h; its header comment carries
+ * the v_worldxy, v_eyepos/highp and invariant-gl_Position notes that were
+ * here.  u_mvp and u_modelview are VertParams members there, so every world
+ * draw path writes them with R_SetMVP / R_SetModelView and flushes.  The
+ * fragment stages below are still C literals; they move in a later slice of
+ * the world plan on #450. */
 
 /* 4-tap B-spline bicubic lightmap fetch (Sigg/Hadwiger).  16-luxel Hexen II
  * lightmaps expose the bilinear lattice on big flat walls; bicubic
@@ -1793,9 +1693,10 @@ static const char sworld_frag_opaque[] =
 /* Init / Shutdown                                                     */
 /* ------------------------------------------------------------------ */
 
-/* Each stage is a (header, body) pair; pass NULL headers for a source that
+/* Each stage is a (header, body) pair; pass a NULL header for a source that
  * carries its own #version, which is every shader still written as a C string
- * literal below.  GL_InitProgram is the wrapper that does exactly that. */
+ * literal below.  (GL_InitProgram, the both-NULL wrapper, went with its last
+ * caller when sworld_vert moved to a file, #450 W1.) */
 static qboolean GL_InitProgramSplit (glprogram_t *p, const char *name,
 				     const char *vert_header, const char *vert_src,
 				     const char *frag_header, const char *frag_src)
@@ -1830,12 +1731,6 @@ static qboolean GL_InitProgramSplit (glprogram_t *p, const char *name,
 
 	Con_SafePrintf("  shader '%s' loaded (program %u)\n", name, p->program);
 	return true;
-}
-
-static qboolean GL_InitProgram (glprogram_t *p, const char *name,
-				const char *vert_src, const char *frag_src)
-{
-	return GL_InitProgramSplit (p, name, NULL, vert_src, NULL, frag_src);
 }
 
 #ifndef USE_GLES
@@ -1960,7 +1855,7 @@ static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p, const char *na
 		if (u_tex >= 0)
 			glUniform1i_fp(u_tex, 0);
 		/* Material maps on units 3 and 4, matching the world program and
-		 * what GL_InitProgram does for every other user of salias_frag.
+		 * what GL_InitProgramSplit does for every other user of salias_frag.
 		 * Without this both samplers default to unit 0 and every model
 		 * would read its own skin as a normal map.  uhexen2-4kcb. */
 		u_tex = glGetUniformLocation_fp(prog, "u_texture3");
@@ -1971,7 +1866,7 @@ static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p, const char *na
 			glUniform1i_fp(u_tex, 4);
 	}
 	/* The froxel grid lives on its own unit for the whole world+entity draw;
-	 * GL_InitProgram does this for every other program that declares it. */
+	 * GL_InitProgramSplit does this for every other program that declares it. */
 	if (p->u_lightgrid >= 0)
 		glUniform1i_fp(p->u_lightgrid, LIGHT_GRID_TMU);	/* uhexen2-waum */
 	R_UseProgram (0);
@@ -2023,8 +1918,12 @@ void GL_Shaders_Init (void)
 							GLSL_FRAG_HEADER, s2d_frag);
 	GL_InitProgramSplit(&gl_shader_flat, "flat",    GLSL_VERT_HEADER, sflat_vert,
 							GLSL_FRAG_HEADER, sflat_frag);
-	GL_InitProgram(&gl_shader_world,    "world",    sworld_vert, sworld_frag);
-	GL_InitProgram(&gl_shader_world_opaque, "world_opaque", sworld_vert, sworld_frag_opaque);
+	/* The vertex stage is a file (#450 W1); both fragment stages are still
+	 * literals with their own #version, hence the NULL fragment headers. */
+	GL_InitProgramSplit(&gl_shader_world, "world", GLSL_VERT_HEADER, sworld_vert,
+							NULL, sworld_frag);
+	GL_InitProgramSplit(&gl_shader_world_opaque, "world_opaque", GLSL_VERT_HEADER, sworld_vert,
+							NULL, sworld_frag_opaque);
 	/* Both stages are files (#450, alias slices S1 and S2). */
 	GL_InitProgramSplit(&gl_shader_alias, "alias", GLSL_VERT_HEADER, salias_vert,
 							GLSL_ALIAS_FRAG_HEADER, salias_frag);
@@ -2155,7 +2054,8 @@ void GL_Shaders_Init (void)
 	 * compile failure in these three on ES, but it did not make OIT work
 	 * there and could not have.  uhexen2-ha7n. */
 #ifndef USE_GLES
-	GL_InitOITProgram(&gl_shader_world_oit,    "world",    sworld_vert, sworld_frag);
+	GL_InitOITProgramSplit(&gl_shader_world_oit, "world", GLSL_VERT_HEADER, sworld_vert,
+							      NULL, sworld_frag);
 	GL_InitOITProgramSplit(&gl_shader_alias_oit, "alias", GLSL_VERT_HEADER, salias_vert,
 							      GLSL_ALIAS_FRAG_HEADER, salias_frag);
 	GL_InitOITProgramSplit(&gl_shader_alias_np_oit, "alias_np",

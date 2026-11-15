@@ -23,6 +23,7 @@
 #ifndef USE_GLES
 
 #include "gl_shader.h"
+#include "gl_uniforms.h"
 #include "gl_pipeline.h"
 #include "gl_vbo.h"
 #include "gl_matrix.h"
@@ -1014,10 +1015,11 @@ void R_DrawWorldCulled (void)
 		R_UseProgram (prog->program);
 		GL_GetMVP(mvp);
 		GL_GetModelview(mv);
-		if (prog->u_mvp >= 0)
-			glUniformMatrix4fv_fp(prog->u_mvp, 1, GL_FALSE, mvp);
-		if (prog->u_modelview >= 0)
-			glUniformMatrix4fv_fp(prog->u_modelview, 1, GL_FALSE, mv);
+		/* sworld_vert reads both from VertParams (#450 W1).  The texture
+		 * binds between here and the indirect draws write no block. */
+		R_SetMVP (mvp);
+		R_SetModelView (mv);
+		R_FlushUniforms ();
 		if (prog->u_fog_density >= 0)
 			glUniform1f_fp(prog->u_fog_density, r_fog_density);
 		if (prog->u_fog_color >= 0)

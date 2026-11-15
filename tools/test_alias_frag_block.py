@@ -374,8 +374,16 @@ if dead:
     errors.append(f"gl_alias_inst_prog_t still carries fragment-stage locations that are -1 now: {sorted(dead)}")
 if "p->ub_afrag = R_BindAliasFragBlock(p->program);" not in gl_shader:
     errors.append("GL_InitProgramUniforms must look up ub_afrag")
-if "fs = GL_CompileOITFragShaderSplit (frag_header, frag_src);" not in gl_shader:
-    errors.append("GL_LoadOITProgramSplit must always take the header-aware splice now")
+# The literal splice is back for one caller only: gl_shader_world_oit, whose
+# fragment stage is still a literal with its own #version (#450 W1), passes a
+# NULL fragment header.  Every alias OIT build must pass a real one -- a NULL
+# there would hand a #version-less file to the literal splice.
+if not re.search(r"fs = frag_header \? GL_CompileOITFragShaderSplit \(frag_header, frag_src\)\s*"
+                 r": GL_CompileOITFragShader \(frag_src\);", gl_shader):
+    errors.append("GL_LoadOITProgramSplit must take the header-aware splice whenever it has a header")
+for m in re.finditer(r"GL_InitOITProgramSplit\s*\(&(\w+),[^;]*?,\s*NULL\s*,", gl_shader):
+    if not m.group(1).startswith("gl_shader_world"):
+        errors.append(f"{m.group(1)} passes a NULL fragment header; only the world family's literal may")
 
 
 # ------------------------------------------------------------ per-path writes

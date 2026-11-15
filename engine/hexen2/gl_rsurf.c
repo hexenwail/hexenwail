@@ -2003,13 +2003,22 @@ int	rprof_chains_n_imm;
 int	rprof_chains_n_slow;
 int	rprof_chains_n_skypoly;
 
+/* The matrices DrawTextureChains_BindWorldState saw, which
+ * DrawTextureChains_FlushBatch writes to VertParams before every batch.
+ * sworld_vert reads u_mvp / u_modelview from that block since #450 W1, and a
+ * block member is global where the loose uniforms were this program's own: a
+ * GL_ImmEnd on any other program between the bind and a batch would leave its
+ * own matrices there.  Re-writing the bind-time pair per batch keeps exactly
+ * the loose semantics (the value set at bind time is the value drawn with). */
+static float	world_state_mvp[16];
+static float	world_state_mv[16];
+
 /* Bind the per-frame world-VBO render state (VAO, shader, MVP/MV/fog/alpha
  * uniforms, lightmap atlas on TU1, color attribute white, TU0 sticky). Called
  * once before the texture loop and again from inside the fast-path branch if
  * a sibling branch (mirror/translucent/sky-no-skybox) invalidated state. */
 static void DrawTextureChains_BindWorldState (void)
 {
-	float mvp[16], mv[16];
 	/* Fast path emits opaque non-special surfaces (fence/water/sky/turb get
 	 * sorted into separate buffers and the deferred section rebinds the
 	 * cutout variant explicitly).  Use the early_fragment_tests variant
@@ -2018,12 +2027,8 @@ static void DrawTextureChains_BindWorldState (void)
 	glBindVertexArray_fp(world_vao);
 	glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
 	R_UseProgram (prog->program);
-	GL_GetMVP(mvp);
-	GL_GetModelview(mv);
-	if (prog->u_mvp >= 0)
-		glUniformMatrix4fv_fp(prog->u_mvp, 1, GL_FALSE, mvp);
-	if (prog->u_modelview >= 0)
-		glUniformMatrix4fv_fp(prog->u_modelview, 1, GL_FALSE, mv);
+	GL_GetMVP(world_state_mvp);
+	GL_GetModelview(world_state_mv);
 	if (prog->u_fog_density >= 0)
 		glUniform1f_fp(prog->u_fog_density, r_fog_density);
 	if (prog->u_fog_color >= 0)
@@ -2067,6 +2072,12 @@ static void DrawTextureChains_FlushBatch (msurface_t **batch_surfs, int batch_co
 
 	if (batch_count <= 0)
 		return;
+
+	/* sworld_vert's VertParams, from DrawTextureChains_BindWorldState's
+	 * capture (#450 W1). */
+	R_SetMVP (world_state_mvp);
+	R_SetModelView (world_state_mv);
+	R_FlushUniforms ();
 
 	run_first_idx = batch_surfs[0]->vbo_firstindex;
 	run_total_idx = batch_surfs[0]->vbo_numtris * 3;
@@ -2271,6 +2282,7 @@ static void DrawTextureChains_DrawDeferred (entity_t *e, msurface_t **deferred, 
 
 		if (fence_n > 0 || water_n > 0)
 		{
+			float mvp[16], mv[16];
 			/* Sort each group by vbo_firstindex so contiguous
 			 * runs collapse into single glDrawElements calls. */
 #define DEF_LESS(a,b) ((a)->vbo_firstindex < (b)->vbo_firstindex)
@@ -2304,15 +2316,8 @@ static void DrawTextureChains_DrawDeferred (entity_t *e, msurface_t **deferred, 
 			glBindVertexArray_fp(world_vao);
 			glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
 			R_UseProgram (gl_shader_world.program);
-			{
-				float mvp[16], mv[16];
-				GL_GetMVP(mvp);
-				GL_GetModelview(mv);
-				if (gl_shader_world.u_mvp >= 0)
-					glUniformMatrix4fv_fp(gl_shader_world.u_mvp, 1, GL_FALSE, mvp);
-				if (gl_shader_world.u_modelview >= 0)
-					glUniformMatrix4fv_fp(gl_shader_world.u_modelview, 1, GL_FALSE, mv);
-			}
+			GL_GetMVP(mvp);
+			GL_GetModelview(mv);
 			if (gl_shader_world.u_fog_density >= 0)
 				glUniform1f_fp(gl_shader_world.u_fog_density, r_fog_density);
 			if (gl_shader_world.u_fog_color >= 0)
@@ -2323,6 +2328,11 @@ static void DrawTextureChains_DrawDeferred (entity_t *e, msurface_t **deferred, 
 			R_BindTextureSlot (2, gl_null_fb_texture);	/* sjvf: default fb */
 			GL_BindMaterialDefaults ();		/* uhexen2-mfql */
 			GL_ImmInvalidateState();
+			/* sworld_vert reads both from VertParams (#450 W1).  Nothing
+			 * between here and EMIT_BATCH's draws writes the block. */
+			R_SetMVP (mvp);
+			R_SetModelView (mv);
+			R_FlushUniforms ();
 
 			/* Emit one batched draw per texture run.  When the
 			 * texture changes we flush the running glDrawElements
@@ -3103,12 +3113,16 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 				glUniform1f_fp(prog->u_overbright, gl_overbright.integer ? 2.0f : 1.0f);
 			GL_ImmInvalidateState();
 		}
+		/* The entity transform R_RotateForEntity pushed, for sworld_vert's
+		 * VertParams (#450 W1).  Written every call, brush batch or not:
+		 * the block is global, so the last entity's (or any other
+		 * program's) matrices are still in it.  Nothing between here and
+		 * the batched draws below writes the block. */
 		GL_GetMVP(mvp);
 		GL_GetModelview(mv);
-		if (prog->u_mvp >= 0)
-			glUniformMatrix4fv_fp(prog->u_mvp, 1, GL_FALSE, mvp);
-		if (prog->u_modelview >= 0)
-			glUniformMatrix4fv_fp(prog->u_modelview, 1, GL_FALSE, mv);
+		R_SetMVP (mvp);
+		R_SetModelView (mv);
+		R_FlushUniforms ();
 
 		/* Claim an id for this pass's special-surface handoff.  Ids stay
 		 * negative so they never collide with the r_framecount stamp the
