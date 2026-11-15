@@ -19,10 +19,16 @@ Checks the pieces that have to move together:
     puts its four storage buffers on VERT_SSBO(n, n) (layout.inc: set 0 on
     Vulkan, the GL binding elsewhere), aliases gl_VertexID / gl_InstanceID on
     Vulkan, and takes the ShadedotRow constants from macros whose #ifndef
-    defaults equal gl_shader.h's;
+    defaults equal gl_shader.h's, which do not overlap;
+  * the glow is unshaded (GitHub #491): main() drops the shade term (sdot = 1)
+    for a record carrying ALIAS_INST_FULLBRIGHT_BIT, after both format arms
+    compute it and before v_color takes it; R_DrawAliasInstanced's fullbright
+    pass sets the bit on every record, with the flat light, before it
+    re-streams them; and nothing else in gl_rmain.c sets it, so the main pass
+    stays shaded;
   * the literal and GL_CompileShaderDefines are gone, both instanced programs
     compile the file with GLSL_ALIAS_INST_VERT_HEADER (the tier's version line
-    plus the two constants; NOPERSP appended for the affine twin), and the
+    plus the three constants; NOPERSP appended for the affine twin), and the
     program binds AliasVert after the memset that would clear it;
   * R_DrawAliasInstanced writes every VertParams member the stage reads before
     each pass's first flush, sets the instance base PER BATCH and flushes it
@@ -239,7 +245,8 @@ def hnum(name):
 
 
 fb = re.search(r"#ifndef ALIAS_INST_SHADEDOT_ROW_MASK\n(.*?)#endif", vcode, re.S)
-for k in ("ALIAS_INST_SHADEDOT_ROW_MASK", "ALIAS_INST_DLIGHT_BIT"):
+BITS = ("ALIAS_INST_SHADEDOT_ROW_MASK", "ALIAS_INST_DLIGHT_BIT", "ALIAS_INST_FULLBRIGHT_BIT")
+for k in BITS:
     if hnum(k) is None:
         errors.append(f"gl_shader.h: no {k}")
     elif not fb or not re.search(rf"#define\s+{k}\s+{hnum(k)}\s*\n", fb.group(1)):
@@ -247,6 +254,25 @@ for k in ("ALIAS_INST_SHADEDOT_ROW_MASK", "ALIAS_INST_DLIGHT_BIT"):
 main = vcode[vcode.find("void main()"):]
 if "inst.ShadedotRow & ALIAS_INST_SHADEDOT_ROW_MASK" not in main or "inst.ShadedotRow & ALIAS_INST_DLIGHT_BIT" not in main:
     errors.append("main() must mask ShadedotRow with the macros, not literals")
+# The three ShadedotRow fields own separate bits.
+vals = [int(hnum(k)) for k in BITS if hnum(k)]
+if len(vals) == 3 and (vals[0] & vals[1] or vals[0] & vals[2] or vals[1] & vals[2]):
+    errors.append(f"ShadedotRow fields overlap: {dict(zip(BITS, vals))}")
+# GitHub #491: a glow record is drawn unshaded.  Both format arms compute the
+# shade term (shadedots table, MD3 1 + d), so the override comes after both,
+# outside either, and before v_color reads it.
+fbo = re.search(r"if \(\(inst\.ShadedotRow & ALIAS_INST_FULLBRIGHT_BIT\) != 0\)\s*sdot = 1\.0;", main)
+vcol = main.find("v_color = vec4(inst.LightAlpha.rgb * sdot, inst.LightAlpha.a);")
+last_arm = max(main.find("sdot = max(1.0 + d, 0.0);"), main.find("sdot = max(sdot, 0.0);"))
+if not fbo:
+    errors.append("main() (#491): a record with ALIAS_INST_FULLBRIGHT_BIT must set sdot = 1.0 -- the glow is "
+                  "emissive, drawn unshaded as the CPU redraw draws it")
+elif vcol < 0 or not (last_arm < fbo.start() < vcol):
+    errors.append("main() (#491): the glow's sdot = 1.0 must come after both shade arms and before v_color")
+else:
+    dep = lambda i: main[:i].count("{") - main[:i].count("}")
+    if dep(fbo.start()) != dep(vcol):
+        errors.append("main() (#491): the glow's sdot override must sit at v_color's depth, outside either format arm")
 
 # ------------------------------------------------------------ the C side's builds
 if re.search(r"static const char salias_inst_vert\[\]", gl_shader):
@@ -256,9 +282,10 @@ if re.search(r"\bGL_CompileShaderDefines\b", strip(gl_shader)):
 hdr = re.search(r"#define GLSL_ALIAS_INST_VERT_HEADER \\\n((?:\t.*\\\n)*\t.*\n)", gl_shader)
 want_hdr = ['GLSL_VERT_HEADER',
             '"#define ALIAS_INST_SHADEDOT_ROW_MASK " GLSL_STR(ALIAS_INST_SHADEDOT_ROW_MASK) "\\n"',
-            '"#define ALIAS_INST_DLIGHT_BIT " GLSL_STR(ALIAS_INST_DLIGHT_BIT) "\\n"']
+            '"#define ALIAS_INST_DLIGHT_BIT " GLSL_STR(ALIAS_INST_DLIGHT_BIT) "\\n"',
+            '"#define ALIAS_INST_FULLBRIGHT_BIT " GLSL_STR(ALIAS_INST_FULLBRIGHT_BIT) "\\n"']
 if not hdr or [l.strip().rstrip("\\").strip() for l in hdr.group(1).splitlines()] != want_hdr:
-    errors.append("GLSL_ALIAS_INST_VERT_HEADER must be GLSL_VERT_HEADER plus the two ShadedotRow constants")
+    errors.append("GLSL_ALIAS_INST_VERT_HEADER must be GLSL_VERT_HEADER plus the three ShadedotRow constants")
 inst = body_of(gl_shader, r"static qboolean GL_InitAliasInstProgram \([^)]*\)\s*\{") or ""
 for w in (r'q_snprintf \(vert_header, sizeof\(vert_header\), "%s%s",\s*GLSL_ALIAS_INST_VERT_HEADER, defines \? defines : ""\);',
           r"vs = GL_CompileShaderSplit\(GL_VERTEX_SHADER, vert_header, salias_inst_vert\);",
@@ -350,10 +377,27 @@ else:
         if re.search(r"R_SetPoseVertType \(PV_", loop):
             errors.append(f"R_DrawAliasInstanced {label} (#485): the pose type is the batch's "
                           "(gm->poseverttype), never a fixed PV_* constant")
+    # GitHub #491: the glow pass marks every record, alongside the flat light,
+    # in one loop before it re-streams them.  The main pass's never carry it.
+    has_fb = draw.rfind("if (has_fb)", 0, fbi)
+    up = draw.find("GL_Upload", has_fb) if has_fb >= 0 else -1
+    seg = draw[has_fb:up] if 0 <= has_fb < up else ""
+    loop_m = re.search(r"for \(i = 0; i < num_alias_instances; i\+\+\)\s*\{([^{}]*)\}", seg)
+    if not loop_m or not re.search(r"alias_instances\[i\]\.shadedot_row \|= ALIAS_INST_FULLBRIGHT_BIT;",
+                                   loop_m.group(1)) \
+            or not all(f"alias_instances[i].light_color[{k}] = 1.0f;" in loop_m.group(1) for k in range(3)):
+        errors.append("R_DrawAliasInstanced fullbright pass (#491): one loop over num_alias_instances must give "
+                      "every record the flat light 1.0f and ALIAS_INST_FULLBRIGHT_BIT before the pass re-streams them")
+    if has_fb < 0 or "ALIAS_INST_FULLBRIGHT_BIT" in draw[:has_fb]:
+        errors.append("R_DrawAliasInstanced (#491): ALIAS_INST_FULLBRIGHT_BIT is set before the main pass draws")
     # Binding 3 goes back to 0 after each pass that may have bound it.
     tail = draw[fbloop:]
     if not re.search(r"GL_BindBufferBase\s*\(\s*GL_SHADER_STORAGE_BUFFER\s*,\s*3\s*,\s*0\s*\)", tail):
         errors.append("R_DrawAliasInstanced fullbright pass (#485): must unbind binding 3 once its batches are drawn")
+
+if len(re.findall(r"\bALIAS_INST_FULLBRIGHT_BIT\b", strip(rmain))) != 1:
+    errors.append("gl_rmain.c (#491): ALIAS_INST_FULLBRIGHT_BIT must be written exactly once, in the glow pass; "
+                  "a main-pass record carrying it would draw unshaded")
 
 bfa = strip(body_of(lc, r"void R_LightCluster_BindForAlias \(void\)\s*\{") or "")
 if re.search(r"glUniform\w*_fp|LC_SetAliasInstUniforms|u_lightview", bfa) or "LC_SetAliasInstUniforms" in strip(lc):

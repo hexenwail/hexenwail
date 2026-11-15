@@ -4189,8 +4189,9 @@ static qboolean R_CollectAliasInstance (entity_t *e)
 	inst->shadedot_row = ((int)(e->angles[1] * (SHADEDOT_QUANT / 360.0))) & (SHADEDOT_QUANT - 1);
 	/* Bit 8 rides along in the same int rather than widening the 80-byte
 	 * instance record, which salias_inst_vert's struct layout hardcodes.  The
-	 * row is 0..15, so there is nothing to collide with; the shader masks it
-	 * off before indexing the shadedots table.  uhexen2-waum. */
+	 * row is 0..15, below the dlight bit and the glow mark (bit 9, set only by
+	 * the glow pass); the shader masks both off before indexing the shadedots
+	 * table.  uhexen2-waum. */
 	if (model_dlight_gpu)
 		inst->shadedot_row |= ALIAS_INST_DLIGHT_BIT;
 
@@ -4595,12 +4596,17 @@ static void R_DrawAliasInstanced (void)
 
 		if (has_fb)
 		{
-			/* Override light_color to uniform brightness for fullbright */
+			/* Flat white, unshaded: the CPU redraw's vertex colour is a
+			 * constant 1 (GL_DrawAliasFrame, model_fullbright_pass), and
+			 * the bit tells the shader to drop the shadedot term too,
+			 * which a light of 1 alone left multiplying the glow by 0.7
+			 * to 2.  GitHub #491. */
 			for (i = 0; i < num_alias_instances; i++)
 			{
 				alias_instances[i].light_color[0] = 1.0f;
 				alias_instances[i].light_color[1] = 1.0f;
 				alias_instances[i].light_color[2] = 1.0f;
+				alias_instances[i].shadedot_row |= ALIAS_INST_FULLBRIGHT_BIT;
 			}
 
 			/* Re-stream the modified instance data into a fresh

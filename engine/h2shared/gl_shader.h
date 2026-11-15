@@ -139,9 +139,9 @@ void	GL_ParticleGPU_SetUniforms (const gl_particle_gpu_prog_t *prog,
 				     const float *vpn, const float *origin,
 				     float ctime);
 
-/* InstanceData.ShadedotRow carries two things, because widening the record
+/* InstanceData.ShadedotRow carries three things, because widening the record
  * would change the 80-byte layout engine/shaders/salias_inst_vert.glsl and
- * R_CollectAliasInstance both hardcode.  The shader gets these two through
+ * R_CollectAliasInstance both hardcode.  The shader gets these through
  * its header chunk (GLSL_ALIAS_INST_VERT_HEADER in gl_shader.c); its #ifndef
  * copies are for the offline SPIR-V compile and are pinned to these by
  * tools/test_alias_inst_vert_block.py.  The low bits are the quantized-yaw row into the shadedots
@@ -152,6 +152,11 @@ void	GL_ParticleGPU_SetUniforms (const gl_particle_gpu_prog_t *prog,
  * they never took dlights on the CPU either.  uhexen2-waum. */
 #define ALIAS_INST_SHADEDOT_ROW_MASK	255
 #define ALIAS_INST_DLIGHT_BIT		256
+/* Bit 9 marks the gl_fullbrights glow redraw's records: the shader draws them
+ * flat white, unshaded, as GL_DrawAliasFrame's model_fullbright_pass does.  A
+ * glow is emissive, so the shadedot (or MD3 1 + d) term that the base pass
+ * takes must not scale it.  GitHub #491. */
+#define ALIAS_INST_FULLBRIGHT_BIT	512
 
 /* Vertex attribute locations (fixed, shared across all programs).  The
  * file-backed shaders in engine/shaders/ repeat these as layout(location=)

@@ -9,7 +9,7 @@
  * ES 3.00, so gl_shader.c never builds this program under USE_GLES.
  *
  * No #version line; gl_shader.c passes GLSL_ALIAS_INST_VERT_HEADER, which is
- * GLSL_VERT_HEADER plus the two ShadedotRow constants below, with
+ * GLSL_VERT_HEADER plus the three ShadedotRow constants below, with
  * "#define NOPERSP 1" appended for the affine (r_softemu) twin.
  *
  *   storage  instances  GL 0  per-frame InstanceData, streamed by GL_Upload
@@ -34,14 +34,16 @@
 #include "uniforms.inc"
 #include "alias.inc"
 
-/* InstanceData.ShadedotRow carries the shadedots row (0..15) in its low bits
- * and the per-instance dynamic-light switch in bit 8 -- ALIAS_INST_* in
+/* InstanceData.ShadedotRow carries the shadedots row (0..15) in its low bits,
+ * the per-instance dynamic-light switch in bit 8 and the glow redraw's mark in
+ * bit 9 -- ALIAS_INST_* in
  * gl_shader.h, which reach the engine's compile through the header chunk.
  * These defaults exist for the offline SPIR-V compile only, and
  * tools/test_alias_inst_vert_block.py keeps them equal to the C values. */
 #ifndef ALIAS_INST_SHADEDOT_ROW_MASK
   #define ALIAS_INST_SHADEDOT_ROW_MASK	255
   #define ALIAS_INST_DLIGHT_BIT		256
+  #define ALIAS_INST_FULLBRIGHT_BIT	512
 #endif
 
 /* Vulkan GLSL has gl_VertexIndex / gl_InstanceIndex instead.  gl_VertexIndex
@@ -184,9 +186,10 @@ void main() {
      * shader and md3mesh.c's CPU path both compute -- the three have to agree
      * or one model lights differently depending on r_alias_gpu and on which
      * format it was shipped in.  uhexen2-2ah9. */
-    /* Bit 8 of ShadedotRow is the per-instance dynamic-light switch, not part
-     * of the row.  The row itself is 0..15, so masking costs nothing and keeps
-     * the 80-byte InstanceData layout unchanged.  uhexen2-waum. */
+    /* ShadedotRow carries the dlight bit (8) and the glow mark (9) above the
+     * row, so the mask is what keeps the QUAKE1 arm's shadedots index in
+     * bounds; packing them here keeps the 80-byte InstanceData layout
+     * unchanged.  uhexen2-waum, GitHub #491. */
     int sdot_row = inst.ShadedotRow & ALIAS_INST_SHADEDOT_ROW_MASK;
     if (u_poseverttype == 1) {  /* MD3: use decoded normal */
         float an = float(sdot_row) * (6.28318531 / 16.0);
@@ -199,6 +202,13 @@ void main() {
         sdot = shadedots[sdot_idx];
         sdot = max(sdot, 0.0);
     }
+    /* The gl_fullbrights glow redraw marks its records and sets their light to
+     * a flat 1: the glow is emissive, drawn unshaded as GL_DrawAliasFrame's
+     * model_fullbright_pass draws it and as Ironwail adds its FullbrightTex
+     * sample after the shading (Quake/gl_shaders.h).  Shading it here made
+     * every glow face 0.7x to 2x what r_alias_gpu 0 drew.  GitHub #491. */
+    if ((inst.ShadedotRow & ALIAS_INST_FULLBRIGHT_BIT) != 0)
+        sdot = 1.0;
     v_color = vec4(inst.LightAlpha.rgb * sdot, inst.LightAlpha.a);
 
     v_texcoord = a_texcoord;
