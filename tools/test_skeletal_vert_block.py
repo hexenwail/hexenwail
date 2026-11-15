@@ -268,10 +268,15 @@ for fn in ("R_SetSkelPose", "R_SetSkelLight"):
         if f.name == "gl_uniforms.c":
             continue
         t = strip(f.read_text(errors="replace"))
-        for m in re.finditer(rf"\b{fn} \(", t):
-            enc = re.findall(r"\n(?:static )?void (\w+) \(", t[:m.start()])
-            if not enc or enc[-1] != "GL_DrawAliasSkeletal":
-                errors.append(f"{fn} is called from {f.relative_to(ROOT)}:{enc[-1] if enc else '?'}; "
+        if not re.search(rf"\b{fn}\b", t):
+            continue
+        # Brace structure, not "the last void name ( above": a static helper
+        # or a non-void function between them would otherwise be misattributed.
+        tfns = functions(t)
+        for m in re.finditer(rf"\b{fn}\b", t):
+            enc = enclosing_fn(tfns, m.start())
+            if enc != "GL_DrawAliasSkeletal":
+                errors.append(f"{fn} is referenced from {f.relative_to(ROOT)}:{enc or 'file scope'}; "
                               "only GL_DrawAliasSkeletal writes the skeletal lanes")
 
 # ------------------------------------------------------------ the file
