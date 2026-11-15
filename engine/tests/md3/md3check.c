@@ -12,6 +12,7 @@
  */
 #include "quakedef.h"
 #include "gl_model.h"
+#include "img_load.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -46,12 +47,34 @@ byte *FS_LoadMallocFile (const char *path, unsigned int *path_id)
 }
 static long last_size;
 
+/* The skin stubs answer from these switches, so one run can load the fixture
+ * with no skin, with a skin, and with a skin plus its glow sidecar.  Texture
+ * numbers: 1 is the white sentinel, 2 a loaded skin, 3 a loaded glow. */
+static int	stub_have_skin, stub_have_glow;
+static char	stub_glow_asked[256];
+
 byte *IMG_LoadExternalTexture (const char *name, int *w, int *h, qboolean *a)
-{ (void)name; (void)w; (void)h; (void)a; return NULL; }
+{
+	(void)name;
+	if (!stub_have_skin) return NULL;
+	*w = *h = 1; *a = false;
+	return (byte *) calloc(1, 4);
+}
+
+qboolean IMG_LoadReplacementGlow (const char *name, const char *modelname, imgreplace_t *out)
+{
+	(void)modelname;
+	q_strlcpy(stub_glow_asked, name, sizeof(stub_glow_asked));
+	memset(out, 0, sizeof(*out));
+	return stub_have_glow ? true : false;
+}
+void IMG_FreeReplacement (imgreplace_t *r) { (void)r; }
 
 GLuint gl_solid_white_texture = 1;
 GLuint GL_LoadTexture (const char *id, byte *data, int w, int h, int flags)
-{ (void)id; (void)data; (void)w; (void)h; (void)flags; return 1; }
+{ (void)id; (void)data; (void)w; (void)h; (void)flags; return 2; }
+GLuint GL_LoadReplacement (const char *id, const struct imgreplace_s *r, int flags)
+{ (void)id; (void)r; (void)flags; return 3; }
 
 /* --- checks ------------------------------------------------------------ */
 static int fails = 0;
@@ -191,6 +214,34 @@ int main (int argc, char **argv)
 		printf("  FAIL: expected \"rest\" / \"lifted\"\n");
 		fails++;
 	}
+
+	/* Skins.  The first load above had no skin image: white sentinel, no
+	 * glow.  An .md3 skin is RGBA, so its glow can only come from the
+	 * _glow / _luma sidecar of the skin path that resolved -- the shader
+	 * name here -- and must reach all four animation slots, which both the
+	 * CPU and the instanced fullbright passes index.  GitHub #485. */
+	printf("skins\n");
+	check_i("no skin: texture", (int)hdr->gl_texturenum[0][0], 1);
+	check_i("no skin: glow", (int)hdr->gl_fb_texturenum[0][0], 0);
+
+	stub_have_skin = 1; stub_have_glow = 0; stub_glow_asked[0] = 0;
+	hdr = MD3_LoadMesh("models/test/quad.md3", file, (int)size, mins, maxs);
+	if (!hdr) { fprintf(stderr, "MD3_LoadMesh failed\n"); return 1; }
+	check_i("skin: texture", (int)hdr->gl_texturenum[0][0], 2);
+	check_i("skin, no sidecar: glow", (int)hdr->gl_fb_texturenum[0][0], 0);
+
+	stub_have_glow = 1; stub_glow_asked[0] = 0;
+	hdr = MD3_LoadMesh("models/test/quad.md3", file, (int)size, mins, maxs);
+	if (!hdr) { fprintf(stderr, "MD3_LoadMesh failed\n"); return 1; }
+	check_i("glow slot 0", (int)hdr->gl_fb_texturenum[0][0], 3);
+	check_i("glow slot 3", (int)hdr->gl_fb_texturenum[0][3], 3);
+	printf("  %-26s \"%s\"\n", "glow sidecar of", stub_glow_asked);
+	if (strcmp(stub_glow_asked, "models/test/quad_front"))
+	{
+		printf("  FAIL: expected \"models/test/quad_front\"\n");
+		fails++;
+	}
+	stub_have_skin = stub_have_glow = 0;
 
 	/* A truncated file must be refused, not parsed from its own bad
 	 * numbers: every offset in an .md3 is self-declared. */

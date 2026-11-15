@@ -11,6 +11,11 @@ Tests for `engine/h2shared/md3mesh.c`, the .md3 parser.
 - **Normal byte order.** MD3 stores one little-endian short per vertex, low
   byte longitude, high byte latitude. The fixture's two surfaces carry
   different normals; read the bytes the wrong way and both come out `(0,0,1)`.
+- **Skin and glow.** No skin image gives the white sentinel and no glow; a
+  skin gives its texture; a skin with a `_glow` / `_luma` sidecar puts the
+  glow in all four `gl_fb_texturenum` slots, looked up from the skin path that
+  resolved. The image loaders are stubs, so this checks the wiring, not the
+  decode.
 - **Truncation.** The last case feeds the loader half the file and expects a
   refusal.
 
@@ -54,3 +59,9 @@ hexenwail -basedir ~/hexen2 -game md3test +developer 1 \
 Every barrel becomes a two-triangle wedge, and the console says so. Run it
 with `r_alias_gpu 0` as well: that is the CPU path (`GL_DrawAliasFrameMD3`),
 which WebGL2 always uses and desktop uses for EF_HOLEY / translucent entities.
+
+To see the glow layer as well, give the front surface a skin and a sidecar:
+`models/test/quad_front.png` and `models/test/quad_front_glow.png` (or
+`_luma`) in the same gamedir. The glow should look the same under
+`r_alias_gpu 1` and `r_alias_gpu 0`; the instanced pass skipped MD3 batches
+until GitHub #485.
