@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""sworld_vert reads its uniforms from VertParams (#450, world slice W1).
+"""sworld_vert reads its uniforms from VertParams (#450, world slice W1), and
+every world draw path writes what all three world stages read (slice W2).
 
 Checks the pieces that have to move together:
   * VertParams in engine/shaders/uniforms.inc and r_vertparams_t in
@@ -51,6 +52,15 @@ Checks the pieces that have to move together:
     flush and its draw; and DrawTextureChains reaches FlushBatch only with
     world_state_set true on every path, FlushBatch refuses to draw without
     it, and nothing in between can refill the pair it draws with.
+  * the member pass (W2, end of file) follows every world-read block member
+    through each of those paths, VertParams' two and every FragParams /
+    WorldFrag slot either world fragment stage reads: at every draw, on every
+    path through the function, each must have been written by this path's own
+    R_SetMVP / R_SetModelView / R_SetWorldFrag, not overwritten since by any
+    other writer (any engine call that reaches one), and flushed after its
+    last write.  The slots are derived from the shader files and the setters'
+    bodies, not listed: a stage that starts reading a member R_SetWorldFrag
+    does not write fails here.
 """
 from pathlib import Path
 import re
@@ -474,7 +484,9 @@ for name, (path, mvp_e, mv_e, source, allowed) in PATHS.items():
         for w in sorted(BLOCK_WRITERS - {"R_FlushUniforms"}):
             if re.search(rf"\b{w}\b", d[near:dp]):
                 errors.append(f"{name} calls {w} between its VertParams flush and a draw")
-    for w in sorted(BLOCK_WRITERS - {"R_SetMVP", "R_SetModelView", "R_FlushUniforms"}):
+    # R_SetWorldFrag writes no VertParams slot (the member pass below proves
+    # it), so the path's own fragment write may sit on either side.
+    for w in sorted(BLOCK_WRITERS - {"R_SetMVP", "R_SetModelView", "R_FlushUniforms", "R_SetWorldFrag"}):
         hit = re.search(rf"\b{w}\b", d[min(sets["R_SetMVP"][0], sets["R_SetModelView"][0]):fpos])
         if hit:
             errors.append(f"{name} calls {w} between its matrix setters and its flush")
@@ -1694,8 +1706,245 @@ if fbf:
                       "without the bind it would draw with another call's matrices")
 
 
+# ==================================================================== the member pass (W2)
+# The checks above pin VertParams' two matrices per path by spelling, and the
+# flow pass proves no other function draws with a world program.  A block
+# member is global, so what each pinned path must also guarantee is that EVERY
+# member any world stage reads holds this path's value when it draws -- since
+# #450 W2 that is the whole fragment set too: fog, the alpha pair, overbright,
+# bicubic, caustics, the debug views (FragParams) and all of WorldFrag.  This
+# follows them member by member (one slot per float), through every path of
+# each pinned function, with the flow pass's parser, interpreter and call graph:
+#   * the slots READ are derived from the three stage files: every block alias
+#     or member they (and their helper .inc files) name, resolved through
+#     uniforms.inc / world.inc to the member and swizzle, and to the C field by
+#     the block's order (the mirrors are pinned by name elsewhere);
+#   * what each function WRITES is derived from gl_uniforms.c's setter bodies
+#     (RU_Set4 / RU_SetMat / an indexed store / a struct copy into a shadow)
+#     closed over the call graph, so a helper that reaches a setter counts;
+#   * a slot counts for a draw only if, on every path, the last write to it in
+#     this function was the path's own R_SetMVP / R_SetModelView /
+#     R_SetWorldFrag and a flush came after that write: any other writer
+#     reaching it in between -- R_SetFog, R_SetAlphaMask, GL_ImmEnd, a helper
+#     -- leaves the slot holding someone else's value, and a write after the
+#     last flush leaves the GPU copy stale.
+# GL_ImmEnd is followed into GL_ImmPushBlocks with the program assumed to be a
+# world one -- its VertParams, FragParams and WorldFrag indices >= 0, AliasFrag
+# and AliasVert -1 -- which tools/test_world_frag_block.py pins on the build
+# side.
+SHADOW = {"vertparams": "r_vertparams_t", "fragparams": "r_fragparams_t", "worldfrag": "r_worldfrag_t",
+          "aliasfrag": "r_aliasfrag_t", "aliasvert": "r_aliasvert_t"}
+BLOCK_OF = {"VertParams": ("uniforms.inc", "vertparams"), "FragParams": ("uniforms.inc", "fragparams"),
+            "WorldFrag": ("world.inc", "worldfrag")}
+GOOD = {"R_SetWorldFrag", "R_SetMVP", "R_SetModelView"}
+INLINE = {"GL_ImmPushBlocks"}
+WORLD_UB = {"ub_vert": True, "ub_frag": True, "ub_wfrag": True, "ub_afrag": False, "ub_avert": False}
+SWZ = {"x": 0, "y": 1, "z": 2, "w": 3, "r": 0, "g": 1, "b": 2, "a": 3}
+uh_code = strip(uh)
+CFIELDS = {}
+for cname in SHADOW.values():
+    m = re.search(rf"typedef struct \{{([^{{}}]*)\}} {cname};", uh_code)
+    CFIELDS[cname] = [(f, int(k)) for _, f, k in re.findall(r"\b(float|int)\s+(\w+)\[(\d+)\];", m.group(1))] if m else []
+    if not CFIELDS[cname]:
+        errors.append(f"member pass: cannot read {cname} from gl_uniforms.h")
+MEMBER = {}          # GLSL member -> (shadow, C field, width)
+for block, (inc, shadow) in BLOCK_OF.items():
+    bt = strip((ROOT / "engine/shaders" / inc).read_text())
+    bm = re.search(rf"uniform {block} \{{(.*?)\}};", bt, re.S)
+    gm = re.findall(r"\b(mat4|ivec4|vec4)\s+(\w+)\s*;", bm.group(1)) if bm else []
+    cf = CFIELDS[SHADOW[shadow]]
+    if not gm or [16 if t == "mat4" else 4 for t, _ in gm] != [k for _, k in cf]:
+        errors.append(f"member pass: {block}'s members {gm} do not line up with {SHADOW[shadow]} {cf}")
+        continue
+    for (t, n), (f, k) in zip(gm, cf):
+        MEMBER[n] = (shadow, f, k)
+
+
+def slots_of(expr):
+    """The (shadow, field, index) slots a member expression like u_fmask.z names."""
+    parts = expr.split(".")
+    if parts[0] not in MEMBER:
+        return None
+    shadow, f, k = MEMBER[parts[0]]
+    idx = list(range(k))
+    for sw in parts[1:]:
+        if k == 16 or any(c not in SWZ for c in sw):
+            return None
+        idx = [idx[SWZ[c]] for c in sw]
+    return {(shadow, f, i) for i in idx}
+
+
+ALIAS = {}
+for inc, sect in (("uniforms.inc", "UNIFORMS_VERT"), ("uniforms.inc", "UNIFORMS_FRAG"), ("world.inc", "UNIFORMS_FRAG")):
+    t = (ROOT / "engine/shaders" / inc).read_text()
+    for body in re.findall(rf"#ifdef {sect}\n(.*?)#endif", t, re.S):
+        for n, e in re.findall(r"^#define\s+(u_\w+)\s+(u_[\w.]+)\s*$", body, re.M):
+            sl = slots_of(e)
+            if sl is None:
+                errors.append(f"member pass: cannot resolve {inc}'s {n} -> {e}")
+            else:
+                ALIAS.setdefault((sect, n), set()).update(sl)
+
+
+def stage_reads(name, sect):
+    """Slots a stage reads: every alias or member its text (helper .inc files
+    included, the block-declaring ones not) names.  Both tiers' arms at once,
+    which is the superset a path has to write."""
+    seen, out, text = set(), set(), ""
+    work = [name]
+    while work:
+        f = work.pop()
+        if f in seen:
+            continue
+        seen.add(f)
+        t = (ROOT / "engine/shaders" / f).read_text()
+        work += [i for i in re.findall(r'#\s*include\s+"([^"]+)"', t)
+                 if i not in ("layout.inc", "uniforms.inc", "world.inc", "alias.inc")]
+        text += strip(t)
+    for tok in set(re.findall(r"\bu_\w+(?:\.\w+)?", text)):
+        n = tok.split(".")[0]
+        if (sect, n) in ALIAS:
+            out |= ALIAS[(sect, n)]
+        elif n in MEMBER:
+            out |= slots_of(tok) or slots_of(n)
+    return out
+
+
+READ_V = stage_reads("sworld_vert.glsl", "UNIFORMS_VERT")
+READ_F = {f: stage_reads(f"{f}.glsl", "UNIFORMS_FRAG") for f in ("sworld_frag", "sworld_opaque_frag")}
+READ = READ_V | READ_F["sworld_frag"] | READ_F["sworld_opaque_frag"]
+if not READ_V or not all(READ_F.values()) or {s for s, _, _ in READ} != {"vertparams", "fragparams", "worldfrag"}:
+    errors.append(f"member pass: cannot derive the slots the world stages read ({len(READ)})")
+
+# What each setter writes, directly, then closed over the engine call graph.
+uc_code = strip(uc)
+DIRECT = {}
+for fname, a, z in functions(uc_code):
+    b = uc_code[a:z]
+    w = set()
+    for sh, f in re.findall(r"\bRU_Set4\s*\(\s*(\w+)\.(\w+)\s*,", b):
+        w |= {(sh, f, i) for i in range(4)}
+    for sh, f in re.findall(r"\bRU_SetMat\s*\(\s*(\w+)\.(\w+)\s*,", b):
+        w |= {(sh, f, i) for i in range(16)}
+    for sh, f, i in re.findall(r"\b(\w+)\.(\w+)\[(\d+)\]\s*=(?!=)", b):
+        w.add((sh, f, int(i)))
+    for sh, f in re.findall(r"\bmemcpy\s*\(\s*(\w+)\.(\w+)\s*,", b):
+        w |= {(sh, f, i) for i in range(dict(CFIELDS.get(SHADOW.get(sh, ""), [])).get(f, 0))}
+    for sh in re.findall(r"(?<![\w.>])(\w+)\s*=(?!=)\s*[^;]*;", b) + re.findall(r"\bmemset\s*\(\s*&(\w+)\s*,", b) \
+            + re.findall(r"\bmemcpy\s*\(\s*&(\w+)\s*,", b):
+        if sh in SHADOW:
+            w |= {(sh, f, i) for f, k in CFIELDS[SHADOW[sh]] for i in range(k)}
+    DIRECT[fname] = {x for x in w if x[0] in SHADOW}
+WRITES = {}
+for fn in ALL:
+    w = set(DIRECT.get(fn.name, ())) if fn.file.endswith("gl_uniforms.c") else set()
+    for g in reached(fn).values():
+        if g.file.endswith("gl_uniforms.c"):
+            w |= DIRECT.get(g.name, set())
+    WRITES[id(fn)] = frozenset(w & READ)
+wf = INDEX.get("R_SetWorldFrag", [None])[0]
+if not wf:
+    errors.append("member pass: no R_SetWorldFrag in gl_uniforms.c")
+else:
+    frag_read = READ - READ_V
+    if not frag_read <= WRITES[id(wf)]:
+        errors.append("R_SetWorldFrag does not write slots the world fragment stages read: " +
+                      ", ".join(sorted(f"{s}.{f}[{i}]" for s, f, i in frag_read - WRITES[id(wf)])))
+    if WRITES[id(wf)] & READ_V:
+        errors.append("R_SetWorldFrag writes VertParams slots sworld_vert reads; its paths' matrices would move")
+for nm, want in (("R_SetMVP", "mvp"), ("R_SetModelView", "modelview")):
+    g = INDEX.get(nm, [None])[0]
+    if not g or {f for _, f, _ in WRITES[id(g)]} != {want}:
+        errors.append(f"member pass: {nm} must write vertparams.{want} and no other world-read slot")
+
+
+def show(sl):
+    by = {}
+    for s, f, i in sorted(sl):
+        by.setdefault(f"{s}.{f}", []).append(i)
+    return ", ".join(f"{k}{v if len(v) < 16 else ''}" for k, v in sorted(by.items()))
+
+
+class MemDom:
+    """State: a set of (pending, fresh) pairs, one per path that can reach a
+    point.  pending: slots this path's own setters wrote since its last flush;
+    fresh: slots so written and flushed, with no other writer since."""
+
+    def __init__(self, fn, world_ub):
+        self.fn, self.world_ub, self.bad = fn, world_ub, []
+
+    def simple(self, text, pos, st):
+        if PROTO.fullmatch(text):
+            return st
+        for name, args, at, mem in calls_in(text):
+            if name in BINDS and not mem:
+                continue
+            if re.fullmatch(GLDRAW, name) and not mem:
+                for pend, fresh in st:
+                    miss, stale = READ - fresh, pend & READ
+                    if miss or stale:
+                        self.bad.append((f"`{' '.join(text[at:].split())[:48]}`",
+                                         ("never written by this path, or overwritten since: " + show(miss))
+                                         if miss else ("written after the last flush: " + show(stale))))
+                        break
+                continue
+            if name in NORETURN and not mem:
+                return None
+            if name == "R_FlushUniforms":
+                st = frozenset((frozenset(), fresh | pend) for pend, fresh in st)
+                continue
+            if name in INLINE and not mem:
+                callee = INDEX[name][0]
+                if not callee.ast and not callee.err:
+                    try:
+                        callee.ast = Parser(callee.body).block(0)[0]
+                    except (Unsupported, IndexError) as e:
+                        callee.err = str(e)
+                if not callee.ast:
+                    self.bad.append((name, "that it cannot follow"))
+                    continue
+                out = Interp(MemDom(callee, self.world_ub)).run(callee.ast, st)
+                st = out if out is not None else frozenset()
+                continue
+            gs = targets(name, len(args), mem, self.fn)
+            w = frozenset().union(*(WRITES[id(g)] for g in gs)) if gs else frozenset()
+            if not w:
+                continue
+            if name in GOOD and not mem:
+                st = frozenset((pend | w, fresh) for pend, fresh in st)
+            else:
+                st = frozenset((pend - w, fresh - w) for pend, fresh in st)
+        return st
+
+    def cond(self, text, pos, st):
+        t = " ".join(text.split())
+        if self.world_ub:
+            e = re.sub(r"shader->(ub_\w+) >= 0", lambda m: str(int(self.world_ub.get(m.group(1), False))), t)
+            if re.fullmatch(r"[01()!&| ]+", e) and e != t:
+                v = eval(e.replace("&&", " and ").replace("||", " or ").replace("!", " not "))
+                return (st, None) if v else (None, st)
+        st = self.simple(text, pos, st)
+        return st, st
+
+
+START = frozenset({(frozenset(), frozenset())})
+for name in list(PATHS) + ["GL_ImmEnd"]:
+    for fn in INDEX.get(name, []):
+        if not fn.ast:
+            errors.append(f"{fn.where()}: the member pass cannot parse this path ({fn.err})")
+            continue
+        dom = MemDom(fn, WORLD_UB if name == "GL_ImmEnd" else None)
+        try:
+            Interp(dom).run(fn.ast, START)
+        except Unsupported as e:
+            errors.append(f"{fn.where()}: the member pass cannot follow this path ({e})")
+            continue
+        for where, why in dict.fromkeys(dom.bad):
+            errors.append(f"{fn.where()}: its draw {where} reads world block slots {why}")
+
 if errors:
     sys.exit("FAIL:\n  " + "\n  ".join(errors))
 print(f"PASS sworld_vert reads VertParams; mirror, file, inputs, varyings, builds and {len(PATHS) + 1} "
       f"draw paths agree, and the flow pass over {len(ALL)} functions ({len(REL)} that bind or draw) "
-      "finds no other (#450 W1)")
+      "finds no other (#450 W1); every path writes and flushes all "
+      f"{len(READ)} world-read block slots before each draw (#450 W2)")

@@ -453,8 +453,18 @@ jobs:
       # its outputs against both world fragment files, the three world
       # builds, and every world draw path (GL_ImmEnd, the fast path, deferred,
       # brush model, instanced, GPU-culled) writing both matrices before an
-      # unconditional flush and its draws; and a flow pass that follows world
+      # unconditional flush and its draws; a flow pass that follows world
       # programs and block writers through calls, pointers and locals, and
-      # world_state_set to every FlushBatch (#450 world slice W1).
+      # world_state_set to every FlushBatch (#450 world slice W1); and a
+      # member pass that follows every world-read block slot, fragment set
+      # included, through each of those paths to its draws (W2).
       - name: World vertex stage on VertParams
         run: python3 tools/test_world_vert_block.py
+      # sworld_frag / sworld_opaque_frag read FragParams + WorldFrag: the
+      # WorldFrag mirror by member name, its binding and upload, the files'
+      # shared layout, pinned bodies on both tiers and ES arm, the world frame
+      # record's writers and every path's R_SetWorldFrag arguments.  That
+      # every path writes and flushes all of it before each draw is the member
+      # pass in test_world_vert_block.py (#450 world slice W2).
+      - name: World fragment stages on FragParams + WorldFrag
+        run: python3 tools/test_world_frag_block.py
