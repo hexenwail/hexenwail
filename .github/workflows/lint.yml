@@ -447,3 +447,12 @@ jobs:
       # glUniform write or GL_ImmEnd cache anywhere in C (#450 S5).
       - name: Alias family has no loose uniform plumbing
         run: python3 tools/test_alias_no_loose.py
+
+      # sworld_vert reads VertParams: the mirror by member name, the two
+      # matrices it reads and their setters, every input on its ATTR_* slot,
+      # its outputs against both world fragment literals, the three world
+      # builds, and every world draw path (GL_ImmEnd, the fast path, deferred,
+      # brush model, instanced, GPU-culled) writing both matrices before an
+      # unconditional flush and its draws (#450 world slice W1).
+      - name: World vertex stage on VertParams
+        run: python3 tools/test_world_vert_block.py
