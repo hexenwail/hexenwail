@@ -541,7 +541,7 @@ typedef struct {
 	int	pose0;		/* current pose * poseverts */
 	int	pose1;		/* previous pose * poseverts */
 	float	blend;		/* pose interpolation (1=pose0, 0=pose1) */
-	int	shadedot_row;	/* index into shadedots table (0-15) */
+	int	shadedot_row;	/* shadedots row (0-15) | ALIAS_INST_* bits | yaw << 16 */
 } alias_instance_t;		/* 80 bytes */
 
 /* alias_inst_header_t removed in uhexen2-8pc2: the view-projection

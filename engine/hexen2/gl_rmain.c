@@ -3950,7 +3950,14 @@ static qboolean R_CollectAliasInstance (entity_t *e)
 
 	paliashdr = (aliashdr_t *)Mod_Extradata(clmodel);
 	gm = GL_GetAliasGPUMesh(paliashdr);
-	if (!gm || !gm->ssbo_pose)
+	/* GL_MakeAliasGPUMesh builds one pose buffer per mesh, ssbo_pose for
+	 * PV_QUAKE1 and ssbo_pose_md3 for PV_MD3, so admit a mesh on its own
+	 * format's.  Testing ssbo_pose alone kept every .md3 out, and with it
+	 * the MD3 arms of both passes in R_DrawAliasInstanced.  A skeletal mesh
+	 * (PV_IQM) has neither and stays with R_DrawAliasModel, which skins it
+	 * on the GPU through GL_DrawAliasSkeletal.  GitHub #492. */
+	if (!gm || !gm->valid || gm->poseverttype == PV_IQM ||
+	    !(gm->poseverttype == PV_MD3 ? gm->ssbo_pose_md3 : gm->ssbo_pose))
 		return false;
 
 	/* --- Lighting (same as R_DrawAliasModel) --- */
@@ -4189,11 +4196,22 @@ static qboolean R_CollectAliasInstance (entity_t *e)
 	inst->shadedot_row = ((int)(e->angles[1] * (SHADEDOT_QUANT / 360.0))) & (SHADEDOT_QUANT - 1);
 	/* Bit 8 rides along in the same int rather than widening the 80-byte
 	 * instance record, which salias_inst_vert's struct layout hardcodes.  The
-	 * row is 0..15, below the dlight bit and the glow mark (bit 9, set only by
-	 * the glow pass); the shader masks both off before indexing the shadedots
-	 * table.  uhexen2-waum. */
+	 * row is 0..15, below the dlight bit, the glow mark (bit 9, set only by the
+	 * glow pass) and the yaw (bits 16..31); the shader masks them all off
+	 * before indexing the shadedots table.  uhexen2-waum. */
 	if (model_dlight_gpu)
 		inst->shadedot_row |= ALIAS_INST_DLIGHT_BIT;
+	/* The entity yaw itself, to 1/65536 of a turn, in the top 16 bits: an
+	 * MD3 shades by its real normal against R_DrawAliasModel's unquantized
+	 * shadevector (GL_DrawAliasFrameMD3), and rebuilding that vector from the
+	 * truncated 16-step row put a turned .md3 up to 22.5 degrees off its CPU
+	 * shading.
+	 * The trivertx arm keeps the row, as the CPU path's shadedots table
+	 * does.  GitHub #492. */
+	{
+		int yaw = (int)floorf(e->angles[1] * (65536.0f / 360.0f) + 0.5f);
+		inst->shadedot_row |= (int)((unsigned int)(yaw & 0xFFFF) << ALIAS_INST_YAW_SHIFT);
+	}
 
 	/* Save entity info + resolved skin for shadow/batch passes.
 	 * Resolve skin HERE while paliashdr is valid — a second
@@ -4691,7 +4709,7 @@ static void R_DrawAliasInstanced (void)
 				if (!gm || !gm->valid)
 					continue;
 
-				/* GL_MakeAliasModelGPU builds one pose buffer per mesh,
+				/* GL_MakeAliasGPUMesh builds one pose buffer per mesh,
 				 * ssbo_pose or ssbo_pose_md3, so the buffer, its binding
 				 * and the pose type are all this batch's, exactly as in
 				 * the main pass.  Testing ssbo_pose alone here skipped

@@ -463,7 +463,7 @@ static void GL_InitProgramUniforms (glprogram_t *p)
  * that file's header comment.  Desktop-only: shader storage blocks are GLSL
  * ES 3.10, not 3.00.
  *
- * Its header chunk is the tier's version line plus the three ShadedotRow
+ * Its header chunk is the tier's version line plus the four ShadedotRow
  * constants from gl_shader.h, which the file cannot see; its #ifndef copies
  * of them are only for the offline SPIR-V compile.  The affine twin appends
  * "#define NOPERSP 1\n", as for the other alias programs. */
@@ -472,7 +472,8 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 	GLSL_VERT_HEADER \
 	"#define ALIAS_INST_SHADEDOT_ROW_MASK " GLSL_STR(ALIAS_INST_SHADEDOT_ROW_MASK) "\n" \
 	"#define ALIAS_INST_DLIGHT_BIT " GLSL_STR(ALIAS_INST_DLIGHT_BIT) "\n" \
-	"#define ALIAS_INST_FULLBRIGHT_BIT " GLSL_STR(ALIAS_INST_FULLBRIGHT_BIT) "\n"
+	"#define ALIAS_INST_FULLBRIGHT_BIT " GLSL_STR(ALIAS_INST_FULLBRIGHT_BIT) "\n" \
+	"#define ALIAS_INST_YAW_SHIFT " GLSL_STR(ALIAS_INST_YAW_SHIFT) "\n"
 #endif /* !USE_GLES */
 
 /* --- shader_sky: two-layer scrolling sky (solid + alpha) --- */

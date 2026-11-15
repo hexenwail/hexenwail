@@ -63,5 +63,6 @@ which WebGL2 always uses and desktop uses for EF_HOLEY / translucent entities.
 To see the glow layer as well, give the front surface a skin and a sidecar:
 `models/test/quad_front.png` and `models/test/quad_front_glow.png` (or
 `_luma`) in the same gamedir. The glow should look the same under
-`r_alias_gpu 1` and `r_alias_gpu 0`; the instanced pass skipped MD3 batches
-until GitHub #485.
+`r_alias_gpu 1` and `r_alias_gpu 0`. Under `r_alias_gpu 1` an .md3 is
+instanced only since GitHub #492 (the collector turned it away before), and
+its glow pass drew MD3 batches only since #485.

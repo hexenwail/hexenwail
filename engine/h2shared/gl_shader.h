@@ -139,7 +139,7 @@ void	GL_ParticleGPU_SetUniforms (const gl_particle_gpu_prog_t *prog,
 				     const float *vpn, const float *origin,
 				     float ctime);
 
-/* InstanceData.ShadedotRow carries three things, because widening the record
+/* InstanceData.ShadedotRow carries four things, because widening the record
  * would change the 80-byte layout engine/shaders/salias_inst_vert.glsl and
  * R_CollectAliasInstance both hardcode.  The shader gets these through
  * its header chunk (GLSL_ALIAS_INST_VERT_HEADER in gl_shader.c); its #ifndef
@@ -157,6 +157,10 @@ void	GL_ParticleGPU_SetUniforms (const gl_particle_gpu_prog_t *prog,
  * glow is emissive, so the shadedot (or MD3 1 + d) term that the base pass
  * takes must not scale it.  GitHub #491. */
 #define ALIAS_INST_FULLBRIGHT_BIT	512
+/* Bits 16..31 hold the entity yaw in 1/65536 turns, for the MD3 arm, which
+ * shades by a real normal against R_DrawAliasModel's unquantized shadevector
+ * and so cannot use the 16-step row.  GitHub #492. */
+#define ALIAS_INST_YAW_SHIFT		16
 
 /* Vertex attribute locations (fixed, shared across all programs).  The
  * file-backed shaders in engine/shaders/ repeat these as layout(location=)

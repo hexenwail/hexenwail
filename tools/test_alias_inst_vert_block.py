@@ -28,7 +28,7 @@ Checks the pieces that have to move together:
     stays shaded;
   * the literal and GL_CompileShaderDefines are gone, both instanced programs
     compile the file with GLSL_ALIAS_INST_VERT_HEADER (the tier's version line
-    plus the three constants; NOPERSP appended for the affine twin), and the
+    plus the four constants; NOPERSP appended for the affine twin), and the
     program binds AliasVert after the memset that would clear it;
   * R_DrawAliasInstanced writes every VertParams member the stage reads before
     each pass's first flush, sets the instance base PER BATCH and flushes it
@@ -38,6 +38,13 @@ Checks the pieces that have to move together:
     gm->poseverttype, set before the flush; a PV_MD3 batch draws from
     ssbo_pose_md3 at binding 3; no batch is skipped on ssbo_pose alone, which
     an MD3 mesh never has; and the fullbright pass unbinds binding 3 after;
+  * an MD3 reaches those passes at all (GitHub #492): R_CollectAliasInstance
+    admits a mesh on its own format's pose buffer (ssbo_pose_md3 for PV_MD3,
+    ssbo_pose otherwise), never on ssbo_pose alone, and turns PV_IQM away;
+  * an MD3 instance shades by the entity's own yaw (GitHub #492): the
+    collector packs e->angles[1] in 1/65536 turns at ALIAS_INST_YAW_SHIFT,
+    above every other ShadedotRow field, and main()'s MD3 arm builds its
+    shade vector from that field, not from the 16-step row;
   * R_LightCluster_BindForAlias no longer writes a per-program u_lightview.
 The varying interface between this stage and salias_frag.glsl is
 tools/test_alias_vert_block.py's.
@@ -254,10 +261,31 @@ for k in BITS:
 main = vcode[vcode.find("void main()"):]
 if "inst.ShadedotRow & ALIAS_INST_SHADEDOT_ROW_MASK" not in main or "inst.ShadedotRow & ALIAS_INST_DLIGHT_BIT" not in main:
     errors.append("main() must mask ShadedotRow with the macros, not literals")
-# The three ShadedotRow fields own separate bits.
+# The ShadedotRow fields own separate bits: the row mask, the dlight and glow
+# bits, and the 16-bit yaw field above all three.
 vals = [int(hnum(k)) for k in BITS if hnum(k)]
 if len(vals) == 3 and (vals[0] & vals[1] or vals[0] & vals[2] or vals[1] & vals[2]):
     errors.append(f"ShadedotRow fields overlap: {dict(zip(BITS, vals))}")
+ysh = hnum("ALIAS_INST_YAW_SHIFT")
+if ysh is None:
+    errors.append("gl_shader.h: no ALIAS_INST_YAW_SHIFT")
+else:
+    if not fb or not re.search(rf"#define\s+ALIAS_INST_YAW_SHIFT\s+{ysh}\s*\n", fb.group(1)):
+        errors.append(f"salias_inst_vert.glsl's #ifndef default for ALIAS_INST_YAW_SHIFT must be gl_shader.h's {ysh}")
+    if int(ysh) != 16 or any(v >= (1 << int(ysh)) for v in vals):
+        errors.append(f"ALIAS_INST_YAW_SHIFT ({ysh}) must be 16, the top half of the int, above {vals}")
+# GitHub #492: the MD3 arm's shade vector comes from the record's yaw field.
+# main() has two PV_MD3 arms, the pose decode and the shading; the shading one
+# runs from the last `if (u_poseverttype == 1)` to the QUAKE1 arm's table index
+# (sliced, not brace-matched, so braces added inside it do not false-fail).
+shade_if = main.rfind("if (u_poseverttype == 1)")
+q1_idx = main.find("sdot_row * 256", shade_if)
+md3arm = main[shade_if:q1_idx] if 0 <= shade_if < q1_idx else ""
+if not re.search(r"\bfloat\s+an\s*=\s*float\s*\(\s*\(\s*inst\.ShadedotRow\s*>>\s*ALIAS_INST_YAW_SHIFT\s*\)\s*&\s*"
+                 r"0xFFFFu?\s*\)\s*\*\s*\(\s*6\.28318531\s*/\s*65536\.0\s*\)\s*;", md3arm) \
+        or "sdot_row" in md3arm.split("} else {")[0]:
+    errors.append("main() MD3 arm (#492): the shade vector must be built from the yaw field "
+                  "(ShadedotRow >> ALIAS_INST_YAW_SHIFT) & 0xFFFF in 1/65536 turns, not the 16-step row")
 # GitHub #491: a glow record is drawn unshaded.  Both format arms compute the
 # shade term (shadedots table, MD3 1 + d), so the override comes after both,
 # outside either, and before v_color reads it.
@@ -283,9 +311,10 @@ hdr = re.search(r"#define GLSL_ALIAS_INST_VERT_HEADER \\\n((?:\t.*\\\n)*\t.*\n)"
 want_hdr = ['GLSL_VERT_HEADER',
             '"#define ALIAS_INST_SHADEDOT_ROW_MASK " GLSL_STR(ALIAS_INST_SHADEDOT_ROW_MASK) "\\n"',
             '"#define ALIAS_INST_DLIGHT_BIT " GLSL_STR(ALIAS_INST_DLIGHT_BIT) "\\n"',
-            '"#define ALIAS_INST_FULLBRIGHT_BIT " GLSL_STR(ALIAS_INST_FULLBRIGHT_BIT) "\\n"']
+            '"#define ALIAS_INST_FULLBRIGHT_BIT " GLSL_STR(ALIAS_INST_FULLBRIGHT_BIT) "\\n"',
+            '"#define ALIAS_INST_YAW_SHIFT " GLSL_STR(ALIAS_INST_YAW_SHIFT) "\\n"']
 if not hdr or [l.strip().rstrip("\\").strip() for l in hdr.group(1).splitlines()] != want_hdr:
-    errors.append("GLSL_ALIAS_INST_VERT_HEADER must be GLSL_VERT_HEADER plus the three ShadedotRow constants")
+    errors.append("GLSL_ALIAS_INST_VERT_HEADER must be GLSL_VERT_HEADER plus the four ShadedotRow constants")
 inst = body_of(gl_shader, r"static qboolean GL_InitAliasInstProgram \([^)]*\)\s*\{") or ""
 for w in (r'q_snprintf \(vert_header, sizeof\(vert_header\), "%s%s",\s*GLSL_ALIAS_INST_VERT_HEADER, defines \? defines : ""\);',
           r"vs = GL_CompileShaderSplit\(GL_VERTEX_SHADER, vert_header, salias_inst_vert\);",
@@ -394,6 +423,33 @@ else:
     tail = draw[fbloop:]
     if not re.search(r"GL_BindBufferBase\s*\(\s*GL_SHADER_STORAGE_BUFFER\s*,\s*3\s*,\s*0\s*\)", tail):
         errors.append("R_DrawAliasInstanced fullbright pass (#485): must unbind binding 3 once its batches are drawn")
+
+# GitHub #492: the collector admits a mesh on its own format's pose buffer.
+cai = strip(body_of(rmain, r"static qboolean R_CollectAliasInstance \(entity_t \*e\)\s*\{") or "")
+if not cai:
+    errors.append("gl_rmain.c: no R_CollectAliasInstance")
+else:
+    gate = re.search(r"gm = GL_GetAliasGPUMesh\(paliashdr\);\s*if \((.*?)\)\s*return false;", cai, re.S)
+    g = re.sub(r"\s+", " ", gate.group(1)) if gate else ""
+    if not gate:
+        errors.append("R_CollectAliasInstance (#492): cannot find the pose-buffer gate after GL_GetAliasGPUMesh")
+    else:
+        if not re.search(r"gm->poseverttype == PV_MD3 \? gm->ssbo_pose_md3 : gm->ssbo_pose\b", g):
+            errors.append("R_CollectAliasInstance (#492): must admit a mesh on its format's pose buffer, "
+                          "ssbo_pose_md3 for PV_MD3 and ssbo_pose otherwise")
+        if re.search(r"!\s*gm->ssbo_pose\b(?!_md3)", g):
+            errors.append("R_CollectAliasInstance (#492): turns away a mesh with no ssbo_pose, which every .md3 is")
+        if not re.search(r"gm->poseverttype == PV_IQM", g):
+            errors.append("R_CollectAliasInstance (#492): must turn a skeletal (PV_IQM) mesh away explicitly")
+        if not g.startswith("!gm ||"):
+            errors.append("R_CollectAliasInstance (#492): the gate must test !gm first")
+    if not re.search(r"int yaw = \(int\)floorf\(e->angles\[1\] \* \(65536\.0f / 360\.0f\) \+ 0\.5f\);\s*"
+                     r"inst->shadedot_row \|= \(int\)\(\(unsigned int\)\(yaw & 0xFFFF\) << ALIAS_INST_YAW_SHIFT\);", cai):
+        errors.append("R_CollectAliasInstance (#492): must pack e->angles[1], rounded to 1/65536 turns, "
+                      "into shadedot_row at ALIAS_INST_YAW_SHIFT")
+    row = cai.find("inst->shadedot_row = ")
+    if row < 0 or row > cai.find("ALIAS_INST_YAW_SHIFT"):
+        errors.append("R_CollectAliasInstance (#492): the yaw must be OR'd in after shadedot_row is assigned")
 
 if len(re.findall(r"\bALIAS_INST_FULLBRIGHT_BIT\b", strip(rmain))) != 1:
     errors.append("gl_rmain.c (#491): ALIAS_INST_FULLBRIGHT_BIT must be written exactly once, in the glow pass; "

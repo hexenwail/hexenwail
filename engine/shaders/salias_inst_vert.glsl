@@ -9,7 +9,7 @@
  * ES 3.00, so gl_shader.c never builds this program under USE_GLES.
  *
  * No #version line; gl_shader.c passes GLSL_ALIAS_INST_VERT_HEADER, which is
- * GLSL_VERT_HEADER plus the three ShadedotRow constants below, with
+ * GLSL_VERT_HEADER plus the four ShadedotRow constants below, with
  * "#define NOPERSP 1" appended for the affine (r_softemu) twin.
  *
  *   storage  instances  GL 0  per-frame InstanceData, streamed by GL_Upload
@@ -35,8 +35,8 @@
 #include "alias.inc"
 
 /* InstanceData.ShadedotRow carries the shadedots row (0..15) in its low bits,
- * the per-instance dynamic-light switch in bit 8 and the glow redraw's mark in
- * bit 9 -- ALIAS_INST_* in
+ * the per-instance dynamic-light switch in bit 8, the glow redraw's mark in
+ * bit 9 and the entity yaw (1/65536 turns) in bits 16..31 -- ALIAS_INST_* in
  * gl_shader.h, which reach the engine's compile through the header chunk.
  * These defaults exist for the offline SPIR-V compile only, and
  * tools/test_alias_inst_vert_block.py keeps them equal to the C values. */
@@ -44,6 +44,7 @@
   #define ALIAS_INST_SHADEDOT_ROW_MASK	255
   #define ALIAS_INST_DLIGHT_BIT		256
   #define ALIAS_INST_FULLBRIGHT_BIT	512
+  #define ALIAS_INST_YAW_SHIFT		16
 #endif
 
 /* Vulkan GLSL has gl_VertexIndex / gl_InstanceIndex instead.  gl_VertexIndex
@@ -178,21 +179,26 @@ void main() {
 
     float sdot;
     /* MD3 carries a real normal instead of an index into the 256-entry anorm
-     * table, so the shadedots row cannot be looked up -- but the row IS the
-     * quantized entity yaw, which is the only thing that table varies by, so
-     * rebuild the light vector from it and evaluate the same function the
-     * table holds: 1 + d, with d scaled by 0.3 where it faces away.  That is
-     * what r_avertexnormal_dots is, and it is what md5mesh.c's skeletal
-     * shader and md3mesh.c's CPU path both compute -- the three have to agree
-     * or one model lights differently depending on r_alias_gpu and on which
-     * format it was shipped in.  uhexen2-2ah9. */
-    /* ShadedotRow carries the dlight bit (8) and the glow mark (9) above the
-     * row, so the mask is what keeps the QUAKE1 arm's shadedots index in
-     * bounds; packing them here keeps the 80-byte InstanceData layout
-     * unchanged.  uhexen2-waum, GitHub #491. */
+     * table, so the shadedots row cannot be looked up.  Build the light
+     * vector R_DrawAliasModel builds, from the entity yaw, and evaluate the
+     * same function the table holds: 1 + d, with d scaled by 0.3 where it
+     * faces away.  That is what r_avertexnormal_dots is, and it is what
+     * md5mesh.c's skeletal shader and md3mesh.c's CPU path both compute --
+     * the three have to agree or one model lights differently depending on
+     * r_alias_gpu and on which format it was shipped in.  uhexen2-2ah9.
+     *
+     * The yaw is the record's own (bits 16..31), not the 16-step row: the
+     * CPU path's shadevector is unquantized, and the row put a turned .md3
+     * up to 22.5 degrees (one truncated step) off it under r_alias_gpu 1.
+     * GitHub #492. */
+    /* ShadedotRow carries the dlight bit (8), the glow mark (9) and the yaw
+     * (16..31) above the row, so the mask is what keeps the QUAKE1 arm's
+     * shadedots index in bounds; packing them here keeps the 80-byte
+     * InstanceData layout unchanged.  uhexen2-waum, GitHub #491 / #492. */
     int sdot_row = inst.ShadedotRow & ALIAS_INST_SHADEDOT_ROW_MASK;
     if (u_poseverttype == 1) {  /* MD3: use decoded normal */
-        float an = float(sdot_row) * (6.28318531 / 16.0);
+        float an = float((inst.ShadedotRow >> ALIAS_INST_YAW_SHIFT) & 0xFFFF)
+                 * (6.28318531 / 65536.0);
         vec3 sv = normalize(vec3(cos(-an), sin(-an), 1.0));
         float d = dot(normalize(normal), sv);
         if (d < 0.0) d *= 0.3;
