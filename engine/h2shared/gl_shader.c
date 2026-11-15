@@ -121,11 +121,6 @@ static GLuint GL_CompileShaderSplit (GLenum type, const char *header,
 	return shader;
 }
 
-GLuint GL_CompileShader (GLenum type, const char *source)
-{
-	return GL_CompileShaderSplit (type, NULL, source);
-}
-
 GLuint GL_LoadComputeProgram (const char *header, const char *body, const char *name)
 {
 	const char	*sources[2];

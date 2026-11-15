@@ -3806,7 +3806,6 @@ void R_DrawBrushInstanced (void)
 	glActiveTexture_fp(GL_TEXTURE2);
 	glBindTexture_fp(GL_TEXTURE_2D, gl_null_fb_texture);
 	glActiveTexture_fp(GL_TEXTURE0);
-	GL_ImmInvalidateState();
 
 	/* Optional polygon offset — kept as a tunable safety net (default 0).
 	 * With the shader unified, no offset should be needed; bumping the
@@ -7278,7 +7277,6 @@ static void R_ShowTris (void)
 	}
 	glBindVertexArray_fp (0);
 	R_UseProgram (0);
-	GL_ImmInvalidateState ();
 	R_SetDepthTest (true);
 }
 

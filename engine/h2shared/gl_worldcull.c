@@ -1066,9 +1066,6 @@ void R_DrawWorldCulled (void)
 
 	glBindVertexArray_fp(0);
 	R_UseProgram (0);
-	/* Re-assert every block and its binding at the next flush; the indexed
-	 * buffer bindings above are not ones the block shadow tracks. */
-	GL_ImmInvalidateState();
 
 	/* Capture this frame's world MVP for next-frame Hi-Z reprojection.
 	 * The pyramid will be built at end-of-3D (after every depth write

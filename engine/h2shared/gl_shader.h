@@ -12,7 +12,6 @@
 #define GL_SHADER_H
 
 /* Shader compilation helpers */
-GLuint	GL_CompileShader (GLenum type, const char *source);
 GLuint	GL_LinkProgram (GLuint vert, GLuint frag);
 GLuint	GL_LoadProgram (const char *vert_src, const char *frag_src);
 /* Compute program from a two-part source: `header` carries the #version line

@@ -535,16 +535,18 @@ static void GL_ImmPushBlocks (const glprogram_t *shader, const float *mvp)
 	R_FlushUniforms ();
 }
 
-/* Force a full re-upload and rebind of every block at the next flush.  Call
- * after anything GL_ImmEnd cannot see that may have moved the indexed uniform
- * bindings, or after a vid_restart.  (It also reset GL_ImmEnd's per-program
- * loose-uniform cache, which went with the last loose world uniform, #450
- * W2.) */
+/* Force a full re-upload and rebind of every block at the next flush, after
+ * a vid_restart.  (It also reset GL_ImmEnd's per-program loose-uniform cache,
+ * which went with the last loose world uniform, #450 W2.  That is what the
+ * world draw paths called it for, so they stopped, W3: nothing outside
+ * R_FlushUniforms binds GL_UNIFORM_BUFFER points 1, 2 or 10-13 -- every other
+ * indexed uniform binding is 0 or 3-9, and only gl_buffer.c issues any -- and
+ * a block's buffer is written only by that flush, so between flushes the
+ * shadow is what the GPU holds.) */
 void GL_ImmInvalidateState (void)
 {
-	/* The blocks have no per-program state to drop, but they do have a
-	 * binding this cannot see being moved, so re-assert rather than assume.
-	 * A redundant flush is one glBufferData of a few hundred bytes. */
+	/* Re-upload every block and re-assert its binding at the next flush:
+	 * after a vid_restart the buffers are new. */
 	R_InvalidateUniforms ();
 }
 

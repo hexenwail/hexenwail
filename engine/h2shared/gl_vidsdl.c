@@ -1778,7 +1778,7 @@ void VID_ShiftPalette (const unsigned char *palette)
 }
 
 
-/* GL_CompileShader and GL_LinkProgram are now in gl_shader.c */
+/* GL_LinkProgram and the shader compile helpers are in gl_shader.c */
 
 #ifndef USE_GLES
 static void GL_LoadFunctionPointers (void)

@@ -1980,7 +1980,6 @@ void R_BeginBrushBatch (void)
 	R_BindTextureSlot (1, lm_atlas_texture);
 	R_BindTextureSlot (2, gl_null_fb_texture);	/* sjvf: default fb */
 	GL_BindMaterialDefaults ();		/* uhexen2-mfql */
-	GL_ImmInvalidateState();
 	brush_batch_active = true;
 }
 
@@ -2056,7 +2055,6 @@ static void DrawTextureChains_BindWorldState (void)
 	 * pixels.  uhexen2-sjvf. */
 	R_BindTextureSlot (2, gl_null_fb_texture);
 	GL_BindMaterialDefaults ();		/* uhexen2-mfql */
-	GL_ImmInvalidateState();
 }
 
 /*
@@ -2338,7 +2336,6 @@ static void DrawTextureChains_DrawDeferred (entity_t *e, msurface_t **deferred, 
 			R_BindTextureSlot (1, lm_atlas_texture);
 			R_BindTextureSlot (2, gl_null_fb_texture);	/* sjvf: default fb */
 			GL_BindMaterialDefaults ();		/* uhexen2-mfql */
-			GL_ImmInvalidateState();
 			/* sworld_vert reads both from VertParams (#450 W1).  Nothing
 			 * between here and EMIT_BATCH's draws writes the block;
 			 * EMIT_BATCH flushes again for its own fragment set, which
@@ -2534,7 +2531,6 @@ static void DrawTextureChains (entity_t *e)
 			{
 				glBindVertexArray_fp(0);
 				R_UseProgram (0);
-				GL_ImmInvalidateState();
 				/* Force the chain loop's hoisted world-state bind to redo
 				 * itself; we just stomped on VAO + program. */
 				world_state_set = false;
@@ -3124,7 +3120,6 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 		if (!brush_batch_active)
 		{
 			glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
-			GL_ImmInvalidateState();
 		}
 		/* sworld_opaque_frag's whole set (#450 W2) -- the fog, alpha and
 		 * overbright this path, or R_BeginBrushBatch for it, used to upload
