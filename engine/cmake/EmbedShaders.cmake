@@ -1,6 +1,7 @@
 # EmbedShaders.cmake -- turn engine/shaders/*.glsl into a C header of string
 # literals, resolving #include "..." along the way, and drop a copy of each
-# expanded source where CompileSpirv.cmake can reach it.
+# expanded source (plus an OIT twin of each stage that has an OIT arm) where
+# CompileSpirv.cmake can reach it.
 #
 # Run in script mode:
 #   cmake -DSHADER_DIR=<dir> -DOUT_FILE=<header> [-DVK_DIR=<dir>] \
@@ -94,6 +95,15 @@ foreach(shader ${SHADER_FILES})
         if(name MATCHES "^(.+)_(vert|frag|comp)$")
             write_if_changed("${VK_DIR}/${CMAKE_MATCH_1}.${CMAKE_MATCH_2}"
                              "${VK_VERSION_LINE}${body}")
+            # A stage with an `#ifdef OIT` arm is also linked as an OIT twin,
+            # with "#define OIT 1" after its header (GL_InitOITProgramSplit).
+            # That arm is a separate shader as far as the offline gates go,
+            # so give it its own copy, or CompileSpirv never sees oit.inc.
+            string(FIND "${body}" "#ifdef OIT\n" oit_arm)
+            if(NOT oit_arm EQUAL -1)
+                write_if_changed("${VK_DIR}/${CMAKE_MATCH_1}_oit.${CMAKE_MATCH_2}"
+                                 "${VK_VERSION_LINE}#define OIT 1\n${body}")
+            endif()
         else()
             message(FATAL_ERROR
                 "EmbedShaders: ${name} does not end in _vert, _frag or _comp")
