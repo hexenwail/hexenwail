@@ -1015,20 +1015,16 @@ void R_DrawWorldCulled (void)
 		R_UseProgram (prog->program);
 		GL_GetMVP(mvp);
 		GL_GetModelview(mv);
-		/* sworld_vert reads both from VertParams (#450 W1).  The texture
-		 * binds between here and the indirect draws write no block. */
+		/* sworld_opaque_frag's whole set from FragParams and WorldFrag
+		 * (#450 W2), the fog / alpha / overbright this path used to upload
+		 * by hand among it; then sworld_vert's pair from VertParams (W1).
+		 * The texture binds between the flush and the indirect draws write
+		 * no block. */
+		R_SetWorldFrag (r_fog_density, r_fog_color, 0.01f, 1.0f,
+				gl_overbright.integer ? 2.0f : 1.0f, 0.0f, 0.0f);
 		R_SetMVP (mvp);
 		R_SetModelView (mv);
 		R_FlushUniforms ();
-		if (prog->u_fog_density >= 0)
-			glUniform1f_fp(prog->u_fog_density, r_fog_density);
-		if (prog->u_fog_color >= 0)
-			glUniform3f_fp(prog->u_fog_color,
-				       r_fog_color[0], r_fog_color[1], r_fog_color[2]);
-		if (prog->u_alpha_threshold >= 0)
-			glUniform1f_fp(prog->u_alpha_threshold, 0.01f);
-		if (prog->u_overbright >= 0)
-			glUniform1f_fp(prog->u_overbright, gl_overbright.integer ? 2.0f : 1.0f);
 	}
 
 	/* Bind lightmap atlas on unit 1, default fb null at unit 2 */
@@ -1070,8 +1066,8 @@ void R_DrawWorldCulled (void)
 
 	glBindVertexArray_fp(0);
 	R_UseProgram (0);
-	/* External upload to gl_shader_world; clear GL_ImmEnd's uniform
-	 * cache so a later ImmEnd reusing the same shader uploads fresh. */
+	/* Re-assert every block and its binding at the next flush; the indexed
+	 * buffer bindings above are not ones the block shadow tracks. */
 	GL_ImmInvalidateState();
 
 	/* Capture this frame's world MVP for next-frame Hi-Z reprojection.

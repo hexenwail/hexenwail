@@ -443,16 +443,11 @@ void EmitWaterPolys (msurface_t *fa)
 	 * models, sprites and brush polys, and a hot u_turb would warp their
 	 * texture lookups too.  uhexen2-9o7u
 	 *
-	 * The world program needs more than the CPU-side reset: the opaque world
-	 * paths upload their uniforms by hand and never push a u_turb, so leaving
-	 * one hot there would warp the map itself.  GL_ClearTurb zeroes it on the
-	 * program now.  Only worth doing when there is something to clear, which
-	 * is why it is gated on the warp actually having been armed.
-	 * uhexen2-a5nn.2. */
-	if (lit && pixelwarp)
-		GL_ClearTurb (prog);
-	else
-		GL_SetTurb (0.0f, 0.0f);
+	 * The world program used to need more than this, a clear on the program
+	 * itself (uhexen2-a5nn.2), because the opaque world paths uploaded their
+	 * uniforms by hand and never pushed a u_turb.  Since #450 W2 every one of
+	 * them writes the warp as 0 in its own R_SetWorldFrag. */
+	GL_SetTurb (0.0f, 0.0f);
 	/* Same reason for the span cell (#176): the world program goes back to
 	 * the world's, the shared alias program to none. */
 	R_SetSpanCell (prog, lit ? R_SpanCell (false) : 0.0f);

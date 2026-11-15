@@ -36,7 +36,7 @@ const PROGRAM_SPECS = [
   ['2d', 'shader', 's2d_vert', 's2d_frag'],
   ['flat', 'shader', 'sflat_vert', 'sflat_frag'],
   ['world', 'shader', 'sworld_vert', 'sworld_frag'],
-  ['world_opaque', 'shader', 'sworld_vert', 'sworld_frag_opaque'],
+  ['world_opaque', 'shader', 'sworld_vert', 'sworld_opaque_frag'],
   ['alias', 'shader', 'salias_vert', 'salias_frag'],
   ['particle', 'shader', 'spart_vert', 'spart_frag'],
   // Two programs since uhexen2-a5nn.4 split the one that branched on
@@ -363,17 +363,15 @@ export async function extractEngineWebGLPrograms() {
   // ones -- those with both a USE_GLES arm and a desktop arm, where this
   // extractor has to say which spelling it wants.  Everything else is found on
   // demand by resolveMacro(), so a new GLSL helper needs no edit to this file.
-  // Clustered dynamic lighting (uhexen2-26bm world, uhexen2-waum alias) is
-  // desktop-only -- it needs a compute shader and an SSBO, and the ES tier has
-  // neither -- so every one of its macros has an empty ES arm and has to be
-  // named here.  The alias one is the froxel-grid sizes the file-backed
-  // salias_frag takes in its header chunk (GLSL_ALIAS_FRAG_HEADER, #450); every
-  // alias stage is a file now and keeps its own dlight half under #ifndef GL_ES.
-  for (const name of ['GLSL_VERT_HEADER', 'GLSL_FRAG_HEADER', 'GLSL_EARLY_Z', 'GLSL_EARLY_Z_OPAQUE',
-                      'GLSL_BITFIELD_REVERSE',
-                      'GLSL_DLIGHT_DECL', 'GLSL_DLIGHT_FN', 'GLSL_DLIGHT_APPLY',
-                      'GLSL_LMSTYLES_DECL', 'GLSL_LMSTYLES_FN', 'GLSL_LMSTYLES_APPLY',
-                      'GLSL_LIGHTGRID_CONSTS']) {
+  // Clustered dynamic lighting (uhexen2-26bm world, uhexen2-waum alias) and
+  // GPU lightstyles (#439) are desktop-only -- they need a compute shader and
+  // an SSBO, and the ES tier has neither -- so the one macro they still need,
+  // the froxel-grid sizes the file-backed alias and world fragment stages take
+  // in their header chunks (GLSL_ALIAS_FRAG_HEADER, GLSL_WORLD_FRAG_HEADER,
+  // #450), has an empty ES arm and has to be named here.  Every alias and
+  // world stage is a file now and keeps its desktop-only half under
+  // #ifndef GL_ES, as it keeps its early-Z and its bitfieldReverse fallback.
+  for (const name of ['GLSL_VERT_HEADER', 'GLSL_FRAG_HEADER', 'GLSL_LIGHTGRID_CONSTS']) {
     macros.set(name, readDefine(glesBranchDefining(shaderSource, name), name, macros, shaderCtx));
   }
   // gl_postprocess.c keeps its own headers; PP_ES_PRECISION feeds the other two.

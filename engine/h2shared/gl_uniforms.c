@@ -1,5 +1,6 @@
 /* gl_uniforms.c -- the two std140 uniform blocks shared by every file-backed
- * draw program, and the alias family's AliasFrag and AliasVert.  See
+ * draw program, the alias family's AliasFrag and AliasVert, and the world
+ * family's WorldFrag.  See
  * gl_uniforms.h for the layout and the reasoning.
  *
  * Copyright (C) 2026  Contributors of the uHexen2 project
@@ -13,7 +14,7 @@
 #include "quakedef.h"
 #include "sdl_inc.h"
 #include "gl_matrix.h"
-#include "gl_shader.h"		/* UBO_BINDING_VERT / _FRAG / _ALIAS_FRAG / _ALIAS_VERT */
+#include "gl_shader.h"		/* UBO_BINDING_VERT / _FRAG / _ALIAS_FRAG / _ALIAS_VERT / _WORLD_FRAG */
 #include "gl_uniforms.h"
 
 #ifndef GL_UNIFORM_BLOCK_DATA_SIZE
@@ -36,34 +37,49 @@
 #define RU_NAME_FRAG	"FragParams"
 #define RU_NAME_AFRAG	"AliasFrag"
 #define RU_NAME_AVERT	"AliasVert"
+#define RU_NAME_WFRAG	"WorldFrag"
 
 static GLuint		ubo_vert;
 static GLuint		ubo_frag;
 static GLuint		ubo_afrag;
 static GLuint		ubo_avert;
+static GLuint		ubo_wfrag;
 
 static r_vertparams_t	vertparams;
 static r_fragparams_t	fragparams;
 static r_aliasfrag_t	aliasfrag;
 static r_aliasvert_t	aliasvert;
+static r_worldfrag_t	worldfrag;
+
+/* The world frame record (#450 W2): the per-frame half of what the world
+ * fragment stages read, kept here, not in any shadow, until R_SetWorldFrag
+ * copies it into one.  worldframe has WorldFrag's layout; the warp's xy is
+ * never read from it (R_SetWorldFrag takes the liquid warp per draw). */
+static r_worldfrag_t	worldframe;
+static float		worldframe_caustics[2];
+static float		worldframe_bicubic;
+static float		worldframe_debug[2];
 
 static qboolean		vert_dirty;
 static qboolean		frag_dirty;
 static qboolean		afrag_dirty;
 static qboolean		avert_dirty;
+static qboolean		wfrag_dirty;
 static qboolean		bindings_dirty;
 static qboolean		layout_checked;
 static qboolean		afrag_layout_checked;
 static qboolean		avert_layout_checked;
+static qboolean		wfrag_layout_checked;
 
 /* The mirrors are only trustworthy if they are the size std140 says they are.
  * All are built from vec4/mat4/ivec4 only, so this is arithmetic rather than
- * hope: 4 mat4 + 6 vec4 + 1 ivec4, 9 vec4, 1 mat4 + 5 vec4, and 1 mat4 +
- * 2 vec4. */
+ * hope: 4 mat4 + 6 vec4 + 1 ivec4, 9 vec4, 1 mat4 + 5 vec4, 1 mat4 +
+ * 2 vec4, and 1 mat4 + 6 vec4. */
 COMPILE_TIME_ASSERT(vertparams_size, sizeof(r_vertparams_t) == 4 * 64 + 7 * 16);
 COMPILE_TIME_ASSERT(fragparams_size, sizeof(r_fragparams_t) == 9 * 16);
 COMPILE_TIME_ASSERT(aliasfrag_size, sizeof(r_aliasfrag_t) == 64 + 5 * 16);
 COMPILE_TIME_ASSERT(aliasvert_size, sizeof(r_aliasvert_t) == 64 + 2 * 16);
+COMPILE_TIME_ASSERT(worldfrag_size, sizeof(r_worldfrag_t) == 64 + 6 * 16);
 
 /* ------------------------------------------------------------------ */
 /* Small helpers                                                       */
@@ -353,6 +369,66 @@ void R_SetSkelLight (const float *shadevec3, const float *light4, float fullbrig
 }
 
 /* ------------------------------------------------------------------ */
+/* The world frame record and WorldFrag (#450 W2)                      */
+/* ------------------------------------------------------------------ */
+
+void R_SetWorldFrame (float caustics_intensity, float caustics_time, float bicubic,
+		      float fullbright, float lightmapdbg,
+		      const float *material3, const float *softemu4)
+{
+	worldframe_caustics[0] = caustics_intensity;
+	worldframe_caustics[1] = caustics_time;
+	worldframe_bicubic = bicubic;
+	worldframe_debug[0] = fullbright;
+	worldframe_debug[1] = lightmapdbg;
+	RU_Set4 (worldframe.material, material3[0], material3[1], material3[2], 0.0f);
+	RU_Set4 (worldframe.softemu, softemu4[0], softemu4[1], softemu4[2], softemu4[3]);
+}
+
+void R_SetWorldSpans (float cell)
+{
+	worldframe.warp[2] = cell;
+}
+
+void R_SetWorldDlight (float scale, const float *view16, const float *grid4,
+		       float zlogscale, float zlogbias)
+{
+	RU_SetMat (worldframe.lightview, view16);
+	RU_Set4 (worldframe.grid, grid4[0], grid4[1], grid4[2], grid4[3]);
+	RU_Set4 (worldframe.gridz, zlogscale, zlogbias, scale, 0.0f);
+}
+
+void R_SetWorldLMStyles (float on, float shift)
+{
+	RU_Set4 (worldframe.lmstyles, on, shift, 0.0f, 0.0f);
+}
+
+/* The whole of WorldFrag is replaced from the frame record on every call, and
+ * every FragParams member the world stages read is written through its own
+ * setter, so no member can keep a value some other program's batch left. */
+void R_SetWorldFrag (float fog_density, const float *fog_rgb,
+		     float alpha_threshold, float force_opaque, float overbright,
+		     float turb_amplitude, float turb_time)
+{
+	r_worldfrag_t	w = worldframe;
+
+	R_SetFog (fog_density, fog_rgb);
+	R_SetAlphaMask (alpha_threshold, force_opaque);
+	R_SetOverbright (overbright);
+	R_SetLightmapBicubic (worldframe_bicubic);
+	R_SetWorldCaustics (worldframe_caustics[0], worldframe_caustics[1]);
+	R_SetLightDebug (worldframe_debug[0], worldframe_debug[1]);
+
+	w.warp[0] = turb_amplitude;
+	w.warp[1] = turb_time;
+	if (memcmp (&worldfrag, &w, sizeof(w)))
+	{
+		worldfrag = w;
+		wfrag_dirty = true;
+	}
+}
+
+/* ------------------------------------------------------------------ */
 /* Upload                                                              */
 /* ------------------------------------------------------------------ */
 
@@ -387,6 +463,7 @@ void R_FlushUniforms (void)
 		GL_BindBufferBase (GL_UNIFORM_BUFFER, UBO_BINDING_FRAG, ubo_frag);
 		GL_BindBufferBase (GL_UNIFORM_BUFFER, UBO_BINDING_ALIAS_FRAG, ubo_afrag);
 		GL_BindBufferBase (GL_UNIFORM_BUFFER, UBO_BINDING_ALIAS_VERT, ubo_avert);
+		GL_BindBufferBase (GL_UNIFORM_BUFFER, UBO_BINDING_WORLD_FRAG, ubo_wfrag);
 	}
 
 	if (vert_dirty)
@@ -417,6 +494,13 @@ void R_FlushUniforms (void)
 		glBufferData_fp (GL_UNIFORM_BUFFER, sizeof(aliasvert), &aliasvert,
 				 GL_STREAM_DRAW);
 	}
+	if (wfrag_dirty)
+	{
+		wfrag_dirty = false;
+		GL_BindBuffer (GL_UNIFORM_BUFFER, ubo_wfrag);
+		glBufferData_fp (GL_UNIFORM_BUFFER, sizeof(worldfrag), &worldfrag,
+				 GL_STREAM_DRAW);
+	}
 }
 
 void R_InvalidateUniforms (void)
@@ -425,6 +509,7 @@ void R_InvalidateUniforms (void)
 	frag_dirty = true;
 	afrag_dirty = true;
 	avert_dirty = true;
+	wfrag_dirty = true;
 	bindings_dirty = true;
 }
 
@@ -531,6 +616,21 @@ GLint R_BindAliasVertBlock (GLuint program)
 	return idx;
 }
 
+GLint R_BindWorldFragBlock (GLuint program)
+{
+	GLint	idx;
+
+	if (!program || !RU_HAVE_UBO_BIND)
+		return -1;
+	idx = RU_BindOne (program, RU_NAME_WFRAG, UBO_BINDING_WORLD_FRAG);
+	if (idx >= 0 && !wfrag_layout_checked)
+	{
+		wfrag_layout_checked = true;
+		RU_CheckBlockSize (program, RU_NAME_WFRAG, sizeof(r_worldfrag_t));
+	}
+	return idx;
+}
+
 /* ------------------------------------------------------------------ */
 /* Life cycle                                                          */
 /* ------------------------------------------------------------------ */
@@ -543,9 +643,15 @@ void R_Uniforms_Init (void)
 	memset (&fragparams, 0, sizeof(fragparams));
 	memset (&aliasfrag, 0, sizeof(aliasfrag));
 	memset (&aliasvert, 0, sizeof(aliasvert));
+	memset (&worldfrag, 0, sizeof(worldfrag));
+	memset (&worldframe, 0, sizeof(worldframe));
+	worldframe_caustics[0] = worldframe_caustics[1] = 0.0f;
+	worldframe_bicubic = 0.0f;
+	worldframe_debug[0] = worldframe_debug[1] = 0.0f;
 	layout_checked = false;
 	afrag_layout_checked = false;
 	avert_layout_checked = false;
+	wfrag_layout_checked = false;
 
 	/* GL zero-initialises nothing useful here.  An all-zero model matrix
 	 * collapses every vertex to world (0,0) (uhexen2-0gn3).  The loose
@@ -569,11 +675,16 @@ void R_Uniforms_Init (void)
 	aliasfrag.lightdir[2] = 1.0f;
 	memcpy (aliasfrag.lightview, ident, sizeof(ident));
 	memcpy (aliasvert.lightview, ident, sizeof(ident));
+	/* The world's, for the same reason; read only once a dlight scale makes
+	 * the froxel lookup live, and that write brings its own view. */
+	memcpy (worldfrag.lightview, ident, sizeof(ident));
+	memcpy (worldframe.lightview, ident, sizeof(ident));
 
 	glGenBuffers_fp (1, &ubo_vert);
 	glGenBuffers_fp (1, &ubo_frag);
 	glGenBuffers_fp (1, &ubo_afrag);
 	glGenBuffers_fp (1, &ubo_avert);
+	glGenBuffers_fp (1, &ubo_wfrag);
 
 	/* Seed both stores before anything binds them, so a program that draws
 	 * before its first setter call reads zeros and an identity rather than
@@ -582,6 +693,7 @@ void R_Uniforms_Init (void)
 	frag_dirty = true;
 	afrag_dirty = true;
 	avert_dirty = true;
+	wfrag_dirty = true;
 	bindings_dirty = true;
 	R_FlushUniforms ();
 }
@@ -612,8 +724,15 @@ void R_Uniforms_Shutdown (void)
 		glDeleteBuffers_fp (1, &ubo_avert);
 		ubo_avert = 0;
 	}
+	if (ubo_wfrag)
+	{
+		GL_ForgetBuffer (ubo_wfrag);
+		glDeleteBuffers_fp (1, &ubo_wfrag);
+		ubo_wfrag = 0;
+	}
 	layout_checked = false;
 	afrag_layout_checked = false;
 	avert_layout_checked = false;
+	wfrag_layout_checked = false;
 	bindings_dirty = true;
 }

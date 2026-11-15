@@ -1,12 +1,33 @@
-/* span_uv.inc -- the 1997 span rasteriser's texture coordinates (#176):
- * exact s/t every `span` pixels along x, linear in between, as D_DrawSpans8
- * computed them.  highp throughout, because the ES tier's default is mediump.
+/* span_uv.inc -- the 1997 span rasteriser's texture coordinates (GitHub
+ * #176).  D_DrawSpans8 (d_scan.c) divided by z to get exact s/t once every 8
+ * pixels along a span and stepped linearly between, so a surface's texture
+ * swims a little between those columns and not at all on them -- not the full
+ * affine wobble of a rasteriser that never divides.
  *
- * A copy of gl_shader.c's GLSL_SPAN_UV_FN, which sworld_frag still splices
- * while the world family is a C literal; the derivation and the 8x depth
- * guard are written up there.  tools/test_alias_frag_block.py keeps the two
- * token-identical, and tools/test_softemu_spans.py compiles the C copy and
- * checks it against the 1997 reference (#450).
+ * uv * gl_FragCoord.w and gl_FragCoord.w are linear in screen space across a
+ * triangle (they are the barycentric sums perspective interpolation divides),
+ * so their dFdx is exact, and both can be evaluated at the cell's first pixel
+ * and at the first pixel of the next cell.  Divide there, interpolate between:
+ * exact at every 8th column, linear in between, as in d_scan.c.  No
+ * noperspective qualifier, so the ES tier (WebGL2) runs it too.
+ *
+ * The cells sit on a screen grid; d_scan.c's started where each span did.  The
+ * difference is where the exact columns fall, not how far apart.
+ *
+ * D_DrawSpans8 also clamped its endpoints to the face's extents, which a
+ * shader cannot see.  The bound here instead: a cell whose depth changes by
+ * more than 8x across it -- an edge-on sliver, or a cell at a plane's
+ * vanishing line, where the far end's 1/w heads for zero and its coordinate
+ * for infinity -- keeps the perspective coordinate.  Elsewhere a cell end
+ * past the face is at most one cell's extrapolation of the same plane, so a
+ * lightmap sample there strays by under a luxel, into the atlas gutter
+ * (LM_FillGutter).  highp throughout: the ES tier's default is mediump, and
+ * a mediump return would undo the world's highp texcoords (uhexen2-mfql).
+ *
+ * The one copy for the alias and world stages since the world fragment
+ * stages became files (#450, world slice W2); it was gl_shader.c's
+ * GLSL_SPAN_UV_FN.  tools/test_softemu_spans.py compiles this function as C++
+ * and checks it against the 1997 reference.
  */
 #ifndef SPAN_UV_INC
 #define SPAN_UV_INC

@@ -450,7 +450,7 @@ jobs:
 
       # sworld_vert reads VertParams: the mirror by member name, the two
       # matrices it reads and their setters, every input on its ATTR_* slot,
-      # its outputs against both world fragment literals, the three world
+      # its outputs against both world fragment files, the three world
       # builds, and every world draw path (GL_ImmEnd, the fast path, deferred,
       # brush model, instanced, GPU-culled) writing both matrices before an
       # unconditional flush and its draws; and a flow pass that follows world

@@ -120,6 +120,45 @@ typedef struct {
 	float	light[4];	/*  80  rgb light (tint and scale folded in), a entity alpha */
 } r_aliasvert_t;		/* 96 */
 
+/* WorldFrag (engine/shaders/world.inc), the world fragment stages' own block,
+ * at UBO_BINDING_WORLD_FRAG (#450, world slice W2).  sworld_frag and
+ * sworld_opaque_frag also read FragParams' fog, alpha pair, overbright,
+ * bicubic, world caustics and debug views.  A block member is GLOBAL, where
+ * the loose uniforms these replaced were each program's own, so EVERY path
+ * that draws with a world program writes all of it, every draw, through one
+ * R_SetWorldFrag call, then flushes, then draws.  The per-draw arguments, by
+ * path (the overbright is what each path wrote by hand before, so it differs
+ * from the frame's under r_fullbright, as it did):
+ *
+ *   path                          fog        alpha        force  overbright  warp
+ *   GL_ImmPushBlocks              r_fog_*    imm_* (-1->0) imm   gated       imm_turb
+ *   DrawTextureChains_FlushBatch  bind-time  0.01         1      ungated     0
+ *   DrawTextureChains_DrawDeferred r_fog_*   0.666 / 0.01 1      ungated     0
+ *   R_DrawBrushModel              r_fog_*    0.01         1      ungated     0
+ *   R_DispatchBrushInstancedPass  r_fog_*    0.01 / 0.666 1      ungated /   0
+ *                                                                 gated (fence)
+ *   R_DrawWorldCulled             r_fog_*    0.01         1      ungated     0
+ *
+ * ("gated" is 1 under r_fullbright.)  Everything else comes from the frame
+ * record the R_SetWorldFrame* setters below fill, once a frame, from where the
+ * values are decided: R_SetupFrame (caustics, bicubic, debug views, material,
+ * softemu, span cell), R_LightCluster_BindForWorld (the froxel lookup and
+ * dlight scale) and R_LightStyles_FrameSetup (the lightstyle mode).  The span
+ * cell is the one frame value overridden mid-frame: lit water brackets its
+ * batches with R_SetSpanCell, exactly as it did the loose u_spans.
+ *
+ * Seeded like the loose uniforms started: all zero (every effect off), with an
+ * identity lightview. */
+typedef struct {
+	float	lightview[16];	/*   0  world -> eye, no entity transform */
+	float	grid[4];	/*  64  xy viewport origin, zw froxels per pixel */
+	float	gridz[4];	/*  80  xy zlogscale, zlogbias; z dynamic-light scale */
+	float	warp[4];	/*  96  xy liquid warp (amplitude, time), z span cell */
+	float	material[4];	/* 112  xyz normal-map, gloss intensity, gloss exponent */
+	float	softemu[4];	/* 128  texture dither, banding, screen dither, any live */
+	float	lmstyles[4];	/* 144  x 1 = GPU lightstyles, y the CPU shift as a factor */
+} r_worldfrag_t;		/* 160 */
+
 void	R_Uniforms_Init (void);
 void	R_Uniforms_Shutdown (void);
 
@@ -142,6 +181,10 @@ GLint	R_BindAliasFragBlock (GLuint program);
 /* The same for AliasVert, at UBO_BINDING_ALIAS_VERT; -1 for every program but
  * the two instanced ones (#450 S3) and the four skeletal ones (S4). */
 GLint	R_BindAliasVertBlock (GLuint program);
+
+/* The same for WorldFrag, at UBO_BINDING_WORLD_FRAG; -1 for every program but
+ * the three world ones (#450 W2). */
+GLint	R_BindWorldFragBlock (GLuint program);
 
 /* Setters.  Each writes the CPU shadow and marks its block dirty only when the
  * value actually changed; nothing reaches the GPU until R_FlushUniforms. */
@@ -203,6 +246,26 @@ void	R_SetAliasLightDirU (const float *dir3);
  * call writes the whole set, so none of it can be inherited from the last
  * skeletal draw. */
 void	R_SetSkelLight (const float *shadevec3, const float *light4, float fullbright);
+
+/* The world frame record (#450 W2).  These write no block and dirty nothing:
+ * they fill the record R_SetWorldFrag copies into FragParams and WorldFrag on
+ * every world draw.  See r_worldfrag_t for who calls which, and when. */
+void	R_SetWorldFrame (float caustics_intensity, float caustics_time, float bicubic,
+			 float fullbright, float lightmapdbg,
+			 const float *material3, const float *softemu4);
+void	R_SetWorldSpans (float cell);
+void	R_SetWorldDlight (float scale, const float *view16, const float *grid4,
+			  float zlogscale, float zlogbias);
+void	R_SetWorldLMStyles (float on, float shift);
+
+/* Everything the world fragment stages read, for the draw about to be made:
+ * the per-draw values given here, and the frame record's.  The only writer of
+ * WorldFrag, and every world draw path calls it before its flush, as ONE call,
+ * for the reason R_SetAlphaMask is one: a path that set some of these and not
+ * the rest would draw with whatever the last alias, sprite or sky batch left. */
+void	R_SetWorldFrag (float fog_density, const float *fog_rgb,
+			float alpha_threshold, float force_opaque, float overbright,
+			float turb_amplitude, float turb_time);
 
 /* Upload whichever blocks changed.  One push per dirty block, whole block,
  * immediately before the draw that reads it. */

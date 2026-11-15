@@ -17,8 +17,9 @@
  * rewriting lightmap blocks on the CPU every frame.
  *
  * THE CONSUMER IS THE WORLD FRAGMENT SHADER (phase B, uhexen2-26bm): see
- * GLSL_DLIGHT_FN in gl_shader.c, which reads a fragment's froxel out of this
- * grid and evaluates only the lights whose bits are set in it.  Alias models
+ * engine/shaders/world_dlight.inc (with lightgrid.inc), which reads a
+ * fragment's froxel out of this grid and evaluates only the lights whose bits
+ * are set in it.  Alias models
  * are NOT a consumer and stay on the CPU term -- finding 2 on uhexen2-a5nn.1.
  *
  * `lightcluster_verify` at the bottom reads the grid back and checks it against
@@ -50,7 +51,7 @@
  *    sphere as a bright one -- so the colour rides negated, and the shading
  *    side accumulates with a clamp at zero, which is what the CPU path does
  *    (gl_rsurf.c, the `dark` arm of R_AddDynamicLights).  Decided in phase B;
- *    see GLSL_DLIGHT_FN.
+ *    see world_dlight.inc.
  *
  * A NOTE ON NEGATIVE RADII, which look like a fourth case and are not.
  * EF_SPIT allocates a dlight with radius -120 (cl_main.c) and leaves `dark`
@@ -70,7 +71,7 @@
 #include "gl_pipeline.h"
 #include "gl_sky.h"		/* gl_farclip -- the projection far plane lives there */
 #include "gl_lightcluster.h"
-#include "gl_uniforms.h"	/* R_SetAliasLightGrid -- see R_LightCluster_BindForAlias */
+#include "gl_uniforms.h"	/* R_SetWorldDlight, R_SetAliasLightGrid -- see the two binds */
 
 #ifndef USE_GLES
 
@@ -480,28 +481,6 @@ qboolean R_LightCluster_AliasActive (void)
 /* Phase B: handing the grid to the world fragment shaders             */
 /* ------------------------------------------------------------------ */
 
-/* One program's worth of the froxel-lookup state.  Split out because the three
- * world programs -- cutout, opaque and OIT -- are three separately linked
- * programs with three sets of uniform locations, and a surface that misses one
- * of them renders next to its neighbours with different lighting.  The same
- * trap uhexen2-uxpp documents for caustics and uhexen2-mfql for material maps. */
-static void LC_SetWorldUniforms (const glprogram_t *p, float scale)
-{
-	if (!p->program)
-		return;
-	R_UseProgram (p->program);
-	if (p->u_dlight_scale >= 0)
-		glUniform1f_fp (p->u_dlight_scale, scale);
-	if (scale <= 0.0f)
-		return;		/* the shader takes no other branch; skip the rest */
-	if (p->u_lightview >= 0)
-		glUniformMatrix4fv_fp (p->u_lightview, 1, GL_FALSE, lc_view);
-	if (p->u_lightgrid_xy >= 0)
-		glUniform4f_fp (p->u_lightgrid_xy, lc_vp[0], lc_vp[1], lc_vp[2], lc_vp[3]);
-	if (p->u_lightgrid_z >= 0)
-		glUniform2f_fp (p->u_lightgrid_z, lc_zlogscale, lc_zlogbias);
-}
-
 void R_LightCluster_BindForWorld (void)
 {
 	float	scale;
@@ -534,10 +513,15 @@ void R_LightCluster_BindForWorld (void)
 		scale = 256.0f / (255.0f * (float)(1 << lmshift));
 	}
 
-	LC_SetWorldUniforms (&gl_shader_world, scale);
-	LC_SetWorldUniforms (&gl_shader_world_opaque, scale);
-	LC_SetWorldUniforms (&gl_shader_world_oit, scale);
-	R_UseProgram (0);
+	/* Into the world frame record, which every world draw copies into
+	 * WorldFrag (#450 W2).  It was three per-program glUniform rounds, one
+	 * per world program -- cutout, opaque and OIT -- because a surface that
+	 * missed one rendered next to its neighbours with different lighting
+	 * (the trap uhexen2-uxpp documents for caustics); one shared block makes
+	 * that impossible.  The lookup constants are read only while the scale
+	 * is non-zero, so on a frame the grid is not live they are simply
+	 * whatever the last live frame left. */
+	R_SetWorldDlight (scale, lc_view, lc_vp, lc_zlogscale, lc_zlogbias);
 
 	if (scale <= 0.0f)
 		return;

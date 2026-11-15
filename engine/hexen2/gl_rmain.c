@@ -2384,7 +2384,7 @@ static qboolean R_SetAliasMaterial (GLuint norm, GLuint gloss, qboolean eyeframe
 
 	/* pow() with a zero or negative exponent returns 1 for every angle, so a
 	 * mistyped r_gloss_exponent would flood the model with flat white rather
-	 * than doing nothing.  Floor it at 1, as GL_MaterialUniform does. */
+	 * than doing nothing.  Floor it at 1, as GL_MaterialParams does. */
 	GL_SetAliasMaterial (nrm, gls, q_max(1.0f, r_gloss_exponent.value));
 	return true;
 }
@@ -3655,17 +3655,24 @@ void R_CollectBrushInstances (void)
  * cross-shader z-fight, no polygon-offset backstop needed. */
 #ifndef USE_GLES
 static void R_DispatchBrushInstancedPass (
-	const world_surf_key_t *keys, int num_keys)
+	const world_surf_key_t *keys, int num_keys, float alpha_threshold, float overbright)
 {
 	/* Draws with whichever world program the caller bound; since #450 W1
-	 * nothing here is per-program, so the program is not a parameter. */
+	 * nothing here is per-program, so the program is not a parameter.  The
+	 * pass's alpha threshold is: the two programs share one block set. */
+	extern float r_fog_density;
+	extern float r_fog_color[3];
 	int i = 0;
 	while (i < num_keys)
 	{
 		GLuint inst = keys[i].instance;
-		/* sworld_vert reads both from VertParams (#450 W1), so they go
-		 * through the block, once per instance, before its draws; the
+		/* The fragment set (#450 W2) -- the fog, alpha threshold and forced
+		 * opaque alpha the caller used to upload by hand, and the overbright
+		 * each pass's program was left holding -- and sworld_vert's pair from
+		 * VertParams (W1), once per instance, before its draws; the
 		 * texture binds between here and them write no block. */
+		R_SetWorldFrag (r_fog_density, r_fog_color, alpha_threshold, 1.0f,
+				overbright, 0.0f, 0.0f);
 		R_SetMVP (world_instances[inst].mvp);
 		R_SetModelView (world_instances[inst].mv);
 		R_FlushUniforms ();
@@ -3711,8 +3718,6 @@ void R_DrawBrushInstanced (void)
 	 * the discard for fence textures.  uhexen2-5c6r. */
 	glprogram_t *prog_opaque = &gl_shader_world_opaque;
 	glprogram_t *prog_cutout = &gl_shader_world;
-	extern float r_fog_density;
-	extern float r_fog_color[3];
 
 	if (!prog_opaque->program || !prog_cutout->program ||
 	    num_world_instances == 0 ||
@@ -3772,41 +3777,33 @@ void R_DrawBrushInstanced (void)
 	}
 
 	/* Opaque pass: opaque program (early_fragment_tests), threshold near
-	 * zero (unused — shader has no discard, kept for uniform layout parity),
-	 * no A2C. */
+	 * zero (unread -- the shader has no discard), no A2C.  uhexen2-khsa r13:
+	 * world opaque passes force fragColor.a=1. */
 	if (num_world_surf_keys > 0)
 	{
 		R_UseProgram (prog_opaque->program);
-		if (prog_opaque->u_fog_density >= 0)
-			glUniform1f_fp(prog_opaque->u_fog_density, r_fog_density);
-		if (prog_opaque->u_fog_color >= 0)
-			glUniform3f_fp(prog_opaque->u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
-		if (prog_opaque->u_alpha_threshold >= 0)
-			glUniform1f_fp(prog_opaque->u_alpha_threshold, 0.01f);
-		/* uhexen2-khsa r13: world opaque pass forces fragColor.a=1. */
-		if (prog_opaque->u_force_opaque_alpha >= 0)
-			glUniform1f_fp(prog_opaque->u_force_opaque_alpha, 1.0f);
-		R_DispatchBrushInstancedPass(world_surf_keys, num_world_surf_keys);
+		/* Overbright: this pass never wrote it; the opaque program held the
+		 * ungated value the world draw before it (R_DrawWorldCulled or the
+		 * fast path) left. */
+		R_DispatchBrushInstancedPass(world_surf_keys, num_world_surf_keys, 0.01f,
+					     gl_overbright.integer ? 2.0f : 1.0f);
 	}
 
-	/* Fence pass: cutout program (has discard), threshold 0.666, optional A2C. */
+	/* Fence pass: cutout program (has discard), threshold 0.666, optional
+	 * A2C.  uhexen2-khsa r13: surviving fence/cutout fragments are opaque
+	 * (the alpha-test discard killed transparent ones), so the forced
+	 * fragColor.a=1 holds here too. */
 	if (num_world_surf_keys_fence > 0)
 	{
 		R_UseProgram (prog_cutout->program);
-		if (prog_cutout->u_fog_density >= 0)
-			glUniform1f_fp(prog_cutout->u_fog_density, r_fog_density);
-		if (prog_cutout->u_fog_color >= 0)
-			glUniform3f_fp(prog_cutout->u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
-		if (prog_cutout->u_alpha_threshold >= 0)
-			glUniform1f_fp(prog_cutout->u_alpha_threshold, 0.666f);
-		/* uhexen2-khsa r13: surviving fence/cutout fragments are opaque
-		 * (the alpha-test discard killed transparent ones), so force
-		 * fragColor.a=1 too. */
-		if (prog_cutout->u_force_opaque_alpha >= 0)
-			glUniform1f_fp(prog_cutout->u_force_opaque_alpha, 1.0f);
 		if (r_alphatocoverage.integer)
 			R_SetAlphaToCoverage (true);
-		R_DispatchBrushInstancedPass(world_surf_keys_fence, num_world_surf_keys_fence);
+		/* The cutout program it never wrote overbright on held R_SetupFrame's
+		 * gated value unless a world fence batch ran first that frame; the
+		 * gated one is uhexen2-isq7's intent, so r_fullbright does not
+		 * blow these fences out. */
+		R_DispatchBrushInstancedPass(world_surf_keys_fence, num_world_surf_keys_fence, 0.666f,
+					     (gl_overbright.integer && !r_fullbright.integer) ? 2.0f : 1.0f);
 		if (r_alphatocoverage.integer)
 			R_SetAlphaToCoverage (false);
 	}
@@ -6059,176 +6056,45 @@ static void R_SetupFrame (void)
 	V_SetContentsColor (r_viewleaf->contents);
 	V_CalcBlend ();
 
-	/* Upload caustics uniform on all three world programs.  GL uniform state
-	 * is per-program and persists across glUseProgram cycles, so setting once
-	 * per frame (immediately after r_viewleaf updates) is enough — every
-	 * subsequent world-shader draw this frame picks up the right value
-	 * without per-bind plumbing.  uhexen2-6bfm. */
+	/* The world fragment stages' per-frame values, into the world frame
+	 * record every world draw copies into WorldFrag and FragParams (#450 W2).
+	 * Set once per frame (immediately after r_viewleaf updates), as they
+	 * were when each was a loose uniform pushed to all three world programs
+	 * here -- one write now, because one shared block cannot hold a value
+	 * per program, which is also what retires the trap those three uploads
+	 * kept documenting: a translucent surface on the OIT twin rendering
+	 * uncausticked (uhexen2-uxpp) or flat (uhexen2-mfql) next to the opaque
+	 * one.
+	 *   caustics    R_CausticsIntensity is 0 unless the view leaf is
+	 *               CONTENTS_WATER and the cvar is on (uhexen2-6bfm).
+	 *   bicubic     r_lightmap_bicubic (uhexen2-b2f0).
+	 *   debug       r_fullbright whites out the lightmap sample, r_lightmap
+	 *               the diffuse one and the fullbright mask, so the two
+	 *               halves of a world fragment can be looked at separately
+	 *               (uhexen2-isq7).
+	 *   material    the intensities are global cvars; whether a texture has
+	 *               maps is what is bound at units 3 and 4 (uhexen2-mfql).
+	 *   softemu     R_SoftEmuParams, all zeros at r_softemu 0, the default
+	 *               (uhexen2-a5nn.3).
+	 *   span cell   the 1997 span cell (#176), always written, so turning
+	 *               the cvar off reaches the next frame; lit water brackets
+	 *               its own (R_SetSpanCell).
+	 * Overbright is not here: each world draw path passes its own, as it
+	 * uploaded its own (see r_worldfrag_t). */
 	{
-		float intensity = R_CausticsIntensity();
-		float t = (float)cl.time;
-		if (gl_shader_world.program && gl_shader_world.u_caustics >= 0)
-		{
-			R_UseProgram (gl_shader_world.program);
-			glUniform2f_fp(gl_shader_world.u_caustics, intensity, t);
-		}
-		if (gl_shader_world_opaque.program && gl_shader_world_opaque.u_caustics >= 0)
-		{
-			R_UseProgram (gl_shader_world_opaque.program);
-			glUniform2f_fp(gl_shader_world_opaque.u_caustics, intensity, t);
-		}
-		/* Translucent world surfaces are drawn with gl_shader_world_oit
-		 * while an OIT pass is active (gl_rsurf.c DrawGLWaterPoly /
-		 * DrawGLPolyMTex), so it needs the same value or those surfaces
-		 * render uncausticked next to causticked opaque ones.
-		 * uhexen2-uxpp. */
-		if (gl_shader_world_oit.program && gl_shader_world_oit.u_caustics >= 0)
-		{
-			R_UseProgram (gl_shader_world_oit.program);
-			glUniform2f_fp(gl_shader_world_oit.u_caustics, intensity, t);
-		}
+		float	mat[3], se[4];
 
-		/* Material maps ride the same once-per-frame channel, and for
-		 * exactly the reason spelled out above: uniform state is
-		 * per-program and persists, so one upload here reaches every
-		 * world draw this frame without threading a program pointer
-		 * through the dozen per-texture binding sites in gl_rsurf.c.
-		 * All three programs, because a translucent surface picks the
-		 * OIT variant and would otherwise render flat next to a
-		 * normal-mapped opaque one -- the same trap uhexen2-uxpp
-		 * documents for caustics.  uhexen2-mfql. */
-		if (gl_shader_world.program)
-		{
-			R_UseProgram (gl_shader_world.program);
-			GL_MaterialUniform (&gl_shader_world);
-		}
-		if (gl_shader_world_opaque.program)
-		{
-			R_UseProgram (gl_shader_world_opaque.program);
-			GL_MaterialUniform (&gl_shader_world_opaque);
-		}
-		if (gl_shader_world_oit.program)
-		{
-			R_UseProgram (gl_shader_world_oit.program);
-			GL_MaterialUniform (&gl_shader_world_oit);
-		}
-		/* Per-frame world overbright (Ironwail-style).  Pushing it once
-		 * per frame here covers the OIT and brush-batch paths that don't
-		 * route through GL_ImmEnd or the per-binding-site uploads.
-		 * uhexen2-f29y. */
-		{
-			/* r_fullbright forces the multiplier back to 1: it replaces the
-			 * lightmap sample with white, and overbright would then double a
-			 * value that is already at full scale, blowing every surface to
-			 * pure white and hiding the very texture detail the mode exists
-			 * to show.  uhexen2-isq7. */
-			float ob = (gl_overbright.integer && !r_fullbright.integer) ? 2.0f : 1.0f;
-			if (gl_shader_world.program && gl_shader_world.u_overbright >= 0)
-			{
-				R_UseProgram (gl_shader_world.program);
-				glUniform1f_fp(gl_shader_world.u_overbright, ob);
-			}
-			if (gl_shader_world_opaque.program && gl_shader_world_opaque.u_overbright >= 0)
-			{
-				R_UseProgram (gl_shader_world_opaque.program);
-				glUniform1f_fp(gl_shader_world_opaque.u_overbright, ob);
-			}
-			if (gl_shader_world_oit.program && gl_shader_world_oit.u_overbright >= 0)
-			{
-				R_UseProgram (gl_shader_world_oit.program);
-				glUniform1f_fp(gl_shader_world_oit.u_overbright, ob);
-			}
-		}
-		/* Per-frame world lighting-debug switches.  Same plumbing again:
-		 * r_fullbright whites out the lightmap sample, r_lightmap whites out
-		 * the diffuse sample and suppresses the fullbright mask, so the two
-		 * halves of a world fragment can be looked at separately.  Both were
-		 * previously inert for brush surfaces -- r_fullbright reached only the
-		 * alias fullbright pass and r_lightmap was registered and never read,
-		 * which quietly invalidated any "is this lighting or texture" test
-		 * anyone ran with them.  uhexen2-isq7. */
-		{
-			float ld[2];
-			ld[0] = r_fullbright.integer ? 1.0f : 0.0f;
-			ld[1] = r_lightmap.integer ? 1.0f : 0.0f;
-			if (gl_shader_world.program && gl_shader_world.u_lightdebug >= 0)
-			{
-				R_UseProgram (gl_shader_world.program);
-				glUniform2f_fp(gl_shader_world.u_lightdebug, ld[0], ld[1]);
-			}
-			if (gl_shader_world_opaque.program && gl_shader_world_opaque.u_lightdebug >= 0)
-			{
-				R_UseProgram (gl_shader_world_opaque.program);
-				glUniform2f_fp(gl_shader_world_opaque.u_lightdebug, ld[0], ld[1]);
-			}
-			if (gl_shader_world_oit.program && gl_shader_world_oit.u_lightdebug >= 0)
-			{
-				R_UseProgram (gl_shader_world_oit.program);
-				glUniform2f_fp(gl_shader_world_oit.u_lightdebug, ld[0], ld[1]);
-			}
-		}
-		/* Per-frame world bicubic lightmap toggle.  Same plumbing as
-		 * u_overbright above: set on all three world program variants so
-		 * the OIT and brush-batch paths pick it up without per-bind
-		 * uploads.  uhexen2-b2f0. */
-		{
-			float bicubic = r_lightmap_bicubic.integer ? 1.0f : 0.0f;
-			if (gl_shader_world.program && gl_shader_world.u_lightmap_bicubic >= 0)
-			{
-				R_UseProgram (gl_shader_world.program);
-				glUniform1f_fp(gl_shader_world.u_lightmap_bicubic, bicubic);
-			}
-			if (gl_shader_world_opaque.program && gl_shader_world_opaque.u_lightmap_bicubic >= 0)
-			{
-				R_UseProgram (gl_shader_world_opaque.program);
-				glUniform1f_fp(gl_shader_world_opaque.u_lightmap_bicubic, bicubic);
-			}
-			if (gl_shader_world_oit.program && gl_shader_world_oit.u_lightmap_bicubic >= 0)
-			{
-				R_UseProgram (gl_shader_world_oit.program);
-				glUniform1f_fp(gl_shader_world_oit.u_lightmap_bicubic, bicubic);
-			}
-		}
-		/* Per-frame software-emulation stage scales (uhexen2-a5nn.3).  Same
-		 * plumbing again, and for the same reason: the MDI dispatch and the
-		 * DrawTextureChains fast path upload their own uniforms and would
-		 * otherwise never see these.  R_SoftEmuParams returns all zeros at
-		 * r_softemu 0, which is the default. */
-		{
-			float se[4];
-			R_SoftEmuParams (se);
-			if (gl_shader_world.program && gl_shader_world.u_softemu >= 0)
-			{
-				R_UseProgram (gl_shader_world.program);
-				glUniform4f_fp(gl_shader_world.u_softemu, se[0], se[1], se[2], se[3]);
-			}
-			if (gl_shader_world_opaque.program && gl_shader_world_opaque.u_softemu >= 0)
-			{
-				R_UseProgram (gl_shader_world_opaque.program);
-				glUniform4f_fp(gl_shader_world_opaque.u_softemu, se[0], se[1], se[2], se[3]);
-			}
-			if (gl_shader_world_oit.program && gl_shader_world_oit.u_softemu >= 0)
-			{
-				R_UseProgram (gl_shader_world_oit.program);
-				glUniform4f_fp(gl_shader_world_oit.u_softemu, se[0], se[1], se[2], se[3]);
-			}
-		}
-		/* The 1997 span cells on the world programs (#176).  Always pushed,
-		 * so turning the cvar off reaches them on the next frame. */
-		{
-			const float	spans = R_SpanCell (false);
-			const glprogram_t	*wp[3] = { &gl_shader_world, &gl_shader_world_opaque, &gl_shader_world_oit };
-			int		k;
-
-			for (k = 0; k < 3; k++)
-			{
-				if (wp[k]->program && wp[k]->u_spans >= 0)
-				{
-					R_UseProgram (wp[k]->program);
-					glUniform1f_fp(wp[k]->u_spans, spans);
-				}
-			}
-		}
+		GL_MaterialParams (mat);
+		R_SoftEmuParams (se);
+		R_SetWorldFrame (R_CausticsIntensity(), (float)cl.time,
+				 r_lightmap_bicubic.integer ? 1.0f : 0.0f,
+				 r_fullbright.integer ? 1.0f : 0.0f,
+				 r_lightmap.integer ? 1.0f : 0.0f, mat, se);
+		R_SetWorldSpans (R_SpanCell (false));
+		/* Nothing bound on the way out, as when this block ended its
+		 * per-program uploads; tools/test_world_vert_block.py's flow pass
+		 * counts on it, since the cheat clamp above may run a cvar
+		 * callback. */
 		R_UseProgram (0);
 	}
 
@@ -7937,13 +7803,17 @@ float R_SpanCell (qboolean liquid)
  * and liquids through gl_shader_alias, lit liquids through the world program.
  * Nothing when the mode is off, so the default path does no uniform traffic.
  *
- * Two arms (#450).  The world programs still declare u_spans loose, so theirs
- * is written on the program.  salias_frag reads it from AliasFrag, which every
- * alias-family program shares: the cell lands in the shadow and reaches the GPU
- * with the batch's own flush in GL_ImmEnd.  That is the same value at the same
- * draws only because every caller brackets one batch -- set, draw, back to 0
- * -- so the block holds 0 everywhere else, and the skeletal and instanced
- * draws, which never come through here, write 0 themselves. */
+ * Two arms (#450), one per block.  salias_frag reads it from AliasFrag, which
+ * every alias-family program shares: the cell lands in the shadow and reaches
+ * the GPU with the batch's own flush in GL_ImmEnd.  That is the same value at
+ * the same draws only because every caller brackets one batch -- set, draw,
+ * back to 0 -- so the block holds 0 everywhere else, and the skeletal and
+ * instanced draws, which never come through here, write 0 themselves.  The
+ * world programs read it from WorldFrag (W2), which every world draw fills
+ * from the world frame record, so their arm writes the record: lit water's
+ * bracket -- set the liquid cell, draw, back to R_SpanCell (false) -- leaves
+ * it at the frame's value for every other world draw, as it left the loose
+ * u_spans. */
 void R_SetSpanCell (const glprogram_t *p, float cell)
 {
 	if (!r_softemu_spans.integer || !p->program)
@@ -7953,10 +7823,8 @@ void R_SetSpanCell (const glprogram_t *p, float cell)
 		R_SetAliasSpans (cell);
 		return;
 	}
-	if (p->u_spans < 0)
-		return;
-	R_UseProgram (p->program);
-	glUniform1f_fp (p->u_spans, cell);
+	if (p->ub_wfrag >= 0)
+		R_SetWorldSpans (cell);
 }
 
 void R_RenderView (void)

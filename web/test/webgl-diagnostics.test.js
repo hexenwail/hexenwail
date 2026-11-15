@@ -207,10 +207,17 @@ test('headless smoke gate compiles the actual engine WebGL shader sources', asyn
   assert.match(byName.bloom_bright.fragment, /uniform BloomParams/);
   assert.match(byName.oit_resolve.fragment, /uniform OitParams/);
   assert.doesNotMatch(byName.oit_resolve.fragment, /sampler2DMS/);
-  // Spot-check that macro expansion actually happened rather than silently
-  // emitting the macro name -- these live behind GLSL_BICUBIC_LM_FN etc.
+  // Spot-check that include expansion actually happened rather than silently
+  // emitting the directive -- these live in bicubic_lm.inc and caustics.inc
+  // since the world fragment stages became files (#450 W2), and the ES arm
+  // must reach the driver with the WorldFrag block, the bitfieldReverse
+  // fallback, and no early-Z.
   assert.match(byName.world.fragment, /vec4 BicubicLightmap/);
   assert.match(byName.world.fragment, /float Caustics/);
+  assert.match(byName.world.fragment, /uniform WorldFrag/);
+  assert.match(byName.world_opaque.fragment, /uniform WorldFrag/);
+  assert.match(byName.world_opaque.fragment, /uint bitfieldReverse/);
+  assert.doesNotMatch(byName.world.fragment, /#include/);
   assert.match(byName.postprocess.fragment, /vec4 fxaa/);
   assert.match(byName.postprocess.fragment, /HDR tonemapping/);
   for (const program of programs) {

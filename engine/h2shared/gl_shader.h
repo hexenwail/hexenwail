@@ -35,37 +35,20 @@ typedef struct glprogram_s {
 	GLint	u_texture2;	/* fullbright mask sampler for world (uhexen2-sjvf) */
 	GLint	u_texture3;	/* normal-map sampler for world (uhexen2-mfql) */
 	GLint	u_texture4;	/* gloss-map sampler for world (uhexen2-mfql) */
-	GLint	u_material;	/* world FS: vec3(normalmap intensity, gloss intensity, gloss exponent).  x and y both 0 disables the whole path. */
-	GLint	u_fog_density;
-	GLint	u_fog_color;
-	GLint	u_alpha_threshold;
-	GLint	u_caustics;	/* world shader: vec2(intensity, time) for underwater caustics (uhexen2-6bfm) */
-	GLint	u_overbright;	/* world shader: lightmap multiplier (1.0 = off, 2.0 = on); Ironwail parity (uhexen2-f29y) */
-	GLint	u_lightmap_bicubic; /* world shader: 0.0 = hardware bilinear, 1.0 = 4-tap B-spline bicubic lightmap fetch (uhexen2-b2f0) */
-	GLint	u_lmstyles;	/* world shader: x 1 = GPU lightstyles, y the CPU shift as a factor (#439) */
-	GLint	u_lmlayer1, u_lmlayer2, u_lmlayer3;	/* lightstyle layer atlases, units LMSTYLE_TMU.. */
-	GLint	u_lightdebug;	/* world shader: vec2(r_fullbright, r_lightmap).  x > 0.5 replaces the lightmap sample with white, y > 0.5 replaces the diffuse sample with white.  Both zero in normal rendering.  uhexen2-isq7. */
+	GLint	u_lmlayer1, u_lmlayer2, u_lmlayer3;	/* lightstyle layer atlases, units LMSTYLE_TMU.. (#439) */
 	GLint	u_oit_mode;		/* OIT programs: 0 WBOIT, 1 MBOIT moments, 2 MBOIT composite (#87) */
 	GLint	u_mboit_ms;		/* moment targets multisampled */
 	GLint	u_mboit_b0, u_mboit_mom, u_mboit_b0_ms, u_mboit_mom_ms;
-	GLint	u_spans;	/* world shader: 0 = perspective-correct, else the 1997 span cell width in pixels (r_softemu_spans, #176) */
-	GLint	u_softemu;	/* world shader: vec4(texture dither, lightmap banding, screen dither, any stage live).  All zero unless r_softemu is on.  uhexen2-a5nn.3. */
-	/* Clustered GPU dynamic lighting, world programs only; -1 everywhere
-	 * else and on the ES tier, which has neither compute nor SSBOs and so
-	 * never sees this half of the shader at all.  uhexen2-26bm. */
-	GLint	u_dlight_scale;	/* blocklight units -> lightmap units; 0 switches the whole froxel path off */
-	GLint	u_lightview;	/* world -> eye, WITHOUT the entity transform u_modelview carries, so world-space light origins land in the same space as v_eyepos */
-	GLint	u_lightgrid_xy;	/* vec4(viewport x, viewport y, froxel columns per pixel, froxel rows per pixel) */
-	GLint	u_lightgrid_z;	/* vec2(zlogscale, zlogbias) -- the depth-slice mapping, which must match gl_lightcluster.c exactly */
-	GLint	u_lightgrid;	/* usampler3D of per-froxel light bitmasks, texture unit LIGHT_GRID_TMU */
-	GLint	u_force_opaque_alpha; /* world FS: when > 0.5, fragColor.a is forced to 1.0 regardless of color.a.  Set to 1 by C for confirmed-opaque draws, to 0 for ENTALPHA / DRF_TRANSLUCENT / OIT translucent paths that need color.a preserved for blend.  uhexen2-khsa r13. */
-	GLint	u_turb;            /* world FS: vec2(warp amplitude in texture units, time); x=0 disables (uhexen2-9o7u) */
-	/* The alias family's per-batch values -- dlight scale, caustics,
-	 * material, light direction, model matrix, soft-particle fade -- have no
-	 * field here: since #450 every stage that reads them takes them from
-	 * VertParams / FragParams / AliasFrag (GL_ImmPushBlocks), and no live
+	GLint	u_lightgrid;	/* usampler3D of per-froxel light bitmasks, texture unit LIGHT_GRID_TMU; world programs, desktop only (uhexen2-26bm) */
+	/* The per-draw values of both families -- fog, the alpha pair,
+	 * overbright, bicubic, caustics, the debug views, material, warp, span
+	 * cell, software emulation, lightstyle mode, the froxel lookup and dlight
+	 * scale, and the alias family's own -- have no field here: since #450
+	 * every stage that reads them takes them from VertParams / FragParams /
+	 * AliasFrag / WorldFrag (GL_ImmPushBlocks, R_SetWorldFrag), and no live
 	 * shader declares those names loose.  tools/test_alias_no_loose.py keeps
-	 * it that way.  Only the alias family's samplers keep a location. */
+	 * it that way.  Only samplers and the OIT preamble's mode switches keep a
+	 * location. */
 	GLint	u_soft_depth;	    /* alias FS: opaque-scene depth snapshot, texture unit 1 (uhexen2-mf9u) */
 	/* Indices of the two SHARED uniform blocks (gl_uniforms.h), for the
 	 * shaders that have moved out of C string literals into engine/shaders/.
@@ -80,6 +63,7 @@ typedef struct glprogram_s {
 	GLint	ub_frag;	    /* FragParams, at UBO_BINDING_FRAG */
 	GLint	ub_afrag;	    /* AliasFrag, at UBO_BINDING_ALIAS_FRAG: the ten programs linking salias_frag (#450) */
 	GLint	ub_avert;	    /* AliasVert, at UBO_BINDING_ALIAS_VERT: the four skeletal programs (#450 S4) */
+	GLint	ub_wfrag;	    /* WorldFrag, at UBO_BINDING_WORLD_FRAG: the three world programs (#450 W2) */
 } glprogram_t;
 
 /* Texture units of the MBOIT moment targets during the composite pass (#87);
@@ -94,7 +78,7 @@ void GL_SetOITMode (int mode, qboolean ms);
 
 /* Extended program for GPU particle SSBO rendering */
 typedef struct {
-	glprogram_t base;       /* standard uniforms (u_mvp, u_modelview, u_fog_density, u_fog_color) */
+	glprogram_t base;       /* program, texture location and block indices */
 	GLint   u_pup;          /* r_pup billboard-up vector */
 	GLint   u_pright;       /* r_pright billboard-right vector */
 	GLint   u_vpn;          /* view forward vector (for distance-based scale) */
@@ -189,7 +173,7 @@ void	GL_ParticleGPU_SetUniforms (const gl_particle_gpu_prog_t *prog,
  * and 4 is its CullParams, 3 is gl_ssao.c's SsaoParams, 5 is
  * gl_lightcluster.c's LcParams, 6 is gl_postprocess.c's BloomParams, 7
  * is its OitParams, 8 its PpVert and 9 is its PpParams, so the graphics
- * blocks start at 1 and the alias family's own pick up at 10.  Keyed by stage rather than by program:
+ * blocks start at 1 and the alias and world families' own pick up at 10.  Keyed by stage rather than by program:
  * only one program is bound at a time, so each program's own vertex-stage
  * block is pinned to the same point rather than every program claiming a new
  * one.  A driver need only guarantee a handful of these.
@@ -204,6 +188,9 @@ void	GL_ParticleGPU_SetUniforms (const gl_particle_gpu_prog_t *prog,
  * salias_frag's AliasFrag, 10 the vertex stages' AliasVert. */
 #define UBO_BINDING_ALIAS_VERT	10
 #define UBO_BINDING_ALIAS_FRAG	11
+/* The world family's (engine/shaders/world.inc, #450 W2): sworld_frag's and
+ * sworld_opaque_frag's WorldFrag. */
+#define UBO_BINDING_WORLD_FRAG	12
 
 void	GL_Shaders_Init (void);
 void	GL_Shaders_Shutdown (void);

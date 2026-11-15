@@ -4,10 +4,9 @@
  * rather than a smooth modulation.  Time advances via the caller's t, so the
  * pattern flows.  uhexen2-6bfm.
  *
- * A copy of gl_shader.c's GLSL_CAUSTICS_FN, which sworld_frag still splices
- * while the world family is a C literal.  tools/test_alias_frag_block.py
- * keeps the two token-identical, so a model and the floor it stands on get the
- * same highlight band (#450).
+ * One copy for the alias and world stages, so a model and the floor it stands
+ * on get the same highlight band; it was gl_shader.c's GLSL_CAUSTICS_FN until
+ * the world fragment stages became files (#450, world slice W2).
  */
 #ifndef CAUSTICS_INC
 #define CAUSTICS_INC

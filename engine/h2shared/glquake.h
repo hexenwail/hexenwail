@@ -485,8 +485,7 @@ extern	cvar_t	r_gloss_exponent;
  * map by R_NewMap.  Gates the world shader's material path so a map without
  * them never enters it.  uhexen2-mfql. */
 extern	qboolean gl_materialmaps_present;
-struct glprogram_s;
-void	GL_MaterialUniform (const struct glprogram_s *prog);
+void	GL_MaterialParams (float *out);	/* the world material vec3, #450 W2 */
 
 #if defined(H2W)
 extern	cvar_t	r_netgraph;

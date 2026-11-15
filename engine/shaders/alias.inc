@@ -7,13 +7,11 @@
  * uniforms.inc gives.
  *
  * ITS OWN BLOCKS, NOT FragParams/VertParams, AND ITS OWN NAMES.  sworld_frag
- * still declares u_turb, u_spans and u_lightview as loose per-program uniforms
- * with different per-frame values.  The members here are spelled u_af* and
- * u_av* and only reach the old names through the macros below, so none of
- * those programs can collide with them at link time, a later world migration
- * can take its own block without fighting this one over a member name, and
- * the two stages' u_lightview -- one in each block -- are different uniforms
- * to the linker.
+ * reads u_turb, u_spans and u_lightview too, with different values, from its
+ * own WorldFrag (world.inc, #450 W2).  The members here are spelled u_af* and
+ * u_av* and only reach the old names through the macros below, so the two
+ * families' blocks never fight over a member name, and the two stages'
+ * u_lightview -- one in each block -- are different uniforms to the linker.
  *
  * GL binding point 11 (UBO_BINDING_ALIAS_FRAG) for AliasFrag and 10
  * (UBO_BINDING_ALIAS_VERT) for AliasVert, assigned from C because ES 3.00

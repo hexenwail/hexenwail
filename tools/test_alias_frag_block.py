@@ -13,8 +13,10 @@ Checks the pieces that have to move together:
   * engine/shaders/salias_frag.glsl declares no loose non-opaque uniform, keeps
     the clustered-dlight half under #ifndef GL_ES, and declares its colour
     output on one line, first, as the OIT splice needs;
-  * the .inc copies of the GLSL_* helpers sworld_frag still splices are
-    token-identical to them, and the froxel-grid sizes agree with the C side;
+  * the helpers it shares with the world stages (caustics, turb_uv, span_uv,
+    material, lightgrid) are one copy, included by both families, with no
+    GLSL_* macro copy left in gl_shader.c (#450 W2 retired the last), and the
+    froxel-grid sizes agree with the C side;
   * the literal and its alias-only macros are gone, and all ten programs
     compile the file through GLSL_ALIAS_FRAG_HEADER (NOPERSP in the header
     for the four affine twins), the instanced pair binding its blocks by hand;
@@ -309,25 +311,32 @@ def inc_code(name):
     return t
 
 
-for inc, macro in (("caustics.inc", "GLSL_CAUSTICS_FN"), ("turb_uv.inc", "GLSL_TURB_UV_FN"),
-                   ("span_uv.inc", "GLSL_SPAN_UV_FN"), ("material.inc", "GLSL_MATERIAL_FN")):
-    c = c_macro(macro, NUMS)
-    if c is None or tokens(c) != tokens(inc_code(inc)):
-        errors.append(f"{inc} is not token-identical to {macro}")
-# lightgrid.inc: the struct and the buffer of GLSL_LIGHTGRID_DECL, and all of
-# GLSL_LIGHTGRID_FETCH_FN, with the sizes substituted.  The DECL's loose
-# uniforms are the includer's business.
-lgt = tokens(re.sub(r"#ifndef LIGHT_TILES_X.*?#endif\n", "", inc_code("lightgrid.inc"), flags=re.S)
-             .replace("FRAG_SSBO(LIGHT_SSBO_BINDING, LIGHTGRID_SSBO_SLOT)",
-                      f"layout(std430, binding = {NUMS['LIGHT_SSBO_BINDING']})")
-             .replace("MAX_LIGHTSTYLES", str(NUMS["MAX_LIGHTSTYLES"]))
-             .replace("LIGHT_TILES_X", str(NUMS["LIGHT_TILES_X"]))
-             .replace("LIGHT_TILES_Y", str(NUMS["LIGHT_TILES_Y"]))
-             .replace("LIGHT_TILES_Z", str(NUMS["LIGHT_TILES_Z"])))
-decl = c_macro("GLSL_LIGHTGRID_DECL", NUMS) or ""
-decl = decl[:decl.index("uniform usampler3D")] if "uniform usampler3D" in decl else ""
-if lgt != tokens(decl + (c_macro("GLSL_LIGHTGRID_FETCH_FN", NUMS) or "")):
-    errors.append("lightgrid.inc is not token-identical to GLSL_LIGHTGRID_DECL's struct+buffer and GLSL_LIGHTGRID_FETCH_FN")
+# One copy of each shared helper since the world fragment stages became files
+# (#450 W2): a model and the floor it stands on take the same caustics band,
+# an unlit and a lit liquid the same ripple, and both families the same froxel
+# lookup, because both include the same file -- not because a gate keeps two
+# copies token-identical.  So: both families include each, and neither the
+# macro copies nor anything else defining these functions is left.
+SHARED = {"caustics.inc": "Caustics", "turb_uv.inc": "TurbUV", "span_uv.inc": "SpanUV",
+          "material.inc": "MaterialShadeCore", "lightgrid.inc": "LightGridMask"}
+world_frags = [(SH / f).read_text() for f in ("sworld_frag.glsl", "sworld_opaque_frag.glsl")]
+for inc, fn_name in SHARED.items():
+    if f'#include "{inc}"' not in frag:
+        errors.append(f"salias_frag.glsl no longer includes {inc}")
+    if inc != "turb_uv.inc" and not all(f'#include "{inc}"' in w for w in world_frags):
+        errors.append(f"a world fragment stage no longer includes {inc}; the families would drift apart")
+    defs = [f.name for f in sorted(SH.iterdir()) if f.suffix in (".glsl", ".inc")
+            and re.search(rf"\b\w+\s+{fn_name}\s*\([^;{{}}]*\)\s*\{{", strip(f.read_text()))]
+    if defs != [inc]:
+        errors.append(f"{fn_name} must be defined once, in {inc}: found in {defs}")
+    if re.search(rf'"[^"\n]*\b{fn_name}\s*\([^"\n]*\{{', gl_shader):
+        errors.append(f"gl_shader.c defines {fn_name} in a string literal again; the one copy is {inc}")
+if '#include "turb_uv.inc"' not in world_frags[0]:
+    errors.append("sworld_frag.glsl no longer includes turb_uv.inc; lit and unlit liquids would ripple apart")
+for gone in ("GLSL_CAUSTICS_FN", "GLSL_TURB_UV_FN", "GLSL_SPAN_UV_FN", "GLSL_MATERIAL_FN",
+             "GLSL_LIGHTGRID_DECL", "GLSL_LIGHTGRID_FETCH_FN"):
+    if re.search(rf"\b{gone}\b", strip(gl_shader)):
+        errors.append(f"{gone} is back in gl_shader.c; its one copy is an engine/shaders .inc")
 if not re.search(r"#define FRAG_SSBO\(gl, vk\) layout\(std430, set = 2, binding = vk\)", read("engine/shaders/layout.inc")):
     errors.append("layout.inc: FRAG_SSBO's Vulkan arm must be set 2, binding vk")
 
@@ -374,16 +383,14 @@ if dead:
     errors.append(f"gl_alias_inst_prog_t still carries fragment-stage locations that are -1 now: {sorted(dead)}")
 if "p->ub_afrag = R_BindAliasFragBlock(p->program);" not in gl_shader:
     errors.append("GL_InitProgramUniforms must look up ub_afrag")
-# The literal splice is back for one caller only: gl_shader_world_oit, whose
-# fragment stage is still a literal with its own #version (#450 W1), passes a
-# NULL fragment header.  Every alias OIT build must pass a real one -- a NULL
-# there would hand a #version-less file to the literal splice.
-if not re.search(r"fs = frag_header \? GL_CompileOITFragShaderSplit \(frag_header, frag_src\)\s*"
-                 r": GL_CompileOITFragShader \(frag_src\);", gl_shader):
-    errors.append("GL_LoadOITProgramSplit must take the header-aware splice whenever it has a header")
+# Every OIT fragment stage is a file with no #version since #450 W2, so the
+# header-aware splice is the only one, and no OIT build may pass a NULL
+# fragment header -- that would hand a #version-less file to the driver.
+if not re.search(r"fs = GL_CompileOITFragShaderSplit \(frag_header, frag_src\);", gl_shader) \
+        or re.search(r"\bGL_CompileOITFragShader\b", strip(gl_shader)):
+    errors.append("GL_LoadOITProgramSplit must always take the header-aware splice (the literal one is gone)")
 for m in re.finditer(r"GL_InitOITProgramSplit\s*\(&(\w+),[^;]*?,\s*NULL\s*,", gl_shader):
-    if not m.group(1).startswith("gl_shader_world"):
-        errors.append(f"{m.group(1)} passes a NULL fragment header; only the world family's literal may")
+    errors.append(f"{m.group(1)} passes a NULL fragment header; every OIT fragment stage is a file")
 
 
 # ------------------------------------------------------------ per-path writes

@@ -13,10 +13,9 @@
  * and each glDrawElements path in gl_rsurf.c / gl_rmain.c / gl_worldcull.c
  * by hand.  tools/test_world_vert_block.py pins that list.
  *
- * The varyings must match sworld_frag and sworld_frag_opaque, still C
- * literals, by name (the plain arm of VERT_OUT emits no location).  The
- * locations are for the SPIR-V gates, and for the FRAG_IN side once the
- * fragment stages move.
+ * The varyings must match sworld_frag.glsl's and sworld_opaque_frag.glsl's
+ * inputs by name (the plain arm of VERT_OUT emits no location) and, for the
+ * SPIR-V gates, by location.
  */
 #include "layout.inc"
 #define UNIFORMS_VERT

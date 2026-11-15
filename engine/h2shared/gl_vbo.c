@@ -22,9 +22,9 @@
 extern float r_fog_density;
 extern float r_fog_color[3];
 
-/* gl_overbright cvar (gl_rmain.c) — read directly for the u_overbright uniform.
- * Kept here so GL_ImmEnd can push the value alongside other auto-uploaded
- * uniforms.  uhexen2-f29y. */
+/* gl_overbright cvar (gl_rmain.c) — read directly for the world programs'
+ * u_overbright, which GL_ImmPushBlocks writes with the rest of their fragment
+ * set.  uhexen2-f29y. */
 extern cvar_t gl_overbright;
 extern cvar_t r_fullbright;
 
@@ -68,10 +68,6 @@ static float	imm_alias_caustics[2] = { 0.0f, 0.0f };
  * back to zero on the way out for exactly that reason. */
 static float	imm_alias_dlight = 0.0f;
 static float	imm_turb[2] = { 0.0f, 0.0f };	/* uhexen2-9o7u: x=amplitude (0=off), y=time */
-/* Its cache lives up here beside it rather than down with the other
- * imm_cache_* values, because GL_ClearTurb below needs both and sits with
- * GL_SetTurb.  -1 is the "never pushed" sentinel; see GL_ImmEnd. */
-static float	imm_cache_turb[2] = { -1.0f, -1.0f };
 /* Soft-particle fade for sprite batches (uhexen2-mf9u).  Like the caustics
  * pair above, 0 intensity is the resting state rather than a -1 sentinel, and
  * R_DrawSpriteModel restores it after each sprite so the alias / warp / brush
@@ -277,24 +273,6 @@ void GL_SetTurb (float amplitude, float time)
 	imm_turb[1] = time;
 }
 
-/* Put one program's warp back to rest RIGHT NOW rather than at the next
- * GL_ImmEnd.  gl_shader_world is shared by the liquid pass and by the opaque
- * world paths, and those set their uniforms by hand -- the MDI dispatch, the
- * DrawTextureChains fast path -- so they never push a u_turb of their own.  A
- * hot value left behind by lit water would warp the entire map from the next
- * draw on.  Clearing the cache too forces the next batch to push whatever it
- * wants, whichever program it turns out to use.  uhexen2-a5nn.2. */
-void GL_ClearTurb (const glprogram_t *shader)
-{
-	imm_turb[0] = imm_turb[1] = 0.0f;
-	if (shader && shader->u_turb >= 0)
-	{
-		R_UseProgram (shader->program);
-		glUniform2f_fp (shader->u_turb, 0.0f, 0.0f);
-	}
-	imm_cache_turb[0] = imm_cache_turb[1] = -1.0f;
-}
-
 /* uhexen2-mf9u.  inv_dist 0 disables the fade entirely; za/zb are the
  * window-depth -> view-distance coefficients for the live projection. */
 void GL_SetSoftParticles (float inv_dist, float za, float zb)
@@ -429,18 +407,10 @@ void GL_ImmVertex2f (float x, float y)
  * triangles using the pre-built index buffer.  (The enum itself comes from
  * glheader.h, which shims it for GLES3.) */
 
-/* Per-shader uniform cache: most HUD/2D draws share identical fog,
- * alpha threshold, and MVP. Driver-side glUniform calls aren't free —
- * skipping the redundant uploads cuts ~100 calls/frame on a typical
- * scene with HUD + center print + several pic draws. The cache is
- * invalidated when the shader changes (different uniform locations)
- * and via GL_ImmInvalidateState() at context boundaries. */
-static const glprogram_t *imm_cache_shader;
-static float	imm_cache_alpha = -2.0f;
-static float	imm_cache_force_opaque_alpha = -2.0f;
-static float	imm_cache_fog_density = -1.0f;
-static float	imm_cache_fog_color[3] = { -1.0f, -1.0f, -1.0f };
-static float	imm_cache_overbright = -1.0f;	/* uhexen2-f29y */
+/* No per-program uniform cache any more: the world programs were the last to
+ * declare loose non-opaque uniforms, and since #450 W2 every program GL_ImmEnd
+ * draws with reads its per-batch values from blocks, whose shadow in
+ * gl_uniforms.c already skips an upload when nothing changed. */
 
 void GL_ImmResetState (void)
 {
@@ -461,7 +431,7 @@ push takes fresh storage and rebinds for each value, so a second value either
 lands in a range the first one is no longer bound to, or silently orphans the
 first -- an arrangement that only works while a block has exactly one member.
 
-Nothing is cached against the program the way the loose uniforms below are.  A
+Nothing is cached against the program the way the loose uniforms were.  A
 loose uniform is per-PROGRAM state, so "we already sent this" is a fact about
 the program; a block is context-wide, so the only meaningful question is
 whether the CONTENTS changed, and that is exactly what the shadow's dirty flags
@@ -524,14 +494,13 @@ static void GL_ImmPushBlocks (const glprogram_t *shader, const float *mvp)
 		R_SetAlphaMask (imm_alpha_threshold >= 0.0f ? imm_alpha_threshold : 0.0f,
 				imm_force_opaque_alpha >= 0.0f ? imm_force_opaque_alpha : 0.0f);
 		/* spart_frag reads u_fog_density / u_fog_color (FragParams
-		 * u_ffogv); the loose half below pushes the same globals for
-		 * programs that still declare them loose. */
+		 * u_ffogv). */
 		R_SetFog (r_fog_density, r_fog_color);
 
 		/* salias_frag reads the rest of its per-batch state from FragParams
 		 * and AliasFrag since #450.  Every value comes from an imm_* global
-		 * (u_turb's is the one the loose half below pushes for the world
-		 * programs), and is written unconditionally: the loose copies were
+		 * (u_turb's is the one the world programs take too), and is
+		 * written unconditionally: the loose copies were
 		 * per-program and cached, so at every alias draw the program
 		 * already held exactly imm_*, and a write per batch is what gives a
 		 * global block the same property.  Gated on AliasFrag because only the ten programs
@@ -548,29 +517,41 @@ static void GL_ImmPushBlocks (const glprogram_t *shader, const float *mvp)
 					    imm_alias_material[2]);
 			R_SetAliasLightDirU (imm_alias_lightdir);
 		}
+
+		/* The world programs' whole fragment set (#450 W2): lit water,
+		 * underwater walls, the legacy brush-poly fallback and translucent
+		 * world polys, on gl_shader_world or its OIT twin.  The values the
+		 * loose half of GL_ImmEnd used to push per program -- the alpha
+		 * pair from the same imm_* (with -1 resolved as above), fog,
+		 * overbright gated on r_fullbright as R_SetupFrame gated it, and
+		 * the liquid warp -- plus the frame record, which these programs
+		 * held per program from R_SetupFrame on.  Every batch, because the
+		 * block is global: the DrawTextureChains fast path, a brush entity
+		 * or an alias batch may have drawn since the last one.  The span
+		 * cell rides the frame record, where lit water's R_SetSpanCell
+		 * brackets put it. */
+		if (shader->ub_wfrag >= 0)
+			R_SetWorldFrag (r_fog_density, r_fog_color,
+					imm_alpha_threshold >= 0.0f ? imm_alpha_threshold : 0.0f,
+					imm_force_opaque_alpha >= 0.0f ? imm_force_opaque_alpha : 0.0f,
+					(gl_overbright.integer && !r_fullbright.integer) ? 2.0f : 1.0f,
+					imm_turb[0], imm_turb[1]);
 	}
 
 	R_FlushUniforms ();
 }
 
-/* Force the cache to miss on the next GL_ImmEnd. Call after any
- * external glUseProgram / glUniform / matrix manipulation that
- * GL_ImmEnd doesn't see, or after a vid_restart that invalidates
- * shader handles. */
+/* Force a full re-upload and rebind of every block at the next flush.  Call
+ * after anything GL_ImmEnd cannot see that may have moved the indexed uniform
+ * bindings, or after a vid_restart.  (It also reset GL_ImmEnd's per-program
+ * loose-uniform cache, which went with the last loose world uniform, #450
+ * W2.) */
 void GL_ImmInvalidateState (void)
 {
 	/* The blocks have no per-program state to drop, but they do have a
 	 * binding this cannot see being moved, so re-assert rather than assume.
 	 * A redundant flush is one glBufferData of a few hundred bytes. */
 	R_InvalidateUniforms ();
-
-	imm_cache_shader = NULL;
-	imm_cache_alpha = -2.0f;
-	imm_cache_force_opaque_alpha = -2.0f;
-	imm_cache_turb[0] = imm_cache_turb[1] = -1.0f;
-	imm_cache_fog_density = -1.0f;
-	imm_cache_fog_color[0] = imm_cache_fog_color[1] = imm_cache_fog_color[2] = -1.0f;
-	imm_cache_overbright = -1.0f;
 }
 
 void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
@@ -599,90 +580,15 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 	}
 #endif
 
-	/* activate shader; reset uniform cache when the program changes
-	 * because uniform locations are per-program */
 	R_UseProgram (shader->program);
-	if (shader != imm_cache_shader)
-	{
-		imm_cache_shader = shader;
-		imm_cache_alpha = -2.0f;
-		imm_cache_force_opaque_alpha = -2.0f;
-		/* Uniform state is per-program, so a cached value proves nothing
-		 * about the program we are about to use.  Every other cache here
-		 * is reset for that reason; u_turb was missed, and it stopped
-		 * mattering only because gl_shader_alias was the one program that
-		 * had one.  Lit water gives the world program a u_turb too
-		 * (uhexen2-a5nn.2), and a stale cache would then leave one of the
-		 * two unwarped. */
-		imm_cache_turb[0] = imm_cache_turb[1] = -1.0f;
-		imm_cache_fog_density = -1.0f;
-		imm_cache_fog_color[0] = imm_cache_fog_color[1] = imm_cache_fog_color[2] = -1.0f;
-		imm_cache_overbright = -1.0f;
-	}
 
 	GL_GetMVP(mvp);
 
-	/* Dual path, keyed on whether this program has a block index and never
-	 * on which shader it is.  The world programs take both halves: their
-	 * vertex stage is a file reading VertParams (#450 W1), while their
-	 * fragment stages are still inline in gl_shader.c with loose uniforms,
-	 * which the glUniform* half below keeps feeding. */
+	/* Every program drawn here reads its non-opaque uniforms from blocks
+	 * (#450; the world family's fragment stages since W2), keyed on whether
+	 * the program has a block index and never on which shader it is. */
 	if (shader->ub_vert >= 0 || shader->ub_frag >= 0)
 		GL_ImmPushBlocks(shader, mvp);
-
-	if (imm_alpha_threshold >= 0.0f && shader->u_alpha_threshold >= 0 &&
-	    imm_alpha_threshold != imm_cache_alpha)
-	{
-		glUniform1f_fp(shader->u_alpha_threshold, imm_alpha_threshold);
-		imm_cache_alpha = imm_alpha_threshold;
-	}
-
-	if (imm_force_opaque_alpha >= 0.0f && shader->u_force_opaque_alpha >= 0 &&
-	    imm_force_opaque_alpha != imm_cache_force_opaque_alpha)
-	{
-		glUniform1f_fp(shader->u_force_opaque_alpha, imm_force_opaque_alpha);
-		imm_cache_force_opaque_alpha = imm_force_opaque_alpha;
-	}
-
-	/* uhexen2-9o7u.  Resting amplitude is 0, so with r_water_pixel_warp off
-	 * this fires once per program switch and never again.  Only the world
-	 * programs declare u_turb loose; salias_frag takes it from AliasFrag. */
-	if (shader->u_turb >= 0 &&
-	    (imm_turb[0] != imm_cache_turb[0] || imm_turb[1] != imm_cache_turb[1]))
-	{
-		glUniform2f_fp(shader->u_turb, imm_turb[0], imm_turb[1]);
-		imm_cache_turb[0] = imm_turb[0];
-		imm_cache_turb[1] = imm_turb[1];
-	}
-
-	if (shader->u_fog_density >= 0 && r_fog_density != imm_cache_fog_density)
-	{
-		glUniform1f_fp(shader->u_fog_density, r_fog_density);
-		imm_cache_fog_density = r_fog_density;
-	}
-	if (shader->u_fog_color >= 0 &&
-	    (r_fog_color[0] != imm_cache_fog_color[0] ||
-	     r_fog_color[1] != imm_cache_fog_color[1] ||
-	     r_fog_color[2] != imm_cache_fog_color[2]))
-	{
-		glUniform3f_fp(shader->u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
-		imm_cache_fog_color[0] = r_fog_color[0];
-		imm_cache_fog_color[1] = r_fog_color[1];
-		imm_cache_fog_color[2] = r_fog_color[2];
-	}
-
-	if (shader->u_overbright >= 0)
-	{
-		/* Same gate as R_SetupFrame: r_fullbright already replaces the
-		 * lightmap sample with white, so doubling it blows every surface
-		 * to pure white.  uhexen2-isq7. */
-		float ob = (gl_overbright.integer && !r_fullbright.integer) ? 2.0f : 1.0f;
-		if (ob != imm_cache_overbright)
-		{
-			glUniform1f_fp(shader->u_overbright, ob);
-			imm_cache_overbright = ob;
-		}
-	}
 
 	/* A global glEnable(GL_BLEND) in the translucent draw paths resets the
 	 * per-buffer blend funcs to the global default on some drivers, which

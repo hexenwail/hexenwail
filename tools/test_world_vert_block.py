@@ -14,15 +14,15 @@ Checks the pieces that have to move together:
     (GOLDEN, token-identical to the literal it replaced);
   * every input has VERT_IN equal to its ATTR_* slot in gl_shader.h, with the
     width the imm and world VAOs feed it;
-  * its outputs match sworld_frag's and sworld_frag_opaque's inputs (still C
-    literals) by name, type, interpolation and precision, and their VERT_OUT
-    locations are distinct and 0..n-1;
+  * its outputs match sworld_frag.glsl's and sworld_opaque_frag.glsl's inputs
+    by name, type, interpolation, precision and location (FRAG_IN = VERT_OUT,
+    for SPIR-V), and their VERT_OUT locations are distinct and 0..n-1;
   * the literal is gone, the three world programs compile the file through
-    GLSL_VERT_HEADER with a NULL fragment header (world_oit desktop-only),
-    GL_LoadOITProgramSplit takes the literal splice only for a NULL header,
-    the WebGL smoke still builds both ES world programs, and no glprogram_t
-    field, lookup or C identifier for the old loose u_mvp / u_modelview is
-    left;
+    GLSL_VERT_HEADER with GLSL_WORLD_FRAG_HEADER for their fragment files
+    (world_oit desktop-only), GL_LoadOITProgramSplit has only the header
+    splice, the WebGL smoke still builds both ES world programs, and no
+    glprogram_t field, lookup or C identifier for the old loose u_mvp /
+    u_modelview is left;
   * every path that draws with a world program writes both members and
     flushes before it draws, because a block member is global where the loose
     uniform was this program's own:
@@ -37,7 +37,8 @@ Checks the pieces that have to move together:
     Each setter call and the flush is unconditional within its path (no
     braceless or extra enclosing if/else/loop beyond the ones pinned per
     path, no #if), comes after the matrix fill, and no block writer runs
-    between the flush and any draw it serves.  Every function anywhere in
+    between a draw and the flush nearest before it (DrawDeferred flushes once
+    more per batch, for its fragment set).  Every function anywhere in
     the engine that names a world program and issues a glDraw* is one of
     these, so a new path has to be added here, and two of them (FlushBatch,
     DispatchBrushInstancedPass) are reached only from their pinned callers.
@@ -259,21 +260,30 @@ if not vo:
     errors.append("could not parse sworld_vert.glsl's outputs")
 for q in {x for v in vo.values() for x in v[3]}:
     errors.append(f"sworld_vert.glsl output qualifier {q!r} is not understood by this check")
-for frag in ("sworld_frag", "sworld_frag_opaque"):
-    ft = c_literal_text(frag)
-    if ft is None:
-        if (ROOT / f"engine/shaders/{frag}.glsl").exists():
-            errors.append(f"{frag} became a file; this check must read its FRAG_IN declarations there")
-        else:
-            errors.append(f"cannot find the {frag} literal")
+def locations(text, macro):
+    return {m.group(2): int(m.group(1)) for m in re.finditer(
+        rf"\b{macro}\((\d+)\)\s+(?:\w+\s+)*?(?:in|out)\s+(?:(?:highp|mediump|lowp)\s+)?\w+\s+(\w+)\s*;", text)}
+
+
+vloc = locations(vcode, "VERT_OUT")
+for frag in ("sworld_frag", "sworld_opaque_frag"):
+    fp = ROOT / f"engine/shaders/{frag}.glsl"
+    if not fp.exists():
+        errors.append(f"engine/shaders/{frag}.glsl is missing")
         continue
+    if c_literal_text(frag) is not None or c_literal_text("sworld_frag_opaque") is not None:
+        errors.append(f"a {frag} C literal is back in gl_shader.c beside the file")
+    ft = strip(fp.read_text())
     fi = varyings(ft, "in")
-    fi.pop("a_position", None)
     if not fi:
         errors.append(f"could not parse {frag}'s inputs")
     elif {k: v[:3] for k, v in vo.items()} != {k: v[:3] for k, v in fi.items()}:
         errors.append(f"sworld_vert outputs {sorted((k, v[:3]) for k, v in vo.items())} != {frag} inputs "
                       f"{sorted((k, v[:3]) for k, v in fi.items())} (name, type, interpolation, precision)")
+    floc = locations(ft, "FRAG_IN")
+    if floc != vloc:
+        errors.append(f"{frag}'s FRAG_IN locations {sorted(floc.items())} differ from sworld_vert's VERT_OUT "
+                      f"{sorted(vloc.items())}; Vulkan matches varyings by location")
 locs = [int(x) for x in re.findall(r"VERT_OUT\((\d+)\)", vcode)]
 if sorted(locs) != list(range(len(vo))) or len(re.findall(r"\bout\b", vcode)) != len(locs):
     errors.append(f"every output needs its own VERT_OUT location, 0..{len(vo) - 1}; found {locs}")
@@ -282,9 +292,9 @@ if sorted(locs) != list(range(len(vo))) or len(re.findall(r"\bout\b", vcode)) !=
 if re.search(r"static const char sworld_vert\[\]", gl_shader):
     errors.append("the inline sworld_vert literal is back in gl_shader.c")
 BUILDS = {
-    "world": r'GL_InitProgramSplit\(&gl_shader_world, "world", GLSL_VERT_HEADER, sworld_vert,\s*NULL, sworld_frag\);',
-    "world_opaque": r'GL_InitProgramSplit\(&gl_shader_world_opaque, "world_opaque", GLSL_VERT_HEADER, sworld_vert,\s*NULL, sworld_frag_opaque\);',
-    "world_oit": r'GL_InitOITProgramSplit\(&gl_shader_world_oit, "world", GLSL_VERT_HEADER, sworld_vert,\s*NULL, sworld_frag\);',
+    "world": r'GL_InitProgramSplit\(&gl_shader_world, "world", GLSL_VERT_HEADER, sworld_vert,\s*GLSL_WORLD_FRAG_HEADER, sworld_frag\);',
+    "world_opaque": r'GL_InitProgramSplit\(&gl_shader_world_opaque, "world_opaque", GLSL_VERT_HEADER, sworld_vert,\s*GLSL_WORLD_FRAG_HEADER, sworld_opaque_frag\);',
+    "world_oit": r'GL_InitOITProgramSplit\(&gl_shader_world_oit, "world", GLSL_VERT_HEADER, sworld_vert,\s*GLSL_WORLD_FRAG_HEADER, sworld_frag\);',
 }
 
 
@@ -314,12 +324,13 @@ for name, b in BUILDS.items():
         errors.append(f"{name} is built inside #ifndef USE_GLES; the ES tier needs it")
 if len(re.findall(r"\bsworld_vert\b", gsc)) != 3:
     errors.append(f"sworld_vert is named {len(re.findall(r'sworld_vert', gsc))} times in gl_shader.c code, expected the 3 builds")
-if not re.search(r"fs = frag_header \? GL_CompileOITFragShaderSplit \(frag_header, frag_src\)\s*"
-                 r": GL_CompileOITFragShader \(frag_src\);", gsc):
-    errors.append("GL_LoadOITProgramSplit must splice a NULL-header (literal) fragment the original way")
+if not re.search(r"fs = GL_CompileOITFragShaderSplit \(frag_header, frag_src\);", gsc) \
+        or re.search(r"\bGL_CompileOITFragShader\b", gsc):
+    errors.append("GL_LoadOITProgramSplit must splice every OIT fragment stage with its header (#450 W2: "
+                  "the literal splice had no caller left)")
 smoke = read("scripts/webgl-engine-shader-smoke.mjs")
 for spec in ("['world', 'shader', 'sworld_vert', 'sworld_frag']",
-             "['world_opaque', 'shader', 'sworld_vert', 'sworld_frag_opaque']"):
+             "['world_opaque', 'shader', 'sworld_vert', 'sworld_opaque_frag']"):
     if spec not in smoke:
         errors.append(f"the WebGL smoke no longer builds {spec}; the ES tier's only compile of this file")
 
@@ -350,6 +361,9 @@ DRAW = r"\bglDraw\w*_fp\b|^\s*EMIT_BATCH\("
 WORLD_PROG = r"\bgl_shader_world(?:_opaque|_oit)?\b"
 
 # function -> (file, mvp expr, mv expr, where the pair comes from, allowed enclosing heads)
+# DrawDeferred flushes once more per batch, inside EMIT_BATCH, for its fragment
+# set (#450 W2): FLUSHES gives each path's count, the first being VertParams'.
+FLUSHES = {"DrawTextureChains_DrawDeferred": 2}
 PATHS = {
     "DrawTextureChains_FlushBatch": ("engine/hexen2/gl_rsurf.c", "world_state_mvp", "world_state_mv", "saved", []),
     "DrawTextureChains_DrawDeferred": ("engine/hexen2/gl_rsurf.c", "mvp", "mv", "local", [
@@ -434,10 +448,12 @@ for name, (path, mvp_e, mv_e, source, allowed) in PATHS.items():
     if not draws:
         errors.append(f"{name}: cannot find its draws")
         continue
-    bad = [w for w, p in sets.items() if len(p) != 1] + (["R_FlushUniforms"] if len(flushes) != 1 else [])
+    bad = [w for w, p in sets.items() if len(p) != 1] + \
+        (["R_FlushUniforms"] if len(flushes) != FLUSHES.get(name, 1) else [])
     if bad:
-        errors.append(f"{name} must call R_SetMVP ({mvp_e}), R_SetModelView ({mv_e}) and R_FlushUniforms () "
-                      f"exactly once each before its draws (missing or repeated: {bad})")
+        errors.append(f"{name} must call R_SetMVP ({mvp_e}), R_SetModelView ({mv_e}) once each and "
+                      f"R_FlushUniforms () {FLUSHES.get(name, 1)} time(s) before its draws "
+                      f"(missing or repeated: {bad})")
         continue
     fpos = flushes[0]
     for w, (p,) in sets.items():
@@ -447,14 +463,16 @@ for name, (path, mvp_e, mv_e, source, allowed) in PATHS.items():
     check_unconditional(fn, f"{name}'s R_FlushUniforms", fpos, allowed)
     if draws[0] < fpos:
         errors.append(f"{name} draws before it flushes VertParams")
-    # From the flush to each draw nothing may write a block: the draw would
-    # read whatever that writer left.  For a draw in a loop the stretch is
-    # the text between them, which is every path through the loop body.
+    # From the flush nearest before each draw to the draw nothing may write a
+    # block: the draw would read whatever that writer left.  For a draw in a
+    # loop the stretch is the text between them, which is every path through
+    # the loop body.
     for dp in draws:
         if dp < fpos:
             continue
+        near = max(f for f in flushes if f < dp)
         for w in sorted(BLOCK_WRITERS - {"R_FlushUniforms"}):
-            if re.search(rf"\b{w}\b", d[fpos:dp]):
+            if re.search(rf"\b{w}\b", d[near:dp]):
                 errors.append(f"{name} calls {w} between its VertParams flush and a draw")
     for w in sorted(BLOCK_WRITERS - {"R_SetMVP", "R_SetModelView", "R_FlushUniforms"}):
         hit = re.search(rf"\b{w}\b", d[min(sets["R_SetMVP"][0], sets["R_SetModelView"][0]):fpos])
@@ -1535,7 +1553,9 @@ while moved:
 CACHE_OK = {("engine/h2shared/gl_vbo.c", "GL_ImmEnd", "imm_cache_shader")}
 vbo_c = strip_c(read("engine/h2shared/gl_vbo.c"))
 uses = re.findall(r"[^;{}]*\bimm_cache_shader\b[^;{}]*", vbo_c)
-if sorted(" ".join(u.split()) for u in uses) != sorted([
+# Gone since #450 W2 took the last per-program cache with it; if it comes
+# back it may only be compared.
+if uses and sorted(" ".join(u.split()) for u in uses) != sorted([
         "static const glprogram_t *imm_cache_shader", "imm_cache_shader = NULL",
         "if (shader != imm_cache_shader)", "imm_cache_shader = shader"]):
     errors.append("imm_cache_shader is used for more than GL_ImmEnd's shader-changed compare "
@@ -1585,11 +1605,16 @@ for name in list(PATHS) + ["GL_ImmEnd"]:
         if name == "GL_ImmEnd":
             fl = [m.end() for m in re.finditer(r"\bGL_ImmPushBlocks\s*\([^;]*\)", b)]
         draws = [m.start() for m in re.finditer(GLDRAW, b)]
-        if len(fl) != 1 or not draws:
-            errors.append(f"{fn.where()}: the flow pass expects one flush and its draws ({len(fl)}, {len(draws)})")
+        # Macros are expanded here: DrawDeferred's VertParams flush, and one
+        # in each of its two EMIT_BATCH uses.
+        want = {"DrawTextureChains_DrawDeferred": 3}.get(name, 1)
+        if len(fl) != want or not draws:
+            errors.append(f"{fn.where()}: the flow pass expects {want} flush(es) and draws "
+                          f"({len(fl)}, {len(draws)})")
             continue
         for dp in draws:
-            w = writer_between(name, b[fl[0]:dp]) if dp > fl[0] else None
+            near = max([f for f in fl if f < dp], default=None)
+            w = writer_between(name, b[near:dp]) if near is not None else None
             if w:
                 errors.append(f"{fn.where()} calls {w} between its VertParams flush and a draw")
                 break
@@ -1667,6 +1692,7 @@ if fbf:
     if not re.match(rf"if \(!{FLAG}\)\s*Sys_Error\s*\(", first):
         errors.append(f"DrawTextureChains_FlushBatch must open with `if (!{FLAG}) Sys_Error (...)`: "
                       "without the bind it would draw with another call's matrices")
+
 
 if errors:
     sys.exit("FAIL:\n  " + "\n  ".join(errors))

@@ -11,7 +11,7 @@ in the commit that made the change):
 
   - SpanUV is highp in and out (the ES tier defaults to mediump) and falls
     back to the perspective coordinate when a cell's depth changes 8x;
-  - every world program declares u_spans, the alias program reads it from
+  - the world programs read u_spans from WorldFrag and the alias program from
     AliasFrag (#450), and all route their texture (and the world's lightmap)
     coordinate through SpanUV;
   - R_SpanCell keeps 1997's proportion, 8/320 of the render width, doubled for
@@ -35,9 +35,9 @@ def strip(text):
     return re.sub(r"/\*.*?\*/", " ", re.sub(r"//[^\n]*", " ", text), flags=re.S)
 
 
-shader = read("engine/h2shared/gl_shader.c")
-fn = shader[shader.index("#define GLSL_SPAN_UV_FN"):]
-fn = fn[:fn.index('"}\\n"') + 6]
+# SpanUV's one copy is engine/shaders/span_uv.inc since the world fragment
+# stages became files (#450 W2); it was gl_shader.c's GLSL_SPAN_UV_FN.
+fn = read("engine/shaders/span_uv.inc")
 if "highp vec2 SpanUV(highp vec2 uv, highp float span)" not in fn:
     errors.append("SpanUV must take and return highp (ES defaults to mediump)")
 if "if (min(w0, w1) < 0.125 * max(w0, w1)) return uv;" not in fn:
@@ -45,17 +45,25 @@ if "if (min(w0, w1) < 0.125 * max(w0, w1)) return uv;" not in fn:
 if "dFdx(a)" not in fn or "dFdx(w)" not in fn or "-d0 / span" not in fn:
     errors.append("SpanUV no longer interpolates the screen-linear terms between cell starts")
 
-for name in ("sworld_frag", "sworld_frag_opaque"):
-    start = shader.index(f"static const char {name}[] =")
-    body = shader[start:shader.index("\";\n", start)]
-    for want in ('"uniform float u_spans;', "GLSL_SPAN_UV_FN", "tc = SpanUV(v_texcoord, u_spans);",
+# The world fragment stages are engine/shaders files since #450 W2: u_spans is
+# WorldFrag's u_wfwarp.z, filled from the world frame record, and SpanUV comes
+# from span_uv.inc.
+world_bodies = {}
+for name in ("sworld_frag", "sworld_opaque_frag"):
+    body = read(f"engine/shaders/{name}.glsl")
+    world_bodies[name] = body
+    for want in ('#include "world.inc"', '#include "span_uv.inc"', "tc = SpanUV(v_texcoord, u_spans);",
                  "lmc = SpanUV(v_lmcoord, u_spans);", "highp vec2 lmc", "highp vec2 lmuv = lmc",
-                 '"in highp vec2 v_lmcoord;', "lmc = v_lmcoord + clamp(lmc - v_lmcoord, -lmlim, lmlim);"):
+                 "in highp vec2 v_lmcoord;", "lmc = v_lmcoord + clamp(lmc - v_lmcoord, -lmlim, lmlim);"):
         if want not in body:
-            errors.append(f"{name}: missing {want}")
+            errors.append(f"{name}.glsl: missing {want}")
+if not re.search(r"#define\s+u_spans\s+u_wfwarp\.z\n", read("engine/shaders/world.inc")):
+    errors.append("world.inc: u_spans must be WorldFrag's u_wfwarp.z")
+if not re.search(r"if \(p->ub_wfrag >= 0\)\s*R_SetWorldSpans \(cell\);", read("engine/hexen2/gl_rmain.c")):
+    errors.append("R_SetSpanCell must put the world programs' cell in the world frame record")
 # The alias program's fragment stage is engine/shaders/salias_frag.glsl since
 # #450: u_spans is AliasFrag's u_afwarp.z, and SpanUV comes from span_uv.inc,
-# which tools/test_alias_frag_block.py keeps token-identical to GLSL_SPAN_UV_FN.
+# the same copy the world stages include.
 alias = read("engine/shaders/salias_frag.glsl")
 for want in ('#include "alias.inc"', '#include "span_uv.inc"',
              "if (u_spans > 0.0) uv = SpanUV(v_texcoord, u_spans);", "highp vec2 uv = v_texcoord"):
@@ -100,10 +108,11 @@ for label, text, before, after in (
 # shader reading past it.
 gutter = re.search(r"#define\s+LM_GUTTER\s+(\d+)", read("engine/hexen2/gl_rsurf.c"))
 # Bicubic reaches a whole luxel further than bilinear's half, so 1.0 there.
-lim = re.search(r"highp vec2 lmlim = \(\(u_lightmap_bicubic > 0\.5\) \? ([0-9.]+) : ([0-9.]+)\) / vec2\(textureSize\(u_texture1, 0\)\);", shader)
-if not gutter or not lim or float(lim.group(2)) != int(gutter.group(1)) - 0.5 \
-        or float(lim.group(1)) != int(gutter.group(1)) - 1.0:
-    errors.append("the lightmap clamp must be LM_GUTTER - 0.5 luxels (bilinear), LM_GUTTER - 1 (bicubic)")
+for name, body in world_bodies.items():
+    lim = re.search(r"highp vec2 lmlim = \(\(u_lightmap_bicubic > 0\.5\) \? ([0-9.]+) : ([0-9.]+)\) / vec2\(textureSize\(u_texture1, 0\)\);", body)
+    if not gutter or not lim or float(lim.group(2)) != int(gutter.group(1)) - 0.5 \
+            or float(lim.group(1)) != int(gutter.group(1)) - 1.0:
+        errors.append(f"{name}: the lightmap clamp must be LM_GUTTER - 0.5 luxels (bilinear), LM_GUTTER - 1 (bicubic)")
 # Underwater walls take the world program's own cell: no override there.
 mt = rsurf[rsurf.index("void DrawGLWaterPolyMTexLM ("):]
 mt = mt[:mt.index("\n}\n")]
@@ -124,8 +133,8 @@ if not re.search(r"#ifndef WEBSOFT[^\n]*\n\s*Cvar_SetValue \(\"r_softemu_spans\"
 # across a plane with depth varying along x, and compared with a 1997-style
 # reference: the true (perspective) coordinate at every cell start, linear
 # between them -- what D_DrawSpans8 computed for whole-pixel cells.
-glsl = "".join(re.findall(r'"((?:[^"\\]|\\.)*)"', fn)).replace("\\n", "\n")
-glsl = glsl.replace("highp ", "")
+glsl = fn[fn.index("highp vec2 SpanUV("):]
+glsl = glsl[:glsl.index("\n}\n") + 3].replace("highp ", "")
 CPP = r"""
 #include <cmath>
 #include <cstdio>

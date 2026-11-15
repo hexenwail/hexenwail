@@ -1,32 +1,36 @@
 #!/usr/bin/env python3
-"""No alias-family program regains a loose non-opaque uniform (#450, alias S5).
+"""No alias- or world-family program regains a loose non-opaque uniform (#450,
+alias S5, world W2).
 
 After slices S1-S4 all four alias stages -- salias_vert, salias_frag,
-salias_inst_vert, sskeletal_vert -- read every non-opaque value from a std140
-block (VertParams / FragParams in uniforms.inc, AliasVert / AliasFrag in
-alias.inc), reaching the old loose names through `#define u_x <member>`
-macros.  A glGetUniformLocation on such a name returns -1 on every program, so
-the C plumbing that looked it up, cached it and glUniform*'d it was dead, and
-S5 removed it.  This keeps it removed.
+salias_inst_vert, sskeletal_vert -- and after W1-W2 all three world stages --
+sworld_vert, sworld_frag, sworld_opaque_frag -- read every non-opaque value
+from a std140 block (VertParams / FragParams in uniforms.inc, AliasVert /
+AliasFrag in alias.inc, WorldFrag in world.inc), reaching the old loose names
+through `#define u_x <member>` macros.  A glGetUniformLocation on such a name
+returns -1 on every program, so the C plumbing that looked it up, cached it
+and glUniform*'d it was dead, and S5 and W2 removed it.  This keeps it
+removed.  ("Alias names" below is the historical spelling: the set covers both
+families.)
 
-The alias names are DERIVED: every block macro an alias stage (or a helper
-.inc it pulls in) actually reads, minus every name that some live shader --
-any engine/shaders file, or any string literal in gl_shader.c, both tiers --
-still declares as a loose `uniform`.  Those shared names (u_turb, u_spans,
-u_overbright, ...) are the world programs' and legitimately keep their loose
-path.  u_mvp and u_modelview left that set when sworld_vert, their last loose
-declarer, moved onto VertParams (#450 W1), so they are alias names now too.
-FLOOR pins today's full derived set, so a name cannot leave it silently --
-which is exactly what re-declaring it loose somewhere would do.
+The alias names are DERIVED: every block macro a stage of either family (or a
+helper .inc it pulls in) actually reads, minus every name that some live
+shader -- any engine/shaders file, or any string literal in gl_shader.c, both
+tiers -- still declares as a loose `uniform`.  Since W2 no live shader
+declares any non-opaque loose uniform but the OIT preamble's two mode
+switches, and that is checked outright.  FLOOR pins today's full derived set,
+so a name cannot leave it silently -- which is exactly what re-declaring it
+loose somewhere would do.
 
-What the alias stages compile WITH counts as theirs.  The header chunks
-passed alongside an alias stage (GLSL_VERT_HEADER, GLSL_ALIAS_FRAG_HEADER,
-GLSL_ALIAS_INST_VERT_HEADER, the NOPERSP literal, ... -- resolved from the
+What the stages compile WITH counts as theirs.  The header chunks
+passed alongside a stage (GLSL_VERT_HEADER, GLSL_ALIAS_FRAG_HEADER,
+GLSL_WORLD_FRAG_HEADER, GLSL_ALIAS_INST_VERT_HEADER, the NOPERSP literal, ...
+-- resolved from the
 compile calls, through macros, q_snprintf buffers and parameters) are scanned
 like the stage files: a non-opaque loose uniform in one fails, and nothing
 declared there makes a name "live elsewhere".  The OIT preamble is spliced
-into every OIT fragment stage, the alias family's included; its loose names
-are pinned to OIT_PREAMBLE_LOOSE.
+into every OIT fragment stage, both families' included; its loose names are
+pinned to OIT_PREAMBLE_LOOSE.
 
 Checks, for each derived alias name, over every engine C file:
   * no C identifier spells it -- not a struct field of any program struct,
@@ -38,9 +42,10 @@ And for the alias-family programs themselves:
   * every `uniform` in the stages (includes expanded) and their header chunks
     is a block, an opaque declaration, or a failure -- multi-declarator and
     initialised forms included, and a #define that builds one counts;
-  * a glUniform* through gl_shader_alias* / gl_shader_skeletal*, through a
-    local that was ever assigned one, or through R_AliasProgram() and the
-    like, may target only a stage sampler or an OIT_PREAMBLE_LOOSE name;
+  * a glUniform* through gl_shader_alias* / gl_shader_skeletal* /
+    gl_shader_world*, through a local that was ever assigned one, or through
+    R_AliasProgram() and the like, may target only a stage sampler or an
+    OIT_PREAMBLE_LOOSE name;
   * GL_InitAliasInstProgram looks up only samplers the stages declare, and
     gl_alias_inst_prog_t carries no other location;
   * GL_InitProgramUniforms looks every field up under its own name, as one
@@ -61,11 +66,13 @@ SH = ROOT / "engine/shaders"
 errors = []
 
 ALIAS_STAGES = ("salias_vert.glsl", "salias_frag.glsl",
-                "salias_inst_vert.glsl", "sskeletal_vert.glsl")
+                "salias_inst_vert.glsl", "sskeletal_vert.glsl",
+                # the world family since #450 W2 (its vertex stage since W1)
+                "sworld_vert.glsl", "sworld_frag.glsl", "sworld_opaque_frag.glsl")
 STAGE_SYMS = {s[:-5] for s in ALIAS_STAGES}
-# The .inc files that DECLARE blocks (or the per-backend layout macros).  An
-# alias stage includes them, but the macro list inside is not a read.
-BLOCK_INCS = ("uniforms.inc", "alias.inc", "layout.inc")
+# The .inc files that DECLARE blocks (or the per-backend layout macros).  A
+# stage includes them, but the macro list inside is not a read.
+BLOCK_INCS = ("uniforms.inc", "alias.inc", "world.inc", "layout.inc")
 # Every name the derivation yields today.  If parsing breaks, or a name is
 # re-declared loose somewhere and so drops out of the set, the guard fails
 # rather than passing over a name it no longer protects.  Grows only when an
@@ -75,18 +82,24 @@ FLOOR = {"u_alias_caustics", "u_alias_dlight", "u_alias_lightdir", "u_alias_mate
          "u_pose_base", "u_pose_base2", "u_poseverttype", "u_shadevector",
          "u_skel_blend", "u_soft_params", "u_viewproj",
          # since #450 W1: no live shader declares the matrices loose
-         "u_modelview", "u_mvp"}
+         "u_modelview", "u_mvp",
+         # since #450 W2: the world fragment stages' names, every one of them
+         # a FragParams or WorldFrag member (some shared with the alias stage)
+         "u_material", "u_fog_density", "u_fog_color", "u_alpha_threshold",
+         "u_force_opaque_alpha", "u_caustics", "u_turb", "u_overbright",
+         "u_lightmap_bicubic", "u_lightdebug", "u_softemu", "u_spans", "u_lightview",
+         "u_lightgrid_xy", "u_lightgrid_z", "u_dlight_scale", "u_lmstyles"}
 # Loose-lookup fields with no live declarer that are NOT alias-family names,
 # listed so their deadness is explicit rather than silent.  It held s2d's
 # u_color and the sky programs' u_time / u_skyfog / u_wind / u_wind3 /
 # u_skyrot until their plumbing went too (#450); keep it empty.
 NON_ALIAS_DEAD = set()
 # The non-opaque loose uniforms the OIT preamble splices into every OIT
-# fragment stage -- the four alias-family OIT programs' included.  Mode
-# switches, written by GL_SetOITMode; nothing alias-specific may join them.
+# fragment stage -- the alias and world OIT programs' included.  Mode
+# switches, written by GL_SetOITMode; nothing family-specific may join them.
 OIT_PREAMBLE_LOOSE = {"u_oit_mode", "u_mboit_ms"}
 OPAQUE = re.compile(r"^(?:[iu]?sampler\w*|[iu]?image\w*)$")
-ALIAS_PROG = r"gl_shader_(?:alias|skeletal)\w*"
+ALIAS_PROG = r"gl_shader_(?:alias|skeletal|world)\w*"
 QUALS = r"(?:(?:lowp|mediump|highp|readonly|writeonly|coherent|volatile|restrict)\s+)*"
 
 
@@ -335,7 +348,7 @@ if mentions != stage_compiles or stage_compiles < 10:
     errors.append(f"gl_shader.c names an alias stage {mentions} times but {stage_compiles} are "
                   "recognised compile calls; a stage is compiled where the header scan cannot see")
 for need in ("GLSL_VERT_HEADER", "GLSL_FRAG_HEADER", "GLSL_ALIAS_FRAG_HEADER",
-             "GLSL_ALIAS_INST_VERT_HEADER", "GLSL_LIGHTGRID_CONSTS"):
+             "GLSL_WORLD_FRAG_HEADER", "GLSL_ALIAS_INST_VERT_HEADER", "GLSL_LIGHTGRID_CONSTS"):
     if need not in hdr_macros:
         errors.append(f"the alias header chunks no longer include {need}; the resolution is broken")
 if not any("NOPERSP" in t for t in hdr_texts):
@@ -363,8 +376,16 @@ for f in sorted(SH.iterdir()):
         for kind, typ, name in uniform_decls(strip(f.read_text())):
             if kind == "decl":
                 live_loose.setdefault(name, set()).add(typ)
-if "u_turb" not in live_loose or "u_overbright" not in live_loose:
-    errors.append("cannot see sworld_*'s loose uniforms in gl_shader.c's literals; the scan is broken")
+# The scan must see the loose declarations that are left: every sampler of
+# both families, and the OIT preamble's mode switches.  Those switches are the
+# ONLY non-opaque loose uniforms any live shader declares since #450 W2; a
+# name joining them is a block member that came back loose.
+if not {"u_texture0", "u_lmlayer1", "u_lightgrid", "u_oit_mode"} <= set(live_loose):
+    errors.append("cannot see the live loose declarations (samplers, the OIT preamble); the scan is broken")
+nonopaque = {n for n, ts in live_loose.items() if any(not OPAQUE.match(t) for t in ts)}
+if nonopaque != OIT_PREAMBLE_LOOSE:
+    errors.append(f"live shaders declare non-opaque loose uniforms {sorted(nonopaque)}; only the OIT "
+                  f"preamble's {sorted(OIT_PREAMBLE_LOOSE)} may (#450 W2)")
 if not oit:
     errors.append("cannot find oit_preamble in gl_shader.c")
 elif oit_loose != OIT_PREAMBLE_LOOSE:
@@ -373,7 +394,7 @@ elif oit_loose != OIT_PREAMBLE_LOOSE:
 
 # ---------------------------------------------------------------- alias-family names
 macros = set()
-for inc in ("uniforms.inc", "alias.inc"):
+for inc in ("uniforms.inc", "alias.inc", "world.inc"):
     macros |= set(re.findall(r"^\s*#\s*define\s+(u_\w+)\s", (SH / inc).read_text(), re.M))
 reads = set()
 stage_decls = []
@@ -511,7 +532,7 @@ for stmt in re.findall(r"[^;{}]*\bglGetUniformLocation\w*\s*\([^;]*;", gipu):
     gipu_names.add(m.group(1))
     if m.group(1) not in set(live_loose) | NON_ALIAS_DEAD:
         errors.append(f"GL_InitProgramUniforms looks up {m.group(1)}, which no live shader declares loose")
-if gipu and len(gipu_names) < 30:
+if gipu and len(gipu_names) < 15:
     errors.append(f"GL_InitProgramUniforms: only {len(gipu_names)} lookups seen; the scan is broken")
 inst = body_of(gsc, gsb, r"static qboolean GL_InitAliasInstProgram \([^)]*\)\s*\{") or ""
 if not inst:
