@@ -4631,14 +4631,6 @@ static void R_DrawAliasInstanced (void)
 			 * pass, and this one's vertex colour is a flat white the shader
 			 * would add to a second time.  uhexen2-waum. */
 			R_SetAliasDlight (0.0f);
-			/* Every batch below binds the PV_QUAKE1 pose buffer at 1, and
-			 * an MD3 mesh has no ssbo_pose, so its batches are skipped:
-			 * PV_QUAKE1 is the only right value.  The loose uniform this
-			 * replaced was left at the main pass's LAST batch's type, which
-			 * after an MD3 batch decoded every glow from binding 3 -- unbound
-			 * by then -- instead (#450 S3). */
-			R_SetPoseVertType (PV_QUAKE1);
-
 			/* The fragment blocks, in full, as for the main pass (#450,
 			 * hazard 3): the shadow pass between the two may have drawn
 			 * through GL_ImmEnd, which rewrites FragParams, so nothing
@@ -4684,17 +4676,34 @@ static void R_DrawAliasInstanced (void)
 			{
 				alias_batch_t *batch = &alias_batches[b];
 				alias_gpu_mesh_t *gm;
+				GLuint pose_ssbo;
 
 				if (!batch->fb_tex)
 					continue;
 
 				gm = GL_GetAliasGPUMesh(batch->hdr);
-				if (!gm || !gm->valid || !gm->ssbo_pose)
+				if (!gm || !gm->valid)
+					continue;
+
+				/* GL_MakeAliasModelGPU builds one pose buffer per mesh,
+				 * ssbo_pose or ssbo_pose_md3, so the buffer, its binding
+				 * and the pose type are all this batch's, exactly as in
+				 * the main pass.  Testing ssbo_pose alone here skipped
+				 * every MD3 batch, and a pose type fixed for the whole
+				 * loop would decode one format's buffer as the other's.
+				 * GitHub #485. */
+				if (gm->poseverttype == PV_MD3)
+					pose_ssbo = gm->ssbo_pose_md3;
+				else
+					pose_ssbo = gm->ssbo_pose;
+				if (!pose_ssbo)
 					continue;
 
 				glActiveTexture_fp(GL_TEXTURE0);
 				GL_Bind(batch->fb_tex);
-				GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, gm->ssbo_pose);
+				GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER,
+						  gm->poseverttype == PV_MD3 ? 3 : 1, pose_ssbo);
+				R_SetPoseVertType (gm->poseverttype);
 				R_SetInstBase (batch->first);	/* hazard 4 */
 				glBindVertexArray_fp(gm->vao);
 				R_FlushUniforms ();
@@ -4717,6 +4726,7 @@ static void R_DrawAliasInstanced (void)
 			GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, 0);
 			GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, 0);
 			GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, 0);
+			GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, 0);
 		}
 	}
 }

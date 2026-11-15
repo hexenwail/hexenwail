@@ -26,8 +26,12 @@ Checks the pieces that have to move together:
     program binds AliasVert after the memset that would clear it;
   * R_DrawAliasInstanced writes every VertParams member the stage reads before
     each pass's first flush, sets the instance base PER BATCH and flushes it
-    before that batch's draw in BOTH passes (hazard 4), writes PV_QUAKE1 for
-    the fullbright pass, and makes no loose glUniform write at all;
+    before that batch's draw in BOTH passes (hazard 4), and makes no loose
+    glUniform write at all;
+  * both passes draw an MD3 batch (GitHub #485): the pose type is the batch's
+    gm->poseverttype, set before the flush; a PV_MD3 batch draws from
+    ssbo_pose_md3 at binding 3; no batch is skipped on ssbo_pose alone, which
+    an MD3 mesh never has; and the fullbright pass unbinds binding 3 after;
   * R_LightCluster_BindForAlias no longer writes a per-program u_lightview.
 The varying interface between this stage and salias_frag.glsl is
 tools/test_alias_vert_block.py's.
@@ -294,7 +298,8 @@ else:
                             [r"R_SetPoseVertType \(gm->poseverttype\);"]),
               "fullbright pass": (draw[fbuse:fbloop] if fbuse >= 0 else "", loop_body(fbloop),
                                   [r"R_SetViewProj \(alias_inst_view_proj\);", r"R_SetEyePos \(r_origin\);",
-                                   r"R_SetAliasDlight \(0\.0f\);", r"R_SetPoseVertType \(PV_QUAKE1\);"], [])}
+                                   r"R_SetAliasDlight \(0\.0f\);"],
+                                  [r"R_SetPoseVertType \(gm->poseverttype\);"])}
     for label, (pre, loop, pre_wants, loop_wants) in passes.items():
         if not loop:
             errors.append(f"R_DrawAliasInstanced {label}: cannot parse the batch loop body")
@@ -328,6 +333,27 @@ else:
         if re.search(r"glDrawElementsInstanced_fp", loop) and \
                 loop.count("glDrawElementsInstanced_fp") != 1:
             errors.append(f"R_DrawAliasInstanced {label}: expected one instanced draw per batch")
+        # GitHub #485: GL_MakeAliasModelGPU builds ssbo_pose OR ssbo_pose_md3,
+        # never both, so a batch is drawn from whichever its format has, at
+        # that format's binding (1 for PV_QUAKE1, 3 for PV_MD3), under that
+        # format's pose type -- in both passes.  A skip on ssbo_pose alone
+        # silently dropped every MD3 glow.
+        if re.search(r"!\s*gm->ssbo_pose\b(?!_md3)", loop):
+            errors.append(f"R_DrawAliasInstanced {label} (#485): skips a batch on !gm->ssbo_pose, "
+                          "which an MD3 mesh never has; test the pose buffer of the batch's format")
+        if not re.search(r"gm->poseverttype == PV_MD3[^;]*?\bgm->ssbo_pose_md3\b", loop, re.S):
+            errors.append(f"R_DrawAliasInstanced {label} (#485): a PV_MD3 batch must draw from gm->ssbo_pose_md3")
+        if not re.search(r"GL_BindBufferBase\s*\(\s*GL_SHADER_STORAGE_BUFFER\s*,\s*"
+                         r"(?:3\b|gm->poseverttype == PV_MD3 \? 3 : 1\b)", loop):
+            errors.append(f"R_DrawAliasInstanced {label} (#485): the MD3 pose buffer must be bound at binding 3, "
+                          "where salias_inst_vert's MD3PoseBuffer reads it")
+        if re.search(r"R_SetPoseVertType \(PV_", loop):
+            errors.append(f"R_DrawAliasInstanced {label} (#485): the pose type is the batch's "
+                          "(gm->poseverttype), never a fixed PV_* constant")
+    # Binding 3 goes back to 0 after each pass that may have bound it.
+    tail = draw[fbloop:]
+    if not re.search(r"GL_BindBufferBase\s*\(\s*GL_SHADER_STORAGE_BUFFER\s*,\s*3\s*,\s*0\s*\)", tail):
+        errors.append("R_DrawAliasInstanced fullbright pass (#485): must unbind binding 3 once its batches are drawn")
 
 bfa = strip(body_of(lc, r"void R_LightCluster_BindForAlias \(void\)\s*\{") or "")
 if re.search(r"glUniform\w*_fp|LC_SetAliasInstUniforms|u_lightview", bfa) or "LC_SetAliasInstUniforms" in strip(lc):
