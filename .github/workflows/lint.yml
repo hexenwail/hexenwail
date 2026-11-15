@@ -300,6 +300,11 @@ jobs:
       - name: gfx.wad off the secondary zone
         run: python3 tools/test_gfx_malloc.py
 
+      # The progs known-string tables grow with realloc and zero the new
+      # slots; Z_Realloc wrote its split header into uncopied slots (GitHub #488).
+      - name: Known-string tables off the zone
+        run: python3 tools/test_knownstrings_heap.py
+
       # 320x200 is a valid mode again, and the main menu fits (GitHub #135).
       - name: Video mode floor 320x200
         run: python3 tools/test_vid_floor_200.py

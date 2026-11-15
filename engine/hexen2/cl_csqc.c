@@ -323,8 +323,8 @@ void CL_ShutdownCSProgs (void)
 		CSQC_SwitchToServer ();
 	}
 
-	if (csqc_state.knownstrings)
-		Z_Free ((void *)csqc_state.knownstrings);
+	/* PR_AllocStringSlots grows it with realloc (GitHub #488) */
+	free ((void *)csqc_state.knownstrings);
 
 	memset (&csqc_state, 0, sizeof(csqc_state));
 	csqc_fn_init = csqc_fn_shutdown = csqc_fn_drawhud = csqc_fn_drawscores = 0;

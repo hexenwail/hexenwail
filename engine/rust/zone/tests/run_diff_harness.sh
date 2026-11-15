@@ -51,7 +51,6 @@ RENAME=(
 	-DMemory_Init=c_Memory_Init
 	-DZ_Free=c_Z_Free
 	-DZ_Malloc=c_Z_Malloc
-	-DZ_Realloc=c_Z_Realloc
 	-DZ_Strdup=c_Z_Strdup
 	-DHunk_Alloc=c_Hunk_Alloc
 	-DHunk_AllocName=c_Hunk_AllocName

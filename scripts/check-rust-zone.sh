@@ -43,7 +43,7 @@ mkdir -p "$work"
 # The exported surface, and the struct-layout accessors the harness and
 # engine/rust/tests/abi_layout.c call.
 symbols=(
-	Memory_Init Z_Free Z_Malloc Z_Realloc Z_Strdup
+	Memory_Init Z_Free Z_Malloc Z_Strdup
 	Hunk_Alloc Hunk_AllocName Hunk_HighAllocName Hunk_Strdup Hunk_TempAlloc
 	Hunk_LowMark Hunk_FreeToLowMark Hunk_HighMark Hunk_FreeToHighMark Hunk_Check
 	Cache_Flush Cache_Check Cache_Free Cache_Alloc Cache_Report
