@@ -988,7 +988,6 @@ void R_DrawWorldCulled (void)
 	extern float	r_fog_density;
 	extern float	r_fog_color[3];
 	extern GLuint	lm_atlas_texture;
-	extern entity_t	r_worldentity;
 
 	if (!cull_initialized || !cull_dst_ibo || cull_total_indices <= 0)
 		return;

@@ -24,8 +24,8 @@ Checks the pieces that have to move together:
   * the literal, GL_SpliceDefines and the GLSL_ALIAS_DLIGHT_VS_* splices are
     gone, all four skeletal programs compile the file through
     GLSL_VERT_HEADER (NOPERSP appended for the two affine ones) inside a
-    desktop-only region, glprogram_t carries ub_avert and none of the six
-    skeletal-only locations, and GL_InitProgramUniforms binds AliasVert;
+    desktop-only region, glprogram_t carries none of the six skeletal-only
+    locations, and GL_InitProgramUniforms binds AliasVert;
   * GL_DrawAliasSkeletal makes no loose glUniform write, writes every member
     the stage reads (each through its setter, from the values the loose
     writes used, each matrix filled by its own getter) after the pose clamp
@@ -425,8 +425,6 @@ if len(re.findall(r"\bsskeletal_vert\b", gsc)) != 4:
 
 gp = re.search(r"typedef struct glprogram_s \{(.*?)\} glprogram_t;", shader_h, re.S)
 gpf = set(re.findall(r"GLint\s+(\w+)", strip(gp.group(1)))) if gp else set()
-if "ub_avert" not in gpf:
-    errors.append("glprogram_t needs ub_avert")
 dead = gpf & {"u_pose_base", "u_pose_base2", "u_skel_blend", "u_shadevector", "u_lightcolor", "u_fullbright"}
 if dead:
     errors.append(f"glprogram_t still carries skeletal locations that are -1 now: {sorted(dead)}")
@@ -434,8 +432,8 @@ for n in ("u_pose_base", "u_pose_base2", "u_skel_blend", "u_shadevector", "u_lig
     if re.search(rf'glGetUniformLocation_fp\([^)]*"{n}"\)', gsc):
         errors.append(f"gl_shader.c still looks up the loose {n}")
 gipu = strip(body_of(gl_shader, r"static void GL_InitProgramUniforms \(glprogram_t \*p\)\s*\{") or "")
-if "p->ub_avert = R_BindAliasVertBlock(p->program);" not in gipu:
-    errors.append("GL_InitProgramUniforms must bind AliasVert (p->ub_avert), or the skeletal programs read block 0")
+if "R_BindAliasVertBlock(p->program);" not in gipu:
+    errors.append("GL_InitProgramUniforms must bind AliasVert, or the skeletal programs read block 0")
 
 # ------------------------------------------------------------ the draw
 sig = r"static void GL_DrawAliasSkeletal \(entity_t \*e, aliashdr_t \*paliashdr,\s*int posenum, int prevposenum, float lerpfrac\)\s*\{"

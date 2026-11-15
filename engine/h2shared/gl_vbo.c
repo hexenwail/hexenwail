@@ -406,11 +406,6 @@ void GL_ImmVertex2f (float x, float y)
  * draws with reads its per-batch values from blocks, whose shadow in
  * gl_uniforms.c already skips an upload when nothing changed. */
 
-void GL_ImmResetState (void)
-{
-	/* no-op — kept for API compat */
-}
-
 /*
 ===============
 GL_ImmPushBlocks

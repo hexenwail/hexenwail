@@ -258,15 +258,13 @@ if not hdr or [l.strip().rstrip("\\").strip() for l in hdr.group(1).splitlines()
 inst = body_of(gl_shader, r"static qboolean GL_InitAliasInstProgram \([^)]*\)\s*\{") or ""
 for w in (r'q_snprintf \(vert_header, sizeof\(vert_header\), "%s%s",\s*GLSL_ALIAS_INST_VERT_HEADER, defines \? defines : ""\);',
           r"vs = GL_CompileShaderSplit\(GL_VERTEX_SHADER, vert_header, salias_inst_vert\);",
-          r"p->ub_avert = R_BindAliasVertBlock\(prog\);"):
+          r"R_BindAliasVertBlock\(prog\);"):
     if not re.search(w, inst):
         errors.append(f"GL_InitAliasInstProgram: missing {w[:70]}")
 if "memset(p, 0" not in inst or "R_BindAliasVertBlock" in inst[:inst.find("memset(p, 0")]:
     errors.append("GL_InitAliasInstProgram must bind AliasVert after the memset that clears p")
 st = re.search(r"typedef struct \{(.*?)\} gl_alias_inst_prog_t;", shader_h, re.S)
 stf = set(re.findall(r"GLint\s+(\w+);", strip(st.group(1)))) if st else set()
-if "ub_avert" not in stf:
-    errors.append("gl_alias_inst_prog_t needs ub_avert")
 dead = stf & {"u_viewproj", "u_inst_base", "u_eyepos", "u_poseverttype", "u_alias_dlight", "u_lightview"}
 if dead:
     errors.append(f"gl_alias_inst_prog_t still carries vertex-stage locations that are -1 now: {sorted(dead)}")

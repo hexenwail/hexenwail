@@ -13,7 +13,6 @@
 
 /* Shader compilation helpers */
 GLuint	GL_LinkProgram (GLuint vert, GLuint frag);
-GLuint	GL_LoadProgram (const char *vert_src, const char *frag_src);
 /* Compute program from a two-part source: `header` carries the #version line
  * and any #defines, `body` the shader itself, so one body can be compiled as
  * several variants without splicing strings.  `name` only labels the log.
@@ -61,7 +60,6 @@ typedef struct glprogram_s {
 	GLint	ub_vert;	    /* VertParams, at UBO_BINDING_VERT */
 	GLint	ub_frag;	    /* FragParams, at UBO_BINDING_FRAG */
 	GLint	ub_afrag;	    /* AliasFrag, at UBO_BINDING_ALIAS_FRAG: the ten programs linking salias_frag (#450) */
-	GLint	ub_avert;	    /* AliasVert, at UBO_BINDING_ALIAS_VERT: the four skeletal programs (#450 S4) */
 	GLint	ub_wfrag;	    /* WorldFrag, at UBO_BINDING_WORLD_FRAG: the three world programs (#450 W2) */
 	GLint	ub_ofrag;	    /* OitFrag, at UBO_BINDING_OIT_FRAG: the six OIT twins (#450 W3) */
 } glprogram_t;
@@ -78,11 +76,8 @@ typedef struct glprogram_s {
 /* Extended program for GPU particle SSBO rendering */
 typedef struct {
 	glprogram_t base;       /* program, texture location and block indices */
-	GLint   u_pup;          /* r_pup billboard-up vector */
-	GLint   u_pright;       /* r_pright billboard-right vector */
-	GLint   u_vpn;          /* view forward vector (for distance-based scale) */
-	GLint   u_origin;       /* camera origin (for distance-based scale) */
-	GLint   u_ctime;        /* current cl.time (for dead particle culling) */
+	/* No basis / camera / time locations: spart_gpu_vert reads them from
+	 * VertParams (R_SetParticleBasis). */
 } gl_particle_gpu_prog_t;
 
 extern glprogram_t	gl_shader_world;	/* textured + lightmap, fog (cutout: has discard) */
@@ -125,12 +120,12 @@ typedef struct {
 	 * pose vertex type and dlight scale into VertParams, and
 	 * R_LightCluster_BindForAlias its world -> eye matrix into AliasVert. */
 	GLint	u_lightgrid;	/* usampler3D, texture unit LIGHT_GRID_TMU */
-	/* Block indices, as on glprogram_t: VertParams and AliasVert from the
-	 * vertex stage, FragParams and AliasFrag from salias_frag. */
+	/* Block indices, as on glprogram_t: VertParams from the vertex stage,
+	 * FragParams and AliasFrag from salias_frag.  AliasVert is bound but its
+	 * index is not kept, as on glprogram_t. */
 	GLint	ub_vert;
 	GLint	ub_frag;
 	GLint	ub_afrag;
-	GLint	ub_avert;	/* AliasVert, at UBO_BINDING_ALIAS_VERT (#450 S3) */
 } gl_alias_inst_prog_t;
 
 extern gl_alias_inst_prog_t gl_shader_alias_inst;

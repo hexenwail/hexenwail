@@ -1730,15 +1730,14 @@ if fbf:
 #     last flush leaves the GPU copy stale.
 # GL_ImmEnd is followed into GL_ImmPushBlocks with the program assumed to be a
 # world one -- its VertParams, FragParams and WorldFrag indices >= 0, AliasFrag
-# and AliasVert -1 -- which tools/test_world_frag_block.py pins on the build
-# side.
+# -1 -- which tools/test_world_frag_block.py pins on the build side.
 SHADOW = {"vertparams": "r_vertparams_t", "fragparams": "r_fragparams_t", "worldfrag": "r_worldfrag_t",
           "aliasfrag": "r_aliasfrag_t", "aliasvert": "r_aliasvert_t"}
 BLOCK_OF = {"VertParams": ("uniforms.inc", "vertparams"), "FragParams": ("uniforms.inc", "fragparams"),
             "WorldFrag": ("world.inc", "worldfrag")}
 GOOD = {"R_SetWorldFrag", "R_SetMVP", "R_SetModelView"}
 INLINE = {"GL_ImmPushBlocks"}
-WORLD_UB = {"ub_vert": True, "ub_frag": True, "ub_wfrag": True, "ub_afrag": False, "ub_avert": False}
+WORLD_UB = {"ub_vert": True, "ub_frag": True, "ub_wfrag": True, "ub_afrag": False}
 SWZ = {"x": 0, "y": 1, "z": 2, "w": 3, "r": 0, "g": 1, "b": 2, "a": 3}
 uh_code = strip(uh)
 CFIELDS = {}

@@ -2947,7 +2947,6 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 	brush_render_state_t render_state;
 
 	R_ResetTextureBindings ();
-	GL_ImmResetState();
 	/* uhexen2-view-dep: guarantee GL_BLEND is disabled on entry. Different
 	 * world surfaces leave GL_BLEND in different states depending on what's
 	 * visible from the current angle. Without this reset, brush entities

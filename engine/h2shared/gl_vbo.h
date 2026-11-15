@@ -25,7 +25,6 @@
  */
 
 int	GL_ImmCount (void);
-void	GL_ImmResetState (void);
 void	GL_ImmInvalidateState (void);	/* drop cached uniform state (after vid_restart, etc) */
 void	GL_ImmBegin (void);
 void	GL_ImmVertex3f (float x, float y, float z);

@@ -3399,10 +3399,8 @@ extern void		R_MarkLights (dlight_t *light, int lnum, mnode_t *node);
 extern int		c_brush_polys;
 extern GLuint		world_vao;
 extern GLuint		world_ibo;
-extern int		world_num_indices;
 extern GLuint		lm_atlas_texture;
 extern qboolean		lm_atlas_enabled;
-extern int		lightmap_bytes;
 /* No LM_BLOCK_WIDTH/HEIGHT or lightmaps[] mirror here: both were unused
  * copies of gl_rsurf.c internals, and the 128 they hardcoded silently went
  * stale when the page size changed.  Anything needing page geometry should
@@ -6284,8 +6282,6 @@ static void R_RenderScene (void)
 	R_SetFrustum ();
 
 	R_SetupGL ();
-
-	GL_ImmResetState ();	/* reset cached GL state for new frame */
 
 	Fog_SetupFrame ();
 

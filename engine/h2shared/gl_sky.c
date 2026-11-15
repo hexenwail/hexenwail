@@ -33,7 +33,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // Don't include gl_texmgr.h because GL_Bind macro in glquake.h conflicts
 // Just declare what we need from it
 extern gltexture_t *notexture;
-extern gltexture_t *nulltexture;
 
 // Source format enum from gl_texmgr.h
 enum srcformat { SRC_INDEXED, SRC_LIGHTMAP, SRC_RGBA, SRC_EXTERNAL };
@@ -109,7 +108,6 @@ gltexture_t	*solidskytexture, *alphaskytexture;
  * distance and is overwritten per level by protocol (gl_rmisc.c).  This one is
  * the frustum.  uhexen2-li13. */
 cvar_t gl_farclip = {"gl_farclip", "16384", CVAR_ARCHIVE};
-extern cvar_t r_skyalpha; /* defined in gl_rmain.c */
 cvar_t r_fastsky = {"r_fastsky", "0", CVAR_ARCHIVE};	/* archived, as in Ironwail */
 cvar_t r_sky_quality = {"r_sky_quality", "12", CVAR_NONE};
 cvar_t r_skyfog = {"r_skyfog", "0.5", CVAR_NONE};

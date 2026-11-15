@@ -276,7 +276,7 @@ static void GL_InitOITProgramSplit (glprogram_t *p, const char *name,
 #endif	/* !USE_GLES */
 
 
-/* GL_LoadProgram where each stage is a (header, body) pair; see
+/* Compile and link a program where each stage is a (header, body) pair; see
  * GL_CompileShaderSplit for why the header is kept separate. */
 static GLuint GL_LoadProgramSplit (const char *vert_header, const char *vert_src,
 				   const char *frag_header, const char *frag_src)
@@ -300,11 +300,6 @@ GLuint GL_LoadProgramHeaders (const char *vert_header, const char *vert_src,
 			      const char *frag_header, const char *frag_src)
 {
 	return GL_LoadProgramSplit (vert_header, vert_src, frag_header, frag_src);
-}
-
-GLuint GL_LoadProgram (const char *vert_src, const char *frag_src)
-{
-	return GL_LoadProgramSplit (NULL, vert_src, NULL, frag_src);
 }
 
 /* ------------------------------------------------------------------ */
@@ -339,10 +334,11 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 	 * link salias_frag, which is what GL_ImmEnd and R_SetSpanCell key their
 	 * AliasFrag writes on. */
 	p->ub_afrag = R_BindAliasFragBlock(p->program);
-	/* AliasVert: >= 0 on the four skeletal programs, whose vertex stage reads
-	 * its lighting from it (#450 S4).  The instanced pair are linked by
-	 * GL_InitAliasInstProgram and bind it there. */
-	p->ub_avert = R_BindAliasVertBlock(p->program);
+	/* AliasVert: present on the four skeletal programs, whose vertex stage
+	 * reads its lighting from it (#450 S4).  Only the binding matters -- no
+	 * draw keys on the index, so it is not kept.  The instanced pair are
+	 * linked by GL_InitAliasInstProgram and bind it there. */
+	R_BindAliasVertBlock(p->program);
 	/* WorldFrag: >= 0 on exactly the three world programs (#450 W2), which is
 	 * what GL_ImmPushBlocks and R_SetSpanCell key their world writes on. */
 	p->ub_wfrag = R_BindWorldFragBlock(p->program);
@@ -560,13 +556,6 @@ static qboolean GL_InitParticleGPUProgram (gl_particle_gpu_prog_t *p)
 	}
 	GL_InitProgramUniforms(&p->base);
 
-	/* Look up extra uniforms */
-	p->u_pup    = glGetUniformLocation_fp(p->base.program, "u_pup");
-	p->u_pright = glGetUniformLocation_fp(p->base.program, "u_pright");
-	p->u_vpn    = glGetUniformLocation_fp(p->base.program, "u_vpn");
-	p->u_origin = glGetUniformLocation_fp(p->base.program, "u_origin");
-	p->u_ctime  = glGetUniformLocation_fp(p->base.program, "u_ctime");
-
 	/* Bind texture unit defaults */
 	R_UseProgram (p->base.program);
 	if (p->base.u_texture0 >= 0) glUniform1i_fp(p->base.u_texture0, 0);
@@ -661,7 +650,7 @@ static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p, const char *na
 	 * four blocks would all sit at binding 0 -- Hi-Z's HizParams. */
 	R_BindProgramBlocks(prog, &p->ub_vert, &p->ub_frag);
 	p->ub_afrag = R_BindAliasFragBlock(prog);
-	p->ub_avert = R_BindAliasVertBlock(prog);
+	R_BindAliasVertBlock(prog);
 
 	/* Bind skin texture to unit 0 */
 	R_UseProgram (prog);
