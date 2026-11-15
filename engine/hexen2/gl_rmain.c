@@ -3655,7 +3655,7 @@ void R_CollectBrushInstances (void)
  * cross-shader z-fight, no polygon-offset backstop needed. */
 #ifndef USE_GLES
 static void R_DispatchBrushInstancedPass (
-	const world_surf_key_t *keys, int num_keys, float alpha_threshold, float overbright)
+	const world_surf_key_t *keys, int num_keys, float alpha_threshold)
 {
 	/* Draws with whichever world program the caller bound; since #450 W1
 	 * nothing here is per-program, so the program is not a parameter.  The
@@ -3667,12 +3667,12 @@ static void R_DispatchBrushInstancedPass (
 	{
 		GLuint inst = keys[i].instance;
 		/* The fragment set (#450 W2) -- the fog, alpha threshold and forced
-		 * opaque alpha the caller used to upload by hand, and the overbright
-		 * each pass's program was left holding -- and sworld_vert's pair from
+		 * opaque alpha the caller used to upload by hand, and the one world
+		 * overbright (R_WorldOverbright, #489) -- and sworld_vert's pair from
 		 * VertParams (W1), once per instance, before its draws; the
 		 * texture binds between here and them write no block. */
 		R_SetWorldFrag (r_fog_density, r_fog_color, alpha_threshold, 1.0f,
-				overbright, 0.0f, 0.0f);
+				R_WorldOverbright (), 0.0f, 0.0f);
 		R_SetMVP (world_instances[inst].mvp);
 		R_SetModelView (world_instances[inst].mv);
 		R_FlushUniforms ();
@@ -3782,11 +3782,7 @@ void R_DrawBrushInstanced (void)
 	if (num_world_surf_keys > 0)
 	{
 		R_UseProgram (prog_opaque->program);
-		/* Overbright: this pass never wrote it; the opaque program held the
-		 * ungated value the world draw before it (R_DrawWorldCulled or the
-		 * fast path) left. */
-		R_DispatchBrushInstancedPass(world_surf_keys, num_world_surf_keys, 0.01f,
-					     gl_overbright.integer ? 2.0f : 1.0f);
+		R_DispatchBrushInstancedPass(world_surf_keys, num_world_surf_keys, 0.01f);
 	}
 
 	/* Fence pass: cutout program (has discard), threshold 0.666, optional
@@ -3798,12 +3794,7 @@ void R_DrawBrushInstanced (void)
 		R_UseProgram (prog_cutout->program);
 		if (r_alphatocoverage.integer)
 			R_SetAlphaToCoverage (true);
-		/* The cutout program it never wrote overbright on held R_SetupFrame's
-		 * gated value unless a world fence batch ran first that frame; the
-		 * gated one is uhexen2-isq7's intent, so r_fullbright does not
-		 * blow these fences out. */
-		R_DispatchBrushInstancedPass(world_surf_keys_fence, num_world_surf_keys_fence, 0.666f,
-					     (gl_overbright.integer && !r_fullbright.integer) ? 2.0f : 1.0f);
+		R_DispatchBrushInstancedPass(world_surf_keys_fence, num_world_surf_keys_fence, 0.666f);
 		if (r_alphatocoverage.integer)
 			R_SetAlphaToCoverage (false);
 	}
@@ -6079,8 +6070,8 @@ static void R_SetupFrame (void)
 	 *   span cell   the 1997 span cell (#176), always written, so turning
 	 *               the cvar off reaches the next frame; lit water brackets
 	 *               its own (R_SetSpanCell).
-	 * Overbright is not here: each world draw path passes its own, as it
-	 * uploaded its own (see r_worldfrag_t). */
+	 * Overbright is not here: each world draw path passes it per draw,
+	 * the one R_WorldOverbright value (see r_worldfrag_t). */
 	{
 		float	mat[3], se[4];
 

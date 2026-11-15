@@ -422,19 +422,21 @@ for fn, n in CALLS.items():
         errors.append(f"{fn} is called {got} times outside gl_uniforms.c, expected {n}")
 
 # Per path: the values it used to upload by hand.  (fog, rgb, alpha, force, overbright, turb amp, turb time)
-UNGATED = r"gl_overbright\.integer \? 2\.0f : 1\.0f"
+# The overbright is the one exception: every path passes R_WorldOverbright, not
+# the gated value two of them uploaded and the ungated one the rest did, or
+# r_fullbright draws lit water and fences at half the batched world (GitHub #489).
+OB = r"R_WorldOverbright \(\)"
 ARGS = {
     "GL_ImmPushBlocks": (vbo, r"if \(shader->ub_wfrag >= 0\)\s*R_SetWorldFrag \(r_fog_density, r_fog_color,\s*"
                               r"imm_alpha_threshold >= 0\.0f \? imm_alpha_threshold : 0\.0f,\s*"
                               r"imm_force_opaque_alpha >= 0\.0f \? imm_force_opaque_alpha : 0\.0f,\s*"
-                              r"\(gl_overbright\.integer && !r_fullbright\.integer\) \? 2\.0f : 1\.0f,\s*"
-                              r"imm_turb\[0\], imm_turb\[1\]\);"),
+                              rf"{OB},\s*imm_turb\[0\], imm_turb\[1\]\);"),
     "DrawTextureChains_FlushBatch": (rsurf, rf"R_SetWorldFrag \(world_state_fog_density, world_state_fog_color, 0\.01f, "
-                                            rf"1\.0f,\s*{UNGATED}, 0\.0f, 0\.0f\);"),
-    "R_DrawBrushModel": (rsurf, rf"R_SetWorldFrag \(r_fog_density, r_fog_color, 0\.01f, 1\.0f,\s*{UNGATED}, 0\.0f, 0\.0f\);"),
-    "R_DispatchBrushInstancedPass": (rmain, r"R_SetWorldFrag \(r_fog_density, r_fog_color, alpha_threshold, 1\.0f,\s*"
-                                            r"overbright, 0\.0f, 0\.0f\);"),
-    "R_DrawWorldCulled": (wcull, rf"R_SetWorldFrag \(r_fog_density, r_fog_color, 0\.01f, 1\.0f,\s*{UNGATED}, 0\.0f, 0\.0f\);"),
+                                            rf"1\.0f,\s*{OB}, 0\.0f, 0\.0f\);"),
+    "R_DrawBrushModel": (rsurf, rf"R_SetWorldFrag \(r_fog_density, r_fog_color, 0\.01f, 1\.0f,\s*{OB}, 0\.0f, 0\.0f\);"),
+    "R_DispatchBrushInstancedPass": (rmain, rf"R_SetWorldFrag \(r_fog_density, r_fog_color, alpha_threshold, 1\.0f,\s*"
+                                            rf"{OB}, 0\.0f, 0\.0f\);"),
+    "R_DrawWorldCulled": (wcull, rf"R_SetWorldFrag \(r_fog_density, r_fog_color, 0\.01f, 1\.0f,\s*{OB}, 0\.0f, 0\.0f\);"),
 }
 for fn, (text, want) in ARGS.items():
     b = body_of(text, rf"\b{fn} \([^;{{]*\)\s*\{{") or ""
@@ -443,20 +445,34 @@ for fn, (text, want) in ARGS.items():
 dd = body_of(rsurf, r"static void DrawTextureChains_DrawDeferred \([^;{]*\)\s*\{") or ""
 BS = r"(?:\s*\\)*\s*"     # whitespace, and the macro's line continuations
 if not re.search(rf"#define EMIT_BATCH\(BUF, N, ALPHA_T, A2C_ON\) do \{{{BS}if \(\(N\) <= 0\) break;{BS}"
-                 rf"R_SetWorldFrag \(r_fog_density, r_fog_color, \(ALPHA_T\), 1\.0f,{BS}{UNGATED}, 0\.0f, 0\.0f\);{BS}"
+                 rf"R_SetWorldFrag \(r_fog_density, r_fog_color, \(ALPHA_T\), 1\.0f,{BS}{OB}, 0\.0f, 0\.0f\);{BS}"
                  r"R_FlushUniforms \(\);", dd) \
         or not re.search(r"EMIT_BATCH\(fence_buf, fence_n, 0\.666f, r_alphatocoverage\.integer\);\s*"
                          r"EMIT_BATCH\(water_buf, water_n, 0\.01f,\s*false\);", dd):
     errors.append("DrawDeferred's EMIT_BATCH must write the fragment set with its own threshold (0.666 fences, "
                   "0.01 underwater) and flush before its draws")
 inst = body_of(rmain, r"void R_DrawBrushInstanced \(void\)\s*\{") or ""
-if not re.search(rf"R_UseProgram \(prog_opaque->program\);\s*R_DispatchBrushInstancedPass\(world_surf_keys, "
-                 rf"num_world_surf_keys, 0\.01f,\s*{UNGATED}\);", inst) \
+if not re.search(r"R_UseProgram \(prog_opaque->program\);\s*R_DispatchBrushInstancedPass\(world_surf_keys, "
+                 r"num_world_surf_keys, 0\.01f\);", inst) \
         or not re.search(r"R_UseProgram \(prog_cutout->program\);.*?R_DispatchBrushInstancedPass\(world_surf_keys_fence, "
-                         r"num_world_surf_keys_fence, 0\.666f,\s*\(gl_overbright\.integer && !r_fullbright\.integer\) "
-                         r"\? 2\.0f : 1\.0f\);", inst, re.S):
-    errors.append("R_DrawBrushInstanced must hand its opaque pass 0.01 / the ungated overbright and its fence pass "
-                  "0.666 / the gated one")
+                         r"num_world_surf_keys_fence, 0\.666f\);", inst, re.S):
+    errors.append("R_DrawBrushInstanced must hand its opaque pass 0.01 and its fence pass 0.666 (the overbright is "
+                  "R_WorldOverbright inside the pass)")
+# Every R_SetWorldFrag argument list, wherever it is, passes the helper as its
+# overbright: a seventh path, or one that grows its own expression, fails here
+# even though the per-path patterns above were never told about it.
+for path, text in engine_c.items():
+    for m in re.finditer(r"\bR_SetWorldFrag\s*\(", text):
+        args = text[m.end():text.find(";", m.end())]
+        if not re.search(rf",(?:\s|\\)*{OB}\s*,", args):
+            errors.append(f"{path.name}: an R_SetWorldFrag call passes an overbright other than R_WorldOverbright ()")
+wob = body_of(rsurf, r"float R_WorldOverbright \(void\)\s*\{") or ""
+if not re.fullmatch(r"\{\s*return \(gl_overbright\.integer && !r_fullbright\.integer\) \? 2\.0f : 1\.0f;\s*\}", wob):
+    errors.append("R_WorldOverbright must be 2 with gl_overbright, 1 without it or under r_fullbright "
+                  "(Ironwail: grey lightmap x2 = the unlit texture; ours: white lightmap x1)")
+defs = [path.name for path, text in engine_c.items() if re.search(r"float R_WorldOverbright \(void\)\s*\{", text)]
+if defs != ["gl_rsurf.c"]:
+    errors.append(f"R_WorldOverbright must be defined once, in gl_rsurf.c (found in {defs})")
 bws = body_of(rsurf, r"static void DrawTextureChains_BindWorldState \(void\)\s*\{") or ""
 if not re.search(r"world_state_fog_density = r_fog_density;\s*VectorCopy \(r_fog_color, world_state_fog_color\);", bws):
     errors.append("DrawTextureChains_BindWorldState must save the fog its batches draw with")

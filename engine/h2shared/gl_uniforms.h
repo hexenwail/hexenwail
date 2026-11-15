@@ -127,19 +127,18 @@ typedef struct {
  * the loose uniforms these replaced were each program's own, so EVERY path
  * that draws with a world program writes all of it, every draw, through one
  * R_SetWorldFrag call, then flushes, then draws.  The per-draw arguments, by
- * path (the overbright is what each path wrote by hand before, so it differs
- * from the frame's under r_fullbright, as it did):
+ * path (the overbright is R_WorldOverbright on every one, 1 under
+ * r_fullbright, so no path draws brighter than another; GitHub #489):
  *
- *   path                          fog        alpha        force  overbright  warp
- *   GL_ImmPushBlocks              r_fog_*    imm_* (-1->0) imm   gated       imm_turb
- *   DrawTextureChains_FlushBatch  bind-time  0.01         1      ungated     0
- *   DrawTextureChains_DrawDeferred r_fog_*   0.666 / 0.01 1      ungated     0
- *   R_DrawBrushModel              r_fog_*    0.01         1      ungated     0
- *   R_DispatchBrushInstancedPass  r_fog_*    0.01 / 0.666 1      ungated /   0
- *                                                                 gated (fence)
- *   R_DrawWorldCulled             r_fog_*    0.01         1      ungated     0
+ *   path                          fog        alpha        force  warp
+ *   GL_ImmPushBlocks              r_fog_*    imm_* (-1->0) imm   imm_turb
+ *   DrawTextureChains_FlushBatch  bind-time  0.01         1      0
+ *   DrawTextureChains_DrawDeferred r_fog_*   0.666 / 0.01 1      0
+ *   R_DrawBrushModel              r_fog_*    0.01         1      0
+ *   R_DispatchBrushInstancedPass  r_fog_*    0.01 / 0.666 1      0
+ *   R_DrawWorldCulled             r_fog_*    0.01         1      0
  *
- * ("gated" is 1 under r_fullbright.)  Everything else comes from the frame
+ * Everything else comes from the frame
  * record the R_SetWorldFrame* setters below fill, once a frame, from where the
  * values are decided: R_SetupFrame (caustics, bicubic, debug views, material,
  * softemu, span cell), R_LightCluster_BindForWorld (the froxel lookup and

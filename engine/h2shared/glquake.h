@@ -519,6 +519,7 @@ extern	cvar_t	gl_particles;
 extern	cvar_t	gl_fullbrights;
 extern	cvar_t	gl_overbright_models;
 extern	cvar_t	gl_overbright;
+float R_WorldOverbright (void);	/* the world fragment stages' overbright (GitHub #489) */
 extern	cvar_t	r_lightmap_bicubic;
 extern	cvar_t	gl_fxaa;
 extern	cvar_t	gl_lmatlas;

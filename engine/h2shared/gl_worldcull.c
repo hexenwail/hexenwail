@@ -1021,7 +1021,7 @@ void R_DrawWorldCulled (void)
 		 * The texture binds between the flush and the indirect draws write
 		 * no block. */
 		R_SetWorldFrag (r_fog_density, r_fog_color, 0.01f, 1.0f,
-				gl_overbright.integer ? 2.0f : 1.0f, 0.0f, 0.0f);
+				R_WorldOverbright (), 0.0f, 0.0f);
 		R_SetMVP (mvp);
 		R_SetModelView (mv);
 		R_FlushUniforms ();

@@ -22,12 +22,6 @@
 extern float r_fog_density;
 extern float r_fog_color[3];
 
-/* gl_overbright cvar (gl_rmain.c) — read directly for the world programs'
- * u_overbright, which GL_ImmPushBlocks writes with the rest of their fragment
- * set.  uhexen2-f29y. */
-extern cvar_t gl_overbright;
-extern cvar_t r_fullbright;
-
 /* ------------------------------------------------------------------ */
 /* Vertex format for the streaming VBO:                                */
 /*   pos[3] + texcoord[2] + lmcoord[2] + color[4] = 11 floats         */
@@ -523,7 +517,7 @@ static void GL_ImmPushBlocks (const glprogram_t *shader, const float *mvp)
 		 * world polys, on gl_shader_world or its OIT twin.  The values the
 		 * loose half of GL_ImmEnd used to push per program -- the alpha
 		 * pair from the same imm_* (with -1 resolved as above), fog,
-		 * overbright gated on r_fullbright as R_SetupFrame gated it, and
+		 * overbright (R_WorldOverbright, as every world path), and
 		 * the liquid warp -- plus the frame record, which these programs
 		 * held per program from R_SetupFrame on.  Every batch, because the
 		 * block is global: the DrawTextureChains fast path, a brush entity
@@ -534,7 +528,7 @@ static void GL_ImmPushBlocks (const glprogram_t *shader, const float *mvp)
 			R_SetWorldFrag (r_fog_density, r_fog_color,
 					imm_alpha_threshold >= 0.0f ? imm_alpha_threshold : 0.0f,
 					imm_force_opaque_alpha >= 0.0f ? imm_force_opaque_alpha : 0.0f,
-					(gl_overbright.integer && !r_fullbright.integer) ? 2.0f : 1.0f,
+					R_WorldOverbright (),
 					imm_turb[0], imm_turb[1]);
 	}
 

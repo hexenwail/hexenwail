@@ -990,6 +990,30 @@ void R_UpdateLightmaps (qboolean Translucent)
 
 /*
 ================
+R_WorldOverbright
+
+The overbright factor every world draw path passes R_SetWorldFrag: 2 with
+gl_overbright, 1 without, and 1 under r_fullbright.  One value for all of them,
+or r_fullbright draws the batched world and lit water / fences at different
+brightness (GitHub #489).
+
+r_fullbright makes the lightmap sample 1.0 (R_BuildLightMap fills it white, the
+shader's u_lightdebug.x mixes it to white), so with the doubling kept it would
+draw every texture at 2x.  Ironwail lands on 1x: it binds a 50% grey lightmap
+under r_fullbright and keeps its doubling, 127/255 * 2 ~ 1
+(Quake/r_world.c:464 `r_fullbright_cheatsafe ? greytexture : lightmap_texture`,
+Quake/gl_shaders.h:714 `total_light *= 2.0;`).  Our white sample with the
+doubling dropped is the same unlit-texture brightness, and R_BrushAbsLight
+below takes 1 under r_fullbright for the same reason.
+================
+*/
+float R_WorldOverbright (void)
+{
+	return (gl_overbright.integer && !r_fullbright.integer) ? 2.0f : 1.0f;
+}
+
+/*
+================
 R_BrushAbsLight
 
 The intensity of a brush entity drawn at a fixed light level (MLS_ABSLIGHT --
@@ -2067,7 +2091,7 @@ static void DrawTextureChains_FlushBatch (qboolean world_state_set, msurface_t *
 	 * upload by hand (#450 W2); then sworld_vert's VertParams, from the same
 	 * capture (W1). */
 	R_SetWorldFrag (world_state_fog_density, world_state_fog_color, 0.01f, 1.0f,
-			gl_overbright.integer ? 2.0f : 1.0f, 0.0f, 0.0f);
+			R_WorldOverbright (), 0.0f, 0.0f);
 	R_SetMVP (world_state_mvp);
 	R_SetModelView (world_state_mv);
 	R_FlushUniforms ();
@@ -2344,7 +2368,7 @@ static void DrawTextureChains_DrawDeferred (entity_t *e, msurface_t **deferred, 
 #define EMIT_BATCH(BUF, N, ALPHA_T, A2C_ON) do { \
 	if ((N) <= 0) break; \
 	R_SetWorldFrag (r_fog_density, r_fog_color, (ALPHA_T), 1.0f, \
-			gl_overbright.integer ? 2.0f : 1.0f, 0.0f, 0.0f); \
+			R_WorldOverbright (), 0.0f, 0.0f); \
 	R_FlushUniforms (); \
 	if (A2C_ON) \
 		R_SetAlphaToCoverage (true); \
@@ -3112,7 +3136,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 		GL_GetMVP(mvp);
 		GL_GetModelview(mv);
 		R_SetWorldFrag (r_fog_density, r_fog_color, 0.01f, 1.0f,
-				gl_overbright.integer ? 2.0f : 1.0f, 0.0f, 0.0f);
+				R_WorldOverbright (), 0.0f, 0.0f);
 		R_SetMVP (mvp);
 		R_SetModelView (mv);
 		R_FlushUniforms ();
