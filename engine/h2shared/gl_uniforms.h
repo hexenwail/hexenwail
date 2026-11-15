@@ -99,14 +99,15 @@ typedef struct {
 
 /* AliasVert (engine/shaders/alias.inc), the alias vertex stages' own block, at
  * UBO_BINDING_ALIAS_VERT (#450, alias slice S3).  Read by salias_inst_vert
- * only, and only where v_dlightscale > 0:
+ * only.  The vertex stage reads it on every vertex to build v_eyepos; only the
+ * fragment stage's use of that varying is gated on v_dlightscale > 0:
  *
  *   lightview  R_LightCluster_BindForAlias through R_SetAliasLightGrid, once a
  *              frame, the same lc_view as AliasFrag's copy.
  *
  * Seeded with an identity.  The loose uniform it replaced started at GL's
- * zeros; neither is ever read, since the scale that gates the read is 0
- * whenever the grid is not live. */
+ * zeros; either value only reaches v_eyepos, which the fragment stage ignores
+ * while the scale is 0, and the scale is 0 whenever the grid is not live. */
 typedef struct {
 	float	lightview[16];	/*   0  world -> eye, no entity transform */
 } r_aliasvert_t;		/* 64 */

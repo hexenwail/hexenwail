@@ -168,13 +168,20 @@ if not fl or not re.search(r"GL_BindBuffer \(GL_UNIFORM_BUFFER, ubo_avert\);\s*g
     errors.append("R_FlushUniforms' avert branch must bind and fill ubo_avert, and only ubo_avert")
 if "avert_dirty = true" not in (body_of(uc, r"\nvoid R_InvalidateUniforms \(void\)\s*\{") or ""):
     errors.append("R_InvalidateUniforms must re-upload AliasVert too")
-init = body_of(uc, r"\nvoid R_Uniforms_Init \(void\)\s*\{") or ""
+init = strip(body_of(uc, r"\nvoid R_Uniforms_Init \(void\)\s*\{") or "")
+init_flush = init.find("R_FlushUniforms ();")
 for w in ("memcpy (aliasvert.lightview, ident, sizeof(ident));", "glGenBuffers_fp (1, &ubo_avert);", "avert_dirty = true;"):
-    if w not in init:
+    at = init.find(w)
+    if at < 0:
         errors.append(f"R_Uniforms_Init: missing {w}")
-shut = body_of(uc, r"\nvoid R_Uniforms_Shutdown \(void\)\s*\{") or ""
-if "glDeleteBuffers_fp (1, &ubo_avert);" not in shut:
-    errors.append("R_Uniforms_Shutdown must delete ubo_avert")
+    elif init_flush < 0 or at > init_flush:
+        # A gen after the seed flush binds buffer 0 at the AliasVert point and
+        # clears bindings_dirty, so the block stays unbound until the next
+        # invalidate.
+        errors.append(f"R_Uniforms_Init: {w} must come before the seed R_FlushUniforms")
+shut = strip(body_of(uc, r"\nvoid R_Uniforms_Shutdown \(void\)\s*\{") or "")
+if not re.search(r"GL_ForgetBuffer \(ubo_avert\);\s*glDeleteBuffers_fp \(1, &ubo_avert\);\s*ubo_avert = 0;", shut):
+    errors.append("R_Uniforms_Shutdown must GL_ForgetBuffer, delete and zero ubo_avert, in that order")
 if not re.search(r"GLint R_BindAliasVertBlock \(GLuint program\)\s*\{.*?RU_BindOne \(program, RU_NAME_AVERT, UBO_BINDING_ALIAS_VERT\)", uc, re.S) \
         or '#define RU_NAME_AVERT	"AliasVert"' not in uc:
     errors.append("R_BindAliasVertBlock must pin the \"AliasVert\" block to UBO_BINDING_ALIAS_VERT")
@@ -203,6 +210,20 @@ if not vk or "#define gl_VertexID gl_VertexIndex" not in vk.group(1) \
     errors.append("salias_inst_vert.glsl must alias gl_VertexID / gl_InstanceID for Vulkan")
 if "invariant gl_Position;" not in vcode:
     errors.append("salias_inst_vert.glsl lost `invariant gl_Position` (uhexen2-iir3)")
+# The layout qualifier beats glBindAttribLocation, so the file's locations
+# must be the C attribute numbers the VAOs are built with.
+attr = dict(re.findall(r"#define\s+(ATTR_\w+)\s+(\d+)", shader_h))
+INPUTS = {"a_position": "ATTR_POSITION", "a_texcoord": "ATTR_TEXCOORD", "a_color": "ATTR_COLOR"}
+for fname, code in (("salias_inst_vert.glsl", vcode), ("salias_vert.glsl", strip(read("engine/shaders/salias_vert.glsl")))):
+    ins = re.findall(r"VERT_IN\((\d+)\)\s+in\s+\w+\s+(\w+)\s*;", code)
+    if not ins:
+        errors.append(f"{fname}: no VERT_IN inputs found")
+    for loc, name in ins:
+        want = attr.get(INPUTS.get(name, ""))
+        if want is None:
+            errors.append(f"{fname}: input {name} has no ATTR_* mapping in this test")
+        elif loc != want:
+            errors.append(f"{fname}: {name} is VERT_IN({loc}), gl_shader.h's {INPUTS[name]} is {want}")
 if "instances[u_inst_base + gl_InstanceID]" not in vcode:
     errors.append("the instance fetch must offset gl_InstanceID by u_inst_base")
 
@@ -279,13 +300,10 @@ else:
         if not loop:
             errors.append(f"R_DrawAliasInstanced {label}: cannot parse the batch loop body")
             continue
-        first_flush = pre.find("R_FlushUniforms ();")
+        # Before the loop is enough: every batch flushes before it draws.
         for w in pre_wants:
-            m = re.search(w, pre)
-            if not m:
+            if not re.search(w, pre):
                 errors.append(f"R_DrawAliasInstanced {label}: must write {w} before its batch loop")
-            elif label == "fullbright pass" and (first_flush < 0 or m.start() > first_flush):
-                errors.append(f"R_DrawAliasInstanced {label}: {w} must come before the pass's first flush")
         # Hazard 4, per batch: the instance base is set, then flushed, then
         # drawn, inside the loop -- in that order, every iteration.
         seq = [m.start() for m in (re.search(r"R_SetInstBase \(batch->first\);", loop),
@@ -294,6 +312,16 @@ else:
         if len(seq) != 3 or seq != sorted(seq):
             errors.append(f"R_DrawAliasInstanced {label} (hazard 4): each batch must R_SetInstBase (batch->first), "
                           "then R_FlushUniforms, then draw")
+        else:
+            # ...and the flush is unconditional: at the draw's own brace depth
+            # and not the body of a braceless if/else/for/while.
+            def depth_at(i):
+                return loop[:i].count("{") - loop[:i].count("}")
+            stmt_start = max(loop.rfind(";", 0, seq[1]), loop.rfind("{", 0, seq[1]), loop.rfind("}", 0, seq[1]))
+            lead = loop[stmt_start + 1:seq[1]]
+            if depth_at(seq[1]) != depth_at(seq[2]) or re.search(r"\b(?:if|else|for|while)\b", lead):
+                errors.append(f"R_DrawAliasInstanced {label} (hazard 4): the per-batch R_FlushUniforms must be "
+                              "unconditional, at the same depth as the draw")
         for w in loop_wants:
             m = re.search(w, loop)
             if not m or (len(seq) == 3 and m.start() > seq[1]):
