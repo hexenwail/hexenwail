@@ -489,3 +489,7 @@ jobs:
       # per draw for both passes, as the instanced glow does (#493).
       - name: CPU alias glow at the base pass's blend
         run: python3 tools/test_alias_fullbright_lerp.py
+      # Every value a shader reads comes through a std140 block; the only
+      # glUniform* left is the sampler bind (#19).
+      - name: No loose value uniforms
+        run: python3 tools/test_no_loose_uniforms.py
