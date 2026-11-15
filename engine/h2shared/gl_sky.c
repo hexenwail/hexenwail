@@ -1132,8 +1132,8 @@ Sky_UpdateWind
 
 Computes the per-frame wind UV offset from the parsed per-skybox params
 and the global r_skywind scalar.  Phase oscillates as a triangle wave
-so wind blows one way, then reverses.  Result is stashed in sky_wind_uv
-for GL_ImmFlush to push to u_wind on the sky programs.  Called once per
+so wind blows one way, then reverses.  Result is stashed in sky_wind_uv,
+which GL_ImmPushBlocks writes into FragParams (u_wind).  Called once per
 frame from Sky_DrawSky (only path that uses skyboxes).
 ==================
 */
