@@ -1,24 +1,33 @@
-/* alias.inc -- the alias family's own std140 uniform block, AliasFrag: what
- * salias_frag reads beyond the shared FragParams (#450, alias slice S2).
+/* alias.inc -- the alias family's own std140 uniform blocks: AliasFrag, what
+ * salias_frag reads beyond the shared FragParams (#450, alias slice S2), and
+ * AliasVert, what the vertex stages read beyond VertParams (slice S3).
  *
- * Include it after uniforms.inc, with UNIFORMS_FRAG defined.  A vertex-stage
- * AliasVert companion arrives with the vertex stages (slices S3/S4 on #450);
- * the two stay split by stage for the reason uniforms.inc gives.
+ * Include it after uniforms.inc, with UNIFORMS_FRAG or UNIFORMS_VERT defined;
+ * each stage gets only its own block, split by stage for the reason
+ * uniforms.inc gives.
  *
- * ITS OWN BLOCK, NOT FragParams, AND ITS OWN NAMES.  sworld_frag still declares
- * u_turb, u_spans and u_lightview as loose per-program uniforms with different
- * per-frame values, and salias_inst_vert still declares a loose u_lightview of
- * its own.  The members here are spelled u_af* and only reach the old names
- * through the macros below, so none of those programs can collide with them at
- * link time, and a later world migration can take its own block without
- * fighting this one over a member name.
+ * ITS OWN BLOCKS, NOT FragParams/VertParams, AND ITS OWN NAMES.  sworld_frag
+ * still declares u_turb, u_spans and u_lightview as loose per-program uniforms
+ * with different per-frame values.  The members here are spelled u_af* and
+ * u_av* and only reach the old names through the macros below, so none of
+ * those programs can collide with them at link time, a later world migration
+ * can take its own block without fighting this one over a member name, and
+ * the two stages' u_lightview -- one in each block -- are different uniforms
+ * to the linker.
  *
- * GL binding point 11 (UBO_BINDING_ALIAS_FRAG), assigned from C because ES
- * 3.00 cannot put layout(binding=) on a block; 10 is held for AliasVert.
- * FRAG_UBO(1) is its SDL_GPU fragment-stage slot, after FragParams' 0.  The C
- * mirror is r_aliasfrag_t in gl_uniforms.h, and the buffer is a permanent one
- * flushed by R_FlushUniforms, not the GL_Upload ring, which is a stub on the
- * ES tier the alias program runs on.
+ * GL binding point 11 (UBO_BINDING_ALIAS_FRAG) for AliasFrag and 10
+ * (UBO_BINDING_ALIAS_VERT) for AliasVert, assigned from C because ES 3.00
+ * cannot put layout(binding=) on a block.  FRAG_UBO(1) and VERT_UBO(1) are
+ * their SDL_GPU slots, after FragParams' and VertParams' 0.  The C mirrors are
+ * r_aliasfrag_t and r_aliasvert_t in gl_uniforms.h, and the buffers are
+ * permanent ones flushed by R_FlushUniforms, not the GL_Upload ring, which is
+ * a stub on the ES tier the alias program runs on.
+ *
+ * WHY AliasVert IS ITS OWN BLOCK and not a VertParams member: its one member
+ * is the froxel grid's world -> eye matrix, written once a frame, while the
+ * instanced draw re-flushes VertParams once per batch for u_inst_base.  Kept
+ * out, it rides that per-batch upload zero times instead of every time, and
+ * VertParams, which every block program on every tier reads, does not grow.
  *
  * EVERY MEMBER IS vec4 OR mat4, for the reason uniforms.inc gives.  The
  * lightgrid members exist on both tiers so the layout never varies; only the
@@ -50,5 +59,18 @@ FRAG_UBO(1) uniform AliasFrag {
 #define u_alias_material  u_afmaterial.xyz
 #define u_alias_lightdir  u_aflightdir.xyz
 #endif  /* UNIFORMS_FRAG */
+
+#ifdef UNIFORMS_VERT
+/* Only salias_inst_vert reads it so far: that stage builds gl_Position from
+ * u_viewproj and a world-space vertex, so it has no u_modelview to take eye
+ * space from and reconstructs it with this for the froxel lookup
+ * (uhexen2-waum).  The same lc_view as AliasFrag's u_aflightview, written by
+ * the same R_SetAliasLightGrid call, so the two stages cannot disagree. */
+VERT_UBO(1) uniform AliasVert {
+    highp mat4 u_avlightview;   /*   0  world -> eye, no entity transform (froxel grid) */
+};                              /*  64 bytes */
+
+#define u_lightview       u_avlightview
+#endif  /* UNIFORMS_VERT */
 
 #endif /* ALIAS_INC */

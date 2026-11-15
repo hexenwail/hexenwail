@@ -4337,13 +4337,11 @@ static void R_DrawAliasInstanced (void)
 	GLintptr	inst_ofs;
 	size_t		inst_bytes;
 	static GLuint last_pose_ssbo = 0;
-	static int last_poseverttype = -1;
 
 	if (num_alias_instances == 0 || !prog->program)
 	{
 		/* Reset SSBO cache on early exit */
 		last_pose_ssbo = 0;
-		last_poseverttype = -1;
 		return;
 	}
 
@@ -4363,18 +4361,19 @@ static void R_DrawAliasInstanced (void)
 	/* Activate instanced shader */
 	R_UseProgram (prog->program);
 
-	/* Vertex-stage uniforms, still loose in salias_inst_vert. */
-	if (prog->u_viewproj >= 0)
-		glUniformMatrix4fv_fp(prog->u_viewproj, 1, GL_FALSE,
-				      alias_inst_view_proj);
-	if (prog->u_eyepos >= 0)
-		glUniform3f_fp(prog->u_eyepos, r_origin[0], r_origin[1], r_origin[2]);
+	/* The vertex stage, salias_inst_vert, reads VertParams since #450 slice
+	 * S3, where these were its own loose uniforms.  VertParams is every block
+	 * program's, and GL_ImmEnd rewrites the eye position and the dlight scale
+	 * for each of its batches, so the whole set is written here before the
+	 * first batch flushes; the instance base and pose vertex type follow per
+	 * batch below. */
+	R_SetViewProj (alias_inst_view_proj);
+	R_SetEyePos (r_origin);
 	/* Clustered dynamic light (uhexen2-waum).  One value for the whole draw:
 	 * WHETHER a given instance takes it is bit 8 of its shadedot_row, so what
 	 * this carries is only the scale and ceiling, and true is the right
 	 * argument here -- the per-entity decision was made in the collector. */
-	if (prog->u_alias_dlight >= 0)
-		glUniform1f_fp(prog->u_alias_dlight, R_AliasDlightScale (true));
+	R_SetAliasDlight (R_AliasDlightScale (true));
 
 	/* The fragment stage, salias_frag, reads FragParams and AliasFrag since
 	 * #450 slice S2: blocks every program shares, where these were this
@@ -4498,22 +4497,19 @@ static void R_DrawAliasInstanced (void)
 			last_pose_ssbo = pose_ssbo;
 		}
 
-		/* Set poseverttype uniform only if changed from last batch */
-		if (gm->poseverttype != last_poseverttype && prog->u_poseverttype >= 0)
-		{
-			glUniform1i_fp(prog->u_poseverttype, gm->poseverttype);
-			last_poseverttype = gm->poseverttype;
-		}
-
-		/* Set base instance offset for this batch */
-		if (prog->u_inst_base >= 0)
-			glUniform1i_fp(prog->u_inst_base, batch->first);
+		/* VertParams members since #450 S3, written every batch.  The
+		 * static "only if changed" cache this used was per-PROGRAM state, so
+		 * it could not see a block another pass or program had written; the
+		 * shadow's own compare is the change test now (hazard 4: the
+		 * instance base differs every batch, so each batch flushes it). */
+		R_SetPoseVertType (gm->poseverttype);
+		R_SetInstBase (batch->first);
 
 		/* Use model's VAO (texcoords + IBO already set up) */
 		glBindVertexArray_fp(gm->vao);
 
-		/* This batch's fragment blocks.  Free when nothing changed: the
-		 * shadow only re-uploads a block it marked dirty. */
+		/* This batch's blocks.  Free when nothing changed: the shadow only
+		 * re-uploads a block it marked dirty. */
 		R_FlushUniforms ();
 
 		/* Draw! */
@@ -4532,7 +4528,6 @@ static void R_DrawAliasInstanced (void)
 
 	/* Reset SSBO cache for next frame */
 	last_pose_ssbo = 0;
-	last_poseverttype = -1;
 
 	/* Shadow pass — drawn individually per entity */
 	if (r_shadows.integer)
@@ -4610,16 +4605,23 @@ static void R_DrawAliasInstanced (void)
 			}
 
 			R_UseProgram (prog->program);
-			if (prog->u_viewproj >= 0)
-				glUniformMatrix4fv_fp(prog->u_viewproj, 1, GL_FALSE,
-						      alias_inst_view_proj);
-			/* This pass reuses the main pass's program, and every uniform
-			 * it does not overwrite is still hot.  The dynamic light was
-			 * already added underneath by that pass, and this one's vertex
-			 * colour is a flat white the shader would add to a second
-			 * time.  uhexen2-waum. */
-			if (prog->u_alias_dlight >= 0)
-				glUniform1f_fp(prog->u_alias_dlight, 0.0f);
+			/* VertParams, in full, for the same reason as the fragment
+			 * blocks below: the shadow pass between the two may have drawn
+			 * through GL_ImmEnd, which rewrites the eye position and the
+			 * dlight scale (#450 S3). */
+			R_SetViewProj (alias_inst_view_proj);
+			R_SetEyePos (r_origin);
+			/* The dynamic light was already added underneath by the main
+			 * pass, and this one's vertex colour is a flat white the shader
+			 * would add to a second time.  uhexen2-waum. */
+			R_SetAliasDlight (0.0f);
+			/* Every batch below binds the PV_QUAKE1 pose buffer at 1, and
+			 * an MD3 mesh has no ssbo_pose, so its batches are skipped:
+			 * PV_QUAKE1 is the only right value.  The loose uniform this
+			 * replaced was left at the main pass's LAST batch's type, which
+			 * after an MD3 batch decoded every glow from binding 3 -- unbound
+			 * by then -- instead (#450 S3). */
+			R_SetPoseVertType (PV_QUAKE1);
 
 			/* The fragment blocks, in full, as for the main pass (#450,
 			 * hazard 3): the shadow pass between the two may have drawn
@@ -4677,9 +4679,9 @@ static void R_DrawAliasInstanced (void)
 				glActiveTexture_fp(GL_TEXTURE0);
 				GL_Bind(batch->fb_tex);
 				GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, gm->ssbo_pose);
-				if (prog->u_inst_base >= 0)
-					glUniform1i_fp(prog->u_inst_base, batch->first);
+				R_SetInstBase (batch->first);	/* hazard 4 */
 				glBindVertexArray_fp(gm->vao);
+				R_FlushUniforms ();
 
 				glDrawElementsInstanced_fp(GL_TRIANGLES, gm->num_indices,
 							   GL_UNSIGNED_SHORT, NULL, batch->count);

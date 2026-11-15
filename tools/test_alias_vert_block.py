@@ -14,8 +14,9 @@ Checks the pieces that have to move together:
     and both OIT twins) compile the file through GLSL_VERT_HEADER, with
     NOPERSP in the header for the two affine ones;
   * the varyings of all three vertex stages that link salias_frag (this file,
-    and the sskeletal_vert / salias_inst_vert literals) match the inputs of
-    engine/shaders/salias_frag.glsl (#450 S2) by name, type and qualifier;
+    engine/shaders/salias_inst_vert.glsl (#450 S3) and the sskeletal_vert
+    literal) match the inputs of engine/shaders/salias_frag.glsl (#450 S2) by
+    name, type and qualifier, and for the two files by location too;
   * GL_ImmPushBlocks feeds u_alias_model and u_alias_dlight from imm_*;
   * the MSL cross-compile targets 2.1.0, which `invariant gl_Position` needs.
 """
@@ -82,9 +83,9 @@ src = (ROOT / "engine/h2shared/gl_shader.c").read_text()
 # desktop tier, where a mismatch is a link failure at startup that leaves every
 # model undrawn with lint green.  Since #450 S2 the fragment side is
 # engine/shaders/salias_frag.glsl; both arms of its #ifndef GL_ES are read,
-# which is the desktop set (the ES arm declares no input of its own).  The two
-# vertex stages still written as C literals are read with the desktop arm of
-# GLSL_ALIAS_DLIGHT_VS_OUT expanded.
+# which is the desktop set (the ES arm declares no input of its own).  The
+# vertex stage still written as a C literal is read with the desktop arm of
+# GLSL_ALIAS_DLIGHT_VS_OUT expanded; the instanced one is a file since S3.
 def c_literal_text(symbol):
     m = re.search(rf"static const char {symbol}\[\] =\n(.*?)\";\n", src, re.S)
     if not m:
@@ -103,6 +104,10 @@ def c_literal_text(symbol):
 def desktop_macro(name):
     m = re.search(rf"#define {name} \\\n((?:\t\".*\" \\\n)*\t\".*\")", src)
     return "".join(re.findall(r'"((?:[^"\\]|\\.)*)"', m.group(1))).replace("\\n", "\n") if m else ""
+def locations(text, macro):
+    """name -> SPIR-V location, from VERT_OUT(n) / FRAG_IN(n) declarations."""
+    return {m.group(2): int(m.group(1)) for m in re.finditer(
+        rf"\b{macro}\((\d+)\)[^;]*?\b(\w+)\s*;", text)}
 def varyings(text, kw):
     found = {}
     for line in text.splitlines():
@@ -114,8 +119,22 @@ def varyings(text, kw):
     return found
 sf = ROOT / "engine/shaders/salias_frag.glsl"
 fi = varyings(strip(sf.read_text()), "in") if sf.exists() else {}
-stages = {"salias_vert.glsl": varyings(strip(body), "out")}
-for lit in ("sskeletal_vert", "salias_inst_vert"):
+iv = ROOT / "engine/shaders/salias_inst_vert.glsl"
+ibody = strip(iv.read_text()) if iv.exists() else ""
+if not ibody:
+    errors.append("engine/shaders/salias_inst_vert.glsl is missing")
+stages = {"salias_vert.glsl": varyings(strip(body), "out"),
+          "salias_inst_vert.glsl": varyings(ibody, "out")}
+# Vulkan links varyings by location, not name: the two files must agree slot
+# for slot with salias_frag.glsl too, or a -V build swaps two of them silently.
+floc = locations(strip(sf.read_text()), "FRAG_IN") if sf.exists() else {}
+if len(floc) != 7:
+    errors.append(f"could not parse salias_frag.glsl's seven FRAG_IN locations: {floc}")
+for name, text in (("salias_vert.glsl", strip(body)), ("salias_inst_vert.glsl", ibody)):
+    vloc = locations(text, "VERT_OUT")
+    if vloc != floc:
+        errors.append(f"{name} VERT_OUT locations {sorted(vloc.items())} != salias_frag FRAG_IN {sorted(floc.items())}")
+for lit in ("sskeletal_vert",):
     t = c_literal_text(lit)
     if t is None:
         errors.append(f"cannot find the {lit} literal to compare varyings against")

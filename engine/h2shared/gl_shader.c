@@ -259,28 +259,6 @@ static char *GL_SpliceDefines (const char *src, const char *defines)
 	return buf;
 }
 
-/*
-===============
-GL_CompileShaderDefines
-
-GL_CompileShader with a preamble spliced in.  One source, several variants --
-which is how a `noperspective` qualifier gets to be optional, since an
-interpolation qualifier cannot be switched by a uniform the way the softemu
-stages in the world shader can.  uhexen2-ktjv.
-===============
-*/
-static GLuint GL_CompileShaderDefines (GLenum type, const char *src, const char *defines)
-{
-	char	*buf = GL_SpliceDefines (src, defines);
-	GLuint	shader;
-
-	if (!buf)
-		return 0;
-	shader = GL_CompileShader (type, buf);
-	free (buf);
-	return shader;
-}
-
 /* The OIT output block, shared by GL_CompileOITFragShader and
  * GL_CompileOITFragShaderSplit below.  Hoisted to file scope (it was a
  * function-local static) so the split variant can splice the same text;
@@ -1473,11 +1451,11 @@ static const char sworld_vert[] =
  * stage's matching `in`s are desktop-only (#ifndef GL_ES in
  * engine/shaders/salias_frag.glsl).
  *
- * Since #450 alias slice S1 the plain alias program no longer uses VS_OUT or
- * VS_CALC: engine/shaders/salias_vert.glsl declares the same pair itself
- * under #ifndef GL_ES and reads u_alias_dlight from VertParams, NOT the loose
- * uniform declared below.  VS_OUT's loose u_alias_dlight now serves
- * sskeletal_vert and salias_inst_vert only, and
+ * Since #450 alias slices S1 and S3 the plain and instanced alias programs no
+ * longer use VS_OUT or VS_CALC: engine/shaders/salias_vert.glsl and
+ * salias_inst_vert.glsl declare the same pair themselves and read
+ * u_alias_dlight from VertParams, NOT the loose uniform declared below.
+ * VS_OUT's loose u_alias_dlight now serves sskeletal_vert only, and
  * tools/test_alias_vert_block.py checks every vertex stage's outputs against
  * salias_frag.glsl's inputs. */
 #define GLSL_ALIAS_DLIGHT_VS_OUT \
@@ -1487,8 +1465,9 @@ static const char sworld_vert[] =
 
 /* Fills them, for the vertex shader that already has `eyepos` in hand --
  * sskeletal_vert, since salias_vert moved to a file (#450) and does the same
- * two assignments itself.  salias_inst_vert does its own -- it works in world space and has a per-
- * instance switch to consult, so it has neither of this line's inputs. */
+ * two assignments itself.  salias_inst_vert.glsl does its own -- it works in
+ * world space and has a per-instance switch to consult, so it has neither of
+ * this line's inputs. */
 #define GLSL_ALIAS_DLIGHT_VS_CALC \
 	"    v_eyepos = eyepos.xyz;\n" \
 	"    v_dlightscale = u_alias_dlight;\n"
@@ -1955,186 +1934,21 @@ static const char sskeletal_vert[] =
  * body carried are dropped -- they were never read by this stage. */
 
 /* --- shader_alias_instanced: GL 4.3 SSBO-based instanced alias models ---
- * Instance data in SSBO binding 0 (streamed via gl_buffer.c each frame).
- * Pose data in SSBO binding 1 (per-batch, from model's ssbo_pose).
- * Shadedots in SSBO binding 2 (static lighting cosine table).
- * View-projection passed as a uniform — uhexen2-8pc2 moved it out of the
- * SSBO so the streaming ring uploads only the instance array.
- * Scale/origin baked into the world matrix CPU-side.
- * 80-byte instance struct matching Ironwail's compact layout.
- */
+ * Lives in engine/shaders/salias_inst_vert.glsl since #450 alias slice S3,
+ * paired with salias_frag.glsl, and reaches us as salias_inst_vert[] via
+ * shaders_gen.h.  Its storage buffers, blocks and varyings are listed in
+ * that file's header comment.  Desktop-only: shader storage blocks are GLSL
+ * ES 3.10, not 3.00.
+ *
+ * Its header chunk is the tier's version line plus the two ShadedotRow
+ * constants from gl_shader.h, which the file cannot see; its #ifndef copies
+ * of them are only for the offline SPIR-V compile.  The affine twin appends
+ * "#define NOPERSP 1\n", as for the other alias programs. */
 #ifndef USE_GLES
-static const char salias_inst_vert[] =
-	"#version 430 core\n"
-	/* Affine texture mapping, the way the software rasteriser did it
-	 * (uhexen2-ktjv).  An interpolation qualifier is not something a uniform
-	 * can switch, so this is a compile-time variant -- the only stage of
-	 * r_softemu that needs one.  Empty object-like macro when NOPERSP is not
-	 * defined, so the qualifier simply is not there. */
-	"#ifdef NOPERSP\n"
-	"#define TCQUAL noperspective\n"
-	"#else\n"
-	"#define TCQUAL\n"
-	"#endif\n"
-	"\n"
-	"struct InstanceData {\n"
-	"    vec4 WorldMatrix0;\n"
-	"    vec4 WorldMatrix1;\n"
-	"    vec4 WorldMatrix2;\n"
-	"    vec4 LightAlpha;\n"      /* rgb = light_color, a = alpha */
-	"    int Pose0;\n"
-	"    int Pose1;\n"
-	"    float Blend;\n"
-	"    int ShadedotRow;\n"
-	"};\n"
-	"\n"
-	"layout(std430, binding=0) restrict readonly buffer InstanceBuffer {\n"
-	"    InstanceData instances[];\n"
-	"};\n"
-	"\n"
-	"layout(std430, binding=1) restrict readonly buffer PoseBuffer {\n"
-	"    uint pose_data[];\n"
-	"};\n"
-	"\n"
-	"layout(std430, binding=2) restrict readonly buffer ShadeDots {\n"
-	"    float shadedots[4096];\n"
-	"};\n"
-	"\n"
-	"layout(std430, binding=3) restrict readonly buffer MD3PoseBuffer {\n"
-	"    uvec2 md3_pose_data[];\n"  /* short xyz[3] + ubyte normal[2] packed as two uint32s */
-	"};\n"
-	"\n"
-	"in vec2 a_texcoord;\n"
-	"\n"
-	"uniform mat4 u_viewproj;\n"
-	"uniform int u_inst_base;\n"
-	"uniform vec3 u_eyepos;\n"
-	"uniform int u_poseverttype;\n"  /* 0=PV_QUAKE1, 1=PV_MD3 */
-	/* World -> eye, the same matrix gl_lightcluster.c clustered the grid
-	 * with.  This path has no u_modelview to fall out of: it builds
-	 * gl_Position straight from u_viewproj and a world-space vertex, so eye
-	 * space has to be reconstructed explicitly for the froxel lookup.
-	 * uhexen2-waum.  NOT the uniform salias_frag reads: since #450 that one
-	 * is AliasFrag's u_aflightview, a different name, so the two no longer
-	 * merge at link time.  R_LightCluster_BindForAlias writes both from the
-	 * same lc_view. */
-	"uniform mat4 u_lightview;\n"
-	"\n"
-	"TCQUAL out vec2 v_texcoord;\n"
-	"out vec4 v_color;\n"
-	"out float v_fogdist;\n"
-	"out vec2 v_worldxy;\n"
-	/* WORLD space here, not eye -- this path has no u_modelview, and the one
-	 * eye-space vector it does build (v_eyepos) goes through u_lightview,
-	 * which only gl_lightcluster.c uploads and only while clustered lighting
-	 * is live.  u_eyepos is unconditional, so camera-relative world space is
-	 * the frame that is always correct.  C uploads u_alias_lightdir in world
-	 * space for this program to match; the tangent-space maths is invariant
-	 * under the pure rotation between the two frames.  uhexen2-4kcb. */
-	"out highp vec3 v_matpos;\n"
-	GLSL_ALIAS_DLIGHT_VS_OUT
-	"\n"
-	"invariant gl_Position;\n"
-	"\n"
-	"vec3 MD3_DecodePosition(uvec2 vdata) {\n"
-	"    int x = int((vdata.x) & 0xFFFFu);\n"
-	"    int y = int((vdata.x >> 16) & 0xFFFFu);\n"
-	"    int z = int((vdata.y) & 0xFFFFu);\n"
-	"    if (x > 32767) x -= 65536;\n"
-	"    if (y > 32767) y -= 65536;\n"
-	"    if (z > 32767) z -= 65536;\n"
-	"    return vec3(x, y, z) / 64.0;\n"
-	"}\n"
-	"\n"
-	/* Byte 6 is longitude and byte 7 is latitude: the file stores one
-	 * little-endian short whose LOW byte is longitude (Quake III
-	 * tr_surface.c, lat = normal >> 8).  This had the two the wrong way
-	 * round, which nothing caught because until uhexen2-2ah9 no loader
-	 * existed to reach it.  md3mesh.c's MD3_DecodeNormal is the CPU twin
-	 * of this and must stay in step. */
-	"vec3 MD3_DecodeNormal(uvec2 vdata) {\n"
-	"    uint lngbyte = (vdata.y >> 16) & 0xFFu;\n"
-	"    uint latbyte = (vdata.y >> 24) & 0xFFu;\n"
-	"    float lat = float(latbyte) * (3.14159265 / 128.0);\n"
-	"    float lng = float(lngbyte) * (3.14159265 / 128.0);\n"
-	"    float sinlng = sin(lng);\n"
-	"    return vec3(sinlng * cos(lat), sinlng * sin(lat), cos(lng));\n"
-	"}\n"
-	"\n"
-	"void main() {\n"
-	"    InstanceData inst = instances[u_inst_base + gl_InstanceID];\n"
-	"    vec3 local_pos, normal;\n"
-	"    uint ni;\n"
-	"\n"
-	"    if (u_poseverttype == 1) {\n"  /* PV_MD3 */
-	"        uvec2 p0 = md3_pose_data[inst.Pose0 + gl_VertexID];\n"
-	"        uvec2 p1 = md3_pose_data[inst.Pose1 + gl_VertexID];\n"
-	"        vec3 v0 = MD3_DecodePosition(p0);\n"
-	"        vec3 v1 = MD3_DecodePosition(p1);\n"
-	"        vec3 n0 = MD3_DecodeNormal(p0);\n"
-	"        vec3 n1 = MD3_DecodeNormal(p1);\n"
-	"        local_pos = mix(v1, v0, inst.Blend);\n"
-	"        normal = normalize(mix(n1, n0, inst.Blend));\n"
-	"        ni = uint(0);\n"  /* MD3 uses vector normal, not dot-product table */
-	"    } else {\n"  /* PV_QUAKE1 (default) */
-	"        uint p0 = pose_data[inst.Pose0 + gl_VertexID];\n"
-	"        uint p1 = pose_data[inst.Pose1 + gl_VertexID];\n"
-	"        vec3 v0 = vec3(float(p0 & 0xFFu), float((p0>>8)&0xFFu), float((p0>>16)&0xFFu));\n"
-	"        vec3 v1 = vec3(float(p1 & 0xFFu), float((p1>>8)&0xFFu), float((p1>>16)&0xFFu));\n"
-	"        ni = (p0 >> 24) & 0xFFu;\n"
-	"        local_pos = mix(v1, v0, inst.Blend);\n"
-	"    }\n"
-	"\n"
-	"    mat4x3 world = transpose(mat3x4(\n"
-	"        inst.WorldMatrix0, inst.WorldMatrix1, inst.WorldMatrix2));\n"
-	"    vec3 world_pos = world * vec4(local_pos, 1.0);\n"
-	"\n"
-	"    float sdot;\n"
-	/* MD3 carries a real normal instead of an index into the 256-entry
-	 * anorm table, so the shadedots row cannot be looked up -- but the row
-	 * IS the quantized entity yaw, which is the only thing that table
-	 * varies by, so rebuild the light vector from it and evaluate the same
-	 * function the table holds: 1 + d, with d scaled by 0.3 where it faces
-	 * away.  That is what r_avertexnormal_dots is, and it is what
-	 * md5mesh.c's skeletal shader and md3mesh.c's CPU path both compute --
-	 * the three have to agree or one model lights differently depending on
-	 * r_alias_gpu and on which format it was shipped in.  The scaffolding
-	 * this replaces used max(world_normal.z, 0), a top-down world light
-	 * that matched none of them.  uhexen2-2ah9. */
-	/* Bit 8 of ShadedotRow is the per-instance dynamic-light switch, not part
-	 * of the row -- see ALIAS_INST_SHADEDOT_ROW_MASK in gl_shader.h.  The row
-	 * itself is 0..15, so masking costs nothing and keeps the 80-byte
-	 * InstanceData layout unchanged.  uhexen2-waum. */
-	"    int sdot_row = inst.ShadedotRow & " GLSL_STR(ALIAS_INST_SHADEDOT_ROW_MASK) ";\n"
-	"    if (u_poseverttype == 1) {\n"  /* MD3: use decoded normal */
-	"        float an = float(sdot_row) * (6.28318531 / 16.0);\n"
-	"        vec3 sv = normalize(vec3(cos(-an), sin(-an), 1.0));\n"
-	"        float d = dot(normalize(normal), sv);\n"
-	"        if (d < 0.0) d *= 0.3;\n"
-	"        sdot = max(1.0 + d, 0.0);\n"
-	"    } else {\n"  /* QUAKE1: use shadedots table */
-	"        int sdot_idx = sdot_row * 256 + int(ni);\n"
-	"        sdot = shadedots[sdot_idx];\n"
-	"        sdot = max(sdot, 0.0);\n"
-	"    }\n"
-	"    v_color = vec4(inst.LightAlpha.rgb * sdot, inst.LightAlpha.a);\n"
-	"\n"
-	"    v_texcoord = a_texcoord;\n"
-	/* The instance world matrix is model-only, so world_pos is already the
-	 * world-space vertex — no u_alias_model needed on this path and no
-	 * change to the 80-byte InstanceData layout.  uhexen2-0gn3. */
-	"    v_worldxy = world_pos.xy;\n"
-	"    v_fogdist = distance(world_pos, u_eyepos);\n"
-	"    v_matpos = world_pos - u_eyepos;\n"
-	"    v_eyepos = (u_lightview * vec4(world_pos, 1.0)).xyz;\n"
-	/* Per instance, because one instanced draw mixes entities whose CPU
-	 * lighting came from different arms of R_DrawAliasModel's branch chain
-	 * and only the ordinary arm ever took dynamic light.  An MLS_ABSLIGHT or
-	 * EF_ROTATE entity carries the bit clear and shades exactly as before. */
-	"    v_dlightscale = ((inst.ShadedotRow & " GLSL_STR(ALIAS_INST_DLIGHT_BIT) ") != 0)\n"
-	"                  ? u_alias_dlight : 0.0;\n"
-	"    gl_Position = u_viewproj * vec4(world_pos, 1.0);\n"
-	"}\n";
+#define GLSL_ALIAS_INST_VERT_HEADER \
+	GLSL_VERT_HEADER \
+	"#define ALIAS_INST_SHADEDOT_ROW_MASK " GLSL_STR(ALIAS_INST_SHADEDOT_ROW_MASK) "\n" \
+	"#define ALIAS_INST_DLIGHT_BIT " GLSL_STR(ALIAS_INST_DLIGHT_BIT) "\n"
 #endif /* !USE_GLES */
 
 /* --- shader_sky: two-layer scrolling sky (solid + alpha) --- */
@@ -2288,15 +2102,16 @@ static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p, const char *na
 					 const char *defines)
 {
 	GLuint vs, fs, prog;
+	char	vert_header[512];
 	char	frag_header[512];
 
 	/* `defines` is NULL for the ordinary program and "#define NOPERSP 1" for
-	 * the affine twin -- one source, two programs.  uhexen2-ktjv.  The vertex
-	 * stage is still a literal with its own #version, so the defines are
-	 * spliced into it; the fragment stage is salias_frag.glsl (#450), so they
-	 * ride its header chunk instead, as for the other eight. */
-	vs = defines ? GL_CompileShaderDefines(GL_VERTEX_SHADER, salias_inst_vert, defines)
-		     : GL_CompileShader(GL_VERTEX_SHADER, salias_inst_vert);
+	 * the affine twin -- one source, two programs.  uhexen2-ktjv.  Both
+	 * stages are files (#450), so the defines ride each one's header chunk,
+	 * as for the other eight alias-family programs. */
+	q_snprintf (vert_header, sizeof(vert_header), "%s%s",
+		    GLSL_ALIAS_INST_VERT_HEADER, defines ? defines : "");
+	vs = GL_CompileShaderSplit(GL_VERTEX_SHADER, vert_header, salias_inst_vert);
 	q_snprintf (frag_header, sizeof(frag_header), "%s%s",
 		    GLSL_ALIAS_FRAG_HEADER, defines ? defines : "");
 	fs = GL_CompileShaderSplit(GL_FRAGMENT_SHADER, frag_header, salias_frag);
@@ -2330,19 +2145,13 @@ static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p, const char *na
 
 	memset(p, 0, sizeof(*p));
 	p->program = prog;
-	p->u_viewproj = glGetUniformLocation_fp(prog, "u_viewproj");
-	p->u_inst_base = glGetUniformLocation_fp(prog, "u_inst_base");
-	p->u_eyepos = glGetUniformLocation_fp(prog, "u_eyepos");
-	p->u_poseverttype = glGetUniformLocation_fp(prog, "u_poseverttype");
-	/* uhexen2-waum */
-	p->u_alias_dlight = glGetUniformLocation_fp(prog, "u_alias_dlight");
-	p->u_lightview = glGetUniformLocation_fp(prog, "u_lightview");
-	p->u_lightgrid = glGetUniformLocation_fp(prog, "u_lightgrid");
+	p->u_lightgrid = glGetUniformLocation_fp(prog, "u_lightgrid");	/* uhexen2-waum */
 	/* This program is linked by hand rather than by GL_InitProgramSplit, so
 	 * it binds its blocks by hand too (#450, hazard 9).  Without this its
-	 * FragParams and AliasFrag would sit at binding 0 -- Hi-Z's HizParams. */
+	 * four blocks would all sit at binding 0 -- Hi-Z's HizParams. */
 	R_BindProgramBlocks(prog, &p->ub_vert, &p->ub_frag);
 	p->ub_afrag = R_BindAliasFragBlock(prog);
+	p->ub_avert = R_BindAliasVertBlock(prog);
 
 	/* Bind skin texture to unit 0 */
 	R_UseProgram (prog);

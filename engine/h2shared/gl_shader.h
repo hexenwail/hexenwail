@@ -167,29 +167,19 @@ extern glprogram_t	gl_shader_particle_oit;
 typedef struct {
 	GLuint	program;	/* shader program handle */
 	GLuint	ubo_shadedots;	/* SSBO handle for shadedots table */
-	/* salias_inst_vert's loose uniforms.  The fragment stage, salias_frag, is
-	 * engine/shaders/salias_frag.glsl since #450 slice S2 and reads every
-	 * non-opaque value from FragParams and AliasFrag, so its fog, alpha pair,
-	 * caustics, material, light direction, warp, span cell, soft params and
-	 * froxel lookup have no location here any more; R_DrawAliasInstanced
-	 * writes them through the R_Set* shadows instead. */
-	GLint	u_viewproj;	/* view-projection matrix (uhexen2-8pc2) */
-	GLint	u_inst_base;	/* base instance index for gl_InstanceID offset */
-	GLint	u_eyepos;	/* camera position for fog distance */
-	GLint	u_poseverttype;	/* vertex format: 0=PV_QUAKE1, 1=PV_MD3 */
-	/* Clustered dynamic lighting (uhexen2-waum), the vertex half: the scale,
-	 * and the world -> eye matrix this path builds v_eyepos with, because it
-	 * has no u_modelview to derive it from.  The fragment stage has its own
-	 * copy of the same matrix in AliasFrag (u_aflightview), written from the
-	 * same lc_view by the same R_LightCluster_BindForAlias call. */
-	GLint	u_alias_dlight;	/* blocklight -> vertex-colour scale; 0 disables */
-	GLint	u_lightview;
+	/* Both stages are files since #450 (salias_inst_vert.glsl in slice S3,
+	 * salias_frag.glsl in S2) and read every non-opaque value from a block,
+	 * so the only location left is the sampler's.  R_DrawAliasInstanced
+	 * writes the vertex stage's view-projection, eye position, instance base,
+	 * pose vertex type and dlight scale into VertParams, and
+	 * R_LightCluster_BindForAlias its world -> eye matrix into AliasVert. */
 	GLint	u_lightgrid;	/* usampler3D, texture unit LIGHT_GRID_TMU */
-	/* Block indices, as on glprogram_t.  The vertex stage declares no block,
-	 * so ub_vert is -1; FragParams and AliasFrag come from salias_frag. */
+	/* Block indices, as on glprogram_t: VertParams and AliasVert from the
+	 * vertex stage, FragParams and AliasFrag from salias_frag. */
 	GLint	ub_vert;
 	GLint	ub_frag;
 	GLint	ub_afrag;
+	GLint	ub_avert;	/* AliasVert, at UBO_BINDING_ALIAS_VERT (#450 S3) */
 } gl_alias_inst_prog_t;
 
 extern gl_alias_inst_prog_t gl_shader_alias_inst;
@@ -204,8 +194,11 @@ void	GL_ParticleGPU_SetUniforms (const gl_particle_gpu_prog_t *prog,
 				     float ctime);
 
 /* InstanceData.ShadedotRow carries two things, because widening the record
- * would change the 80-byte layout salias_inst_vert and R_CollectAliasInstance
- * both hardcode.  The low bits are the quantized-yaw row into the shadedots
+ * would change the 80-byte layout engine/shaders/salias_inst_vert.glsl and
+ * R_CollectAliasInstance both hardcode.  The shader gets these two through
+ * its header chunk (GLSL_ALIAS_INST_VERT_HEADER in gl_shader.c); its #ifndef
+ * copies are for the offline SPIR-V compile and are pinned to these by
+ * tools/test_alias_inst_vert_block.py.  The low bits are the quantized-yaw row into the shadedots
  * table (0..15); bit 8 says this entity's CPU lighting came from the arm of
  * R_DrawAliasModel's branch chain that accumulates dynamic light, and so may
  * take it per-pixel from the froxel grid.  MLS_ABSLIGHT, model-lightstyle and
@@ -240,7 +233,8 @@ void	GL_ParticleGPU_SetUniforms (const gl_particle_gpu_prog_t *prog,
 #define UBO_BINDING_VERT	1
 #define UBO_BINDING_FRAG	2
 /* The alias family's own blocks (engine/shaders/alias.inc, #450): 11 is
- * salias_frag's AliasFrag; 10 is held for the vertex stages' AliasVert. */
+ * salias_frag's AliasFrag, 10 the vertex stages' AliasVert. */
+#define UBO_BINDING_ALIAS_VERT	10
 #define UBO_BINDING_ALIAS_FRAG	11
 
 void	GL_Shaders_Init (void);

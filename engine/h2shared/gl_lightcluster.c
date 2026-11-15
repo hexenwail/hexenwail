@@ -67,7 +67,6 @@
 #include "sdl_inc.h"
 #include "gl_matrix.h"
 #include "gl_shader.h"
-#include "gl_vbo.h"		/* GL_ImmInvalidateState -- see R_LightCluster_BindForAlias */
 #include "gl_pipeline.h"
 #include "gl_sky.h"		/* gl_farclip -- the projection far plane lives there */
 #include "gl_lightcluster.h"
@@ -564,18 +563,6 @@ void R_LightCluster_BindForWorld (void)
 /* Phase C: handing the same grid to the alias family (uhexen2-waum)    */
 /* ------------------------------------------------------------------ */
 
-/* The instanced vertex stage's own world -> eye matrix, which it builds
- * v_eyepos with: salias_inst_vert is still a literal with a loose u_lightview
- * (#450 slice S3 moves it).  The fragment stage's copy is AliasFrag's, set
- * below from the same lc_view. */
-static void LC_SetAliasInstUniforms (const gl_alias_inst_prog_t *p)
-{
-	if (!p->program || p->u_lightview < 0)
-		return;
-	R_UseProgram (p->program);
-	glUniformMatrix4fv_fp (p->u_lightview, 1, GL_FALSE, lc_view);
-}
-
 void R_LightCluster_BindForAlias (void)
 {
 	if (!R_LightCluster_AliasActive ())
@@ -595,19 +582,14 @@ void R_LightCluster_BindForAlias (void)
 	 * gone by construction; the shadow reaches the GPU with the next alias
 	 * batch's flush.  A frame on which the grid is not live writes nothing
 	 * and leaves last frame's values, which nothing reads: the scale that
-	 * gates the lookup is 0 on such a frame (R_AliasDlightScale). */
+	 * gates the lookup is 0 on such a frame (R_AliasDlightScale).
+	 *
+	 * The same call writes AliasVert's copy of lc_view, which the instanced
+	 * vertex stage builds v_eyepos with (#450 S3).  That was the last
+	 * per-program write here -- a glUniform on each instanced program, with
+	 * the GL_ImmInvalidateState it obliged -- so nothing here touches a
+	 * program any more. */
 	R_SetAliasLightGrid (lc_view, lc_vp, lc_zlogscale, lc_zlogbias);
-	LC_SetAliasInstUniforms (&gl_shader_alias_inst);
-	LC_SetAliasInstUniforms (&gl_shader_alias_inst_np);
-	R_UseProgram (0);
-
-	/* GL_ImmEnd caches uniform values per program and did not see the
-	 * instanced writes above.  Its cache keys on the program pointer, so
-	 * without this the next batch on a program we just touched would trust
-	 * a stale entry.  In practice u_lightview is not one GL_ImmEnd tracks,
-	 * but the rule in this engine is that anything setting uniforms behind
-	 * its back says so -- see the header comment on GL_ImmInvalidateState. */
-	GL_ImmInvalidateState ();
 
 	/* The SSBO and the grid texture are already bound for the frame by
 	 * R_LightCluster_BindForWorld, which runs immediately before this, and

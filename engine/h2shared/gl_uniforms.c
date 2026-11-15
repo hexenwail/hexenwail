@@ -1,6 +1,6 @@
 /* gl_uniforms.c -- the two std140 uniform blocks shared by every file-backed
- * draw program, and the alias family's AliasFrag.  See gl_uniforms.h for the
- * layout and the reasoning.
+ * draw program, and the alias family's AliasFrag and AliasVert.  See
+ * gl_uniforms.h for the layout and the reasoning.
  *
  * Copyright (C) 2026  Contributors of the uHexen2 project
  *
@@ -13,7 +13,7 @@
 #include "quakedef.h"
 #include "sdl_inc.h"
 #include "gl_matrix.h"
-#include "gl_shader.h"		/* UBO_BINDING_VERT / _FRAG / _ALIAS_FRAG */
+#include "gl_shader.h"		/* UBO_BINDING_VERT / _FRAG / _ALIAS_FRAG / _ALIAS_VERT */
 #include "gl_uniforms.h"
 
 #ifndef GL_UNIFORM_BLOCK_DATA_SIZE
@@ -35,21 +35,26 @@
 #define RU_NAME_VERT	"VertParams"
 #define RU_NAME_FRAG	"FragParams"
 #define RU_NAME_AFRAG	"AliasFrag"
+#define RU_NAME_AVERT	"AliasVert"
 
 static GLuint		ubo_vert;
 static GLuint		ubo_frag;
 static GLuint		ubo_afrag;
+static GLuint		ubo_avert;
 
 static r_vertparams_t	vertparams;
 static r_fragparams_t	fragparams;
 static r_aliasfrag_t	aliasfrag;
+static r_aliasvert_t	aliasvert;
 
 static qboolean		vert_dirty;
 static qboolean		frag_dirty;
 static qboolean		afrag_dirty;
+static qboolean		avert_dirty;
 static qboolean		bindings_dirty;
 static qboolean		layout_checked;
 static qboolean		afrag_layout_checked;
+static qboolean		avert_layout_checked;
 
 /* The mirrors are only trustworthy if they are the size std140 says they are.
  * Both are built from vec4/mat4/ivec4 only, so this is arithmetic rather than
@@ -57,6 +62,7 @@ static qboolean		afrag_layout_checked;
 COMPILE_TIME_ASSERT(vertparams_size, sizeof(r_vertparams_t) == 4 * 64 + 7 * 16);
 COMPILE_TIME_ASSERT(fragparams_size, sizeof(r_fragparams_t) == 9 * 16);
 COMPILE_TIME_ASSERT(aliasfrag_size, sizeof(r_aliasfrag_t) == 64 + 5 * 16);
+COMPILE_TIME_ASSERT(aliasvert_size, sizeof(r_aliasvert_t) == 64);
 
 /* ------------------------------------------------------------------ */
 /* Small helpers                                                       */
@@ -290,6 +296,11 @@ void R_SetAliasLightGrid (const float *view16, const float *grid4,
 	changed |= RU_Set4(aliasfrag.gridz, zlogscale, zlogbias, 0.0f, 0.0f);
 	if (changed)
 		afrag_dirty = true;
+	/* The instanced vertex stage's copy of the same matrix (#450 S3).  One
+	 * call writes both, so the stage that builds v_eyepos and the one that
+	 * looks it up in the grid cannot drift apart. */
+	if (RU_SetMat(aliasvert.lightview, view16))
+		avert_dirty = true;
 }
 
 void R_SetAliasTurb (float amplitude, float time)
@@ -357,6 +368,7 @@ void R_FlushUniforms (void)
 		GL_BindBufferBase (GL_UNIFORM_BUFFER, UBO_BINDING_VERT, ubo_vert);
 		GL_BindBufferBase (GL_UNIFORM_BUFFER, UBO_BINDING_FRAG, ubo_frag);
 		GL_BindBufferBase (GL_UNIFORM_BUFFER, UBO_BINDING_ALIAS_FRAG, ubo_afrag);
+		GL_BindBufferBase (GL_UNIFORM_BUFFER, UBO_BINDING_ALIAS_VERT, ubo_avert);
 	}
 
 	if (vert_dirty)
@@ -380,6 +392,13 @@ void R_FlushUniforms (void)
 		glBufferData_fp (GL_UNIFORM_BUFFER, sizeof(aliasfrag), &aliasfrag,
 				 GL_STREAM_DRAW);
 	}
+	if (avert_dirty)
+	{
+		avert_dirty = false;
+		GL_BindBuffer (GL_UNIFORM_BUFFER, ubo_avert);
+		glBufferData_fp (GL_UNIFORM_BUFFER, sizeof(aliasvert), &aliasvert,
+				 GL_STREAM_DRAW);
+	}
 }
 
 void R_InvalidateUniforms (void)
@@ -387,6 +406,7 @@ void R_InvalidateUniforms (void)
 	vert_dirty = true;
 	frag_dirty = true;
 	afrag_dirty = true;
+	avert_dirty = true;
 	bindings_dirty = true;
 }
 
@@ -478,6 +498,21 @@ GLint R_BindAliasFragBlock (GLuint program)
 	return idx;
 }
 
+GLint R_BindAliasVertBlock (GLuint program)
+{
+	GLint	idx;
+
+	if (!program || !RU_HAVE_UBO_BIND)
+		return -1;
+	idx = RU_BindOne (program, RU_NAME_AVERT, UBO_BINDING_ALIAS_VERT);
+	if (idx >= 0 && !avert_layout_checked)
+	{
+		avert_layout_checked = true;
+		RU_CheckBlockSize (program, RU_NAME_AVERT, sizeof(r_aliasvert_t));
+	}
+	return idx;
+}
+
 /* ------------------------------------------------------------------ */
 /* Life cycle                                                          */
 /* ------------------------------------------------------------------ */
@@ -489,8 +524,10 @@ void R_Uniforms_Init (void)
 	memset (&vertparams, 0, sizeof(vertparams));
 	memset (&fragparams, 0, sizeof(fragparams));
 	memset (&aliasfrag, 0, sizeof(aliasfrag));
+	memset (&aliasvert, 0, sizeof(aliasvert));
 	layout_checked = false;
 	afrag_layout_checked = false;
+	avert_layout_checked = false;
 
 	/* GL zero-initialises nothing useful here.  An all-zero model matrix
 	 * collapses every vertex to world (0,0), which is what the per-program
@@ -510,10 +547,12 @@ void R_Uniforms_Init (void)
 	aliasfrag.material[2] = 1.0f;
 	aliasfrag.lightdir[2] = 1.0f;
 	memcpy (aliasfrag.lightview, ident, sizeof(ident));
+	memcpy (aliasvert.lightview, ident, sizeof(ident));
 
 	glGenBuffers_fp (1, &ubo_vert);
 	glGenBuffers_fp (1, &ubo_frag);
 	glGenBuffers_fp (1, &ubo_afrag);
+	glGenBuffers_fp (1, &ubo_avert);
 
 	/* Seed both stores before anything binds them, so a program that draws
 	 * before its first setter call reads zeros and an identity rather than
@@ -521,6 +560,7 @@ void R_Uniforms_Init (void)
 	vert_dirty = true;
 	frag_dirty = true;
 	afrag_dirty = true;
+	avert_dirty = true;
 	bindings_dirty = true;
 	R_FlushUniforms ();
 }
@@ -545,7 +585,14 @@ void R_Uniforms_Shutdown (void)
 		glDeleteBuffers_fp (1, &ubo_afrag);
 		ubo_afrag = 0;
 	}
+	if (ubo_avert)
+	{
+		GL_ForgetBuffer (ubo_avert);
+		glDeleteBuffers_fp (1, &ubo_avert);
+		ubo_avert = 0;
+	}
 	layout_checked = false;
 	afrag_layout_checked = false;
+	avert_layout_checked = false;
 	bindings_dirty = true;
 }

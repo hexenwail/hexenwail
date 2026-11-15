@@ -123,6 +123,11 @@
  *                    where SDL_GPU puts a fragment stage's read-only storage
  *                    buffers.  Storage blocks do not exist in ES 3.00 at all,
  *                    so a caller keeps them under #ifndef GL_ES.
+ *                    VERT_SSBO(gl, vk) is the vertex-stage twin: set 0,
+ *                    after that stage's sampled textures (#450, the instanced
+ *                    alias stage, which has none, so its four buffers are
+ *                    0..3 in both numberings).  Desktop-only for the same
+ *                    reason.
  * ------------------------------------------------------------------------ */
 
 #ifdef VULKAN
@@ -134,6 +139,7 @@
   #define FRAG_TEX(b)       layout(set = 2, binding = b)
   #define FRAG_UBO(b)       layout(std140, set = 3, binding = b)
   #define FRAG_SSBO(gl, vk) layout(std430, set = 2, binding = vk)
+  #define VERT_SSBO(gl, vk) layout(std430, set = 0, binding = vk)
 #elif defined(GL_SPIRV)
   #define VERT_IN(loc)      layout(location = loc)
   #define VERT_OUT(loc)     layout(location = loc)
@@ -143,6 +149,7 @@
   #define FRAG_TEX(b)       layout(binding = b)
   #define FRAG_UBO(b)       layout(std140, binding = b)
   #define FRAG_SSBO(gl, vk) layout(std430, binding = gl)
+  #define VERT_SSBO(gl, vk) layout(std430, binding = gl)
 #else
   #define VERT_IN(loc)      layout(location = loc)
   #define VERT_OUT(loc)
@@ -152,6 +159,7 @@
   #define FRAG_TEX(b)
   #define FRAG_UBO(b)       layout(std140)
   #define FRAG_SSBO(gl, vk) layout(std430, binding = gl)
+  #define VERT_SSBO(gl, vk) layout(std430, binding = gl)
 #endif
 
 #endif /* LAYOUT_INC */

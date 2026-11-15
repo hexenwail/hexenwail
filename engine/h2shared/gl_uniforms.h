@@ -97,6 +97,20 @@ typedef struct {
 	float	lightdir[4];	/* 128  xyz model light direction */
 } r_aliasfrag_t;		/* 144 */
 
+/* AliasVert (engine/shaders/alias.inc), the alias vertex stages' own block, at
+ * UBO_BINDING_ALIAS_VERT (#450, alias slice S3).  Read by salias_inst_vert
+ * only, and only where v_dlightscale > 0:
+ *
+ *   lightview  R_LightCluster_BindForAlias through R_SetAliasLightGrid, once a
+ *              frame, the same lc_view as AliasFrag's copy.
+ *
+ * Seeded with an identity.  The loose uniform it replaced started at GL's
+ * zeros; neither is ever read, since the scale that gates the read is 0
+ * whenever the grid is not live. */
+typedef struct {
+	float	lightview[16];	/*   0  world -> eye, no entity transform */
+} r_aliasvert_t;		/* 64 */
+
 void	R_Uniforms_Init (void);
 void	R_Uniforms_Shutdown (void);
 
@@ -115,6 +129,10 @@ void	R_BindProgramBlocks (GLuint program, GLint *out_vert, GLint *out_frag);
  * UBO_BINDING_ALIAS_FRAG, or -1 if the program declares no such block, which
  * is every program but the ten that link salias_frag. */
 GLint	R_BindAliasFragBlock (GLuint program);
+
+/* The same for AliasVert, at UBO_BINDING_ALIAS_VERT; -1 for every program but
+ * the two instanced ones (#450 S3). */
+GLint	R_BindAliasVertBlock (GLuint program);
 
 /* Setters.  Each writes the CPU shadow and marks its block dirty only when the
  * value actually changed; nothing reaches the GPU until R_FlushUniforms. */
@@ -157,7 +175,7 @@ void	R_SetSkyWind (float u, float v);
 void	R_SetSkyCubeWind (const float *dir3, float yaw);
 void	R_SetLightDebug (float fullbright, float lightmapdbg);
 
-/* AliasFrag */
+/* AliasFrag; R_SetAliasLightGrid writes AliasVert's copy of the view too */
 void	R_SetAliasLightGrid (const float *view16, const float *grid4,
 			     float zlogscale, float zlogbias);
 void	R_SetAliasTurb (float amplitude, float time);
