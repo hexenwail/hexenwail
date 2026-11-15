@@ -21,7 +21,11 @@ This source check fails if:
   - R_SetSkyFog gains another caller, or R_RenderScene stops running
     Fog_SetupFrame before the world (which draws the scrolling sky) and
     Sky_DrawSky,
-  - Sky_LayerFogAlpha drifts from Sky_DrawSkyBox's condition and alpha,
+  - Sky_LayerFogAlpha drifts from Sky_DrawSkyBox's condition and alpha, or
+    Sky_LayerFogColor from setting the fog colour at alpha a and nothing else,
+  - anything but R_SetSkyFog (gl_uniforms.c) touches fragparams.skyfog,
+  - Fog_GetColor stops clamping its colour to 0..1 after the fade and before
+    the 24-bit rounding, as Ironwail does (the worldspawn fog key is raw),
   - either two-pass path (R_DrawSkyChain, EmitSkyPolysMulti) loses its flat
     fog pass after the front layer, inside the blend, or
   - a shader other than ssky_layers_frag.glsl reads u_skyfog (the skybox
@@ -114,6 +118,16 @@ def check(root):
             failures.append("Fog_SetupFrame: R_SetSkyFog is conditional; it must "
                             "run every frame, fog off included (alpha 0 zeroes it)")
 
+    # 1b. Fog_GetColor clamps after the fade, before the 24-bit rounding.
+    getc = squash(function(fog_c, "float *Fog_GetColor (void)"))
+    clamp = re.search(rf"for\(i=0;i<3;i\+\+\)\{{?c\[i\]=CLAMP\({ZERO},c\[i\],{ONE}\);\}}?", getc)
+    lerp = getc.rfind("c[2]=fog_blue;")
+    rnd = getc.find("Q_rint(")
+    if not clamp or lerp < 0 or rnd < 0 or not lerp < clamp.start() < rnd:
+        failures.append("Fog_GetColor: must clamp c[0..2] to 0..1 "
+                        "('for (i=0;i<3;i++) c[i] = CLAMP(0, c[i], 1);') after "
+                        "the fade and before the Q_rint rounding, as Ironwail does")
+
     # 2. One writer, and it runs before anything draws sky.
     writers = []
     for path in (root / "engine").rglob("*.c"):
@@ -128,6 +142,31 @@ def check(root):
     if writers != ["engine/h2shared/gl_fog.c"]:
         failures.append("R_SetSkyFog callers must be exactly Fog_SetupFrame, got: "
                         + ", ".join(writers or ["none"]))
+
+    # The uniform itself: R_SetSkyFog is its only toucher, and it is a plain
+    # store, so R_SetSkyFog's single caller decides what the shader sees.
+    touchers = []
+    for path in sorted((root / "engine").rglob("*.[ch]")):
+        if "rust" in path.parts:
+            continue
+        text = strip_comments(path.read_text(errors="replace"))
+        for hit in re.finditer(r"\bfragparams\s*(?:\.|->)\s*skyfog\b", text):
+            touchers.append((path.relative_to(root).as_posix(), hit.start()))
+    uni_c = strip_comments((root / "engine/h2shared/gl_uniforms.c").read_text())
+    setter_at = uni_c.find("void R_SetSkyFog (float r, float g, float b, float a)")
+    setter = function(uni_c, "void R_SetSkyFog (float r, float g, float b, float a)")
+    inside = False
+    if setter_at >= 0 and len(touchers) == 1:
+        brace = uni_c.index("{", setter_at)
+        f, pos = touchers[0]
+        inside = f == "engine/h2shared/gl_uniforms.c" and brace < pos < brace + len(setter)
+    if not inside:
+        failures.append("fragparams.skyfog must be touched only in R_SetSkyFog "
+                        "(gl_uniforms.c), once; got %d: " % len(touchers)
+                        + ", ".join(sorted({t[0] for t in touchers}) or ["none"]))
+    if squash(setter) != "{if(RU_Set4(fragparams.skyfog,r,g,b,a))frag_dirty=true;}":
+        failures.append("R_SetSkyFog: must store (r, g, b, a) as given, got: "
+                        + squash(setter))
 
     scene = function(rmain_c, "static void R_RenderScene (void)")
     order = [scene.find(s) for s in ("Fog_SetupFrame ()", "R_DrawWorld ()",
@@ -148,8 +187,10 @@ def check(root):
         failures.append("Sky_LayerFogAlpha: must be 'Fog_GetDensity() > 0 && "
                         "skyfog > 0 ? CLAMP(0, skyfog, 1) : 0', got: " + alpha_fn)
     color_fn = squash(function(warp_c, "static void Sky_LayerFogColor (float a)"))
-    if not ("Fog_GetColor()" in color_fn and "GL_ImmColor4f(c[0],c[1],c[2],a)" in color_fn):
-        failures.append("Sky_LayerFogColor: must set the fog colour at alpha a")
+    if color_fn != "{float*c=Fog_GetColor();GL_ImmColor4f(c[0],c[1],c[2],a);}":
+        failures.append("Sky_LayerFogColor: must be exactly 'float *c = "
+                        "Fog_GetColor(); GL_ImmColor4f (c[0], c[1], c[2], a);', "
+                        "got: " + color_fn)
 
     # 4. Both two-pass paths: a flat fog pass after the front layer, blend on.
     def fog_pass_after_front(body, name, front_marker):

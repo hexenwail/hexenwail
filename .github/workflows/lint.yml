@@ -198,6 +198,8 @@ jobs:
       # caller and the two-pass layers had no fog pass (GitHub #486).  Pins
       # the per-frame write in Fog_SetupFrame and both two-pass fog passes;
       # and the skybox is never skipped on skyfog (GitHub #487).
+      # Fog_GetColor clamps as Ironwail does, and R_SetSkyFog alone writes
+      # fragparams.skyfog (the #486 review).
       - name: Sky fog reaches the scrolling sky
         run: python3 tools/test_skyfog_layers.py
 

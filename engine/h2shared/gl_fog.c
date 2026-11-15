@@ -266,6 +266,13 @@ float *Fog_GetColor (void)
 		c[3] = 1.0;
 	}
 
+	/* Ironwail's clamp, after the fade.  The fog command clamps its colour,
+	 * but the worldspawn "fog" key is sscanf'd raw, and out-of-range values
+	 * would otherwise reach u_skyfog and the flat sky fog passes, which
+	 * r_hdr's RGBA16F targets do not clamp. */
+	for (i=0;i<3;i++)
+		c[i] = CLAMP(0.0f, c[i], 1.0f);
+
 	//find closest 24-bit RGB value, so solid-colored sky can match the fog perfectly
 	for (i=0;i<3;i++)
 		c[i] = (float)(Q_rint(c[i] * 255)) / 255.0f;
