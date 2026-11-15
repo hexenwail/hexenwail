@@ -1398,6 +1398,52 @@ static float R_AliasDlightScale (qboolean want)
 	return R_AliasLightScale ();
 }
 
+/*
+=================
+R_AliasFinishLight
+
+The last step of both alias lighting setups (R_DrawAliasModel, which every
+non-instanced path draws through -- MDL, MD3, skeletal and the viewmodel --
+and R_CollectAliasInstance for r_alias_gpu): takes lightcolor from 0..255 to
+the shader's range, or under r_fullbright replaces it with the flat light that
+draws the skin at nominal unlit brightness.  One function, so no alias path can
+stay lit under r_fullbright while the others go flat (GitHub #490).
+
+The flat value is 1.0 after scaling.  No alias shader doubles its light, so
+texture * 1.0 * shadedot is the unlit skin, and that matches Ironwail, which
+sets lightcolor to 0.5 under r_fullbright (Quake/r_alias.c:640-641) and doubles
+it in the vertex shader with its default gl_overbright_models 1
+(Quake/gl_shaders.h:1158-1160).  The shadedots stay: they are the model's own
+fixed shading, not environment light, and Ironwail keeps them too.  The
+gl_overbright_models 2 boost is dropped, as R_WorldOverbright drops the
+world's 2x, so the model and the floor under it are both at 1x.
+
+It overrides every arm of the chain, MLS_ABSLIGHT and the model lightstyles
+included, as R_BrushAbsLight does for an abslight brush: r_fullbright shows
+the unlit texture, whatever light the server asked for.  Dynamic light goes
+too.  The CPU loops' contribution is overwritten here, and model_dlight_gpu
+is cleared so neither GL_SetAliasDlight nor the instance's dlight bit asks the
+froxel grid for anything.  R_DrawViewModel's cl.light_level, which monster AI
+reads, is computed before this and is unchanged.  The entity's colorshade
+tint still applies downstream: it is the entity's colour, not its light.
+=================
+*/
+static void R_AliasFinishLight (void)
+{
+	if (r_fullbright.integer)
+	{
+		lightcolor[0] = lightcolor[1] = lightcolor[2] = 1.0f;
+		ambientlight = shadelight = 1.0f;
+		model_dlight_gpu = false;
+		return;
+	}
+	{
+		const float lightscale = R_AliasLightScale ();
+		shadelight *= lightscale;
+		VectorScale(lightcolor, lightscale, lightcolor);
+	}
+}
+
 static int	lastposenum;
 
 /*
@@ -2690,11 +2736,7 @@ static void R_DrawAliasModel (entity_t *e)
 
 	shadedot_row_index = ((int)(e->angles[1] * (SHADEDOT_QUANT / 360.0))) & (SHADEDOT_QUANT - 1);
 	shadedots = r_avertexnormal_dots[shadedot_row_index];
-	{
-		const float lightscale = R_AliasLightScale ();
-		shadelight *= lightscale;
-		VectorScale(lightcolor, lightscale, lightcolor);
-	}
+	R_AliasFinishLight ();
 
 	an = e->angles[1] / 180 * M_PI;
 	shadevector[0] = cos(-an);
@@ -4017,11 +4059,7 @@ static qboolean R_CollectAliasInstance (entity_t *e)
 		}
 	}
 
-	{
-		const float lightscale = R_AliasLightScale ();
-		shadelight *= lightscale;
-		VectorScale(lightcolor, lightscale, lightcolor);
-	}
+	R_AliasFinishLight ();
 
 	/* --- Build world matrix with scale/origin baked in --- */
 	/* Save current modelview (which is the VIEW matrix), load identity,

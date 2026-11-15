@@ -473,3 +473,8 @@ jobs:
       # pass in test_world_vert_block.py (#450 world slice W2).
       - name: World fragment stages on FragParams + WorldFrag
         run: python3 tools/test_world_frag_block.py
+      # r_fullbright flattens alias model light on every alias path: one
+      # helper, both lighting setups through it, every consumer fed from it
+      # and reached only from those setups (#490).
+      - name: Alias models flat under r_fullbright
+        run: python3 tools/test_alias_fullbright.py
