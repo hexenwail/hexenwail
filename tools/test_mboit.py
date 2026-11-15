@@ -2,7 +2,8 @@
 """r_oit 2: moment-based OIT, from vkQuake's mboit.inc (GitHub #87).
 
 Held:
-  - the OIT preamble branches on u_oit_mode: 0 WBOIT (unchanged), 1 MBOIT
+  - the OIT output stage (engine/shaders/oit.inc since #450 W3; gl_shader.c's
+    oit_preamble before) branches on u_oit_mode: 0 WBOIT (unchanged), 1 MBOIT
     moments (b0, then z..z^4 weighted by absorbance), 2 MBOIT composite
     (colour times the transmittance reconstructed at this depth, moments
     read with texelFetch -- not Vulkan subpass inputs), both MBOIT passes
@@ -30,16 +31,18 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 read = lambda p: (ROOT / p).read_text()
 errors = []
-sh, pp, rm, rs = (read("engine/h2shared/gl_shader.c"), read("engine/h2shared/gl_postprocess.c"),
+sh, pp, rm, rs = (read("engine/shaders/oit.inc"), read("engine/h2shared/gl_postprocess.c"),
                   read("engine/hexen2/gl_rmain.c"), read("engine/hexen2/gl_rsurf.c"))
 
-for need in ('"uniform int u_oit_mode;\\n"', '"    if (u_oit_mode == 0) {\\n"', '"    if (u_oit_mode == 1) {\\n"',
-             '"        out_reveal = vec4(mz, z2, z2 * mz, z2 * z2) * absorbance;\\n"',
-             '"    if (fragColor.a < (1.0 / 255.0))\\n"', '"#define MBOIT_OVERESTIMATION 0.25\\n"',
-             'z, 6e-5, vec4(0.0, 0.375, 0.0, 0.375)', '"        b0 = texelFetch(u_mboit_b0_ms, pix, 0).r;\\n"',
-             '"    out_accum = vec4(fragColor.rgb * fragColor.a * t, fragColor.a * t);\\n"'):
+for need in ("#define u_oit_mode  u_foit.x\n", "    if (u_oit_mode == 0) {\n", "    if (u_oit_mode == 1) {\n",
+             "        out_reveal = vec4(mz, z2, z2 * mz, z2 * z2) * absorbance;\n",
+             "    if (fragColor.a < (1.0 / 255.0))\n", "#define MBOIT_OVERESTIMATION 0.25\n",
+             "z, 6e-5, vec4(0.0, 0.375, 0.0, 0.375)", "        b0 = texelFetch(u_mboit_b0_ms, pix, 0).r;\n",
+             "    out_accum = vec4(fragColor.rgb * fragColor.a * t, fragColor.a * t);\n"):
     if need not in sh:
-        errors.append(f"OIT preamble lacks {need}")
+        errors.append(f"oit.inc lacks {need!r}")
+if re.search(r"\boit_preamble\s*\[", read("engine/h2shared/gl_shader.c")):
+    errors.append("gl_shader.c carries an oit_preamble again; the OIT output stage is engine/shaders/oit.inc (#450 W3)")
 if "subpassInput" in sh or "subpassLoad" in sh:
     errors.append("no Vulkan subpass inputs in the GL port")
 if not re.search(r"\} while \(OIT_NextPass \(\)\);\s*OIT_EndTranslucency\(GL_GetSceneFBO\(\)\);", rm):
@@ -62,4 +65,4 @@ if not kc or "mboit_pass == 1" not in kc.group(1):
 
 if errors:
     sys.exit("FAIL:\n  " + "\n  ".join(errors))
-print("PASS r_oit 2 moment-based OIT: preamble, two passes, chains kept, resolve (#87)")
+print("PASS r_oit 2 moment-based OIT: oit.inc, two passes, chains kept, resolve (#87)")

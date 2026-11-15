@@ -11,6 +11,8 @@
  *   u_lightgrid_z    vec2: zlogscale, zlogbias
  *   LIGHTGRID_SSBO_SLOT  the light buffer's SDL_GPU index in set 2, which is
  *                    the number of sampled textures the stage declares
+ *                    (an OIT twin's four more, from oit.inc, are added here
+ *                    through OIT_TEX_COUNT, so the stage states one number)
  * so each family can keep those in its own block: the world's in WorldFrag
  * (world.inc), the alias family's in AliasFrag (alias.inc).
  *
@@ -39,11 +41,17 @@
   #define LIGHT_SSBO_BINDING	8
 #endif
 
+#ifdef OIT_TEX_COUNT
+  #define LIGHTGRID_SET2_SLOT	(LIGHTGRID_SSBO_SLOT + OIT_TEX_COUNT)
+#else
+  #define LIGHTGRID_SET2_SLOT	LIGHTGRID_SSBO_SLOT
+#endif
+
 struct Light { vec3 origin; float radius; vec3 color; float minlight; };
 /* Layout and binding must match gl_lightcluster.c's compute pass.  LightStyles
  * is not read by the alias family, but it has to be declared or std430 puts
  * Lights[] at the wrong offset; the world reads it for GPU lightstyles. */
-FRAG_SSBO(LIGHT_SSBO_BINDING, LIGHTGRID_SSBO_SLOT) restrict readonly buffer LightBuffer {
+FRAG_SSBO(LIGHT_SSBO_BINDING, LIGHTGRID_SET2_SLOT) restrict readonly buffer LightBuffer {
     float LightStyles[MAX_LIGHTSTYLES];
     Light Lights[];
 };

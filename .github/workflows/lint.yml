@@ -411,9 +411,8 @@ jobs:
         run: python3 tools/test_bloomparams_block.py
 
       # The shader include expander and its WebGL-smoke mirror allow the same
-      # number of passes, no stage exceeds it, and no shader comment carries
-      # the declaration the OIT splice searches for (#450).
-      - name: Shader include bound and OIT splice marker
+      # number of passes, and no stage exceeds it (#450).
+      - name: Shader include bound
         run: python3 tools/test_embed_include_bound.py
 
       # salias_vert reads VertParams: the C mirror matches the block member
@@ -473,6 +472,14 @@ jobs:
       # pass in test_world_vert_block.py (#450 world slice W2).
       - name: World fragment stages on FragParams + WorldFrag
         run: python3 tools/test_world_frag_block.py
+
+      # The OIT twins' output stage is engine/shaders/oit.inc, taken under
+      # #ifdef OIT, and its mode switches are OitFrag's: the mirror and
+      # binding, R_SetOITMode as the one writer at the four pass transitions,
+      # every OIT draw flushing, the three stages' arms and slot counts, and
+      # the desktop-only builds (#450 W3).
+      - name: OIT twins on oit.inc + OitFrag
+        run: python3 tools/test_oit_frag_block.py
       # r_fullbright flattens alias model light on every alias path: one
       # helper, both lighting setups through it, every consumer fed from it
       # and reached only from those setups (#490).

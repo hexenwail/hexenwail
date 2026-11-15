@@ -20,8 +20,8 @@ Checks the pieces that have to move together:
     for SPIR-V), and their VERT_OUT locations are distinct and 0..n-1;
   * the literal is gone, the three world programs compile the file through
     GLSL_VERT_HEADER with GLSL_WORLD_FRAG_HEADER for their fragment files
-    (world_oit desktop-only), GL_LoadOITProgramSplit has only the header
-    splice, the WebGL smoke still builds both ES world programs, and no
+    (world_oit desktop-only, built by GL_InitOITProgramSplit as the same file
+    with "#define OIT 1" after the header, #450 W3), the WebGL smoke still builds both ES world programs, and no
     glprogram_t field, lookup or C identifier for the old loose u_mvp /
     u_modelview is left;
   * every path that draws with a world program writes both members and
@@ -334,10 +334,10 @@ for name, b in BUILDS.items():
         errors.append(f"{name} is built inside #ifndef USE_GLES; the ES tier needs it")
 if len(re.findall(r"\bsworld_vert\b", gsc)) != 3:
     errors.append(f"sworld_vert is named {len(re.findall(r'sworld_vert', gsc))} times in gl_shader.c code, expected the 3 builds")
-if not re.search(r"fs = GL_CompileOITFragShaderSplit \(frag_header, frag_src\);", gsc) \
-        or re.search(r"\bGL_CompileOITFragShader\b", gsc):
-    errors.append("GL_LoadOITProgramSplit must splice every OIT fragment stage with its header (#450 W2: "
-                  "the literal splice had no caller left)")
+if not re.search(r"GL_LoadProgramSplit \(vert_header, vert_src, oit_header, frag_src\);", gsc) \
+        or re.search(r"\bGL_CompileOITFragShader\w*\b", gsc):
+    errors.append("GL_InitOITProgramSplit must build every OIT twin from its vertex header and the fragment "
+                  "header plus \"#define OIT 1\" (#450 W3: the splice had no use left)")
 smoke = read("scripts/webgl-engine-shader-smoke.mjs")
 for spec in ("['world', 'shader', 'sworld_vert', 'sworld_frag']",
              "['world_opaque', 'shader', 'sworld_vert', 'sworld_opaque_frag']"):

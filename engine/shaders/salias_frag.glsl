@@ -13,8 +13,8 @@
  * No #version line; gl_shader.c passes GLSL_ALIAS_FRAG_HEADER, the tier's
  * GLSL_FRAG_HEADER plus the froxel-grid sizes on desktop, with
  * "#define NOPERSP 1" appended for the affine (r_softemu) twins.  The OIT twins
- * go through GL_CompileOITFragShaderSplit, which drops the line holding the
- * colour output's declaration and splices its own outputs in.
+ * add "#define OIT 1", which swaps the colour output for oit.inc's outputs
+ * and main() wrapper (#450 W3).
  *
  * The non-opaque uniforms that were loose are block members now: fog, the
  * alpha pair, the caustics and the soft-particle parameters in FragParams
@@ -77,7 +77,13 @@ FRAG_IN(6) flat in float v_dlightscale;
 FRAG_TEX(4) uniform usampler3D u_lightgrid;
 #endif
 
+#ifdef OIT
+#define OIT_TEX0 5
+#define OIT_UBO 2
+#include "oit.inc"
+#else
 FRAG_OUT(0) out vec4 fragColor;
+#endif
 
 #include "caustics.inc"
 #include "turb_uv.inc"

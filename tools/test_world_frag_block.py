@@ -13,8 +13,8 @@ Checks the pieces that have to move together:
     block, identical block, sampler and varying declarations in both (the two
     programs are switched between with no rewrite, so their layout must not
     drift), no loose non-opaque uniform, FRAG_TEX 0..n-1 with the light
-    buffer's slot after them, the colour output's line first (the OIT splice
-    drops it), early_fragment_tests in the opaque twin only and only outside
+    buffer's slot after them, sworld_frag's colour output the #else arm of
+    the oit.inc include its OIT twin takes (#450 W3), early_fragment_tests in the opaque twin only and only outside
     GL_ES, discard in the cutout one only, and each preprocessed function
     body pinned by hash on both tiers (GOLDEN), so the bodies are still the
     literals' -- tools/test_world_frag_block.py --golden prints them;
@@ -249,7 +249,8 @@ def digest(fns):
 # Pinned at the move: the function bodies, helpers included, as each tier's
 # preprocessor leaves them, token for token.  At #450 W2 these were proven
 # token-identical to the literals they replaced (aliases expanded) on both
-# tiers and for the OIT splice.  A deliberate shader change updates them:
+# tiers and for the OIT splice (and at W3, the OIT twin re-proven against that
+# splice as a `#define OIT 1` variant).  A deliberate shader change updates them:
 # run this file with --golden.
 GOLDEN = {
     ("sworld_frag", "desk"): "b569cef5ad4db0cb",
@@ -285,10 +286,17 @@ for f in FRAGS:
     if not re.search(rf"#define LIGHTGRID_SSBO_SLOT {len(samplers)}\n", code):
         errors.append(f"{f}.glsl: LIGHTGRID_SSBO_SLOT must follow the {len(samplers)} sampled textures in set 2")
     decls[f] = (samplers, [" ".join(x.split()) for x in re.findall(r"^FRAG_(?:IN|OUT)\(\d+\).*$", code, re.M)])
-    lines = [l for l in expanded[f].splitlines() if "fragColor;" in l]
-    if not lines or lines[0].strip() != "FRAG_OUT(0) out vec4 fragColor;":
-        errors.append(f"{f}.glsl: the first line holding `fragColor;` after include expansion must be the "
-                      "one-line FRAG_OUT(0) declaration (the OIT splice drops it)")
+    # The colour output: sworld_frag's is the #else arm of the oit.inc include
+    # its OIT twin takes (#450 W3; tools/test_oit_frag_block.py pins the arm),
+    # the opaque twin, which has no OIT twin, declares it plainly.
+    arm = re.search(r'#ifdef OIT\s*\n\s*#define OIT_TEX0 \d+\s*\n\s*#define OIT_UBO \d+\s*\n\s*#include "oit\.inc"\s*\n'
+                    r'\s*#else\s*\n\s*FRAG_OUT\(0\) out vec4 fragColor;\s*\n\s*#endif\s*\n', text)
+    if f == "sworld_frag" and not arm:
+        errors.append("sworld_frag.glsl: the colour output must be the #else arm of `#ifdef OIT ... "
+                      "#include \"oit.inc\"` (world_oit compiles it with OIT defined)")
+    if f == "sworld_opaque_frag" and (arm or "oit.inc" in code
+                                      or text.count("FRAG_OUT(0) out vec4 fragColor;\n") != 1):
+        errors.append("sworld_opaque_frag.glsl has no OIT twin: one plain colour output, no oit.inc")
     desk = "".join(re.findall(r"#ifndef GL_ES\n(.*?)#(?:endif|else)", code, re.S))
     for want in ("usampler3D u_lightgrid", "sampler2D u_lmlayer1", "sampler2D u_lmlayer2", "sampler2D u_lmlayer3",
                  '#include "lightgrid.inc"', '#include "world_dlight.inc"', '#include "lmstyles.inc"',

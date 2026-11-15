@@ -1,6 +1,6 @@
 /* gl_uniforms.c -- the two std140 uniform blocks shared by every file-backed
- * draw program, the alias family's AliasFrag and AliasVert, and the world
- * family's WorldFrag.  See
+ * draw program, the alias family's AliasFrag and AliasVert, the world
+ * family's WorldFrag, and the OIT twins' OitFrag.  See
  * gl_uniforms.h for the layout and the reasoning.
  *
  * Copyright (C) 2026  Contributors of the uHexen2 project
@@ -14,7 +14,7 @@
 #include "quakedef.h"
 #include "sdl_inc.h"
 #include "gl_matrix.h"
-#include "gl_shader.h"		/* UBO_BINDING_VERT / _FRAG / _ALIAS_FRAG / _ALIAS_VERT / _WORLD_FRAG */
+#include "gl_shader.h"		/* UBO_BINDING_VERT / _FRAG / _ALIAS_FRAG / _ALIAS_VERT / _WORLD_FRAG / _OIT_FRAG */
 #include "gl_uniforms.h"
 
 #ifndef GL_UNIFORM_BLOCK_DATA_SIZE
@@ -38,18 +38,21 @@
 #define RU_NAME_AFRAG	"AliasFrag"
 #define RU_NAME_AVERT	"AliasVert"
 #define RU_NAME_WFRAG	"WorldFrag"
+#define RU_NAME_OFRAG	"OitFrag"
 
 static GLuint		ubo_vert;
 static GLuint		ubo_frag;
 static GLuint		ubo_afrag;
 static GLuint		ubo_avert;
 static GLuint		ubo_wfrag;
+static GLuint		ubo_ofrag;
 
 static r_vertparams_t	vertparams;
 static r_fragparams_t	fragparams;
 static r_aliasfrag_t	aliasfrag;
 static r_aliasvert_t	aliasvert;
 static r_worldfrag_t	worldfrag;
+static r_oitfrag_t	oitfrag;
 
 /* The world frame record (#450 W2): the per-frame half of what the world
  * fragment stages read, kept here, not in any shadow, until R_SetWorldFrag
@@ -65,21 +68,24 @@ static qboolean		frag_dirty;
 static qboolean		afrag_dirty;
 static qboolean		avert_dirty;
 static qboolean		wfrag_dirty;
+static qboolean		ofrag_dirty;
 static qboolean		bindings_dirty;
 static qboolean		layout_checked;
 static qboolean		afrag_layout_checked;
 static qboolean		avert_layout_checked;
 static qboolean		wfrag_layout_checked;
+static qboolean		ofrag_layout_checked;
 
 /* The mirrors are only trustworthy if they are the size std140 says they are.
  * All are built from vec4/mat4/ivec4 only, so this is arithmetic rather than
  * hope: 4 mat4 + 6 vec4 + 1 ivec4, 9 vec4, 1 mat4 + 5 vec4, 1 mat4 +
- * 2 vec4, and 1 mat4 + 6 vec4. */
+ * 2 vec4, 1 mat4 + 6 vec4, and 1 ivec4. */
 COMPILE_TIME_ASSERT(vertparams_size, sizeof(r_vertparams_t) == 4 * 64 + 7 * 16);
 COMPILE_TIME_ASSERT(fragparams_size, sizeof(r_fragparams_t) == 9 * 16);
 COMPILE_TIME_ASSERT(aliasfrag_size, sizeof(r_aliasfrag_t) == 64 + 5 * 16);
 COMPILE_TIME_ASSERT(aliasvert_size, sizeof(r_aliasvert_t) == 64 + 2 * 16);
 COMPILE_TIME_ASSERT(worldfrag_size, sizeof(r_worldfrag_t) == 64 + 6 * 16);
+COMPILE_TIME_ASSERT(oitfrag_size, sizeof(r_oitfrag_t) == 16);
 
 /* ------------------------------------------------------------------ */
 /* Small helpers                                                       */
@@ -429,6 +435,22 @@ void R_SetWorldFrag (float fog_density, const float *fog_rgb,
 }
 
 /* ------------------------------------------------------------------ */
+/* OitFrag (#450 W3)                                                   */
+/* ------------------------------------------------------------------ */
+
+void R_SetOITMode (int mode, qboolean ms)
+{
+	int	m = ms ? 1 : 0;
+
+	if (oitfrag.mode[0] != mode || oitfrag.mode[1] != m)
+	{
+		oitfrag.mode[0] = mode;
+		oitfrag.mode[1] = m;
+		ofrag_dirty = true;
+	}
+}
+
+/* ------------------------------------------------------------------ */
 /* Upload                                                              */
 /* ------------------------------------------------------------------ */
 
@@ -464,6 +486,7 @@ void R_FlushUniforms (void)
 		GL_BindBufferBase (GL_UNIFORM_BUFFER, UBO_BINDING_ALIAS_FRAG, ubo_afrag);
 		GL_BindBufferBase (GL_UNIFORM_BUFFER, UBO_BINDING_ALIAS_VERT, ubo_avert);
 		GL_BindBufferBase (GL_UNIFORM_BUFFER, UBO_BINDING_WORLD_FRAG, ubo_wfrag);
+		GL_BindBufferBase (GL_UNIFORM_BUFFER, UBO_BINDING_OIT_FRAG, ubo_ofrag);
 	}
 
 	if (vert_dirty)
@@ -501,6 +524,13 @@ void R_FlushUniforms (void)
 		glBufferData_fp (GL_UNIFORM_BUFFER, sizeof(worldfrag), &worldfrag,
 				 GL_STREAM_DRAW);
 	}
+	if (ofrag_dirty)
+	{
+		ofrag_dirty = false;
+		GL_BindBuffer (GL_UNIFORM_BUFFER, ubo_ofrag);
+		glBufferData_fp (GL_UNIFORM_BUFFER, sizeof(oitfrag), &oitfrag,
+				 GL_STREAM_DRAW);
+	}
 }
 
 void R_InvalidateUniforms (void)
@@ -510,6 +540,7 @@ void R_InvalidateUniforms (void)
 	afrag_dirty = true;
 	avert_dirty = true;
 	wfrag_dirty = true;
+	ofrag_dirty = true;
 	bindings_dirty = true;
 }
 
@@ -631,6 +662,21 @@ GLint R_BindWorldFragBlock (GLuint program)
 	return idx;
 }
 
+GLint R_BindOITFragBlock (GLuint program)
+{
+	GLint	idx;
+
+	if (!program || !RU_HAVE_UBO_BIND)
+		return -1;
+	idx = RU_BindOne (program, RU_NAME_OFRAG, UBO_BINDING_OIT_FRAG);
+	if (idx >= 0 && !ofrag_layout_checked)
+	{
+		ofrag_layout_checked = true;
+		RU_CheckBlockSize (program, RU_NAME_OFRAG, sizeof(r_oitfrag_t));
+	}
+	return idx;
+}
+
 /* ------------------------------------------------------------------ */
 /* Life cycle                                                          */
 /* ------------------------------------------------------------------ */
@@ -644,6 +690,7 @@ void R_Uniforms_Init (void)
 	memset (&aliasfrag, 0, sizeof(aliasfrag));
 	memset (&aliasvert, 0, sizeof(aliasvert));
 	memset (&worldfrag, 0, sizeof(worldfrag));
+	memset (&oitfrag, 0, sizeof(oitfrag));
 	memset (&worldframe, 0, sizeof(worldframe));
 	worldframe_caustics[0] = worldframe_caustics[1] = 0.0f;
 	worldframe_bicubic = 0.0f;
@@ -652,6 +699,7 @@ void R_Uniforms_Init (void)
 	afrag_layout_checked = false;
 	avert_layout_checked = false;
 	wfrag_layout_checked = false;
+	ofrag_layout_checked = false;
 
 	/* GL zero-initialises nothing useful here.  An all-zero model matrix
 	 * collapses every vertex to world (0,0) (uhexen2-0gn3).  The loose
@@ -685,6 +733,7 @@ void R_Uniforms_Init (void)
 	glGenBuffers_fp (1, &ubo_afrag);
 	glGenBuffers_fp (1, &ubo_avert);
 	glGenBuffers_fp (1, &ubo_wfrag);
+	glGenBuffers_fp (1, &ubo_ofrag);
 
 	/* Seed both stores before anything binds them, so a program that draws
 	 * before its first setter call reads zeros and an identity rather than
@@ -694,6 +743,7 @@ void R_Uniforms_Init (void)
 	afrag_dirty = true;
 	avert_dirty = true;
 	wfrag_dirty = true;
+	ofrag_dirty = true;
 	bindings_dirty = true;
 	R_FlushUniforms ();
 }
@@ -730,9 +780,16 @@ void R_Uniforms_Shutdown (void)
 		glDeleteBuffers_fp (1, &ubo_wfrag);
 		ubo_wfrag = 0;
 	}
+	if (ubo_ofrag)
+	{
+		GL_ForgetBuffer (ubo_ofrag);
+		glDeleteBuffers_fp (1, &ubo_ofrag);
+		ubo_ofrag = 0;
+	}
 	layout_checked = false;
 	afrag_layout_checked = false;
 	avert_layout_checked = false;
 	wfrag_layout_checked = false;
+	ofrag_layout_checked = false;
 	bindings_dirty = true;
 }

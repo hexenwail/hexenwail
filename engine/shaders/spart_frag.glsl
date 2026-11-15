@@ -3,6 +3,8 @@
  * u_fog_density / u_fog_color are FragParams' u_ffogv.w / .xyz.
  *
  * No #version line here on purpose; gl_shader.c supplies the tier's own.
+ * The OIT twin (gl_shader_particle_oit) adds "#define OIT 1", which swaps the
+ * colour output for oit.inc's outputs and main() wrapper (#450 W3).
  */
 #include "layout.inc"
 #define UNIFORMS_FRAG
@@ -14,7 +16,13 @@ FRAG_IN(0) in vec2 v_texcoord;
 FRAG_IN(1) in vec4 v_color;
 FRAG_IN(2) in float v_fogdist;
 
+#ifdef OIT
+#define OIT_TEX0 1
+#define OIT_UBO 1
+#include "oit.inc"
+#else
 FRAG_OUT(0) out vec4 fragColor;
+#endif
 
 void main() {
     vec4 tex = texture(u_texture0, v_texcoord);

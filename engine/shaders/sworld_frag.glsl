@@ -9,9 +9,9 @@
  * plain arm of FRAG_IN emits no location) and, for SPIR-V, by location.
  *
  * No #version line; gl_shader.c passes GLSL_WORLD_FRAG_HEADER, the tier's
- * GLSL_FRAG_HEADER plus the froxel-grid sizes on desktop.  The OIT twin goes
- * through GL_CompileOITFragShaderSplit, which drops the line holding the
- * colour output's declaration and splices its own outputs in.
+ * GLSL_FRAG_HEADER plus the froxel-grid sizes on desktop.  The OIT twin adds
+ * "#define OIT 1", which swaps the colour output for oit.inc's outputs and
+ * main() wrapper (#450 W3).
  *
  * NO early_fragment_tests HERE, and none may be added.  Early tests run depth
  * and stencil -- and write them -- BEFORE the fragment shader executes, and a
@@ -59,7 +59,13 @@ FRAG_IN(2) in vec4 v_color;
 FRAG_IN(3) in float v_fogdist;
 FRAG_IN(4) in vec2 v_worldxy;
 FRAG_IN(5) in highp vec3 v_eyepos;      /* highp: see sworld_vert (uhexen2-mfql) */
+#ifdef OIT
+#define OIT_TEX0 9
+#define OIT_UBO 2
+#include "oit.inc"
+#else
 FRAG_OUT(0) out vec4 fragColor;
+#endif
 
 #include "bicubic_lm.inc"
 #include "caustics.inc"

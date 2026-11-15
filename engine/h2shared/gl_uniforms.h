@@ -158,6 +158,26 @@ typedef struct {
 	float	lmstyles[4];	/* 144  x 1 = GPU lightstyles, y the CPU shift as a factor */
 } r_worldfrag_t;		/* 160 */
 
+/* OitFrag (engine/shaders/oit.inc), the OIT twins' own block, at
+ * UBO_BINDING_OIT_FRAG (#450 W3): what the six OIT programs' fragment stages
+ * output this pass.  Unlike every other block here it is not written per draw,
+ * and need not be.  It is per-PASS state with exactly one writer,
+ * R_SetOITMode, called at each OIT pass transition in gl_postprocess.c
+ * (OIT_BeginTranslucency, OIT_NextPass, OIT_EndTranslucency) before any draw of
+ * that pass, so every OIT draw's own flush carries it.  The loose u_oit_mode /
+ * u_mboit_ms it replaced were per-program, but GL_SetOITMode wrote all six
+ * programs the same value at the same moments, so one global copy holds
+ * exactly what each of them did.  No other program declares the block, so a
+ * stale value can only ever be the previous pass's, and no OIT program draws
+ * outside a pass.
+ *
+ * Seeded with mode 0, single-sampled: what GL_InitOITProgramSplit seeded the
+ * loose pair with. */
+typedef struct {
+	int	mode[4];	/*   0  x mode (0 WBOIT, 1 MBOIT moments, 2 MBOIT
+				 *      composite), y moment targets multisampled */
+} r_oitfrag_t;			/* 16 */
+
 void	R_Uniforms_Init (void);
 void	R_Uniforms_Shutdown (void);
 
@@ -184,6 +204,10 @@ GLint	R_BindAliasVertBlock (GLuint program);
 /* The same for WorldFrag, at UBO_BINDING_WORLD_FRAG; -1 for every program but
  * the three world ones (#450 W2). */
 GLint	R_BindWorldFragBlock (GLuint program);
+
+/* The same for OitFrag, at UBO_BINDING_OIT_FRAG; -1 for every program but the
+ * six OIT twins (#450 W3). */
+GLint	R_BindOITFragBlock (GLuint program);
 
 /* Setters.  Each writes the CPU shadow and marks its block dirty only when the
  * value actually changed; nothing reaches the GPU until R_FlushUniforms. */
@@ -265,6 +289,11 @@ void	R_SetWorldLMStyles (float on, float shift);
 void	R_SetWorldFrag (float fog_density, const float *fog_rgb,
 			float alpha_threshold, float force_opaque, float overbright,
 			float turb_amplitude, float turb_time);
+
+/* OitFrag: the output the OIT programs write this pass, 0 WBOIT, 1 MBOIT
+ * moments, 2 MBOIT composite, and whether the moment targets the composite
+ * reads are multisampled.  The block's only writer; see r_oitfrag_t. */
+void	R_SetOITMode (int mode, qboolean ms);
 
 /* Upload whichever blocks changed.  One push per dirty block, whole block,
  * immediately before the draw that reads it. */

@@ -12,7 +12,7 @@ Checks the pieces that have to move together:
     seeded with material and light direction (0,0,1);
   * engine/shaders/salias_frag.glsl declares no loose non-opaque uniform, keeps
     the clustered-dlight half under #ifndef GL_ES, and declares its colour
-    output on one line, first, as the OIT splice needs;
+    output as the #else arm of the oit.inc include its OIT twins take;
   * the helpers it shares with the world stages (caustics, turb_uv, span_uv,
     material, lightgrid) are one copy, included by both families, with no
     GLSL_* macro copy left in gl_shader.c (#450 W2 retired the last), and the
@@ -228,20 +228,12 @@ for want in ("v_eyepos", "v_dlightscale", "usampler3D u_lightgrid", '#include "l
 es = re.search(r"#else\n(.*?)#endif", fcode[fcode.index("ClusteredAliasDlight(lit"):] if "ClusteredAliasDlight(lit" in fcode else "", re.S)
 if not es or "vec4 color = tex * v_color;" not in es.group(1):
     errors.append("the ES arm must be the plain `vec4 color = tex * v_color;`")
-lines = [l for l in fcode.splitlines() if "fragColor;" in l]
-if not lines or lines[0].strip() != "FRAG_OUT(0) out vec4 fragColor;":
-    errors.append("the first line holding `fragColor;` must be the one-line FRAG_OUT(0) declaration (OIT splice)")
-# The OIT splice runs on the EXPANDED body, so included text must not reach
-# `fragColor;` first either.
-expanded = frag
-for _ in range(32):
-    m = re.search(r'#include "([^"]+)"\n', expanded)
-    if not m:
-        break
-    expanded = expanded.replace(m.group(0), (SH / m.group(1)).read_text())
-first = expanded.find("fragColor;")
-if first < 0 or "FRAG_OUT(0) out vec4 fragColor;" not in expanded[expanded.rfind("\n", 0, first):first + 11]:
-    errors.append("after include expansion, the first `fragColor;` is not the output declaration")
+# The OIT twins are `#define OIT 1` variants: the colour output is the #else
+# arm of the oit.inc include (#450 W3; tools/test_oit_frag_block.py pins the
+# arm's slot counts and the C side).
+if not re.search(r'#ifdef OIT\s*\n\s*#define OIT_TEX0 \d+\s*\n\s*#define OIT_UBO \d+\s*\n\s*#include "oit\.inc"\s*\n'
+                 r'\s*#else\s*\n\s*FRAG_OUT\(0\) out vec4 fragColor;\s*\n\s*#endif\s*\n', frag):
+    errors.append("salias_frag.glsl: the colour output must be the #else arm of `#ifdef OIT ... #include \"oit.inc\"`")
 
 # ------------------------------------------------------------ the .inc copies
 
@@ -383,12 +375,15 @@ if dead:
     errors.append(f"gl_alias_inst_prog_t still carries fragment-stage locations that are -1 now: {sorted(dead)}")
 if "p->ub_afrag = R_BindAliasFragBlock(p->program);" not in gl_shader:
     errors.append("GL_InitProgramUniforms must look up ub_afrag")
-# Every OIT fragment stage is a file with no #version since #450 W2, so the
-# header-aware splice is the only one, and no OIT build may pass a NULL
-# fragment header -- that would hand a #version-less file to the driver.
-if not re.search(r"fs = GL_CompileOITFragShaderSplit \(frag_header, frag_src\);", gl_shader) \
-        or re.search(r"\bGL_CompileOITFragShader\b", strip(gl_shader)):
-    errors.append("GL_LoadOITProgramSplit must always take the header-aware splice (the literal one is gone)")
+# Every OIT fragment stage is a file with no #version since #450 W2, and its
+# OIT twin is the same file with "#define OIT 1" after the header since W3; no
+# OIT build may pass a NULL fragment header -- that would hand a #version-less
+# file to the driver.
+if not re.search(r'q_snprintf \(oit_header, sizeof\(oit_header\), "%s%s", frag_header, "#define OIT 1\\n"\);', gl_shader) \
+        or not re.search(r"GL_LoadProgramSplit \(vert_header, vert_src, oit_header, frag_src\);", gl_shader) \
+        or re.search(r"\bGL_CompileOITFragShader\w*\b|\boit_preamble\b", strip(gl_shader)):
+    errors.append("GL_InitOITProgramSplit must compile the file with its header plus \"#define OIT 1\" "
+                  "(the splice and its preamble are gone, #450 W3)")
 for m in re.finditer(r"GL_InitOITProgramSplit\s*\(&(\w+),[^;]*?,\s*NULL\s*,", gl_shader):
     errors.append(f"{m.group(1)} passes a NULL fragment header; every OIT fragment stage is a file")
 

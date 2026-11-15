@@ -10,12 +10,10 @@ with more distinct includes than the smaller bound builds in one and fails (or
 silently differs) in the other.  Both were raised together from 9 to 32 passes
 for the alias family's split (#450).
 
-Also checked, against every engine/shaders file:
-  * no stage needs more distinct includes (transitively) than the bound;
-  * no .inc or .glsl comment contains `out vec4 fragColor;`.
-    GL_CompileOITFragShaderSplit (gl_shader.c) finds that declaration with
-    strstr and splices the OIT outputs in its place; a comment carrying the
-    same text earlier in the expanded body would be cut instead.
+Also checked, against every engine/shaders file: no stage needs more distinct
+includes (transitively) than the bound.  (It also kept `out vec4 fragColor;`
+out of shader comments, for the OIT splice's strstr; the splice went in #450
+W3, when the OIT twins became `#define OIT 1` variants of their files.)
 """
 from pathlib import Path
 import re
@@ -50,12 +48,6 @@ else:
         n = len(includes_of(stage.read_text(), set()))
         if n > bound:
             errors.append(f"{stage.name} pulls in {n} distinct includes, over the bound of {bound}")
-
-for f in sorted(list(SH.glob("*.inc")) + list(SH.glob("*.glsl"))):
-    comments = re.findall(r"/\*.*?\*/|//[^\n]*", f.read_text(), re.S)
-    if any("out vec4 fragColor;" in c for c in comments):
-        errors.append(f"{f.name}: a comment contains `out vec4 fragColor;`, "
-                      "which the OIT splice would cut instead of the declaration")
 
 if errors:
     sys.exit("FAIL:\n  " + "\n  ".join(errors))

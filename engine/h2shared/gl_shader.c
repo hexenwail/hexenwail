@@ -74,6 +74,8 @@ gl_particle_gpu_prog_t	gl_shader_particle_gpu;
 
 /* Forward declarations */
 static void GL_InitProgramUniforms (glprogram_t *p);
+static GLuint GL_LoadProgramSplit (const char *vert_header, const char *vert_src,
+				   const char *frag_header, const char *frag_src);
 
 /* ------------------------------------------------------------------ */
 /* Shader compilation helpers                                          */
@@ -208,241 +210,47 @@ GLuint GL_LinkProgram (GLuint vert, GLuint frag)
 	return prog;
 }
 
-/* The OIT program builders below are desktop-only: OIT cannot run on the ES
- * tier at all (no glBlendFunci in WebGL2), so nothing there would call
- * them.  See GL_Shaders_Init and uhexen2-ha7n. */
+/* The OIT program builder below is desktop-only: OIT cannot run on the ES
+ * tier at all (no glBlendFunci in WebGL2), so nothing there would call it.
+ * See GL_Shaders_Init and uhexen2-ha7n. */
 #ifndef USE_GLES
-/* The OIT output block GL_CompileOITFragShaderSplit splices into an OIT
- * variant of a fragment stage, after its header chunk, in place of its
- * `fragColor;` declaration line.  (GL_CompileOITFragShader, the splice for
- * fragment literals that carried their own #version, went with its last
- * caller when sworld_frag moved to a file, #450 W2.)
- * Uses the main→main_body rename trick from Ironwail.
- * Uses the main→main_body rename trick from Ironwail. */
-/* fragColor is initialized rather than merely declared.  main() below
- * reads it after calling main_body(), which is only a prototype at
- * that point, so the compiler cannot see the assignment inside and
- * correctly reports a read of an uninitialized global — three
- * GL_DEBUG_SEVERITY_HIGH lines on every cold start.  More than noise:
- * this wrapper is only correct because every shader it wraps happens
- * to assign fragColor on every non-discard path, and nothing enforces
- * that.  An early `return;` added to one of them later would yield
- * undefined colour in OIT mode only.  Seeding it makes that case
- * transparent black instead of garbage.  uhexen2-nkvm. */
-/* u_oit_mode picks what the wrapped shader writes (GitHub #87):
- *   0  weighted blended OIT -- accum, revealage (r_oit 1)
- *   1  moment-based OIT, moment pass -- absorbance b0 and its four
- *      depth-weighted power moments (r_oit 2)
- *   2  moment-based OIT, composite pass -- colour weighted by the
- *      transmittance reconstructed from those moments at this depth
- * One program per shader, branched on a uniform, rather than a program
- * per mode: every per-frame uniform the engine pushes to an OIT
- * program (caustics, overbright, light clusters, ...) then reaches all
- * three modes with no extra plumbing.
- *
- * The moment maths is vkQuake's Shaders/mboit.inc (Muenstermann et al.,
- * "Moment-Based Order-Independent Transparency", I3D 2018), with two
- * departures: the moments come from texelFetch on the moment targets
- * rather than Vulkan subpass inputs, and depth is warped from view
- * distance (1/gl_FragCoord.w, valid whatever gl_reversed_z says) where
- * vkQuake reads its reversed-Z gl_FragCoord.z. */
-static const char oit_preamble[] =
-	"#define OIT 1\n"
-	"vec4 fragColor = vec4(0.0);\n"
-	"layout(location=0) out vec4 out_accum;\n"
-	"layout(location=1) out vec4 out_reveal;\n"
-	"uniform int u_oit_mode;\n"
-	"uniform int u_mboit_ms;\n"
-	"uniform sampler2D u_mboit_b0;\n"
-	"uniform sampler2D u_mboit_mom;\n"
-	"uniform sampler2DMS u_mboit_b0_ms;\n"
-	"uniform sampler2DMS u_mboit_mom_ms;\n"
-	"#define MBOIT_OVERESTIMATION 0.25\n"
-	/* log-warp view distance to [-1,1]: 14 octaves from the 4-unit
-	 * near plane, i.e. up to 65536 units */
-	"float MBOIT_Depth() {\n"
-	"    float d = max(1.0 / gl_FragCoord.w, 4.0) * 0.25;\n"
-	"    return clamp(log2(d) * (1.0 / 14.0), 0.0, 1.0) * 2.0 - 1.0;\n"
-	"}\n"
-	"float MBOIT_Transmittance4(float b_0, vec2 b_even, vec2 b_odd, float depth, float bias, vec4 bias_vector) {\n"
-	"    vec4 b = vec4(b_odd.x, b_even.x, b_odd.y, b_even.y);\n"
-	"    b = mix(b, bias_vector, bias);\n"
-	"    vec3 z;\n"
-	"    z[0] = depth;\n"
-	"    float L21D11 = fma(-b[0], b[1], b[2]);\n"
-	"    float D11 = fma(-b[0], b[0], b[1]);\n"
-	"    float InvD11 = 1.0 / D11;\n"
-	"    float L21 = L21D11 * InvD11;\n"
-	"    float SquaredDepthVariance = fma(-b[1], b[1], b[3]);\n"
-	"    float D22 = fma(-L21D11, L21, SquaredDepthVariance);\n"
-	"    vec3 c = vec3(1.0, z[0], z[0] * z[0]);\n"
-	"    c[1] -= b.x;\n"
-	"    c[2] -= b.y + L21 * c[1];\n"
-	"    c[1] *= InvD11;\n"
-	"    c[2] /= D22;\n"
-	"    c[1] -= L21 * c[2];\n"
-	"    c[0] -= dot(c.yz, b.xy);\n"
-	"    float InvC2 = 1.0 / c[2];\n"
-	"    float p = c[1] * InvC2;\n"
-	"    float q = c[0] * InvC2;\n"
-	"    float D = (p * p * 0.25) - q;\n"
-	"    float r = sqrt(D);\n"
-	"    z[1] = -p * 0.5 - r;\n"
-	"    z[2] = -p * 0.5 + r;\n"
-	"    vec3 polynomial;\n"
-	"    vec3 weight_factor = vec3(MBOIT_OVERESTIMATION, (z[1] < z[0]) ? 1.0 : 0.0, (z[2] < z[0]) ? 1.0 : 0.0);\n"
-	"    float f0 = weight_factor[0];\n"
-	"    float f1 = weight_factor[1];\n"
-	"    float f2 = weight_factor[2];\n"
-	"    float f01 = (f1 - f0) / (z[1] - z[0]);\n"
-	"    float f12 = (f2 - f1) / (z[2] - z[1]);\n"
-	"    float f012 = (f12 - f01) / (z[2] - z[0]);\n"
-	"    polynomial[0] = f012;\n"
-	"    polynomial[1] = polynomial[0];\n"
-	"    polynomial[0] = f01 - polynomial[0] * z[1];\n"
-	"    polynomial[2] = polynomial[1];\n"
-	"    polynomial[1] = polynomial[0] - polynomial[1] * z[0];\n"
-	"    polynomial[0] = f0 - polynomial[0] * z[0];\n"
-	"    float absorbance = polynomial[0] + dot(b.xy, polynomial.yz);\n"
-	"    if (isnan(absorbance))\n"
-	"        absorbance = MBOIT_OVERESTIMATION;\n"
-	"    return clamp(exp(-b_0 * absorbance), 0.0, 1.0);\n"
-	"}\n"
-	"float MBOIT_TransmittanceAtDepth(float z, float b0, vec4 moments0) {\n"
-	"    if (b0 <= 1e-3)\n"
-	"        return 1.0;\n"
-	"    moments0 /= b0;\n"
-	/* vkQuake's bias, well above the paper's: a lone fragment's Hankel
-	 * matrix is rank one and its pivots drown in fp32 noise otherwise */
-	"    return MBOIT_Transmittance4(b0, moments0.yw, moments0.xz, z, 6e-5, vec4(0.0, 0.375, 0.0, 0.375));\n"
-	"}\n"
-	"void main_body();\n"
-	"void main() {\n"
-	"    main_body();\n"
-	"    fragColor = clamp(fragColor, 0.0, 1.0);\n"
-	"    if (u_oit_mode == 0) {\n"
-	"        float z = 1.0 / gl_FragCoord.w;\n"
-	"        float w = clamp(fragColor.a * fragColor.a * 0.03 / (1e-5 + pow(z/1e7, 1.0)), 1e-2, 3e3);\n"
-	"        out_accum = vec4(fragColor.rgb * fragColor.a * w, fragColor.a * w);\n"
-	"        out_reveal = vec4(fragColor.a, 0.0, 0.0, 0.0);\n"
-	"        return;\n"
-	"    }\n"
-	/* both MBOIT passes must drop the same fragments */
-	"    if (fragColor.a < (1.0 / 255.0))\n"
-	"        discard;\n"
-	"    float mz = MBOIT_Depth();\n"
-	"    if (u_oit_mode == 1) {\n"
-	"        float absorbance = -log(max(1.0 - clamp(fragColor.a, 0.0, 0.999), 1e-4));\n"
-	"        float z2 = mz * mz;\n"
-	"        out_accum = vec4(absorbance, 0.0, 0.0, 0.0);\n"
-	"        out_reveal = vec4(mz, z2, z2 * mz, z2 * z2) * absorbance;\n"
-	"        return;\n"
-	"    }\n"
-	"    ivec2 pix = ivec2(gl_FragCoord.xy);\n"
-	"    float b0;\n"
-	"    vec4 mom;\n"
-	/* sample 0 under MSAA, as vkQuake: moments only differ between
-	 * samples at the edges of translucent geometry */
-	"    if (u_mboit_ms != 0) {\n"
-	"        b0 = texelFetch(u_mboit_b0_ms, pix, 0).r;\n"
-	"        mom = texelFetch(u_mboit_mom_ms, pix, 0);\n"
-	"    } else {\n"
-	"        b0 = texelFetch(u_mboit_b0, pix, 0).r;\n"
-	"        mom = texelFetch(u_mboit_mom, pix, 0);\n"
-	"    }\n"
-	"    float t = MBOIT_TransmittanceAtDepth(mz, b0, mom);\n"
-	"    out_accum = vec4(fragColor.rgb * fragColor.a * t, fragColor.a * t);\n"
-	"    out_reveal = vec4(0.0);\n"
-	"}\n"
-	"#define main main_body\n";
-
 /*
 ===============
-GL_CompileOITFragShaderSplit
+GL_InitOITProgramSplit
 
-The OIT variant of a fragment body that lives in engine/shaders/ and carries
-no version line of its own -- every OIT fragment stage since #450 W2: the
-version (and any default-precision lines) come from `frag_header` verbatim,
-the OIT preamble is spliced after them, and the body's `fragColor;`
-declaration line is dropped.
-
-The strip matches the whole LINE containing `fragColor;`, not an
-exact-spelling substring: a file-backed body spells it
-`FRAG_OUT(0) out vec4 fragColor;`, which expands to
-`layout(location = 0) out vec4 fragColor;` only at driver-preprocessor time,
-so a search for `out vec4 fragColor;` would not match and the program would
-fail to build on every desktop startup.  The FIRST line holding `fragColor;`
-in the include-expanded body is the one dropped, so nothing ahead of the
-declaration -- an included file's comment included -- may spell it.
-(#450, #339)
+The OIT twin of a program: the same two stages, the fragment one compiled with
+"#define OIT 1" after its header chunk.  That swaps the stage's colour output
+for engine/shaders/oit.inc -- the accum/revealage outputs, the moment maths and
+the main() that wraps the stage's own -- so the twin is a variant of the file,
+not a splice of it.  (It was a splice, of gl_shader.c's oit_preamble, until
+#450 W3.)  Fails the program rather than build one that cannot be told which
+OIT output to write: a twin without OitFrag would write WBOIT output into the
+moment pass.
 ===============
 */
-static GLuint GL_CompileOITFragShaderSplit (const char *frag_header,
-					    const char *frag_src)
-{
-	/* The header carries the version line and, on the ES tier, the
-	 * default-precision declarations that must follow it; it is used
-	 * verbatim as the prefix, so the preamble lands after them.  OIT is
-	 * desktop-only, so only the desktop header ever reaches here. */
-	const char *out, *line_start, *line_end;
-	size_t head_len, before_len, total;
-	char *buf;
-	GLuint shader;
-
-	/* Drop the whole line containing `fragColor;` -- see the header
-	 * comment above for why a substring search is wrong here. */
-	out = strstr (frag_src, "fragColor;");
-	if (!out)
-		return 0;
-	line_start = out;
-	while (line_start > frag_src && line_start[-1] != '\n')
-		line_start--;
-	line_end = strchr (out, '\n');
-	if (!line_end)
-		return 0;
-	line_end++; /* skip past newline */
-
-	head_len = strlen (frag_header);
-	before_len = (size_t)(line_start - frag_src);
-	total = head_len + strlen (oit_preamble) + before_len + strlen (line_end) + 1;
-	buf = (char *)malloc (total);
-	if (!buf)
-		Sys_Error ("GL_CompileOITFragShaderSplit: out of memory");
-	memcpy (buf, frag_header, head_len);
-	memcpy (buf + head_len, oit_preamble, strlen (oit_preamble));
-	memcpy (buf + head_len + strlen (oit_preamble), frag_src, before_len);
-	strcpy (buf + head_len + strlen (oit_preamble) + before_len, line_end);
-
-	shader = GL_CompileShader (GL_FRAGMENT_SHADER, buf);
-	free (buf);
-	return shader;
-}
-
-static GLuint GL_LoadOITProgramSplit (const char *vert_header, const char *vert_src,
-				      const char *frag_header, const char *frag_src)
-{
-	GLuint vs, fs, prog;
-
-	vs = GL_CompileShaderSplit (GL_VERTEX_SHADER, vert_header, vert_src);
-	if (!vs) return 0;
-	fs = GL_CompileOITFragShaderSplit (frag_header, frag_src);
-	if (!fs) { glDeleteShader_fp (vs); return 0; }
-
-	prog = GL_LinkProgram (vs, fs);
-	glDeleteShader_fp (vs);
-	glDeleteShader_fp (fs);
-	return prog;
-}
-
 static void GL_InitOITProgramSplit (glprogram_t *p, const char *name,
 				    const char *vert_header, const char *vert_src,
 				    const char *frag_header, const char *frag_src)
 {
-	p->program = GL_LoadOITProgramSplit (vert_header, vert_src,
-					     frag_header, frag_src);
+	char	oit_header[1024];
+	int	n;
+
+	n = q_snprintf (oit_header, sizeof(oit_header), "%s%s", frag_header, "#define OIT 1\n");
+	p->program = 0;
+	if (n > 0 && n < (int)sizeof(oit_header))
+		p->program = GL_LoadProgramSplit (vert_header, vert_src, oit_header, frag_src);
 	if (p->program)
 	{
 		GL_InitProgramUniforms (p);
+		if (p->ub_ofrag < 0)
+		{
+			Con_Printf ("[SHADER] %s_oit declares no OitFrag block\n", name);
+			glDeleteProgram_fp (p->program);
+			p->program = 0;
+		}
+	}
+	if (p->program)
+	{
 		/* bind texture unit defaults (mirrors GL_InitProgramSplit) */
 		R_UseProgram (p->program);
 		if (p->u_texture0 >= 0) glUniform1i_fp(p->u_texture0, 0);
@@ -458,8 +266,6 @@ static void GL_InitOITProgramSplit (glprogram_t *p, const char *name,
 		/* MBOIT moment targets (#87): their own units, the 2D and the
 		 * multisample pair apart, so the two sampler types never share a
 		 * unit -- that is an error at draw time even when one is unused */
-		if (p->u_oit_mode >= 0)     glUniform1i_fp(p->u_oit_mode, 0);
-		if (p->u_mboit_ms >= 0)     glUniform1i_fp(p->u_mboit_ms, 0);
 		if (p->u_mboit_b0 >= 0)     glUniform1i_fp(p->u_mboit_b0, MBOIT_TMU_B0);
 		if (p->u_mboit_mom >= 0)    glUniform1i_fp(p->u_mboit_mom, MBOIT_TMU_MOM);
 		if (p->u_mboit_b0_ms >= 0)  glUniform1i_fp(p->u_mboit_b0_ms, MBOIT_TMU_B0_MS);
@@ -473,32 +279,6 @@ static void GL_InitOITProgramSplit (glprogram_t *p, const char *name,
 	}
 }
 #endif	/* !USE_GLES */
-
-/* Switch every OIT program to one of the u_oit_mode outputs above (#87).
- * `ms' says the moment targets are multisampled.  A no-op on the ES tier,
- * which builds no OIT programs. */
-void GL_SetOITMode (int mode, qboolean ms)
-{
-#ifdef USE_GLES
-	(void)mode; (void)ms;
-#else
-	glprogram_t	*progs[] = { &gl_shader_world_oit, &gl_shader_alias_oit,
-				     &gl_shader_alias_np_oit, &gl_shader_skeletal_oit,
-				     &gl_shader_skeletal_np_oit, &gl_shader_particle_oit };
-	int		i;
-
-	for (i = 0; i < (int)(sizeof(progs) / sizeof(progs[0])); i++)
-	{
-		if (!progs[i]->program || progs[i]->u_oit_mode < 0)
-			continue;
-		R_UseProgram (progs[i]->program);
-		glUniform1i_fp(progs[i]->u_oit_mode, mode);
-		if (progs[i]->u_mboit_ms >= 0)
-			glUniform1i_fp(progs[i]->u_mboit_ms, ms ? 1 : 0);
-	}
-	R_UseProgram (0);
-#endif
-}
 
 
 /* GL_LoadProgram where each stage is a (header, body) pair; see
@@ -546,9 +326,7 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 	p->u_lmlayer1        = glGetUniformLocation_fp(p->program, "u_lmlayer1");
 	p->u_lmlayer2        = glGetUniformLocation_fp(p->program, "u_lmlayer2");
 	p->u_lmlayer3        = glGetUniformLocation_fp(p->program, "u_lmlayer3");
-	p->u_oit_mode        = glGetUniformLocation_fp(p->program, "u_oit_mode");	/* #87 */
-	p->u_mboit_ms        = glGetUniformLocation_fp(p->program, "u_mboit_ms");
-	p->u_mboit_b0        = glGetUniformLocation_fp(p->program, "u_mboit_b0");
+	p->u_mboit_b0        = glGetUniformLocation_fp(p->program, "u_mboit_b0");	/* #87 */
 	p->u_mboit_mom       = glGetUniformLocation_fp(p->program, "u_mboit_mom");
 	p->u_mboit_b0_ms     = glGetUniformLocation_fp(p->program, "u_mboit_b0_ms");
 	p->u_mboit_mom_ms    = glGetUniformLocation_fp(p->program, "u_mboit_mom_ms");
@@ -573,6 +351,9 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 	/* WorldFrag: >= 0 on exactly the three world programs (#450 W2), which is
 	 * what GL_ImmPushBlocks and R_SetSpanCell key their world writes on. */
 	p->ub_wfrag = R_BindWorldFragBlock(p->program);
+	/* OitFrag: >= 0 on exactly the six OIT twins (#450 W3), which
+	 * GL_InitOITProgramSplit requires of each. */
+	p->ub_ofrag = R_BindOITFragBlock(p->program);
 }
 
 /* ------------------------------------------------------------------ */

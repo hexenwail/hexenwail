@@ -18,6 +18,7 @@
 #include "gl_postprocess.h"
 #include "gl_matrix.h"
 #include "gl_shader.h"
+#include "gl_uniforms.h"	/* R_SetOITMode, the OIT twins' OitFrag (#450 W3) */
 #include "gl_pipeline.h"
 #include "gl_vbo.h"
 #include "draw.h"
@@ -2053,12 +2054,12 @@ void OIT_BeginTranslucency (void)
 		R_SetBlendFuncIndexed (0, GL_ONE, GL_ONE);
 		R_SetBlendFuncIndexed (1, GL_ONE, GL_ONE);
 		R_SetDepthMask (false);
-		GL_SetOITMode (1, oit_samples > 1);
+		R_SetOITMode (1, oit_samples > 1);
 		return;
 	}
 
 	mboit_pass = 0;
-	GL_SetOITMode (0, false);
+	R_SetOITMode (0, false);
 	glBindFramebuffer_fp(GL_FRAMEBUFFER, oit_fbo);
 	glClearBufferfv_fp(GL_COLOR, 0, zeroes);
 	glClearBufferfv_fp(GL_COLOR, 1, ones);
@@ -2100,7 +2101,7 @@ qboolean OIT_NextPass (void)
 	glBindTexture_fp(textarget, mboit_mom_tex);
 	glActiveTexture_fp(GL_TEXTURE0);
 
-	GL_SetOITMode (2, oit_samples > 1);
+	R_SetOITMode (2, oit_samples > 1);
 	return true;
 }
 
@@ -2146,7 +2147,7 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 		glActiveTexture_fp(GL_TEXTURE0 + ((oit_samples > 1) ? MBOIT_TMU_MOM_MS : MBOIT_TMU_MOM));
 		glBindTexture_fp(mt, 0);
 		glActiveTexture_fp(GL_TEXTURE0);
-		GL_SetOITMode (0, false);
+		R_SetOITMode (0, false);
 		mboit_pass = 0;
 	}
 

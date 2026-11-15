@@ -36,8 +36,8 @@ typedef struct glprogram_s {
 	GLint	u_texture3;	/* normal-map sampler for world (uhexen2-mfql) */
 	GLint	u_texture4;	/* gloss-map sampler for world (uhexen2-mfql) */
 	GLint	u_lmlayer1, u_lmlayer2, u_lmlayer3;	/* lightstyle layer atlases, units LMSTYLE_TMU.. (#439) */
-	GLint	u_oit_mode;		/* OIT programs: 0 WBOIT, 1 MBOIT moments, 2 MBOIT composite (#87) */
-	GLint	u_mboit_ms;		/* moment targets multisampled */
+	/* MBOIT moment-target samplers, OIT programs only (#87); the mode
+	 * switches beside them are OitFrag members since #450 W3. */
 	GLint	u_mboit_b0, u_mboit_mom, u_mboit_b0_ms, u_mboit_mom_ms;
 	GLint	u_lightgrid;	/* usampler3D of per-froxel light bitmasks, texture unit LIGHT_GRID_TMU; world programs, desktop only (uhexen2-26bm) */
 	/* The per-draw values of both families -- fog, the alpha pair,
@@ -47,8 +47,8 @@ typedef struct glprogram_s {
 	 * every stage that reads them takes them from VertParams / FragParams /
 	 * AliasFrag / WorldFrag (GL_ImmPushBlocks, R_SetWorldFrag), and no live
 	 * shader declares those names loose.  tools/test_alias_no_loose.py keeps
-	 * it that way.  Only samplers and the OIT preamble's mode switches keep a
-	 * location. */
+	 * it that way.  Only samplers keep a location: the OIT mode switches are
+	 * OitFrag members since #450 W3 (R_SetOITMode). */
 	GLint	u_soft_depth;	    /* alias FS: opaque-scene depth snapshot, texture unit 1 (uhexen2-mf9u) */
 	/* Indices of the two SHARED uniform blocks (gl_uniforms.h), for the
 	 * shaders that have moved out of C string literals into engine/shaders/.
@@ -64,6 +64,7 @@ typedef struct glprogram_s {
 	GLint	ub_afrag;	    /* AliasFrag, at UBO_BINDING_ALIAS_FRAG: the ten programs linking salias_frag (#450) */
 	GLint	ub_avert;	    /* AliasVert, at UBO_BINDING_ALIAS_VERT: the four skeletal programs (#450 S4) */
 	GLint	ub_wfrag;	    /* WorldFrag, at UBO_BINDING_WORLD_FRAG: the three world programs (#450 W2) */
+	GLint	ub_ofrag;	    /* OitFrag, at UBO_BINDING_OIT_FRAG: the six OIT twins (#450 W3) */
 } glprogram_t;
 
 /* Texture units of the MBOIT moment targets during the composite pass (#87);
@@ -74,7 +75,6 @@ typedef struct glprogram_s {
 #define MBOIT_TMU_MOM		13
 #define MBOIT_TMU_B0_MS		14
 #define MBOIT_TMU_MOM_MS	15
-void GL_SetOITMode (int mode, qboolean ms);
 
 /* Extended program for GPU particle SSBO rendering */
 typedef struct {
@@ -173,7 +173,7 @@ void	GL_ParticleGPU_SetUniforms (const gl_particle_gpu_prog_t *prog,
  * and 4 is its CullParams, 3 is gl_ssao.c's SsaoParams, 5 is
  * gl_lightcluster.c's LcParams, 6 is gl_postprocess.c's BloomParams, 7
  * is its OitParams, 8 its PpVert and 9 is its PpParams, so the graphics
- * blocks start at 1 and the alias and world families' own pick up at 10.  Keyed by stage rather than by program:
+ * blocks start at 1 and the alias, world and OIT families' own pick up at 10.  Keyed by stage rather than by program:
  * only one program is bound at a time, so each program's own vertex-stage
  * block is pinned to the same point rather than every program claiming a new
  * one.  A driver need only guarantee a handful of these.
@@ -191,6 +191,10 @@ void	GL_ParticleGPU_SetUniforms (const gl_particle_gpu_prog_t *prog,
 /* The world family's (engine/shaders/world.inc, #450 W2): sworld_frag's and
  * sworld_opaque_frag's WorldFrag. */
 #define UBO_BINDING_WORLD_FRAG	12
+/* The OIT twins' (engine/shaders/oit.inc, #450 W3): OitFrag, the pass's
+ * output mode.  Desktop only in practice -- no ES program declares it -- but
+ * still under ES 3.00's 24 binding points. */
+#define UBO_BINDING_OIT_FRAG	13
 
 void	GL_Shaders_Init (void);
 void	GL_Shaders_Shutdown (void);
