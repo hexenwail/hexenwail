@@ -689,9 +689,9 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 	/* The two shared uniform blocks, for the shaders that have moved to
 	 * engine/shaders/.  Looked up on every program the same way the
 	 * loose uniforms above are, and -1 on the ones
-	 * that declare no such block.  Whichever u_* fields a block absorbed
-	 * came back -1 just now, which is what makes GL_ImmEnd take the block
-	 * path instead. */
+	 * that declare no such block.  These two indices are what GL_ImmEnd
+	 * keys its block path on; whichever u_* fields a block absorbed came
+	 * back -1 just now, which only makes their glUniform* writes skip. */
 	R_BindProgramBlocks(p->program, &p->ub_vert, &p->ub_frag);
 	/* And the alias family's own (#450): >= 0 on exactly the programs that
 	 * link salias_frag, which is what GL_ImmEnd and R_SetSpanCell key their

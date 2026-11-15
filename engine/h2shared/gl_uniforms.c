@@ -548,10 +548,13 @@ void R_Uniforms_Init (void)
 	avert_layout_checked = false;
 
 	/* GL zero-initialises nothing useful here.  An all-zero model matrix
-	 * collapses every vertex to world (0,0), which is what the per-program
-	 * identity upload in GL_InitProgram exists to prevent (uhexen2-0gn3);
-	 * mvp and modelview are overwritten before any draw, but start sane for
-	 * the same reason. */
+	 * collapses every vertex to world (0,0) (uhexen2-0gn3).  The loose
+	 * u_alias_model and the per-program identity upload that guarded it are
+	 * gone (#450 S5), so this seed is now the only thing between that
+	 * collapse and a VertParams draw issued before any R_SetModelMatrix;
+	 * GL_ImmPushBlocks' feed, imm_alias_model, starts at identity for the
+	 * same reason.  mvp and modelview are overwritten before any draw, but
+	 * start sane too. */
 	Mat4_Identity (ident);
 	memcpy (vertparams.mvp, ident, sizeof(ident));
 	memcpy (vertparams.modelview, ident, sizeof(ident));
