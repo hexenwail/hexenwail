@@ -509,3 +509,11 @@ jobs:
       # (#97 P2).
       - name: Dynamic lights do not see through walls
         run: python3 tools/test_dlight_vis.py
+      # ...and on the GPU clustered path, the cube shadow maps: the six face
+      # matrices against GL's cube-map table and the cull face that keeps the
+      # walls' far sides, and the ShadowPass / DlShadow blocks against their C
+      # mirrors, binds, packing and an ES arm without them (#97 P3/P4).
+      - name: Shadow-map faces are GL's cube faces
+        run: python3 tools/test_shadow_cube_faces.py
+      - name: Shadow-map blocks match their mirrors
+        run: python3 tools/test_dlshadow_block.py

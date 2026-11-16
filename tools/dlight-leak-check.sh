@@ -31,14 +31,16 @@
 #                         (face 4981, a pillar at y=960)
 #   lit    170 312 80     the torch's own wall                    repro > control
 #   alias  -758 482 192   an alias model (an obj_barrel the .ent   repro == control
-#                         adds at -818 462 136) in a door recess
+#                         adds at -838 434 136) in a door recess
 #                         the torch's wall hides from it
 #
 # Face numbers are tools/bsp_dlight_leak.py's (--map demo2 --scenes N); every
 # box was placed by projecting its face and checked on the frames.  Scene 2 is
 # the case the one-sided test (P1) cannot fix: the face does face the light.
 # The CPU path passes it since P2 (r_dlightvis.c); the GPU clustered path
-# (r_lightclusters 1) fails it until the shadow maps (P4) land.
+# (r_lightclusters 1) passes it only with the cube shadow maps, P3/P4
+# (gl_shadow.c, r_dlight_occlusion 2) -- under r_dlight_occlusion 1 it still
+# FAILs there, by design: 1 is the CPU visibility and nothing else.
 #
 # The alias scene is P2's too: the CPU alias loops (R_DrawAliasModel, the
 # instanced twin, the software R_PrepareAlias) took every light in
@@ -48,7 +50,27 @@
 # same view without the barrel, and the scene FAILs unless the box differs
 # from it by PRESENT: a barrel that did not spawn would leave a wall P2
 # already fixes, and the scene would pass without testing a model.  On r_lightclusters 1 the
-# GPU shades alias models (ClusteredAliasDlight) and it FAILs until P4.
+# GPU shades alias models (ClusteredAliasDlight): it FAILs under
+# r_dlight_occlusion 1 and passes under 2, the shadow maps' per-pixel answer.
+#
+# The barrel stood at -818 462 136 until the shadow maps (#97 P4), and there
+# it was only half hidden: hull-0 traces from the torch (tools/bsp_dlight_leak.py's
+# Bsp.blocked) reach every point of its box with y >= 468 -- the half facing
+# the camera -- and none behind.  P2's answer is one per model, from its origin,
+# which is behind the corner, so it called the whole barrel dark and passed; a
+# per-pixel answer lights the half the torch can see, which is right, and the
+# scene could not tell that from a leak.  At -838 434 136 the same traces are
+# blocked at all 100 points of the model's box (x +-13, y +-19, z 138..172),
+# the box is clear of solid, and the camera sees its front; the frame box
+# moved with it.
+#
+# SHADOWS=1 is that configuration, checked as such: it adds
+# "+r_lightclusters 1 +r_dlight_occlusion 2" to the engine's arguments and
+# dumps r_shadowinfo with every frame, and a dark scene FAILs as proving nothing
+# unless the repro frame's dump shows a shadow map in use drawn from the
+# torch's light -- so a pass cannot come from the maps quietly being off (the
+# ES tier, a driver without the entry points, r_shadow_maxlights 0).  Use it
+# on a desktop build only.
 #
 # Why scene 1 is not the torch at 170 312 80 that the design pass picked: the
 # server sends the client only the entities in its PVS, and from in front of
@@ -68,6 +90,7 @@
 # Environment:
 #   ENGINE  engine binary            (default ./result/bin/hexenwail)
 #   EXTRA   extra engine args, e.g. "+r_lightclusters 0 +r_dlight_occlusion 0"
+#   SHADOWS 1 = the shadow-map configuration (see above), default 0
 #   SCENES  which scenes             (default "1 2 3 lit alias")
 #   OUT     keep the PNGs and logs here (default: a temp dir, removed)
 #   TOL, LITMIN, WAITS (frames after the map loads, default 150)
@@ -89,7 +112,9 @@ TOL=${TOL:-1.0}
 LITMIN=${LITMIN:-4.0}
 PRESENT=${PRESENT:-2.0}
 WAITS=${WAITS:-150}
+SHADOWS=${SHADOWS:-0}
 MAP=demo2
+[ "$SHADOWS" = 1 ] && EXTRA="+r_lightclusters 1 +r_dlight_occlusion 2 $EXTRA"
 
 [ -x "$ENGINE" ] || { echo "no engine at $ENGINE (nix build .#default)" >&2; exit 2; }
 for p in pak0.pak pak1.pak; do
@@ -110,10 +135,10 @@ TORCH[1]="-720 -88 224";  CAM[1]="-830 32 150 0 -90 0";   BOX[1]="0.36 0.25 0.55
 TORCH[2]="-758 482 192";  CAM[2]="-801 608 184 17 -90 0"; BOX[2]="0.475 0.25 0.515 0.55"; KIND[2]=dark
 TORCH[3]="-798 930 304";  CAM[3]="-811 1088 247 17 -90 0"; BOX[3]="0.49 0.25 0.515 0.52"; KIND[3]=dark
 TORCH[lit]="170 312 80";  CAM[lit]="210 200 99 0 90 0";   BOX[lit]="0.55 0.40 0.75 0.60"; KIND[lit]=lit
-TORCH[alias]="-758 482 192"; CAM[alias]="-801 608 184 17 -90 0"; BOX[alias]="0.52 0.60 0.58 0.73"; KIND[alias]=dark
+TORCH[alias]="-758 482 192"; CAM[alias]="-801 608 184 17 -90 0"; BOX[alias]="0.575 0.54 0.615 0.64"; KIND[alias]=dark
 ADD[alias]='{
 "classname" "obj_barrel"
-"origin" "-818 462 136"
+"origin" "-838 434 136"
 }'
 
 for s in $SCENES; do
@@ -171,6 +196,7 @@ run () {
 			for ((i = 0; i < 60; i++)); do echo wait; done
 			echo "cl_screenshotname shots/$s"
 			echo r_dlightinfo
+			[ "$SHADOWS" = 1 ] && echo r_shadowinfo
 			echo screenshot
 			echo wait
 		done
@@ -247,6 +273,15 @@ has_dlight () {
 		index($0, shot) { printf "%s", buf; exit }' "$1" | grep -qF "$o" && echo yes || echo no
 }
 
+# $1 log, $2 scene, $3 torch origin: under SHADOWS=1, did the frame have a
+# shadow map in use drawn from the torch's light?  r_shadowinfo's dump just
+# before the shot, as has_dlight reads r_dlightinfo's.
+has_map () {
+	local o x y z; read -r x y z <<<"$3"; o="from=($x,$y,$((z + 8)))"
+	awk -v shot="Wrote shots/$2.png" '/^--- r_shadowinfo/ { buf = "" } { buf = buf $0 "\n" }
+		index($0, shot) { printf "%s", buf; exit }' "$1" | grep -F "$o" | grep -qF "in use" && echo yes || echo no
+}
+
 [ ${#plain[@]} -gt 0 ] && run control "$work/control.ent" ${plain[@]+"${plain[@]}"}
 for t in $torches; do
 	scn=(); for s in ${plain[@]+"${plain[@]}"}; do [ "${TORCH[$s]// /_}" = "$t" ] && scn+=("$s"); done
@@ -280,8 +315,12 @@ for s in $SCENES; do
 		pd=$(lum "$c" "${BOX[$s]}" "$work/bare_$s/data1/shots/$s.png" 2>/dev/null || echo 0)
 		python3 -c "import sys; sys.exit(0 if $pd >= $PRESENT else 1)" || present="no (box differs from the bare view by $pd)"
 	fi
+	rm_=yes
+	if [ "$SHADOWS" = 1 ] && [ "${KIND[$s]}" = dark ]; then rm_=$(has_map "$rep/qconsole.log" "$s" "${TORCH[$s]}"); fi
 	if [ "$cd_" != no ] || [ "$rd" != yes ]; then
 		verdict="FAIL (torch dlight: control $cd_, repro $rd -- the run proves nothing)"
+	elif [ "$rm_" != yes ]; then
+		verdict="FAIL (SHADOWS=1 but no shadow map of the torch was in use -- the run proves nothing)"
 	elif [ "$present" != yes ]; then
 		verdict="FAIL (the added entity is not in the box: $present -- the run proves nothing)"
 	elif [ "${KIND[$s]}" = lit ]; then

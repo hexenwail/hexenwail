@@ -483,6 +483,12 @@ GL_FUNCTION_OPT(void, glDrawElementsIndirect, (GLenum, GLenum, const void *))
 /* 3D texture (OpenGL 1.2+) */
 GL_FUNCTION_OPT(void, glTexImage3D, (GLenum, GLint, GLint, GLsizei, GLsizei, GLsizei, GLint, GLenum, GLenum, const void *))
 
+/* Dynamic-light cube shadow maps (gl_shadow.c, #97): one layer-face of a
+ * cube-map array per pass (GL 3.0), and the world's caster runs in one call
+ * per face (GL 1.4).  Desktop only in use. */
+GL_FUNCTION_OPT(void, glFramebufferTextureLayer, (GLenum, GLenum, GLuint, GLint, GLint))
+GL_FUNCTION_OPT(void, glMultiDrawElements, (GLenum, const GLsizei *, GLenum, const void *const *, GLsizei))
+
 /* Additional uniform functions */
 
 #undef GL_FUNCTION_OPT
@@ -567,6 +573,9 @@ GL_FUNCTION_OPT(void, glTexImage3D, (GLenum, GLint, GLint, GLsizei, GLsizei, GLs
 #define glGetActiveUniformBlockiv_fp	glGetActiveUniformBlockiv
 #define glBindBufferRange_fp		glBindBufferRange
 #define glTexImage3D_fp			glTexImage3D
+/* gl_shadow.c is stubs on this tier; WebGL2 has no glMultiDrawElements. */
+#define glFramebufferTextureLayer_fp	glFramebufferTextureLayer
+#define glMultiDrawElements_fp(m,c,t,i,n)	((void)0)
 /* GL 4.3+ buffer streaming: not in WebGL2.  The streaming ring
  * (gl_buffer.c) is compiled out under USE_GLES — these stubs
  * exist so call sites still link. */

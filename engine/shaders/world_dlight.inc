@@ -10,7 +10,7 @@
  * DESKTOP GL 4.3 ONLY, and not by choice.  The whole thing needs an SSBO and a
  * compute pass to fill the grid, and the ES/WebGL2 tier has neither (WebGL2 is
  * GLSL ES 3.00: no shader storage blocks, no findLSB).  Include this under
- * #ifndef GL_ES, after lightgrid.inc; the CPU path stays live on that tier
+ * #ifndef GL_ES, after lightgrid.inc and dlshadow.inc; the CPU path stays live on that tier
  * permanently -- finding 1 on uhexen2-a5nn.1, and the reason this is an
  * ADDITIONAL path rather than a replacement.
  *
@@ -89,6 +89,14 @@
  * Moved from gl_shader.c's GLSL_DLIGHT_FN with the world fragment stages
  * (#450, world slice W2); token-identical to its ClusteredDlight.  The alias
  * family's half is alias_dlight.inc, which says why it is not a reuse of this.
+ *
+ * A LIGHT THE FACE CANNOT SEE DOES NOT LIGHT IT EITHER, under
+ * r_dlight_occlusion 2 (#97, P4): each light that survives the rejects is
+ * scaled by DlShadowFactor, its cube shadow map's answer for this point
+ * (dlshadow.inc).  The one-sided test above still runs first -- a face's own
+ * back is what the maps store, so they cannot reject a light behind the face
+ * by themselves.  With no map, or u_dlsparams.x 0, the term is the old one
+ * untouched, which is what r_dlight_occlusion 0 and 1 draw.
  */
 #ifndef WORLD_DLIGHT_INC
 #define WORLD_DLIGHT_INC
@@ -98,6 +106,8 @@ vec3 ClusteredDlight(vec3 lm, highp vec3 p) {
     highp vec3 N = normalize(cross(dFdx(p), dFdy(p)));
     if (dot(N, p) > 0.0) N = -N;   /* toward the eye: the face's front */
     uvec4 mask = LightGridMask(p);
+    bool shadowed = u_dlsparams.x > 0.0;
+    highp vec3 wp = shadowed ? DlShadowWorldPos(p) : vec3(0.0);
     for (int w = 0; w < 4; w++) {
         uint bits = mask[w];
         while (bits != 0u) {
@@ -133,7 +143,9 @@ vec3 ClusteredDlight(vec3 lm, highp vec3 p) {
              * genuine difference an A/B in a very bright room will show, not
              * a bug to go hunting for.  Reproducing the CPU exactly would
              * mean carrying the unclamped sum, which the 8-bit atlas cannot. */
-            lm = max(lm + (rad - d) * u_dlight_scale * Lights[i].color, vec3(0.0));
+            vec3 add = (rad - d) * u_dlight_scale * Lights[i].color;
+            if (shadowed) add *= DlShadowFactor(i, wp);
+            lm = max(lm + add, vec3(0.0));
         }
     }
     /* R_BuildLightMap clamps the blocklight sum at 255 before it reaches the

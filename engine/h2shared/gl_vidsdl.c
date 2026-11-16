@@ -43,6 +43,7 @@
 #include "gl_postprocess.h"
 #include "gl_shader.h"
 #include "gl_lightcluster.h"
+#include "gl_shadow.h"		/* R_Shadow_Shutdown, #97 */
 #include "gl_ssao.h"
 #include "gl_pipeline.h"
 #include "gl_vbo.h"
@@ -1843,6 +1844,11 @@ static void GL_LoadFunctionPointers (void)
 	glMultiDrawElementsIndirect_fp = (glMultiDrawElementsIndirect_f) SDL_GL_GetProcAddress("glMultiDrawElementsIndirect");
 	glDrawElementsIndirect_fp = (glDrawElementsIndirect_f) SDL_GL_GetProcAddress("glDrawElementsIndirect");
 
+	/* Dynamic-light cube shadow maps (gl_shadow.c, #97).  Optional: the
+	 * maps turn themselves off without them. */
+	glFramebufferTextureLayer_fp = (glFramebufferTextureLayer_f) SDL_GL_GetProcAddress("glFramebufferTextureLayer");
+	glMultiDrawElements_fp = (glMultiDrawElements_f) SDL_GL_GetProcAddress("glMultiDrawElements");
+
 	/* Image load/store + immutable storage (GL 4.2) — Hi-Z (uhexen2-xd87) */
 	glBindImageTexture_fp = (glBindImageTexture_f) SDL_GL_GetProcAddress("glBindImageTexture");
 	glTexStorage2D_fp = (glTexStorage2D_f) SDL_GL_GetProcAddress("glTexStorage2D");
@@ -2458,6 +2464,7 @@ static void VID_ChangeVideoMode (int newmode)
 	R_GPU_Particles_Shutdown();
 	R_LightCluster_Shutdown();	/* before the shader manager: GL reuses program names */
 	R_SSAO_Shutdown ();	/* GitHub #188; GL reuses program names */
+	R_Shadow_Shutdown ();	/* GitHub #97; likewise */
 	GL_Shaders_Shutdown();
 	R_Uniforms_Shutdown();
 	R_TexBind_Shutdown();

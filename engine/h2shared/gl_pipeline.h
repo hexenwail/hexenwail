@@ -116,5 +116,12 @@ qboolean R_GetCull (void);
 qboolean R_GetBlend (void);
 qboolean R_GetDepthMask (void);
 void	R_GetDepthRange (double *znear, double *zfar);
+/* For gl_shadow.c, which draws its maps in the middle of R_SetupGL and puts
+ * back everything it changed (#97).  The two enums may be RP_ENUM_UNKNOWN. */
+qboolean R_GetDepthTest (void);
+GLenum	R_GetDepthFunc (void);
+GLenum	R_GetCullFace (void);
+qboolean R_GetStencilTest (void);
+qboolean R_GetPolygonOffsetFill (float *factor, float *units);
 
 #endif	/* GL_PIPELINE_H */

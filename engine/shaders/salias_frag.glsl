@@ -75,10 +75,12 @@ FRAG_IN(4) in highp vec3 v_matpos;
 FRAG_IN(5) in highp vec3 v_eyepos;
 FRAG_IN(6) flat in float v_dlightscale;
 FRAG_TEX(4) uniform usampler3D u_lightgrid;
+/* The dynamic-light cube shadow maps (#97, P4; dlshadow.inc). */
+FRAG_TEX(5) uniform highp samplerCubeArrayShadow u_dlshadowmap;
 #endif
 
 #ifdef OIT
-#define OIT_TEX0 5
+#define OIT_TEX0 6
 #define OIT_UBO 2
 #include "oit.inc"
 #else
@@ -90,8 +92,10 @@ FRAG_OUT(0) out vec4 fragColor;
 #include "span_uv.inc"
 #include "material.inc"
 #ifndef GL_ES
-#define LIGHTGRID_SSBO_SLOT 5
+#define LIGHTGRID_SSBO_SLOT 6
 #include "lightgrid.inc"
+#define DLSHADOW_UBO_SLOT 2
+#include "dlshadow.inc"
 #include "alias_dlight.inc"
 #endif
 

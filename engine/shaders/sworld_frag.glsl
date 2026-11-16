@@ -51,6 +51,8 @@ FRAG_TEX(5) uniform usampler3D u_lightgrid;  /* per-froxel light bitmasks */
 FRAG_TEX(6) uniform sampler2D u_lmlayer1;
 FRAG_TEX(7) uniform sampler2D u_lmlayer2;
 FRAG_TEX(8) uniform sampler2D u_lmlayer3;
+/* The dynamic-light cube shadow maps (#97, P4; dlshadow.inc). */
+FRAG_TEX(9) uniform highp samplerCubeArrayShadow u_dlshadowmap;
 #endif
 
 FRAG_IN(0) in highp vec2 v_texcoord;    /* highp: see sworld_vert (uhexen2-mfql) */
@@ -60,7 +62,7 @@ FRAG_IN(3) in float v_fogdist;
 FRAG_IN(4) in vec2 v_worldxy;
 FRAG_IN(5) in highp vec3 v_eyepos;      /* highp: see sworld_vert (uhexen2-mfql) */
 #ifdef OIT
-#define OIT_TEX0 9
+#define OIT_TEX0 10
 #define OIT_UBO 2
 #include "oit.inc"
 #else
@@ -74,8 +76,10 @@ FRAG_OUT(0) out vec4 fragColor;
 #include "softemu_noise.inc"
 #include "material.inc"
 #ifndef GL_ES
-#define LIGHTGRID_SSBO_SLOT 9
+#define LIGHTGRID_SSBO_SLOT 10
 #include "lightgrid.inc"
+#define DLSHADOW_UBO_SLOT 2
+#include "dlshadow.inc"
 #include "world_dlight.inc"
 #include "lmstyles.inc"
 #endif

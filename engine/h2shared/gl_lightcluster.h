@@ -74,6 +74,14 @@ void	R_LightCluster_Update (void);
  * for the frame. */
 qboolean R_LightCluster_Available (void);
 
+/* This frame's grid lights, in the order the shader indexes them -- what
+ * gl_shadow.c's DlShadow block is keyed on (#97).  GetLight hands back light
+ * i's origin and radius and the cl_dlights[] slot it came from, -1 for one of
+ * lightcluster_verify's synthetic lights; false past the end or when the grid
+ * is not valid this frame, when NumLights is 0. */
+int	R_LightCluster_NumLights (void);
+qboolean R_LightCluster_GetLight (int i, float origin[3], float *radius, int *dlight);
+
 /* True when the world fragment shaders are taking dynamic light from the grid,
  * and the CPU lightmap path must therefore stand down.
  *

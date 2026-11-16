@@ -15,6 +15,7 @@
 #include "gl_pipeline.h"
 #include "gl_lightcluster.h"	/* froxel grid dimensions and binding points (uhexen2-26bm) */
 #include "gl_uniforms.h"	/* the two shared std140 blocks (uhexen2-p4ln) */
+#include "gl_shadow.h"		/* DlShadow and u_dlshadowmap, world and alias stages (#97) */
 
 /* Generated from the .glsl files in engine/shaders by EmbedShaders.cmake.
  * Embedded rather than loaded at runtime: the engine has no shader search
@@ -265,6 +266,7 @@ static void GL_InitOITProgramSplit (glprogram_t *p, const char *name,
 		if (p->u_mboit_mom >= 0)    glUniform1i_fp(p->u_mboit_mom, MBOIT_TMU_MOM);
 		if (p->u_mboit_b0_ms >= 0)  glUniform1i_fp(p->u_mboit_b0_ms, MBOIT_TMU_B0_MS);
 		if (p->u_mboit_mom_ms >= 0) glUniform1i_fp(p->u_mboit_mom_ms, MBOIT_TMU_MOM_MS);
+		R_Shadow_InitProgram (p->program);	/* #97 */
 		R_UseProgram (0);
 		Con_SafePrintf ("  %s_oit: OK (prog=%u)\n", name, p->program);
 	}
@@ -541,6 +543,9 @@ static qboolean GL_InitProgramSplit (glprogram_t *p, const char *name,
 	 * gl_shader_alias has no u_texture1 — so the depth snapshot can sit
 	 * there permanently and only the sprite path ever binds to it. */
 	if (p->u_soft_depth >= 0) glUniform1i_fp(p->u_soft_depth, 1);
+	/* The cube shadow maps' block and sampler, on the world and alias
+	 * programs that declare them (#97). */
+	R_Shadow_InitProgram (p->program);
 	R_UseProgram (0);
 
 	Con_SafePrintf("  shader '%s' loaded (program %u)\n", name, p->program);
@@ -675,6 +680,7 @@ static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p, const char *na
 	 * GL_InitProgramSplit does this for every other program that declares it. */
 	if (p->u_lightgrid >= 0)
 		glUniform1i_fp(p->u_lightgrid, LIGHT_GRID_TMU);	/* uhexen2-waum */
+	R_Shadow_InitProgram (prog);	/* #97: salias_frag's DlShadow and u_dlshadowmap */
 	R_UseProgram (0);
 
 	/* Create and fill shadedots SSBO (static data, upload once).

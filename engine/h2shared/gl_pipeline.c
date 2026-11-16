@@ -219,6 +219,33 @@ void R_GetDepthRange (double *znear, double *zfar)
 	if (zfar)  *zfar  = rp.depth_far;
 }
 
+qboolean R_GetDepthTest (void)
+{
+	return rp.depth_test;
+}
+
+GLenum R_GetDepthFunc (void)
+{
+	return rp.depth_func;
+}
+
+GLenum R_GetCullFace (void)
+{
+	return rp.cull_face;
+}
+
+qboolean R_GetStencilTest (void)
+{
+	return rp.stencil_test;
+}
+
+qboolean R_GetPolygonOffsetFill (float *factor, float *units)
+{
+	if (factor) *factor = rp.poly_factor;
+	if (units)  *units  = rp.poly_units;
+	return rp.poly_offset_fill;
+}
+
 /* The disable paths also zero factor/units, matching what the scattered
  * clusters did: every glDisable(GL_POLYGON_OFFSET_FILL) in the engine was
  * paired with a glPolygonOffset(0,0) on the next line. */

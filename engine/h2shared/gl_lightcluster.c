@@ -126,6 +126,7 @@ COMPILE_TIME_ASSERT(lcparams_size, sizeof(lc_params_t) == 160);
 /* This frame's lights, in the order the shader indexes them, kept so the
  * verifier can recompute without guessing which dlights were live. */
 static gpulight_t	lc_lights[MAX_DLIGHTS];
+static int		lc_src[MAX_DLIGHTS];	/* cl_dlights[] slot of each; -1 synthetic */
 static int		lc_numlights;
 static float		lc_view[16];
 static float		lc_tproj[16];
@@ -311,6 +312,7 @@ static void R_LightCluster_GatherLights (void)
 		if (dl->die < cl.time || dl->radius <= 0.0f)
 			continue;
 
+		lc_src[lc_numlights] = i;
 		out = &lc_lights[lc_numlights++];
 		out->origin[0] = dl->origin[0];
 		out->origin[1] = dl->origin[1];
@@ -431,6 +433,23 @@ static void LC_UploadAndDispatch (void)
 qboolean R_LightCluster_Available (void)
 {
 	return lc_valid_this_frame;
+}
+
+int R_LightCluster_NumLights (void)
+{
+	return lc_valid_this_frame ? lc_numlights : 0;
+}
+
+qboolean R_LightCluster_GetLight (int i, float origin[3], float *radius, int *dlight)
+{
+	if (!lc_valid_this_frame || i < 0 || i >= lc_numlights)
+		return false;
+	origin[0] = lc_lights[i].origin[0];
+	origin[1] = lc_lights[i].origin[1];
+	origin[2] = lc_lights[i].origin[2];
+	*radius = lc_lights[i].radius;
+	*dlight = lc_src[i];
+	return true;
 }
 
 qboolean R_LightCluster_ShadesWorld (void)
@@ -648,6 +667,7 @@ static void R_LightCluster_Verify_f (void)
 			lc_lights[i].radius = 40.0f + (float)(i % 9) * 45.0f;
 			lc_lights[i].color[0] = lc_lights[i].color[1] = lc_lights[i].color[2] = 1.0f;
 			lc_lights[i].minlight = 0.0f;
+			lc_src[i] = -1;
 		}
 		lc_numlights = want;
 		LC_UploadAndDispatch ();
@@ -767,6 +787,12 @@ void R_LightCluster_Init (void) {}
 void R_LightCluster_Shutdown (void) {}
 void R_LightCluster_Update (void) {}
 qboolean R_LightCluster_Available (void) { return false; }
+int R_LightCluster_NumLights (void) { return 0; }
+qboolean R_LightCluster_GetLight (int i, float origin[3], float *radius, int *dlight)
+{
+	(void)i; (void)origin; (void)radius; (void)dlight;
+	return false;
+}
 qboolean R_LightCluster_ShadesWorld (void) { return false; }
 qboolean R_LightCluster_ShadesAlias (void) { return false; }
 qboolean R_LightCluster_AliasActive (void) { return false; }

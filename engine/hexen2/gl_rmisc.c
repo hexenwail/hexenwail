@@ -21,6 +21,7 @@
 
 #include "quakedef.h"
 #include "gl_lightcluster.h"
+#include "gl_shadow.h"
 #include "gl_ssao.h"
 #include "hashindex.h"
 #include "img_load.h"
@@ -277,6 +278,7 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_skyalpha);
 	Cvar_RegisterVariable (&r_dynamic);
 	R_LightCluster_Init ();	/* uhexen2-a5nn.1 phase A */
+	R_Shadow_Init ();	/* GitHub #97, the cube shadow maps */
 	R_SSAO_Init ();		/* GitHub #188 */
 	Cvar_RegisterVariable (&r_lerplightstyles);
 	/* Ironwail parity toggles, uhexen2-a5nn.11 */
@@ -607,6 +609,7 @@ void R_NewMap (void)
 	Sky_NewMap ();
 	Fog_NewMap ();
 	R_DlightVis_NewMap ();	/* GitHub #97 */
+	R_Shadow_NewMap ();	/* GitHub #97: the maps are of the old world */
 	mirrortexturenum = -1;
 	for (i = 0; i < cl.worldmodel->numtextures; i++)
 	{

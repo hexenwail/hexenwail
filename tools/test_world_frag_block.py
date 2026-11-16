@@ -214,7 +214,8 @@ ALIASES = {**WORLD_ALIASES, **FRAG_ALIASES}
 DESKTOP_ONLY = {"u_dlight_scale", "u_dlight_onesided", "u_lightview", "u_lightgrid_xy", "u_lightgrid_z", "u_lmstyles"}
 ES_FORBIDDEN = DESKTOP_ONLY | {"u_lightgrid", "u_lmlayer1", "u_lmlayer2", "u_lmlayer3", "Lights", "LightStyles",
                                "findLSB", "early_fragment_tests", "buffer", "u_wflightview", "u_wfgrid",
-                               "u_wflmstyles"}
+                               "u_wflmstyles", "u_dlshadowmap", "DlShadow", "DlShadowFactor", "u_dlsmask", "u_dlsparams",
+                               "bitCount"}
 
 
 def functions_of(text):
@@ -255,10 +256,13 @@ def digest(fns):
 # run this file with --golden.  The desktop pair moved with GitHub #97's
 # one-sided dynamic-light test in world_dlight.inc (tools/test_dlight_onesided.py
 # pins the test itself); the ES pair did not, ClusteredDlight being desktop only.
+# The desktop pair moved again with #97's shadow-map receivers (P4: DlShadow,
+# DlShadowWorldPos and the scaled light term; tools/test_dlshadow_block.py pins
+# those); the ES pair, again, did not.
 GOLDEN = {
-    ("sworld_frag", "desk"): "2714c90648360cc0",
+    ("sworld_frag", "desk"): "0a18f7146b49dfcb",
     ("sworld_frag", "es"): "20aa06ceead5c04e",
-    ("sworld_opaque_frag", "desk"): "ab4d128f7c15d9a6",
+    ("sworld_opaque_frag", "desk"): "612ebd65182cae1f",
     ("sworld_opaque_frag", "es"): "63569b0838c0cfaa",
 }
 ARMS = {"desk": set(), "es": {"GL_ES"}}
@@ -272,10 +276,15 @@ for f in FRAGS:
         errors.append(f"{f}.glsl carries a #version; GLSL_WORLD_FRAG_HEADER supplies it per tier")
     if '#include "layout.inc"\n#define UNIFORMS_FRAG\n#include "uniforms.inc"\n#include "world.inc"\n' not in text:
         errors.append(f"{f}.glsl must include layout.inc, then uniforms.inc with UNIFORMS_FRAG, then world.inc")
+    # Desktop adds DlShadow, the dynamic-light shadow maps' (#97, dlshadow.inc;
+    # tools/test_dlshadow_block.py pins it); the ES arm has exactly the two.
     blocks = re.findall(r"\buniform\s+(\w+)\s*\{", strip(preprocess(expanded[f], set())))
-    if sorted(blocks) != ["FragParams", "WorldFrag"]:
+    if sorted(blocks) != ["DlShadow", "FragParams", "WorldFrag"]:
         errors.append(f"{f}.glsl (includes expanded) declares blocks {blocks}; the world stages read exactly "
-                      "FragParams and WorldFrag")
+                      "FragParams and WorldFrag, and DlShadow on desktop")
+    es_blocks = re.findall(r"\buniform\s+(\w+)\s*\{", strip(preprocess(expanded[f], {"GL_ES"})))
+    if sorted(es_blocks) != ["FragParams", "WorldFrag"]:
+        errors.append(f"{f}.glsl's ES arm declares blocks {es_blocks}; it reads exactly FragParams and WorldFrag")
     if re.search(r"#\s*define\s+UNIFORMS_VERT\b|alias\.inc", code):
         errors.append(f"{f}.glsl pulls in a vertex block or AliasFrag")
     loose = [m.group(1) for m in re.finditer(
@@ -302,6 +311,7 @@ for f in FRAGS:
         errors.append("sworld_opaque_frag.glsl has no OIT twin: one plain colour output, no oit.inc")
     desk = "".join(re.findall(r"#ifndef GL_ES\n(.*?)#(?:endif|else)", code, re.S))
     for want in ("usampler3D u_lightgrid", "sampler2D u_lmlayer1", "sampler2D u_lmlayer2", "sampler2D u_lmlayer3",
+                 "samplerCubeArrayShadow u_dlshadowmap", '#include "dlshadow.inc"',
                  '#include "lightgrid.inc"', '#include "world_dlight.inc"', '#include "lmstyles.inc"',
                  "if (u_lmstyles.x > 0.5) lm = LMStyles(lm, lmuv);",
                  "if (u_dlight_scale > 0.0) lm.rgb = ClusteredDlight(lm.rgb, v_eyepos);"):

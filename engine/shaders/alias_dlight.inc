@@ -1,6 +1,6 @@
 /* alias_dlight.inc -- the alias family's half of the clustered dynamic-light
  * grid (uhexen2-waum, phase C).  Desktop only; include it under #ifndef GL_ES,
- * after lightgrid.inc and after declaring u_lightview.  Moved from
+ * after lightgrid.inc, dlshadow.inc and u_lightview.  Moved from
  * gl_shader.c's GLSL_ALIAS_DLIGHT_FN when salias_frag became a file (#450).
  *
  * WHAT THIS REPLACES.  Every alias model used to take the whole frame's
@@ -47,12 +47,22 @@
  * A uniform cannot distinguish them; a flat varying the vertex shader fills
  * from the instance record can.  The other two paths set it from the uniform
  * unchanged.
+ *
+ * SHADOWED BY THE WORLD under r_dlight_occlusion 2 (#97, P4): each light's
+ * term is scaled by DlShadowFactor, its cube shadow map's answer for this pixel
+ * (dlshadow.inc), so a torch no longer lights a monster through the wall
+ * between them -- per pixel, so a model half round a corner is half lit.  The
+ * maps hold the world and brush entities; models cast nothing yet (P6).  A
+ * light with no map, and every light under r_dlight_occlusion 0 and 1, takes
+ * the term untouched.
  */
 #ifndef ALIAS_DLIGHT_INC
 #define ALIAS_DLIGHT_INC
 
 vec3 ClusteredAliasDlight(vec3 lit, highp vec3 p, float scale) {
     uvec4 mask = LightGridMask(p);
+    bool shadowed = u_dlsparams.x > 0.0;
+    highp vec3 wp = shadowed ? DlShadowWorldPos(p) : vec3(0.0);
     for (int w = 0; w < 4; w++) {
         uint bits = mask[w];
         while (bits != 0u) {
@@ -70,7 +80,9 @@ vec3 ClusteredAliasDlight(vec3 lit, highp vec3 p, float scale) {
              * Ascending light index is the CPU's order too (findLSB within a
              * word, words in order), so the two agree even where a dark light
              * and a bright one overlap the same pixel. */
-            lit = max(lit + add * scale * Lights[i].color, vec3(0.0));
+            vec3 term = add * scale * Lights[i].color;
+            if (shadowed) term *= DlShadowFactor(i, wp);
+            lit = max(lit + term, vec3(0.0));
         }
     }
     /* NO UPPER CLAMP, and that is a decision rather than an omission.

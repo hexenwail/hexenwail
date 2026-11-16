@@ -23,6 +23,7 @@
 #include "gl_shader.h"
 #include "gl_uniforms.h"
 #include "gl_lightcluster.h"
+#include "gl_shadow.h"
 #include "r_dlightvis.h"
 #include "gl_ssao.h"
 #include "gl_pipeline.h"
@@ -314,11 +315,12 @@ cvar_t	r_dlight_model_list = {"r_dlight_model_list", "", CVAR_ARCHIVE};
 
 /* Dynamic-light occlusion (GitHub #97).  0 is vanilla: every tier lit both
  * sides of a face's plane, so a light lit the far side of the wall it stood
- * against.  1 (and anything above, kept for the visibility and shadow-map
- * phases still to come) drops a light that is more than DLIGHT_PLANE_EPSILON
+ * against.  1 and above drop a light that is more than DLIGHT_PLANE_EPSILON
  * behind a face, on the CPU path (R_AddDynamicLights, R_MarkLights; brush
  * entities too, measured in their model space, #495) and the GPU one
- * (ClusteredDlight).
+ * (ClusteredDlight), and run the CPU path's visibility (r_dlightvis.c).  2 adds
+ * the cube shadow maps on desktop with r_lightclusters 1 (gl_shadow.c), which
+ * every other tier treats as 1.
  * Liquids are exempt: they are seen, and lit, from both sides.  The software renderer's copy is in r_soft_web.c. */
 cvar_t	r_dlight_occlusion = {"r_dlight_occlusion", "1", CVAR_ARCHIVE};
 
@@ -6193,6 +6195,11 @@ static void R_SetupFrame (void)
 
 #define NEARCLIP	4
 
+/* r_speeds 2's shadow-map buckets (#97): the GPU pair is defined with the
+ * profiler below; the CPU half, R_Shadow_Prepare, is timed here. */
+static void R_ProfileShadowTimestamp (qboolean end);
+static double	rprof_cpu_shadow;
+
 /*
 =============
 R_SetupGL
@@ -6289,6 +6296,21 @@ static void R_SetupGL (void)
 	R_LightCluster_Update ();
 	R_LightCluster_BindForWorld ();
 	R_LightCluster_BindForAlias ();	/* uhexen2-waum, phase C */
+	/* The dynamic-light cube shadow maps (#97, P3/P4): after the cluster
+	 * update, whose light list their block indexes, and before anything is
+	 * drawn.  Not in the mirror pass: its lights and so its block are the
+	 * main pass's, already bound, and redrawing maps there would only spend
+	 * the frame's update budget twice. */
+	if (!mirror)
+	{
+		double t0 = (r_speeds.integer >= 2) ? Sys_DoubleTime () : 0;
+		R_Shadow_Prepare ();
+		if (r_speeds.integer >= 2)
+			rprof_cpu_shadow = Sys_DoubleTime () - t0;
+		R_ProfileShadowTimestamp (false);
+		R_Shadow_Draw ();
+		R_ProfileShadowTimestamp (true);
+	}
 	/* After the cluster update, whose SSBO carries LightStyles[]: the GPU
 	 * lightstyle mode reads them, and may rebuild the lightmaps here if the
 	 * mode it wants has changed (#439). */
@@ -7687,8 +7709,15 @@ r_refdef must be set before the first call
 #define RPROF_VM	4
 #define RPROF_MIRROR	5
 #define RPROF_COUNT	6	/* 6 passes = 7 timestamp queries */
+/* Plus a pair of its own around R_Shadow_Draw, which runs INSIDE the world
+ * bucket (from R_SetupGL), so the report takes it out of `world` and prints
+ * it apart; R_Shadow_Prepare, the CPU half, is outside the pair, so the pair
+ * is the drawing and not the GPU waiting on the caster walk.  Both are written every r_speeds 2 frame, a frame with nothing to
+ * draw included, so the pair is never read unwritten.  #97. */
+#define RPROF_SHADOW	(RPROF_COUNT + 1)
+#define RPROF_QUERIES	(RPROF_COUNT + 3)
 
-static GLuint	rprof_queries[RPROF_COUNT + 1];
+static GLuint	rprof_queries[RPROF_QUERIES];
 static qboolean	rprof_pending;		/* results from previous frame waiting */
 static qboolean	rprof_available;	/* queries have been allocated */
 static double	rprof_cpu_world;	/* CPU wall-clock for R_RenderScene */
@@ -7744,7 +7773,7 @@ static void R_ProfileInit (void)
 		rprof_gpu_unavailable_reason = "GL timer-query entry points missing";
 		return;
 	}
-	glGenQueries_fp(RPROF_COUNT + 1, rprof_queries);
+	glGenQueries_fp(RPROF_QUERIES, rprof_queries);
 	rprof_available = true;
 	rprof_pending = false;
 #endif
@@ -7756,9 +7785,15 @@ static void R_ProfileTimestamp (int idx)
 		glQueryCounter_fp(rprof_queries[idx], GL_TIMESTAMP);
 }
 
+static void R_ProfileShadowTimestamp (qboolean end)
+{
+	if (r_speeds.integer >= 2)
+		R_ProfileTimestamp (RPROF_SHADOW + (end ? 1 : 0));
+}
+
 static void R_ProfileReport (void)
 {
-	HWGLuint64 ts[RPROF_COUNT + 1];
+	HWGLuint64 ts[RPROF_QUERIES];
 	GLint ready = 0;
 	int i;
 
@@ -7767,24 +7802,26 @@ static void R_ProfileReport (void)
 
 	if (rprof_available)
 	{
-		double ms[RPROF_COUNT], total;
+		double ms[RPROF_COUNT], total, shadow;
 
 		/* Check if last timestamp is ready (implies all earlier ones are too) */
 		glGetQueryObjectiv_fp(rprof_queries[RPROF_COUNT], GL_QUERY_RESULT_AVAILABLE, &ready);
 		if (!ready)
 			return;
 
-		for (i = 0; i <= RPROF_COUNT; i++)
+		for (i = 0; i < RPROF_QUERIES; i++)
 			glGetQueryObjectui64v_fp(rprof_queries[i], GL_QUERY_RESULT, &ts[i]);
 
 		for (i = 0; i < RPROF_COUNT; i++)
 			ms[i] = (double)(ts[i + 1] - ts[i]) / 1000000.0;
 
 		total = (double)(ts[RPROF_COUNT] - ts[0]) / 1000000.0;
+		shadow = (double)(ts[RPROF_SHADOW + 1] - ts[RPROF_SHADOW]) / 1000000.0;
 
-		Con_Printf("GPU %.1f  CPU %.1f | world %.1f  part %.1f  water %.1f  trans %.1f  vm %.1f  mirr %.1f\n",
+		/* `world` without the shadow maps drawn inside it (#97). */
+		Con_Printf("GPU %.1f  CPU %.1f | world %.1f  shadow %.2f  part %.1f  water %.1f  trans %.1f  vm %.1f  mirr %.1f\n",
 			   total, rprof_cpu_world * 1000.0,
-			   ms[RPROF_WORLD], ms[RPROF_PARTICLES], ms[RPROF_WATER],
+			   ms[RPROF_WORLD] - shadow, shadow, ms[RPROF_PARTICLES], ms[RPROF_WATER],
 			   ms[RPROF_TRANS], ms[RPROF_VM], ms[RPROF_MIRROR]);
 	}
 	else if (rprof_gpu_source == RPROF_GPU_UNAVAILABLE)
@@ -7799,7 +7836,7 @@ static void R_ProfileReport (void)
 	else
 		return;	/* queries not allocated yet; nothing to report */
 
-	Con_Printf("  CPU: marklv %.1f  draw %.1f  sky %.1f  ents %.1f (collect %.1f, inst %.1f, loop %.1f [bC=%.1f bD=%.1f p1=%.1f p2=%.1f] a=%d/%.1fms b=%d bL=%d/%.1fms inst[op=%d fc=%d])  glows %.1f  dlt %.1f\n"
+	Con_Printf("  CPU: marklv %.1f  draw %.1f  sky %.1f  ents %.1f (collect %.1f, inst %.1f, loop %.1f [bC=%.1f bD=%.1f p1=%.1f p2=%.1f] a=%d/%.1fms b=%d bL=%d/%.1fms inst[op=%d fc=%d])  glows %.1f  dlt %.1f  shadow %.2f\n"
 		   "  draw: bsp %.1f  lmup %.1f (%d pages)  gcull %.1f  chains %.1f (gpufin %.1f, sky-stencil %.1f, sky-proc %.1f, loop %.1f, defer %.1f)\n"
 		   "  chains: fast=%d imm=%d slow=%d skypolys=%d  walk=%d (%.1f ms)  lmrebuild=%d (%.1f ms)\n"
 		   "  %4i wpoly  %4i epoly  %4i texbind\n",
@@ -7823,6 +7860,7 @@ static void R_ProfileReport (void)
 		   rprof_brush_inst_fence,
 		   rprof_cpu_glows * 1000.0,
 		   rprof_cpu_dlights * 1000.0,
+		   rprof_cpu_shadow * 1000.0,
 		   rprof_cpu_bsp * 1000.0,
 		   rprof_cpu_lmupload * 1000.0,
 		   rprof_lm_pages_uploaded,
@@ -8009,6 +8047,8 @@ void R_RenderView (void)
 	// render mirror view
 	R_Mirror ();
 	if (r_speeds.integer >= 2) { R_ProfileTimestamp(RPROF_COUNT); rprof_pending = true; }
+
+	R_Shadow_DrawDebug ();	/* r_shadow_debug, #97 */
 
 	R_PolyBlend ();
 
