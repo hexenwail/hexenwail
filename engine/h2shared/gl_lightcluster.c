@@ -126,6 +126,7 @@ COMPILE_TIME_ASSERT(lcparams_size, sizeof(lc_params_t) == 160);
 /* This frame's lights, in the order the shader indexes them, kept so the
  * verifier can recompute without guessing which dlights were live. */
 static gpulight_t	lc_lights[MAX_DLIGHTS];
+static int		lc_src[MAX_DLIGHTS];	/* cl_dlights[] slot of each; -1 synthetic */
 static int		lc_numlights;
 static float		lc_view[16];
 static float		lc_tproj[16];
@@ -198,7 +199,7 @@ static qboolean R_LightCluster_Build (void)
 	}
 
 	q_snprintf (header, sizeof(header),
-		    "#version 430 core\n"
+		    TIER_CORE
 		    "#define LIGHT_TILES_X %d\n"
 		    "#define LIGHT_TILES_Y %d\n"
 		    "#define LIGHT_TILES_Z %d\n"
@@ -248,8 +249,7 @@ static qboolean R_LightCluster_Build (void)
 	GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, 0);
 
 	glGenTextures_fp (1, &lc_grid);
-	glActiveTexture_fp (GL_TEXTURE0);
-	glBindTexture_fp (GL_TEXTURE_3D, lc_grid);
+	R_BindTextureForEdit (GL_TEXTURE_3D, lc_grid);
 	glTexImage3D_fp (GL_TEXTURE_3D, 0, GL_RGBA32UI,
 			 LIGHT_TILES_X, LIGHT_TILES_Y, LIGHT_TILES_Z, 0,
 			 GL_RGBA_INTEGER, GL_UNSIGNED_INT, NULL);
@@ -258,7 +258,7 @@ static qboolean R_LightCluster_Build (void)
 	glTexParameterf_fp (GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameterf_fp (GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	glTexParameterf_fp (GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-	glBindTexture_fp (GL_TEXTURE_3D, 0);
+	R_BindTextureForEdit (GL_TEXTURE_3D, 0);
 
 	if (!lc_ssbo || !lc_grid)
 	{
@@ -311,6 +311,7 @@ static void R_LightCluster_GatherLights (void)
 		if (dl->die < cl.time || dl->radius <= 0.0f)
 			continue;
 
+		lc_src[lc_numlights] = i;
 		out = &lc_lights[lc_numlights++];
 		out->origin[0] = dl->origin[0];
 		out->origin[1] = dl->origin[1];
@@ -420,10 +421,10 @@ static void LC_UploadAndDispatch (void)
 				    ubo, ofs, sizeof(params));
 	}
 
-	glBindImageTexture_fp (0, lc_grid, 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_RGBA32UI);
+	R_BindImageTexture (0, lc_grid, 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_RGBA32UI);
 	glDispatchCompute_fp (LIGHT_TILES_X / 8, LIGHT_TILES_Y / 8, LIGHT_TILES_Z);
 	glMemoryBarrier_fp (GL_TEXTURE_FETCH_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
-	glBindImageTexture_fp (0, 0, 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_RGBA32UI);
+	R_BindImageTexture (0, 0, 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_RGBA32UI);
 
 	R_UseProgram (0);
 }
@@ -431,6 +432,23 @@ static void LC_UploadAndDispatch (void)
 qboolean R_LightCluster_Available (void)
 {
 	return lc_valid_this_frame;
+}
+
+int R_LightCluster_NumLights (void)
+{
+	return lc_valid_this_frame ? lc_numlights : 0;
+}
+
+qboolean R_LightCluster_GetLight (int i, float origin[3], float *radius, int *dlight)
+{
+	if (!lc_valid_this_frame || i < 0 || i >= lc_numlights)
+		return false;
+	origin[0] = lc_lights[i].origin[0];
+	origin[1] = lc_lights[i].origin[1];
+	origin[2] = lc_lights[i].origin[2];
+	*radius = lc_lights[i].radius;
+	*dlight = lc_src[i];
+	return true;
 }
 
 qboolean R_LightCluster_ShadesWorld (void)
@@ -537,13 +555,7 @@ void R_LightCluster_BindForWorld (void)
 	 * can take it back -- see the header for what happened when it wasn't. */
 	GL_BindBufferBase (GL_SHADER_STORAGE_BUFFER, LIGHT_SSBO_BINDING, lc_ssbo);
 
-	glActiveTexture_fp (GL_TEXTURE0 + LIGHT_GRID_TMU);
-	glBindTexture_fp (GL_TEXTURE_3D, lc_grid);
-	/* Back to unit 0, which every other binding site in the renderer both
-	 * expects on entry and leaves behind.  `currenttexture` is untouched:
-	 * it caches GL_TEXTURE_2D on unit 0 and nothing above went through
-	 * GL_Bind. */
-	glActiveTexture_fp (GL_TEXTURE0);
+	R_BindTextureTarget (LIGHT_GRID_TMU, GL_TEXTURE_3D, lc_grid);
 }
 
 /* ------------------------------------------------------------------ */
@@ -648,6 +660,7 @@ static void R_LightCluster_Verify_f (void)
 			lc_lights[i].radius = 40.0f + (float)(i % 9) * 45.0f;
 			lc_lights[i].color[0] = lc_lights[i].color[1] = lc_lights[i].color[2] = 1.0f;
 			lc_lights[i].minlight = 0.0f;
+			lc_src[i] = -1;
 		}
 		lc_numlights = want;
 		LC_UploadAndDispatch ();
@@ -659,10 +672,9 @@ static void R_LightCluster_Verify_f (void)
 		return;
 	}
 
-	glActiveTexture_fp (GL_TEXTURE0);
-	glBindTexture_fp (GL_TEXTURE_3D, lc_grid);
+	R_BindTextureForEdit (GL_TEXTURE_3D, lc_grid);
 	glGetTexImage_fp (GL_TEXTURE_3D, 0, GL_RGBA_INTEGER, GL_UNSIGNED_INT, readback);
-	glBindTexture_fp (GL_TEXTURE_3D, 0);
+	R_BindTextureForEdit (GL_TEXTURE_3D, 0);
 
 	/* The frustum straight from the field of view R_SetupGL built it with.
 	 * At view depth d, NDC x spans +/- tan(fov_x/2)*d.  Deliberately NOT the
@@ -754,7 +766,7 @@ void R_LightCluster_Shutdown (void)
 	R_PipelineForgetProgram ();	/* GL reuses program names */
 	if (lc_prog) { glDeleteProgram_fp (lc_prog); lc_prog = 0; }
 	if (lc_ssbo) { GL_ForgetBuffer (lc_ssbo); glDeleteBuffers_fp (1, &lc_ssbo); lc_ssbo = 0; }
-	if (lc_grid) { glDeleteTextures_fp (1, &lc_grid); lc_grid = 0; }
+	if (lc_grid) { R_DeleteTextures (1, &lc_grid); lc_grid = 0; }
 	lc_ready = false;
 	lc_failed = false;
 	lc_valid_this_frame = false;
@@ -767,6 +779,12 @@ void R_LightCluster_Init (void) {}
 void R_LightCluster_Shutdown (void) {}
 void R_LightCluster_Update (void) {}
 qboolean R_LightCluster_Available (void) { return false; }
+int R_LightCluster_NumLights (void) { return 0; }
+qboolean R_LightCluster_GetLight (int i, float origin[3], float *radius, int *dlight)
+{
+	(void)i; (void)origin; (void)radius; (void)dlight;
+	return false;
+}
 qboolean R_LightCluster_ShadesWorld (void) { return false; }
 qboolean R_LightCluster_ShadesAlias (void) { return false; }
 qboolean R_LightCluster_AliasActive (void) { return false; }

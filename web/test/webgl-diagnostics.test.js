@@ -108,20 +108,24 @@ test('the launcher gates on the renderer its artifact was built with', async () 
 });
 
 test('the presenter self-test mirrors the engine palette blit', async () => {
-  const [diagnostics, presenter] = await Promise.all([
+  const [diagnostics, presenter, blitFrag] = await Promise.all([
     readFile(new URL('../lib/webgl-diagnostics.js', import.meta.url), 'utf8'),
     readFile(new URL('../../engine/h2shared/web_canvas_gl2.c', import.meta.url), 'utf8'),
+    readFile(new URL('../../engine/shaders/glonly/webcanvas_blit_frag.glsl', import.meta.url), 'utf8'),
   ]);
 
   // The C presenter is the thing being gated, so the probe has to sample the
-  // same way it does: an R8UI source expanded through a 256x1 RGBA8 LUT.
+  // same way it does: an R8UI source expanded through a 256x1 RGBA8 LUT.  Its
+  // shaders are engine/shaders/glonly files since #450; the C compiles them
+  // through the WEBCANVAS_BLIT_* macros shaders_gen.h makes of them.
   for (const shared of [
     /usampler2D u_indexed/,
     /texelFetch\(u_palette, ivec2\(int\(idx\), 0\), 0\)\.rgb/,
   ]) {
     assert.match(diagnostics, shared);
-    assert.match(presenter, shared);
+    assert.match(blitFrag, shared);
   }
+  assert.match(presenter, /blit_fragment_source = WEBCANVAS_BLIT_FRAG;/);
   assert.match(presenter, /GL_R8UI/);
   assert.match(diagnostics, /gl\.R8UI/);
 
@@ -141,23 +145,27 @@ test('framebuffer self-test validates a generated world draw', async () => {
 });
 
 test('every engine shader family carries an ES-tier header', async () => {
-  const [shader, postprocess] = await Promise.all([
+  const [shader, postprocess, tierEs, tierEsPp] = await Promise.all([
     readFile(new URL('../../engine/h2shared/gl_shader.c', import.meta.url), 'utf8'),
     readFile(new URL('../../engine/h2shared/gl_postprocess.c', import.meta.url), 'utf8'),
+    readFile(new URL('../../engine/shaders/glonly/tier_es.glsl', import.meta.url), 'utf8'),
+    readFile(new URL('../../engine/shaders/glonly/tier_es_pp.glsl', import.meta.url), 'utf8'),
   ]);
 
   // The tier is USE_GLES, not __EMSCRIPTEN__: a desktop -DUSE_GLES=ON build
   // reaches the same code paths and is how ES regressions get caught locally.
-  assert.match(shader, /#ifdef USE_GLES\n#define GLSL_VERT_HEADER\s+"#version 300 es/);
-  assert.match(postprocess, /#ifdef USE_GLES\n#define PP_ES_PRECISION/);
+  // The headers' text is engine/shaders/glonly/tier_*.glsl since #450.
+  assert.match(shader, /#ifdef USE_GLES\n#define GLSL_VERT_HEADER\s+TIER_ES\n/);
+  assert.match(postprocess, /#ifdef USE_GLES\n#define PP_VERT_HEADER\s+TIER_ES_PP\n/);
+  assert.match(tierEs, /^#version 300 es\nprecision highp float;\n$/);
+  assert.match(tierEsPp, /^#version 300 es\nprecision highp float;\nprecision highp int;\nprecision highp sampler3D;\n$/);
 
   // Every post-process shader goes through the header macros.  Hardcoding
   // "#version 430 core" here is what took the whole chain -- gamma, contrast,
   // FXAA, bloom, render scale -- out on the ES tier in uhexen2-7wdv.  The
   // browser-profile shaders in gl_shader.c are covered by the extraction test
-  // below, which compiles what the engine actually emits; gl_shader.c's
-  // remaining literal 430s are the SSBO and instanced-alias programs, which
-  // are built under #ifndef USE_GLES and can only ever be desktop.
+  // below, which compiles what the engine actually emits; no #version literal
+  // is left in either file (tools/test_no_version_in_c.py, #450).
   const hardcoded = postprocess.match(/^\s*"#version 430 core\\n"/gm) || [];
   assert.deepEqual(hardcoded, [], 'gl_postprocess.c hardcodes a desktop #version in a shader source');
 });

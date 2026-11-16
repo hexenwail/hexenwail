@@ -30,8 +30,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "gl_vbo.h"
 #include "gl_sky.h"
 
-// Don't include gl_texmgr.h because GL_Bind macro in glquake.h conflicts
-// Just declare what we need from it
+// There is no gl_texmgr.h; declare what we need from gl_texmgr.c
 extern gltexture_t *notexture;
 
 // Source format enum from gl_texmgr.h
@@ -60,11 +59,6 @@ extern void TexMgr_FreeTexture (gltexture_t *kill);
 #define TEXPREF_RGBA			0x1000
 #define TEXPREF_TRANSPARENT		0x2000
 
-// Undef the GL_Bind macro so we can use the function from gl_texmgr
-#undef GL_Bind
-
-// Forward declaration of GL_Bind function from gl_texmgr
-extern void GL_Bind (gltexture_t *texture);
 extern qboolean have_stencil;
 
 #define	MAX_CLIP_VERTS 64
@@ -419,7 +413,7 @@ static skybox_t *Sky_CacheAdd(const char *name, gltexture_t **textures, GLuint *
 		/* The cache owns the cubemap exactly as it owns the faces, so this
 		 * is the only place an evicted one may be deleted (uhexen2-ctk9). */
 		if (kill->cubemap)
-			glDeleteTextures_fp (1, &kill->cubemap);
+			R_DeleteTextures (1, &kill->cubemap);
 		free(kill);
 		kill = next;
 	}
@@ -448,7 +442,7 @@ void Sky_CacheFlush(void)
 				TexMgr_FreeTexture(entry->textures[i]);
 		}
 		if (entry->cubemap)
-			glDeleteTextures_fp (1, &entry->cubemap);
+			R_DeleteTextures (1, &entry->cubemap);
 		free(entry);
 	}
 	skybox_cache = NULL;
@@ -675,7 +669,7 @@ static void Sky_BuildCubemap (void)
 	}
 
 	glGenTextures_fp (1, &skybox_cubemap);
-	glBindTexture_fp (GL_TEXTURE_CUBE_MAP, skybox_cubemap);
+	R_BindTextureForEdit (GL_TEXTURE_CUBE_MAP, skybox_cubemap);
 	for (i = 0; i < 6; i++)
 		glTexImage2D_fp (GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, GL_RGBA8,
 				 sky_cube_size, sky_cube_size, 0,
@@ -684,7 +678,7 @@ static void Sky_BuildCubemap (void)
 	glTexParameterf_fp (GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	glTexParameterf_fp (GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameterf_fp (GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glBindTexture_fp (GL_TEXTURE_CUBE_MAP, 0);
+	R_BindTextureForEdit (GL_TEXTURE_CUBE_MAP, 0);
 
 	Con_DPrintf ("Sky: cubemap built, %dx%d per face\n", sky_cube_size, sky_cube_size);
 
@@ -1774,7 +1768,7 @@ void Sky_DrawSkyBox (void)
 		      (gl_shader_sky_cubemap.program != 0);
 	if (use_cubemap)
 	{
-		glBindTexture_fp(GL_TEXTURE_CUBE_MAP, skybox_cubemap);
+		R_BindTextureTarget (0, GL_TEXTURE_CUBE_MAP, skybox_cubemap);
 		skyprog = &gl_shader_sky_cubemap;
 	}
 
@@ -1827,7 +1821,7 @@ void Sky_DrawSkyBox (void)
 
 	// Restore GL state — full window-Z range is symmetric, no flip needed
 	if (use_cubemap)
-		glBindTexture_fp(GL_TEXTURE_CUBE_MAP, 0);
+		R_BindTextureTarget (0, GL_TEXTURE_CUBE_MAP, 0);
 	R_SetDepthRange (0.0, 1.0);
 	R_SetCull (true);
 }

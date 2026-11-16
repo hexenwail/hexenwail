@@ -22,6 +22,7 @@
 #include "quakedef.h"
 #include "r_local.h"
 #include "r_dlightvis.h"
+#include "r_dlightmark.h"
 
 int	r_dlightframecount;
 
@@ -135,9 +136,13 @@ void R_MarkLights (dlight_t *light, int lnum, mnode_t *node, const entity_t *ent
 		{
 			DLIGHTBITS_CLEAR (surf->dlightbits);
 			surf->dlightframe = r_dlightframecount;
+			surf->dlightent = ent;
+			surf->dlightmarks = NULL;
 		}
+		/* a second entity sharing this submodel: see gl_rlight.c's twin (#496) */
+		else if (ent != surf->dlightent || surf->dlightmarks)
+			R_DlightMark_Shared (surf, lnum, ent, r_dlightframecount);
 		DLIGHTBIT_SET (surf->dlightbits, lnum);
-		surf->dlightent = ent;
 	}
 
 	R_MarkLights (light, lnum, node->children[0], ent);

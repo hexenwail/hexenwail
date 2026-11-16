@@ -94,6 +94,28 @@ jobs:
       - name: No GL calls outside the renderer modules
         run: python3 tools/test_gl_call_sites.py
 
+      # gl_pipeline.c shadows the GL draw state and drops calls that would not
+      # change it, which is only right while nothing writes that state behind
+      # its back.  No draw-state call outside gl_pipeline.c, except the
+      # context-time switches allowlisted in the script, the loader table
+      # (gl_func.h) and the web canvas blit (web_canvas_gl2.c).  GitHub #337.
+      - name: No draw-state GL call bypasses the pipeline
+        run: python3 tools/test_draw_state_routing.py
+
+      # gl_texbind.c shadows what every texture unit holds and which unit is
+      # active, and drops binds that would not change them, which is only
+      # right while nothing binds, switches units or deletes a texture behind
+      # its back.  No glActiveTexture / glBindTexture / glBindImageTexture /
+      # glDeleteTextures (or sampler / multi-bind) call outside gl_texbind.c,
+      # except the loader table (gl_func.h) and the web canvas blit
+      # (web_canvas_gl2.c); and the shadow itself checked against a fake GL.
+      # GitHub #338.
+      - name: No texture bind bypasses gl_texbind.c
+        run: python3 tools/test_texture_bind_routing.py
+
+      - name: gl_texbind.c shadow agrees with GL
+        run: python3 tools/test_texbind_shadow.py
+
       # The linker already guarantees the software build *defines* every
       # renderer cvar shared code touches -- r_soft_web.c exists for that, and
       # CI builds the WEBSOFT config on every PR.  What nothing catches is a
@@ -415,6 +437,12 @@ jobs:
       - name: Shader include bound
         run: python3 tools/test_embed_include_bound.py
 
+      # No C string literal under engine/h2shared or engine/hexen2 holds a
+      # GLSL #version: the tier preambles and the WEBSOFT canvas blit live in
+      # engine/shaders/glonly, embedded as macros (#450).
+      - name: No #version string in the C
+        run: python3 tools/test_no_version_in_c.py
+
       # salias_vert reads VertParams: the C mirror matches the block member
       # for member (sizes AND int/float kinds), all four alias builds compile
       # the file, GL_ImmPushBlocks feeds it, MSL targets 2.1 (#450 S1).
@@ -509,3 +537,25 @@ jobs:
       # (#97 P2).
       - name: Dynamic lights do not see through walls
         run: python3 tools/test_dlight_vis.py
+      # ...and on brush entities sharing one submodel, each light measured in
+      # the space of the copy it came in through: r_dlightmark.c compiled
+      # whole with both tiers' mark and add loops, run on two copies (#496).
+      - name: Shared submodels keep their own lights
+        run: python3 tools/test_dlight_shared_submodel.py
+      # Both brush-entity dlight mark loops (R_DrawBrushModel and its
+      # instanced twin) stand down under gl_flashblend and the GPU path.
+      - name: Brush dlight mark loops share their gates
+        run: python3 tools/test_brush_dlight_gates.py
+      # ...and on the GPU clustered path, the cube shadow maps: the six face
+      # matrices against GL's cube-map table and the cull face that keeps the
+      # walls' far sides, and the ShadowPass / DlShadow blocks against their C
+      # mirrors, binds, packing and an ES arm without them (#97 P3/P4); the
+      # alias casters' pose, push and exclusions (#97 P6).
+      - name: Shadow-map faces are GL's cube faces
+        run: python3 tools/test_shadow_cube_faces.py
+      - name: Shadow-map blocks match their mirrors
+        run: python3 tools/test_dlshadow_block.py
+      # The Display presets' shadow-map tiers, each preset detected as itself
+      # after applying it, and the DLight Occlusion row (#97 P5).
+      - name: Presets carry their shadow-map tier
+        run: python3 tools/test_shadow_presets.py

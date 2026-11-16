@@ -803,7 +803,7 @@ iqm_gpu_setup:
 		/* Pose texture (ES 3.0 compatible) — R32UI, width=poseverts, height=numposes.
 		 * Each texel packs one trivertx_t as: v[0] | v[1]<<8 | v[2]<<16 | ni<<24 */
 		glGenTextures_fp(1, &gm->tex_pose);
-		glBindTexture_fp(GL_TEXTURE_2D, gm->tex_pose);
+		R_BindTextureForEdit (GL_TEXTURE_2D, gm->tex_pose);
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -811,7 +811,7 @@ iqm_gpu_setup:
 		glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_R32UI,
 				hdr->poseverts, hdr->numposes, 0,
 				GL_RED_INTEGER, GL_UNSIGNED_INT, pose_packed);
-		glBindTexture_fp(GL_TEXTURE_2D, 0);
+		R_BindTextureForEdit (GL_TEXTURE_2D, 0);
 	}
 
 	/* Refuse a mesh with no pose data.  Everything downstream indexes the

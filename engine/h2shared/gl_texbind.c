@@ -94,9 +94,16 @@ void R_BindTextureTarget (GLuint slot, GLenum target, GLuint texture)
 	RT_Activate (0);
 }
 
-GLuint R_CurrentTexture (void)
+void R_BindTextureForEdit (GLenum target, GLuint texture)
 {
-	return bound[0][RT_T2D];
+	RT_Bind (0, target, texture);
+	RT_Activate (0);
+}
+
+void R_BindImageTexture (GLuint unit, GLuint texture, GLint level, GLboolean layered,
+			 GLint layer, GLenum access, GLenum format)
+{
+	glBindImageTexture_fp (unit, texture, level, layered, layer, access, format);
 }
 
 /* Zero is a real binding -- it means "nothing bound" -- so clearing the shadow
@@ -109,19 +116,6 @@ void R_ResetTextureBindings (void)
 	for (u = 0; u < RT_MAX_TEXTURE_UNITS; u++)
 		for (t = 0; t < RT_NUM_TARGETS; t++)
 			bound[u][t] = GL_UNUSED_TEXTURE;
-
-	/* Slice 1 is a partial conversion: raw code outside this module can
-	 * still move the GL cursor, so forgetting the shadow without
-	 * re-asserting the unit would leave the two disagreeing -- the next
-	 * slot-0 bind would then land on whatever unit the raw code left
-	 * active.  Re-asserting here bounds that risk to the reset points,
-	 * which are the context boundary, the frame entries, and the paths
-	 * that bind behind the module's back. */
-	if (active_unit != 0)
-	{
-		glActiveTexture_fp (GL_TEXTURE0);
-		active_unit = 0;
-	}
 }
 
 void R_DeleteTextures (GLsizei n, const GLuint *textures)

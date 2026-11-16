@@ -176,7 +176,7 @@ void	GL_ParticleGPU_SetUniforms (const gl_particle_gpu_prog_t *prog,
  * and 4 is its CullParams, 3 is gl_ssao.c's SsaoParams, 5 is
  * gl_lightcluster.c's LcParams, 6 is gl_postprocess.c's BloomParams, 7
  * is its OitParams, 8 its PpVert and 9 is its PpParams, so the graphics
- * blocks start at 1 and the alias, world and OIT families' own pick up at 10.  Keyed by stage rather than by program:
+ * blocks start at 1 and the alias, world and OIT families' own pick up at 10, and gl_shadow.c's at 14.  Keyed by stage rather than by program:
  * only one program is bound at a time, so each program's own vertex-stage
  * block is pinned to the same point rather than every program claiming a new
  * one.  A driver need only guarantee a handful of these.
@@ -198,6 +198,12 @@ void	GL_ParticleGPU_SetUniforms (const gl_particle_gpu_prog_t *prog,
  * output mode.  Desktop only in practice -- no ES program declares it -- but
  * still under ES 3.00's 24 binding points. */
 #define UBO_BINDING_OIT_FRAG	13
+/* The dynamic-light cube shadow maps' (gl_shadow.c, #97 P3/P4): 14 is the map
+ * pass's ShadowPass (sshadow_vert), 15 the receivers' DlShadow (dlshadow.inc),
+ * which the world and alias fragment stages read on desktop.  Neither is ever
+ * declared on the ES tier. */
+#define UBO_BINDING_SHADOW_PASS	14
+#define UBO_BINDING_DLSHADOW	15
 
 void	GL_Shaders_Init (void);
 void	GL_Shaders_Shutdown (void);

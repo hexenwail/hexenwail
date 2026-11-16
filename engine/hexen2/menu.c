@@ -30,6 +30,7 @@
 #include "gl_vbo.h"
 #include "gl_shader.h"
 #include "gl_pipeline.h"
+#include "gl_lightcluster.h"
 #endif
 #include "sbar.h"
 #include "menu_pointer.h"
@@ -2837,6 +2838,61 @@ static void M_Options_Key (int k)
 
 
 //=============================================================================
+/* DYNAMIC-LIGHT OCCLUSION (GitHub #97) -- the Display presets and the Misc row */
+
+/* What r_dlight_occlusion can reach on this tier: 2, the cube shadow maps,
+ * on desktop GL only (gl_shadow.c); the ES tier and the software renderer
+ * render a 2 as 1, so neither the row nor a preset offers it there. */
+#if defined(GLQUAKE) && !defined(USE_GLES)
+#define	M_DLOCCLUSION_MAX	2
+#else
+#define	M_DLOCCLUSION_MAX	1
+#endif
+
+/* What r_dlight_occlusion reaches right now: the cube maps light only the
+ * clustered path's receivers (gl_shadow.c), so with r_lightclusters 0 -- or a
+ * driver without compute -- a desktop 2 renders as 1 too.  The presets still
+ * store the tier's M_DLOCCLUSION_MAX, which comes alive with the clusters;
+ * the row shows and steps through what renders. */
+static int M_DlightOcclusionMax (void)
+{
+#if defined(GLQUAKE) && !defined(USE_GLES)
+	if (!R_LightCluster_ShadesWorld ())
+		return 1;
+#endif
+	return M_DLOCCLUSION_MAX;
+}
+
+static int M_DlightOcclusion (void)
+{
+	int v = (int)Cvar_VariableValue ("r_dlight_occlusion");
+	int max = M_DlightOcclusionMax ();
+	return v < 0 ? 0 : v > max ? max : v;
+}
+
+/* A preset's shadow-map tier (#97, P5): cube size in texels, most lights
+ * mapped, PCF, maps redrawn a frame, and casters (1 the world and brush
+ * entities, 2 alias models too).  Every preset turns the occlusion on as far
+ * as the tier goes: the maps measured 0.34 ms GPU a frame on the Tesla P4
+ * with all eight redrawn every frame at 64 texels, 0.06 ms at two a frame,
+ * nothing for a cached one -- inside the 0.5 ms the plan gave the retro
+ * presets, so none of them is a tier too slow for it.  The r_shadow_* cvars
+ * exist on every GL tier (a desktop config loads quietly on the web) and the
+ * ES one ignores them; the software build has none. */
+#ifdef GLQUAKE
+#define PRESET_SHADOWS(res, lights, filter, updates, casters) \
+	Cvar_SetValue ("r_dlight_occlusion", M_DLOCCLUSION_MAX); \
+	Cvar_SetValue ("r_shadow_resolution", res); \
+	Cvar_SetValue ("r_shadow_maxlights", lights); \
+	Cvar_SetValue ("r_shadow_filter", filter); \
+	Cvar_SetValue ("r_shadow_updates", updates); \
+	Cvar_SetValue ("r_shadow_casters", casters);
+#else
+#define PRESET_SHADOWS(res, lights, filter, updates, casters) \
+	Cvar_SetValue ("r_dlight_occlusion", M_DLOCCLUSION_MAX);
+#endif
+
+//=============================================================================
 /* DISPLAY MENU */
 
 enum
@@ -2983,6 +3039,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_glow_intensity", 0.4f);
 			Cvar_SetValue ("gl_torch_dlight", 1);
 			Cvar_SetValue ("r_lerpmodels", 0);	/* snappy lo-fi animation */
+			PRESET_SHADOWS (64, 8, 0, 2, 1)	/* nearest texels, the lo-fi edge */
 			PRESET_COMMON
 		}
 		else if (preset == 2)	/* Retro — half res, banded, old-school */
@@ -3004,6 +3061,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_glow_intensity", 0.4f);
 			Cvar_SetValue ("gl_torch_dlight", 1);
 			Cvar_SetValue ("r_lerpmodels", 0);	/* snappy lo-fi animation */
+			PRESET_SHADOWS (64, 8, 0, 2, 1)	/* nearest texels, the lo-fi edge */
 			PRESET_COMMON
 		}
 		else if (preset == 3)	/* Authentic — Retro, but quantized through Raven's own colormap */
@@ -3025,6 +3083,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_glow_intensity", 0.4f);
 			Cvar_SetValue ("gl_torch_dlight", 1);
 			Cvar_SetValue ("r_lerpmodels", 0);	/* snappy lo-fi animation */
+			PRESET_SHADOWS (64, 8, 0, 2, 1)	/* nearest texels, the lo-fi edge */
 			PRESET_COMMON
 		}
 		else if (preset == 4)	/* Faithful — native res, OG textures, static water */
@@ -3044,6 +3103,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_missile_glows", 1);
 			Cvar_SetValue ("gl_other_glows", 1);
 			Cvar_SetValue ("gl_glow_intensity", 0.2f);
+			PRESET_SHADOWS (128, 16, 1, 4, 1)
 			PRESET_COMMON
 		}
 		else if (preset == 5)	/* Clean — sharp native, mild effects */
@@ -3064,6 +3124,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_other_glows", 1);
 			Cvar_SetValue ("gl_glow_intensity", 0.4f);
 			Cvar_SetValue ("gl_torch_dlight", 1);
+			PRESET_SHADOWS (128, 16, 1, 4, 1)
 			PRESET_COMMON
 		}
 		else if (preset == 6)	/* Modern — smooth, full effects */
@@ -3084,6 +3145,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_other_glows", 1);
 			Cvar_SetValue ("gl_glow_intensity", 1.0f);
 			Cvar_SetValue ("gl_torch_dlight", 1);
+			PRESET_SHADOWS (256, 16, 1, 8, 2)	/* + the models' shadows */
 			PRESET_COMMON
 		}
 		else if (preset == 7)	/* Ultra — everything maxed */
@@ -3104,6 +3166,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_other_glows", 1);
 			Cvar_SetValue ("gl_glow_intensity", 1.0f);
 			Cvar_SetValue ("gl_torch_dlight", 1);
+			PRESET_SHADOWS (512, 16, 1, 16, 2)	/* every map may redraw every frame */
 			PRESET_COMMON
 		}
 #undef PRESET_COMMON
@@ -4220,6 +4283,7 @@ enum
 	GFX_OVERBRIGHT,
 	GFX_COLORED_LM,
 	GFX_TORCH_DLIGHT,
+	GFX_DLOCCLUSION,
 	GFX_GLOW_INTENSITY,
 	GFX_SHOWSPEED,
 	GFX_SHOWCLOCK,
@@ -4245,6 +4309,7 @@ static const char *gfx_labels[GFX_ITEMS] = {
 	"Overbright Mdls :",	/* GFX_OVERBRIGHT */
 	"Colored Lighting:",	/* GFX_COLORED_LM */
 	"Wall Torch DLs  :",	/* GFX_TORCH_DLIGHT */
+	"DLight Occlusion:",	/* GFX_DLOCCLUSION */
 	"Glow Intensity  :",	/* GFX_GLOW_INTENSITY */
 	"Show Speed      :",	/* GFX_SHOWSPEED */
 	"Show Clock      :",	/* GFX_SHOWCLOCK */
@@ -4287,7 +4352,10 @@ static qboolean M_Graphics_IsSkip (int i)
 		break;
 	}
 	/* soft-ok: GFX_HUDTRANS, GFX_CONMAXCOLS, GFX_TORCH_DLIGHT, GFX_DEMOBAR,
-	 *          GFX_CENTERPRINTBG, GFX_SHOWSPEED, GFX_SHOWCLOCK
+	 *          GFX_CENTERPRINTBG, GFX_SHOWSPEED, GFX_SHOWCLOCK, GFX_DLOCCLUSION
+	 *
+	 * GFX_DLOCCLUSION: r_surf.c, r_light.c and r_main.c read it (#97); the
+	 * row stops at Walls here, as on the ES tier (M_DLOCCLUSION_MAX).
 	 *
 	 * GFX_DEMOBAR: screen.c draws the bar in this build too (GitHub #123).
 	 * GFX_CENTERPRINTBG, GFX_SHOWSPEED, GFX_SHOWCLOCK: ported to screen.c,
@@ -4405,6 +4473,17 @@ static void M_Graphics_AdjustSliders (int dir)
 	case GFX_TORCH_DLIGHT:
 		Cvar_SetValue ("gl_torch_dlight", !gl_torch_dlight.integer);
 		break;
+	case GFX_DLOCCLUSION:
+	{
+		/* Off, Walls (1), Shadows (2) where the maps render.  A 2 carried
+		 * in a config from desktop, or held with r_lightclusters 0, reads,
+		 * and steps, as the 1 it renders as. */
+		int v = M_DlightOcclusion () + dir;
+		if (v < 0) v = M_DlightOcclusionMax ();
+		if (v > M_DlightOcclusionMax ()) v = 0;
+		Cvar_SetValue ("r_dlight_occlusion", v);
+		break;
+	}
 	case GFX_GLOW_INTENSITY:
 	{
 		float v = gl_glow_intensity.value + dir * 0.1f;
@@ -4450,11 +4529,17 @@ static void M_Graphics_AdjustSliders (int dir)
 
 static const char *M_Graphics_Note (int row)
 {
+	/* the row stops at Walls on desktop without the clusters: say why --
+	 * the cvar, or, with it on, a GPU the grid cannot run on */
+	if (row == GFX_DLOCCLUSION && M_DlightOcclusionMax () < M_DLOCCLUSION_MAX)
+		return Cvar_VariableValue ("r_lightclusters") ? "This GPU cannot draw the shadow maps"
+							       : "Shadows need r_lightclusters 1";
 	switch (row)
 	{
 	case GFX_CONMAXCOLS:	return "Wrap console text at this width";	/* con_maxcols */
 	case GFX_OVERBRIGHT:	return "Full lets models light up like walls";	/* gl_overbright_models */
 	case GFX_TORCH_DLIGHT:	return "Wall torches cast dynamic light";	/* gl_torch_dlight */
+	case GFX_DLOCCLUSION:	return "Keep dynamic light out past walls";	/* r_dlight_occlusion */
 #if !defined(WEBSOFT)
 	case GFX_HUDTRANS:	return "Bottom bar opacity; 1 is solid";	/* scr_sbaralpha */
 #endif
@@ -4572,6 +4657,13 @@ static void M_Graphics_Draw (void)
 	{
 		M_Print (76, 92 + 8*GFX_TORCH_DLIGHT, gfx_labels[GFX_TORCH_DLIGHT]);
 		M_DrawCheckbox (220, 92 + 8*GFX_TORCH_DLIGHT, gl_torch_dlight.integer);
+	}
+
+	if (!M_Graphics_IsSkip(GFX_DLOCCLUSION))
+	{
+		static const char *names[] = { "Off", "Walls", "Shadows" };
+		M_Print (76, 92 + 8*GFX_DLOCCLUSION, gfx_labels[GFX_DLOCCLUSION]);
+		M_PrintWhite (220, 92 + 8*GFX_DLOCCLUSION, names[M_DlightOcclusion ()]);
 	}
 
 	if (!M_Graphics_IsSkip(GFX_GLOW_INTENSITY))

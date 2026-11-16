@@ -10,8 +10,7 @@ calls through the loader table" established that contract; this gate
 enforces it, plus the location rule.
 
 Scope: engine/**/*.c only, NOT .h -- gl_func.h defines every _fp name
-(the loader table itself) and glquake.h holds the renderer's own
-GL_Bind macro, so scanning headers would flag the contract rather
+(the loader table itself), so scanning headers would flag the contract rather
 than its violations.  Comments are stripped before matching, so a
 /* glClear() ... */ note in a non-renderer file is not a violation.
 

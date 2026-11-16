@@ -211,7 +211,7 @@ def check(root):
                 and "fogalpha" in guarded.split("Sky_LayerFogColor", 1)[1]):
             failures.append(f"{name}: fog pass must draw gl_shader_flat in "
                             "Sky_LayerFogColor (fogalpha), got: " + " ".join(guarded.split()))
-        if re.search(r"\b(GL_Bind|R_BindTextures?|glBindTexture_fp)\b|gl_shader_sky_", guarded):
+        if re.search(r"\b(R_BindTexture\w*|glBindTexture_fp)\b|gl_shader_sky_", guarded):
             failures.append(f"{name}: fog pass binds a sky texture or sky program")
 
     fog_pass_after_front(function(warp_c, "void R_DrawSkyChain (msurface_t *s)"),
@@ -222,7 +222,7 @@ def check(root):
     # the back layer's sits before R_SetBlend (true); check that ordering too.
     if multi:
         two = multi.find("R_SetBlend (true)")
-        if multi.find("GL_Bind (alphaskytexture)") > two >= 0 or \
+        if multi.find("R_BindTextureSlot (0, alphaskytexture)") > two >= 0 or \
                 multi.count("gl_shader_sky_boxside", two) != 1:
             failures.append("EmitSkyPolysMulti: expected one boxside draw after "
                             "R_SetBlend (true) (the front layer)")

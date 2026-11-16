@@ -68,7 +68,7 @@ void R_SSAO_Init (void)
 #define SSAO_UBO_BINDING	3	/* 0 Hi-Z, 1 and 2 the shared vert/frag blocks, 4 CullParams */
 #define SSAO_TEX_UNIT		8	/* the shaders' TEXBIND(8..11): clear of the units draws cache */
 #define SSAO_PYRAMID_LEVELS	5
-#define SSAO_VERSION		"#version 430 core\n"
+#define SSAO_VERSION		TIER_CORE	/* engine/shaders/glonly/tier_core.glsl */
 /* Tile tags: one bit per 128x128 AO tile, 8x4 tiles per texel.  16x16 texels
  * covers a 16384x8192 AO target; R_SSAO_Apply clears them from a buffer this
  * size. */
@@ -102,14 +102,13 @@ static void SS_DeleteTargets (void)
 	{
 		if (*tex[i])
 		{
-			glDeleteTextures_fp (1, tex[i]);
+			R_DeleteTextures (1, tex[i]);
 			*tex[i] = 0;
 		}
 	}
 	if (ss_world_fbo) { glDeleteFramebuffers_fp (1, &ss_world_fbo); ss_world_fbo = 0; }
 	if (ss_scene_fbo) { glDeleteFramebuffers_fp (1, &ss_scene_fbo); ss_scene_fbo = 0; }
 	ss_w = ss_h = ss_scale = 0;
-	currenttexture = GL_UNUSED_TEXTURE;
 }
 
 void R_SSAO_Shutdown (void)
@@ -213,7 +212,7 @@ static GLuint SS_Tex2D (GLsizei levels, GLenum fmt, int w, int h, GLenum min_fil
 	GLuint	t;
 
 	glGenTextures_fp (1, &t);
-	glBindTexture_fp (GL_TEXTURE_2D, t);
+	R_BindTextureForEdit (GL_TEXTURE_2D, t);
 	glTexStorage2D_fp (GL_TEXTURE_2D, levels, fmt, w, h);
 	glTexParameteri_fp (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, min_filter);
 	glTexParameteri_fp (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
@@ -311,8 +310,7 @@ static qboolean SS_EnsureTargets (int w, int h, int scale)
 	ss_edges = SS_Tex2D (1, GL_R8, ss_aow, ss_aoh, GL_NEAREST);
 	ss_mismatch = SS_Tex2D (1, GL_R32UI, ss_mismatch_w, ss_mismatch_h, GL_NEAREST);
 	SS_UploadHilbert ();
-	glBindTexture_fp (GL_TEXTURE_2D, 0);
-	currenttexture = GL_UNUSED_TEXTURE;
+	R_BindTextureForEdit (GL_TEXTURE_2D, 0);
 	return true;
 }
 
@@ -345,13 +343,12 @@ static void SS_UnbindImages (int count)
 	int	i;
 
 	for (i = 0; i < count; i++)
-		glBindImageTexture_fp (i, 0, 0, GL_FALSE, 0, GL_READ_ONLY, GL_R8);
+		R_BindImageTexture (i, 0, 0, GL_FALSE, 0, GL_READ_ONLY, GL_R8);
 }
 
 static void SS_BindTex (int unit, GLuint tex)
 {
-	glActiveTexture_fp (GL_TEXTURE0 + SSAO_TEX_UNIT + unit);
-	glBindTexture_fp (GL_TEXTURE_2D, tex);
+	R_BindTextureSlot (SSAO_TEX_UNIT + unit, tex);
 }
 
 static void SS_UnbindTex (int count)
@@ -360,7 +357,6 @@ static void SS_UnbindTex (int count)
 
 	for (i = 0; i < count; i++)
 		SS_BindTex (i, 0);
-	glActiveTexture_fp (GL_TEXTURE0);
 }
 
 static qboolean SS_Active (void)
@@ -454,7 +450,7 @@ void R_SSAO_CaptureWorld (void)
 	SS_Upload ();
 
 	SS_BindTex (0, ss_world_tex);
-	glBindImageTexture_fp (0, ss_pyramid, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RG16F);
+	R_BindImageTexture (0, ss_pyramid, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RG16F);
 	R_UseProgram (ss_prep_prog);
 	glDispatchCompute_fp ((ss_aow + 7) / 8, (ss_aoh + 7) / 8, 1);
 	glMemoryBarrier_fp (GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
@@ -479,19 +475,18 @@ void R_SSAO_Apply (void)
 
 	/* The tile tags accumulate with atomics, so start them clear.  At most
 	 * a handful of texels: glClearTexImage is GL 4.4, this is not. */
-	glBindTexture_fp (GL_TEXTURE_2D, ss_mismatch);
+	R_BindTextureForEdit (GL_TEXTURE_2D, ss_mismatch);
 	glTexSubImage2D_fp (GL_TEXTURE_2D, 0, 0, 0, ss_mismatch_w, ss_mismatch_h,
 			    GL_RED_INTEGER, GL_UNSIGNED_INT, zeros);
-	glBindTexture_fp (GL_TEXTURE_2D, 0);
-	currenttexture = GL_UNUSED_TEXTURE;
+	R_BindTextureForEdit (GL_TEXTURE_2D, 0);
 	glMemoryBarrier_fp (GL_TEXTURE_UPDATE_BARRIER_BIT);
 
 	/* mip: scene depth in, the whole pyramid and the tile tags out */
 	SS_BindTex (0, ss_scene_tex);
 	for (level = 0; level < SSAO_PYRAMID_LEVELS; level++)
-		glBindImageTexture_fp (level, ss_pyramid, q_min (level, ss_levels - 1), GL_FALSE, 0,
-				       level == 0 ? GL_READ_WRITE : GL_WRITE_ONLY, GL_RG16F);
-	glBindImageTexture_fp (5, ss_mismatch, 0, GL_FALSE, 0, GL_READ_WRITE, GL_R32UI);
+		R_BindImageTexture (level, ss_pyramid, q_min (level, ss_levels - 1), GL_FALSE, 0,
+				    level == 0 ? GL_READ_WRITE : GL_WRITE_ONLY, GL_RG16F);
+	R_BindImageTexture (5, ss_mismatch, 0, GL_FALSE, 0, GL_READ_WRITE, GL_R32UI);
 	R_UseProgram (ss_mip_prog);
 	glDispatchCompute_fp ((ss_aow + 15) / 16, (ss_aoh + 15) / 16, 1);
 	glMemoryBarrier_fp (GL_TEXTURE_FETCH_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
@@ -501,8 +496,8 @@ void R_SSAO_Apply (void)
 	SS_BindTex (0, ss_pyramid);
 	SS_BindTex (1, ss_hilbert);
 	SS_BindTex (2, ss_mismatch);
-	glBindImageTexture_fp (0, ss_ao, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R8);
-	glBindImageTexture_fp (1, ss_edges, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R8);
+	R_BindImageTexture (0, ss_ao, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R8);
+	R_BindImageTexture (1, ss_edges, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R8);
 	R_UseProgram (ss_eval_prog[quality - 1]);
 	glDispatchCompute_fp ((ss_aow + 7) / 8, (ss_aoh + 7) / 8, 1);
 	glMemoryBarrier_fp (GL_TEXTURE_FETCH_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
@@ -515,14 +510,14 @@ void R_SSAO_Apply (void)
 	ss_params.settings[2] = 0.0f;
 	SS_Upload ();
 	SS_BindTex (0, ss_ao);
-	glBindImageTexture_fp (0, ss_filtered, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R8);
+	R_BindImageTexture (0, ss_filtered, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R8);
 	glDispatchCompute_fp ((ss_aow + 15) / 16, (ss_aoh + 7) / 8, 1);
 	glMemoryBarrier_fp (GL_TEXTURE_FETCH_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
 	SS_UnbindImages (1);
 	ss_params.settings[2] = 1.0f;
 	SS_Upload ();
 	SS_BindTex (0, ss_filtered);
-	glBindImageTexture_fp (0, ss_ao, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R8);
+	R_BindImageTexture (0, ss_ao, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R8);
 	glDispatchCompute_fp ((ss_aow + 15) / 16, (ss_aoh + 7) / 8, 1);
 	glMemoryBarrier_fp (GL_TEXTURE_FETCH_BARRIER_BIT);
 	SS_UnbindImages (1);
@@ -531,11 +526,10 @@ void R_SSAO_Apply (void)
 	ss_params.settings[2] = r_fog_density;
 	ss_params.settings[3] = (float) CLAMP (0, r_ssao_debug.integer, 2);
 	SS_Upload ();
-	SS_BindTex (0, ss_world_tex);
-	SS_BindTex (1, ss_scene_tex);
-	SS_BindTex (2, ss_ao);
-	SS_BindTex (3, ss_pyramid);
-	glActiveTexture_fp (GL_TEXTURE0);
+	{
+		const GLuint	composite[4] = { ss_world_tex, ss_scene_tex, ss_ao, ss_pyramid };
+		R_BindTextures (SSAO_TEX_UNIT, 4, composite);
+	}
 
 	cull = R_GetCull ();
 	blend = R_GetBlend ();

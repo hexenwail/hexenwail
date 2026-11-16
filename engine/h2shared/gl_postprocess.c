@@ -73,18 +73,19 @@
  * so it must be stated.  int is declared mediump there, which is as little as
  * 16 bits -- not enough for bayer16's 32-bit shifts below -- hence highp int.
  * sampler3D likewise has no default (only sampler2D and samplerCube do), and
- * softemu's palette LUT is a sampler3D, so it wants a stated precision too. */
+ * softemu's palette LUT is a sampler3D, so it wants a stated precision too.
+ * Those lines are engine/shaders/glonly/tier_es_pp.glsl (TIER_ES_PP in
+ * shaders_gen.h); the desktop header is tier_core.glsl, as in gl_shader.c. */
 #ifdef USE_GLES
-#define PP_ES_PRECISION	"precision highp float;\nprecision highp int;\nprecision highp sampler3D;\n"
-#define PP_VERT_HEADER	"#version 300 es\n" PP_ES_PRECISION
-#define PP_FRAG_HEADER	"#version 300 es\n" PP_ES_PRECISION
+#define PP_VERT_HEADER	TIER_ES_PP
+#define PP_FRAG_HEADER	TIER_ES_PP
 /* bitfieldReverse (GLSL 4.00 / ES 3.10) used to be spliced in here for the
  * ES tier as PP_BITFIELD_REVERSE.  Since #450 the polyfill lives in
  * engine/shaders/spp_frag.glsl under #ifdef GL_ES, which the ES compiler
  * predefines, so the tier choice no longer needs C. */
 #else
-#define PP_VERT_HEADER	"#version 430 core\n"
-#define PP_FRAG_HEADER	"#version 430 core\n"
+#define PP_VERT_HEADER	TIER_CORE
+#define PP_FRAG_HEADER	TIER_CORE
 #endif
 
 /* FBO state — scaled 3D scene */
@@ -515,10 +516,10 @@ static void PP_FormatChanged (cvar_t *var)
 
 static void PP_DeleteFBO (void)
 {
-	if (pp_color_tex)   { glDeleteTextures_fp(1, &pp_color_tex); pp_color_tex = 0; }
+	if (pp_color_tex)   { R_DeleteTextures (1, &pp_color_tex); pp_color_tex = 0; }
 	if (pp_color_rb)    { glDeleteRenderbuffers_fp(1, &pp_color_rb); pp_color_rb = 0; }
 	if (pp_depth_rb)    { glDeleteRenderbuffers_fp(1, &pp_depth_rb); pp_depth_rb = 0; }
-	if (pp_depth_tex)   { glDeleteTextures_fp(1, &pp_depth_tex); pp_depth_tex = 0; }
+	if (pp_depth_tex)   { R_DeleteTextures (1, &pp_depth_tex); pp_depth_tex = 0; }
 	if (pp_resolve_fbo) { glDeleteFramebuffers_fp(1, &pp_resolve_fbo); pp_resolve_fbo = 0; }
 	if (pp_fbo)         { glDeleteFramebuffers_fp(1, &pp_fbo); pp_fbo = 0; }
 	PP_DeleteBloomFBOs();
@@ -527,7 +528,7 @@ static void PP_DeleteFBO (void)
 
 static void PP_DeleteNativeFBO (void)
 {
-	if (pp_native_color_tex) { glDeleteTextures_fp(1, &pp_native_color_tex); pp_native_color_tex = 0; }
+	if (pp_native_color_tex) { R_DeleteTextures (1, &pp_native_color_tex); pp_native_color_tex = 0; }
 	if (pp_native_depth_rb)  { glDeleteRenderbuffers_fp(1, &pp_native_depth_rb); pp_native_depth_rb = 0; }
 	if (pp_native_fbo)       { glDeleteFramebuffers_fp(1, &pp_native_fbo); pp_native_fbo = 0; }
 	pp_native_w = pp_native_h = 0;
@@ -538,7 +539,7 @@ static void PP_DeleteBloomFBOs (void)
 {
 	int i;
 	for (i = 0; i < BLOOM_LEVELS; i++) {
-		if (bloom_tex[i]) { glDeleteTextures_fp(1, &bloom_tex[i]); bloom_tex[i] = 0; }
+		if (bloom_tex[i]) { R_DeleteTextures (1, &bloom_tex[i]); bloom_tex[i] = 0; }
 		if (bloom_fbo[i]) { glDeleteFramebuffers_fp(1, &bloom_fbo[i]); bloom_fbo[i] = 0; }
 		bloom_w[i] = bloom_h[i] = 0;
 	}
@@ -561,14 +562,14 @@ static qboolean PP_CreateNativeFBO (int width, int height)
 	GLenum native_fmt = PP_HDRActive() ? GL_RGBA16F : GL_RGBA8;
 	GLenum native_type = PP_HDRActive() ? GL_FLOAT : GL_UNSIGNED_BYTE;
 	glGenTextures_fp(1, &pp_native_color_tex);
-	glBindTexture_fp(GL_TEXTURE_2D, pp_native_color_tex);
+	R_BindTextureForEdit (GL_TEXTURE_2D, pp_native_color_tex);
 	glTexImage2D_fp(GL_TEXTURE_2D, 0, native_fmt, width, height, 0,
 			GL_RGBA, native_type, NULL);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glBindTexture_fp(GL_TEXTURE_2D, 0);
+	R_BindTextureForEdit (GL_TEXTURE_2D, 0);
 
 	glGenRenderbuffers_fp(1, &pp_native_depth_rb);
 	glBindRenderbuffer_fp(GL_RENDERBUFFER, pp_native_depth_rb);
@@ -627,14 +628,14 @@ static qboolean PP_CreateBloomFBOs (int width, int height)
 
 		/* Bloom texture */
 		glGenTextures_fp(1, &bloom_tex[i]);
-		glBindTexture_fp(GL_TEXTURE_2D, bloom_tex[i]);
+		R_BindTextureForEdit (GL_TEXTURE_2D, bloom_tex[i]);
 		glTexImage2D_fp(GL_TEXTURE_2D, 0, color_fmt, bloom_w[i], bloom_h[i], 0,
 				GL_RGBA, color_type, NULL);
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-		glBindTexture_fp(GL_TEXTURE_2D, 0);
+		R_BindTextureForEdit (GL_TEXTURE_2D, 0);
 
 		/* Bloom FBO */
 		glGenFramebuffers_fp(1, &bloom_fbo[i]);
@@ -685,14 +686,14 @@ static qboolean PP_CreateFBO (int width, int height)
 		GLenum color_fmt = PP_HDRActive() ? GL_RGBA16F : GL_RGBA8;
 		GLenum color_type = PP_HDRActive() ? GL_FLOAT : GL_UNSIGNED_BYTE;
 	glGenTextures_fp(1, &pp_color_tex);
-	glBindTexture_fp(GL_TEXTURE_2D, pp_color_tex);
+	R_BindTextureForEdit (GL_TEXTURE_2D, pp_color_tex);
 	glTexImage2D_fp(GL_TEXTURE_2D, 0, color_fmt, width, height, 0,
 			GL_RGBA, color_type, NULL);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glBindTexture_fp(GL_TEXTURE_2D, 0);
+	R_BindTextureForEdit (GL_TEXTURE_2D, 0);
 
 	if (samples > 1 && glRenderbufferStorageMultisample_fp && glBlitFramebuffer_fp)
 	{
@@ -760,7 +761,7 @@ static qboolean PP_CreateFBO (int width, int height)
 	/* non-MSAA path — depth/stencil as a sampler-readable texture so the
 	 * Hi-Z compute pass (uhexen2-xd87) can read it. */
 	glGenTextures_fp(1, &pp_depth_tex);
-	glBindTexture_fp(GL_TEXTURE_2D, pp_depth_tex);
+	R_BindTextureForEdit (GL_TEXTURE_2D, pp_depth_tex);
 	glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_DEPTH24_STENCIL8, width, height, 0,
 			GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8, NULL);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -769,7 +770,7 @@ static qboolean PP_CreateFBO (int width, int height)
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	/* GL_TEXTURE_COMPARE_MODE defaults to NONE so sampler2D returns the
 	 * raw depth value rather than a comparison result. */
-	glBindTexture_fp(GL_TEXTURE_2D, 0);
+	R_BindTextureForEdit (GL_TEXTURE_2D, 0);
 
 	glGenFramebuffers_fp(1, &pp_fbo);
 	glBindFramebuffer_fp(GL_FRAMEBUFFER, pp_fbo);
@@ -1052,16 +1053,15 @@ extern unsigned int d_8to24table[256];
 #define PP_GRID_TO_8BIT(i)	(((i) * 255) / (PP_LUT_DIM - 1))
 
 /* Creates the empty 3D texture both LUT routes fill: CPU builders through
- * PP_UploadLUT, the compute builder by imageStore.  Binds on unit 1, where the
- * post-process shader expects the LUT, and leaves GL_TEXTURE0 active with
- * nothing newly bound. */
+ * PP_UploadLUT, the compute builder by imageStore.  An edit bind, so on unit
+ * 0's 3D target, and unbound again; the post-process pass binds it on unit 1
+ * when it samples it. */
 static GLuint PP_CreateLUTTexture (int dim)
 {
 	GLuint tex = 0;
 
 	glGenTextures_fp(1, &tex);
-	glActiveTexture_fp(GL_TEXTURE0 + 1);
-	glBindTexture_fp(GL_TEXTURE_3D, tex);
+	R_BindTextureForEdit (GL_TEXTURE_3D, tex);
 	glTexImage3D_fp(GL_TEXTURE_3D, 0, GL_RGBA8,
 			dim, dim, dim, 0,
 			GL_RGBA, GL_UNSIGNED_BYTE, NULL);
@@ -1070,8 +1070,7 @@ static GLuint PP_CreateLUTTexture (int dim)
 	glTexParameterf_fp(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameterf_fp(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	glTexParameterf_fp(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-	glBindTexture_fp(GL_TEXTURE_3D, 0);
-	glActiveTexture_fp(GL_TEXTURE0);
+	R_BindTextureForEdit (GL_TEXTURE_3D, 0);
 
 	return tex;
 }
@@ -1117,13 +1116,11 @@ static qboolean PP_UploadLUT (GLuint *tex, const unsigned char *lut, int dim)
 		rgba[i * 4 + 3] = 255;
 	}
 
-	glActiveTexture_fp(GL_TEXTURE0 + 1);
-	glBindTexture_fp(GL_TEXTURE_3D, *tex);
+	R_BindTextureForEdit (GL_TEXTURE_3D, *tex);
 	glTexImage3D_fp(GL_TEXTURE_3D, 0, GL_RGBA8,
 			dim, dim, dim, 0,
 			GL_RGBA, GL_UNSIGNED_BYTE, rgba);
-	glBindTexture_fp(GL_TEXTURE_3D, 0);
-	glActiveTexture_fp(GL_TEXTURE0);
+	R_BindTextureForEdit (GL_TEXTURE_3D, 0);
 
 	return true;
 }
@@ -1641,15 +1638,14 @@ static GLuint PP_CreatePaletteTexture (void)
 	}
 
 	glGenTextures_fp(1, &tex);
-	glActiveTexture_fp(GL_TEXTURE0);
-	glBindTexture_fp(GL_TEXTURE_2D, tex);
+	R_BindTextureForEdit (GL_TEXTURE_2D, tex);
 	glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_RGBA8, 256, 1, 0,
 			GL_RGBA, GL_UNSIGNED_BYTE, rgba);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glBindTexture_fp(GL_TEXTURE_2D, 0);
+	R_BindTextureForEdit (GL_TEXTURE_2D, 0);
 
 	return tex;
 }
@@ -1667,7 +1663,7 @@ static qboolean PP_BuildPaletteLUT_GPU (softemu_metric_t metric)
 
 	if (!pp_palette_init_prog[metric])
 	{
-		q_snprintf(header, sizeof(header), "#version 430 core\n#define MODE %d\n#define LUT_DIM %d\n",
+		q_snprintf(header, sizeof(header), TIER_CORE "#define MODE %d\n#define LUT_DIM %d\n",
 			   (int)metric, PP_LUT_DIM);
 		pp_palette_init_prog[metric] =
 			GL_LoadComputeProgram(header, softemu_lut_comp, "palette init");
@@ -1695,17 +1691,16 @@ static qboolean PP_BuildPaletteLUT_GPU (softemu_metric_t metric)
 	}
 
 	R_UseProgram (pp_palette_init_prog[metric]);
-	glActiveTexture_fp(GL_TEXTURE0);
-	glBindTexture_fp(GL_TEXTURE_2D, pp_palette_tex);
+	R_BindTextureSlot (0, pp_palette_tex);
 	/* u_palette is pinned to unit 0 in the shader (TEXBIND(0)); LUT_DIM is
 	 * compiled in.  Nothing to upload. */
 
-	glBindImageTexture_fp(0, pp_palette_lut, 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_RGBA8);
+	R_BindImageTexture (0, pp_palette_lut, 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_RGBA8);
 	glDispatchCompute_fp(PP_LUT_DIM / 8, PP_LUT_DIM / 8, PP_LUT_DIM / 4);
 	glMemoryBarrier_fp(GL_TEXTURE_FETCH_BARRIER_BIT);
 
-	glBindImageTexture_fp(0, 0, 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_RGBA8);
-	glBindTexture_fp(GL_TEXTURE_2D, 0);
+	R_BindImageTexture (0, 0, 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_RGBA8);
+	R_BindTextureSlot (0, 0);
 	R_UseProgram (0);
 
 	pp_lut_gpu_built = true;
@@ -1726,7 +1721,7 @@ static void PP_FreePaletteGPU (void)
 	}
 	if (pp_palette_tex)
 	{
-		glDeleteTextures_fp(1, &pp_palette_tex);
+		R_DeleteTextures (1, &pp_palette_tex);
 		pp_palette_tex = 0;
 	}
 	pp_lut_gpu_failed = false;
@@ -1817,11 +1812,11 @@ static void PP_BuildPaletteLUT (void)
 
 static void OIT_DeleteFBO (void)
 {
-	if (oit_accum_tex) { glDeleteTextures_fp(1, &oit_accum_tex); oit_accum_tex = 0; }
-	if (oit_revealage_tex) { glDeleteTextures_fp(1, &oit_revealage_tex); oit_revealage_tex = 0; }
+	if (oit_accum_tex) { R_DeleteTextures (1, &oit_accum_tex); oit_accum_tex = 0; }
+	if (oit_revealage_tex) { R_DeleteTextures (1, &oit_revealage_tex); oit_revealage_tex = 0; }
 	if (oit_fbo) { glDeleteFramebuffers_fp(1, &oit_fbo); oit_fbo = 0; }
-	if (mboit_b0_tex) { glDeleteTextures_fp(1, &mboit_b0_tex); mboit_b0_tex = 0; }
-	if (mboit_mom_tex) { glDeleteTextures_fp(1, &mboit_mom_tex); mboit_mom_tex = 0; }
+	if (mboit_b0_tex) { R_DeleteTextures (1, &mboit_b0_tex); mboit_b0_tex = 0; }
+	if (mboit_mom_tex) { R_DeleteTextures (1, &mboit_mom_tex); mboit_mom_tex = 0; }
 	if (mboit_fbo) { glDeleteFramebuffers_fp(1, &mboit_fbo); mboit_fbo = 0; }
 	mboit_available = false;
 	oit_samples = 0;
@@ -1855,7 +1850,7 @@ static qboolean OIT_CreateFBO (int width, int height, GLuint depth_stencil_rb, G
 	/* Accumulation texture (RGBA16F). When MSAA is active these must be
 	 * multisampled to share the scene's multisampled depth/stencil. */
 	glGenTextures_fp(1, &oit_accum_tex);
-	glBindTexture_fp(textarget, oit_accum_tex);
+	R_BindTextureForEdit (textarget, oit_accum_tex);
 	if (oit_samples > 1)
 		glTexImage2DMultisample_fp(GL_TEXTURE_2D_MULTISAMPLE, oit_samples,
 					   GL_RGBA16F, width, height, GL_TRUE);
@@ -1868,7 +1863,7 @@ static qboolean OIT_CreateFBO (int width, int height, GLuint depth_stencil_rb, G
 	}
 
 	glGenTextures_fp(1, &oit_revealage_tex);
-	glBindTexture_fp(textarget, oit_revealage_tex);
+	R_BindTextureForEdit (textarget, oit_revealage_tex);
 	if (oit_samples > 1)
 		glTexImage2DMultisample_fp(GL_TEXTURE_2D_MULTISAMPLE, oit_samples,
 					   GL_RGBA16F, width, height, GL_TRUE);
@@ -1925,7 +1920,7 @@ static qboolean OIT_CreateFBO (int width, int height, GLuint depth_stencil_rb, G
 		for (k = 0; k < 2; k++)
 		{
 			glGenTextures_fp(1, texs[k]);
-			glBindTexture_fp(textarget, *texs[k]);
+			R_BindTextureForEdit (textarget, *texs[k]);
 			if (oit_samples > 1)
 				glTexImage2DMultisample_fp(GL_TEXTURE_2D_MULTISAMPLE, oit_samples,
 							   fmts[k], width, height, GL_TRUE);
@@ -1950,7 +1945,7 @@ static qboolean OIT_CreateFBO (int width, int height, GLuint depth_stencil_rb, G
 		glDrawBuffers_fp(2, drawbufs);
 		status = glCheckFramebufferStatus_fp(GL_FRAMEBUFFER);
 		glBindFramebuffer_fp(GL_FRAMEBUFFER, 0);
-		glBindTexture_fp(textarget, 0);
+		R_BindTextureForEdit (textarget, 0);
 		mboit_available = (status == GL_FRAMEBUFFER_COMPLETE);
 		if (!mboit_available)
 			Con_SafePrintf("OIT: MBOIT moment targets incomplete (status 0x%x); r_oit 2 falls back to 1\n", status);
@@ -2095,11 +2090,8 @@ qboolean OIT_NextPass (void)
 	R_SetBlendFuncIndexed (0, GL_ONE, GL_ONE);
 	R_SetDepthMask (false);
 
-	glActiveTexture_fp(GL_TEXTURE0 + ((oit_samples > 1) ? MBOIT_TMU_B0_MS : MBOIT_TMU_B0));
-	glBindTexture_fp(textarget, mboit_b0_tex);
-	glActiveTexture_fp(GL_TEXTURE0 + ((oit_samples > 1) ? MBOIT_TMU_MOM_MS : MBOIT_TMU_MOM));
-	glBindTexture_fp(textarget, mboit_mom_tex);
-	glActiveTexture_fp(GL_TEXTURE0);
+	R_BindTextureTarget ((oit_samples > 1) ? MBOIT_TMU_B0_MS : MBOIT_TMU_B0, textarget, mboit_b0_tex);
+	R_BindTextureTarget ((oit_samples > 1) ? MBOIT_TMU_MOM_MS : MBOIT_TMU_MOM, textarget, mboit_mom_tex);
 
 	R_SetOITMode (2, oit_samples > 1);
 	return true;
@@ -2142,11 +2134,8 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 
 		glBindFramebuffer_fp(GL_FRAMEBUFFER, oit_fbo);
 		glDrawBuffers_fp(2, two);
-		glActiveTexture_fp(GL_TEXTURE0 + ((oit_samples > 1) ? MBOIT_TMU_B0_MS : MBOIT_TMU_B0));
-		glBindTexture_fp(mt, 0);
-		glActiveTexture_fp(GL_TEXTURE0 + ((oit_samples > 1) ? MBOIT_TMU_MOM_MS : MBOIT_TMU_MOM));
-		glBindTexture_fp(mt, 0);
-		glActiveTexture_fp(GL_TEXTURE0);
+		R_BindTextureTarget ((oit_samples > 1) ? MBOIT_TMU_B0_MS : MBOIT_TMU_B0, mt, 0);
+		R_BindTextureTarget ((oit_samples > 1) ? MBOIT_TMU_MOM_MS : MBOIT_TMU_MOM, mt, 0);
 		R_SetOITMode (0, false);
 		mboit_pass = 0;
 	}
@@ -2163,10 +2152,8 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 	R_SetDepthMask (false);
 	R_SetDepthTest (false);
 
-	glActiveTexture_fp(GL_TEXTURE0);
-	glBindTexture_fp(textarget, oit_accum_tex);
-	glActiveTexture_fp(GL_TEXTURE1);
-	glBindTexture_fp(textarget, mboit ? mboit_b0_tex : oit_revealage_tex);
+	R_BindTextureTarget (0, textarget, oit_accum_tex);
+	R_BindTextureTarget (1, textarget, mboit ? mboit_b0_tex : oit_revealage_tex);
 
 	if (loc_accum >= 0) glUniform1i_fp(loc_accum, 0);
 	if (loc_reveal >= 0) glUniform1i_fp(loc_reveal, 1);
@@ -2228,9 +2215,7 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 	glViewport_fp(saved_viewport[0], saved_viewport[1],
 		      saved_viewport[2], saved_viewport[3]);
 
-	glActiveTexture_fp(GL_TEXTURE1);
-	glBindTexture_fp(textarget, 0);
-	glActiveTexture_fp(GL_TEXTURE0);
+	R_BindTextureTarget (1, textarget, 0);
 	R_UseProgram (0);
 	R_SetDepthTest (true);
 	R_SetDepthMask (true);
@@ -2269,7 +2254,7 @@ GLuint GL_PostProcess_GetSceneDepthTex (void)
 
 static void PP_DeleteSoftDepth (void)
 {
-	if (soft_depth_tex) { glDeleteTextures_fp(1, &soft_depth_tex); soft_depth_tex = 0; }
+	if (soft_depth_tex) { R_DeleteTextures (1, &soft_depth_tex); soft_depth_tex = 0; }
 	if (soft_depth_fbo) { glDeleteFramebuffers_fp(1, &soft_depth_fbo); soft_depth_fbo = 0; }
 	soft_depth_w = soft_depth_h = 0;
 	soft_depth_fmt = 0;
@@ -2309,7 +2294,7 @@ void GL_SoftDepth_Capture (void)
 	PP_DeleteSoftDepth();
 
 	glGenTextures_fp(1, &soft_depth_tex);
-	glBindTexture_fp(GL_TEXTURE_2D, soft_depth_tex);
+	R_BindTextureForEdit (GL_TEXTURE_2D, soft_depth_tex);
 	glTexImage2D_fp(GL_TEXTURE_2D, 0, fmt, w, h, 0,
 			(fmt == GL_DEPTH24_STENCIL8) ? GL_DEPTH_STENCIL : GL_DEPTH_COMPONENT,
 			(fmt == GL_DEPTH24_STENCIL8) ? GL_UNSIGNED_INT_24_8 : GL_UNSIGNED_INT,
@@ -2318,7 +2303,7 @@ void GL_SoftDepth_Capture (void)
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glBindTexture_fp(GL_TEXTURE_2D, 0);
+	R_BindTextureForEdit (GL_TEXTURE_2D, 0);
 
 	glGetIntegerv_fp(GL_DRAW_FRAMEBUFFER_BINDING, &prev_draw);
 	glGenFramebuffers_fp(1, &soft_depth_fbo);
@@ -2514,12 +2499,12 @@ void GL_PostProcess_Shutdown (void)
 	}
 	if (pp_palette_lut)
 	{
-		glDeleteTextures_fp(1, &pp_palette_lut);
+		R_DeleteTextures (1, &pp_palette_lut);
 		pp_palette_lut = 0;
 	}
 	if (pp_colormap_lut)
 	{
-		glDeleteTextures_fp(1, &pp_colormap_lut);
+		R_DeleteTextures (1, &pp_colormap_lut);
 		pp_colormap_lut = 0;
 	}
 	PP_FreePaletteGPU();
@@ -2530,7 +2515,7 @@ void GL_PostProcess_Shutdown (void)
 	pp_native_active = false;
 	pp_prev_yaw = pp_prev_pitch = 0.0f;
 	pp_fbo_failed = false;
-	if (pp_copyback_tex) { glDeleteTextures_fp(1, &pp_copyback_tex); pp_copyback_tex = 0; }
+	if (pp_copyback_tex) { R_DeleteTextures (1, &pp_copyback_tex); pp_copyback_tex = 0; }
 	pp_copyback_w = pp_copyback_h = 0;
 }
 
@@ -2568,15 +2553,7 @@ static void PP_ApplySampleShading (void)
 	else if (frac > 1.0f)
 		frac = 1.0f;
 
-	if (frac > 0.0f)
-	{
-		glEnable_fp (GL_SAMPLE_SHADING);
-		glMinSampleShading_fp (frac);
-	}
-	else
-	{
-		glDisable_fp (GL_SAMPLE_SHADING);
-	}
+	GL_SetSampleShading (frac);
 
 	/* Reported on change only -- per frame it would be a wall of text, and
 	 * never reported at all leaves no way to tell "the cvar did nothing"
@@ -2595,7 +2572,7 @@ static void PP_EndSampleShading (void)
 {
 #ifndef USE_GLES
 	if (gl_renderer_caps.sample_shading)
-		glDisable_fp (GL_SAMPLE_SHADING);
+		GL_SetSampleShading (0.0f);
 #endif
 }
 
@@ -2673,7 +2650,7 @@ static void PP_BlitWith3DEffects (GLuint src_tex, int w, int h, float warp, floa
 	GL_PushMatrix();
 	GL_LoadIdentity();
 
-	glBindTexture_fp(GL_TEXTURE_2D, src_tex);
+	R_BindTextureSlot (0, src_tex);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -2777,9 +2754,9 @@ void GL_PostProcess_End3D (void)
 			if (!pp_copyback_tex || w != pp_copyback_w || h != pp_copyback_h)
 			{
 				if (pp_copyback_tex)
-					glDeleteTextures_fp(1, &pp_copyback_tex);
+					R_DeleteTextures (1, &pp_copyback_tex);
 				glGenTextures_fp(1, &pp_copyback_tex);
-				glBindTexture_fp(GL_TEXTURE_2D, pp_copyback_tex);
+				R_BindTextureForEdit (GL_TEXTURE_2D, pp_copyback_tex);
 				glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_RGB10_A2, w, h, 0,
 						GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 				glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -2789,7 +2766,7 @@ void GL_PostProcess_End3D (void)
 				pp_copyback_w = w;
 				pp_copyback_h = h;
 			}
-			glBindTexture_fp(GL_TEXTURE_2D, pp_copyback_tex);
+			R_BindTextureForEdit (GL_TEXTURE_2D, pp_copyback_tex);
 			glCopyTexSubImage2D_fp(GL_TEXTURE_2D, 0, 0, 0, 0, 0, w, h);
 
 			/* Apply warp+blur, writing the processed 3D back into the default framebuffer */
@@ -2897,9 +2874,9 @@ void GL_PostProcess_EndFrame (void)
 		if (!pp_copyback_tex || w != pp_copyback_w || h != pp_copyback_h)
 		{
 			if (pp_copyback_tex)
-				glDeleteTextures_fp(1, &pp_copyback_tex);
+				R_DeleteTextures (1, &pp_copyback_tex);
 			glGenTextures_fp(1, &pp_copyback_tex);
-			glBindTexture_fp(GL_TEXTURE_2D, pp_copyback_tex);
+			R_BindTextureForEdit (GL_TEXTURE_2D, pp_copyback_tex);
 			glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0,
 					GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 			glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -2909,7 +2886,7 @@ void GL_PostProcess_EndFrame (void)
 			pp_copyback_w = w;
 			pp_copyback_h = h;
 		}
-		glBindTexture_fp(GL_TEXTURE_2D, pp_copyback_tex);
+		R_BindTextureForEdit (GL_TEXTURE_2D, pp_copyback_tex);
 		glCopyTexSubImage2D_fp(GL_TEXTURE_2D, 0, 0, 0, 0, 0, w, h);
 		blit_tex = pp_copyback_tex;
 		blit_w = w;
@@ -2964,8 +2941,7 @@ void GL_PostProcess_EndFrame (void)
 		glViewport_fp(0, 0, bloom_w[0], bloom_h[0]);
 		glBindFramebuffer_fp(GL_FRAMEBUFFER, bloom_fbo[0]);
 		R_UseProgram (bloom_bright_prog);
-		glActiveTexture_fp(GL_TEXTURE0);
-		glBindTexture_fp(GL_TEXTURE_2D, bloom_src);
+		R_BindTextureSlot (0, bloom_src);
 		if (bloom_bright_loc_scene >= 0) glUniform1i_fp(bloom_bright_loc_scene, 0);
 		PP_PushBloomParams(1.0f / bloom_src_w, 1.0f / bloom_src_h, r_bloom_threshold.value);
 		glDrawArrays_fp(GL_TRIANGLES, 0, 3);
@@ -2976,8 +2952,7 @@ void GL_PostProcess_EndFrame (void)
 			glViewport_fp(0, 0, bloom_w[i], bloom_h[i]);
 			glBindFramebuffer_fp(GL_FRAMEBUFFER, bloom_fbo[i]);
 			R_UseProgram (bloom_down_prog);
-			glActiveTexture_fp(GL_TEXTURE0);
-			glBindTexture_fp(GL_TEXTURE_2D, bloom_tex[i-1]);
+			R_BindTextureSlot (0, bloom_tex[i-1]);
 			if (bloom_down_loc_scene >= 0) glUniform1i_fp(bloom_down_loc_scene, 0);
 			PP_PushBloomParams(1.0f / bloom_w[i-1], 1.0f / bloom_h[i-1], 0.0f);
 			glDrawArrays_fp(GL_TRIANGLES, 0, 3);
@@ -2996,8 +2971,7 @@ void GL_PostProcess_EndFrame (void)
 			glViewport_fp(0, 0, bloom_w[i], bloom_h[i]);
 			glBindFramebuffer_fp(GL_FRAMEBUFFER, bloom_fbo[i]);
 			R_UseProgram (bloom_up_prog);
-			glActiveTexture_fp(GL_TEXTURE0);
-			glBindTexture_fp(GL_TEXTURE_2D, bloom_tex[i + 1]);
+			R_BindTextureSlot (0, bloom_tex[i + 1]);
 			if (bloom_up_loc_scene >= 0) glUniform1i_fp(bloom_up_loc_scene, 0);
 			PP_PushBloomParams(1.0f / bloom_w[i+1], 1.0f / bloom_h[i+1], 0.0f);
 			glDrawArrays_fp(GL_TRIANGLES, 0, 3);
@@ -3035,7 +3009,7 @@ apply_shader:
 	GL_LoadIdentity();
 
 	/* bind composited scene texture */
-	glBindTexture_fp(GL_TEXTURE_2D, blit_tex);
+	R_BindTextureSlot (0, blit_tex);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -3050,9 +3024,7 @@ apply_shader:
 		qboolean cmap = ((int)r_softemu.value == 3 && pp_colormap_lut);
 		GLuint lut = cmap ? pp_colormap_lut : pp_palette_lut;
 		lutmax = (float)((cmap ? PP_CMAP_DIM : PP_LUT_DIM) - 1);
-		glActiveTexture_fp(GL_TEXTURE0 + 1);
-		glBindTexture_fp(GL_TEXTURE_3D, lut);
-		glActiveTexture_fp(GL_TEXTURE0);
+		R_BindTextureTarget (1, GL_TEXTURE_3D, lut);
 	}
 
 	/* activate shader and set all uniforms before drawing */
@@ -3138,10 +3110,8 @@ apply_shader:
 	/* bloom composite texture */
 	if (pp_loc_bloom_tex >= 0)
 	{
-		glActiveTexture_fp(GL_TEXTURE0 + 2);
-		glBindTexture_fp(GL_TEXTURE_2D, (r_bloom.integer && bloom_tex[0]) ? bloom_tex[0] : 0);
+		R_BindTextureSlot (2, (r_bloom.integer && bloom_tex[0]) ? bloom_tex[0] : 0);
 		glUniform1i_fp(pp_loc_bloom_tex, 2);
-		glActiveTexture_fp(GL_TEXTURE0);
 	}
 	pp_params.p3[2] = r_bloom.integer ? r_bloom_intensity.value : 0.0f;	/* u_bloom_strength */
 	PP_PushParams();
@@ -3160,9 +3130,7 @@ apply_shader:
 	/* unbind palette LUT from unit 1 to avoid interfering with lightmap binds */
 	if ((int)r_softemu.value > 0 && pp_lut_built)
 	{
-		glActiveTexture_fp(GL_TEXTURE0 + 1);
-		glBindTexture_fp(GL_TEXTURE_3D, 0);
-		glActiveTexture_fp(GL_TEXTURE0);
+		R_BindTextureTarget (1, GL_TEXTURE_3D, 0);
 	}
 
 	/* restore matrices */

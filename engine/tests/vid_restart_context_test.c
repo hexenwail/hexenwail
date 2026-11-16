@@ -266,7 +266,7 @@ int main (void)
 		body = FunctionBody(source, "void TexMgr_ContextLost (void)", "TexMgr_ContextLost");
 		if (body && (clean = StripComments(body)) != NULL)
 		{
-			RequireAbsent(clean, "glDeleteTextures", "TexMgr_ContextLost");
+			RequireAbsent(clean, "DeleteTextures", "TexMgr_ContextLost");	/* gl or R_ */
 			RequireContains(clean, "managed_textures", "TexMgr_ContextLost");
 			RequireContains(clean, "num_managed_textures = 0", "TexMgr_ContextLost");
 			RequireContains(clean, "notexture_val", "TexMgr_ContextLost");
@@ -290,7 +290,7 @@ int main (void)
 		body = FunctionBody(source, "void Sky_ContextLost (void)", "Sky_ContextLost");
 		if (body && (clean = StripComments(body)) != NULL)
 		{
-			RequireAbsent(clean, "glDeleteTextures", "Sky_ContextLost");
+			RequireAbsent(clean, "DeleteTextures", "Sky_ContextLost");	/* gl or R_ */
 			RequireAbsent(clean, "TexMgr_FreeTexture", "Sky_ContextLost");
 			RequireAbsent(clean, "Sky_CacheFlush", "Sky_ContextLost");
 			RequireContains(clean, "skybox_cache = NULL", "Sky_ContextLost");

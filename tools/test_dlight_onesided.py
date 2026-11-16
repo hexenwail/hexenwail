@@ -2,7 +2,7 @@
 """A dynamic light behind a face does not light it, on every tier (GitHub #97).
 
 Every renderer lit both sides of a face's plane, so a torch lit the far side
-of the wall it stood against.  r_dlight_occlusion 1 (the default) adds a
+of the wall it stood against.  r_dlight_occlusion 1 (2, the desktop default, too) adds a
 one-sided test with a tolerance of DLIGHT_PLANE_EPSILON (2 units, client.h):
 
   * the CPU twins, gl_rsurf.c / r_surf.c R_AddDynamicLights, which decide
@@ -15,7 +15,8 @@ The CPU half is tested by running it.  Lifted out of the engine source
 verbatim, compiled against stubs and run with one light and one surface: each
 R_AddDynamicLights prologue (from `rad = ...` through the impact loop), each
 R_MarkLights surface loop, R_DlightModelOrigin (client.h) with the
-AngleVectors it calls, and the dlight loop of each of the three brush-entity
+AngleVectors it calls, r_dlightmark.c whole (the space R_AddDynamicLights
+measures in, #496), and the dlight loop of each of the three brush-entity
 marking sites -- R_DrawBrushModel (gl_rsurf.c), R_CollectBrushInstances
 (gl_rmain.c) and the software R_DrawBEntitiesOnList (r_main.c) -- with
 R_MarkLights caught by a macro, so what a site hands it is what the mark loop
@@ -195,6 +196,9 @@ PRELUDE = r"""
 typedef float vec_t;
 typedef vec_t vec3_t[3];
 typedef int qboolean;
+#define true 1
+#define false 0
+#define Con_DPrintf(...) ((void)0)
 #define PITCH 0
 #define YAW 1
 #define ROLL 2
@@ -209,8 +213,9 @@ typedef int qboolean;
 typedef struct entity_s { vec3_t origin, angles; } entity_t;
 typedef struct { vec3_t normal; float dist; int type; } mplane_t;
 typedef struct { float vecs[2][4]; } mtexinfo_t;
-typedef struct { mplane_t *plane; int flags; mtexinfo_t *texinfo; short texturemins[2], extents[2];
-                 int dlightframe; unsigned int dlightbits[4]; const struct entity_s *dlightent; } msurface_t;
+typedef struct msurface_s { mplane_t *plane; int flags; mtexinfo_t *texinfo; short texturemins[2], extents[2];
+                 int dlightframe; unsigned int dlightbits[4]; const struct entity_s *dlightent;
+                 struct dlightmark_s *dlightmarks; } msurface_t;
 typedef struct mnode_s { int numsurfaces; } mnode_t;
 typedef struct { vec3_t origin; float radius, minlight, die; } dlight_t;
 typedef struct { int integer; } cvar_t;
@@ -250,7 +255,7 @@ static void site_%(name)s (entity_t *ent)
 HARNESS = r"""
 static int add_%(name)s (msurface_t *surf, float *out_rad, float *out_impact)
 {
-	int lnum, i; float dist, rad, minlight; vec3_t impact, lorg;
+	int lnum, i; float dist, rad, minlight; vec3_t impact, lorg; qboolean known;
 	for (lnum = 0; lnum < 1; lnum++)
 	{
 %(body)s
@@ -347,6 +352,20 @@ def world_of(ent, local):
     return tuple(origin[j] + sum(m[i][j] * local[i] for i in range(3)) for j in range(3))
 
 
+def dlightmark_c():
+    """r_dlightmark.c whole (GitHub #496): R_AddDynamicLights takes the light's
+    model-space origin from it, R_MarkLights hands it a second entity's marks.
+    One entity per surface here, so it answers with dlightent's space;
+    tools/test_dlight_shared_submodel.py runs the rest."""
+    src, hdr = read("engine/h2shared/r_dlightmark.c"), read("engine/h2shared/r_dlightmark.h")
+    if not src or not hdr:
+        errors.append("r_dlightmark.c / r_dlightmark.h missing")
+        return None
+    hdr = re.sub(r"^#(ifndef|define)\s+R_DLIGHTMARK_H.*$|^#endif\s+/\* R_DLIGHTMARK_H \*/$", "", hdr, flags=re.M)
+    src = re.sub(r"^#if defined\(WEBSOFT\)\n#include \"r_local.h\"\n#endif\n", "", src, flags=re.M)
+    return hdr + "\n" + re.sub(r"^#include .*$", "", src, flags=re.M)
+
+
 def run_c():
     eps = define("engine/hexen2/client.h", "DLIGHT_PLANE_EPSILON")
     consts = ["#define DLIGHT_PLANE_EPSILON %s" % eps]
@@ -360,7 +379,7 @@ def run_c():
         "sw_mark": mark_loop(R_LIGHT),
     }
     loops = {name: site_loop(rel, head) for name, rel, head, _ in SITES}
-    fns = [angle_vectors(), helper()]
+    fns = [angle_vectors(), helper(), dlightmark_c()]
     if any(v is None for v in list(sites.values()) + list(loops.values()) + fns):
         return None
     # the GL path builds against gl_model.h, the software one against model.h
@@ -572,10 +591,15 @@ def check_gpu():
 
 # ------------------------------------------------------------------ the cvar
 def check_cvar():
-    for rel in ("engine/hexen2/gl_rmain.c", "engine/hexen2/r_soft_web.c"):
-        if not re.search(r'^cvar_t\s+r_dlight_occlusion = \{"r_dlight_occlusion", "1", CVAR_ARCHIVE\};',
-                         read(rel), re.M):
-            errors.append('%s must define r_dlight_occlusion as "1", CVAR_ARCHIVE' % rel)
+    if not re.search(r'^cvar_t\s+r_dlight_occlusion = \{"r_dlight_occlusion", "1", CVAR_ARCHIVE\};',
+                     read("engine/hexen2/r_soft_web.c"), re.M):
+        errors.append('r_soft_web.c must define r_dlight_occlusion as "1", CVAR_ARCHIVE')
+    # Desktop GL defaults to 2 (the shadow maps, #97 P5); the ES tier, which has
+    # none, to 1, the value the software build shares with it.
+    if not re.search(r'#ifdef USE_GLES\n(?:[^#\n][^\n]*\n)*?cvar_t\s+r_dlight_occlusion = \{"r_dlight_occlusion", "1", CVAR_ARCHIVE\};\n'
+                     r'(?:[^#\n][^\n]*\n)*?#else\n(?:[^#\n][^\n]*\n)*?cvar_t\s+r_dlight_occlusion = \{"r_dlight_occlusion", "2", CVAR_ARCHIVE\};\n(?:[^#\n][^\n]*\n)*?#endif',
+                     read("engine/hexen2/gl_rmain.c")):
+        errors.append('gl_rmain.c must define r_dlight_occlusion as "1" under USE_GLES and "2" otherwise, CVAR_ARCHIVE')
     if "Cvar_RegisterVariable (&r_dlight_occlusion);" not in read("engine/hexen2/gl_rmisc.c"):
         errors.append("gl_rmisc.c must register r_dlight_occlusion")
     sw = body_of(strip_comments(read("engine/hexen2/r_soft_web.c")), r"void R_SoftWebInitCvars \(void\)\s*\{") or ""

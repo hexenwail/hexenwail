@@ -21,11 +21,13 @@
 
 #include "quakedef.h"
 #include "gl_lightcluster.h"
+#include "gl_shadow.h"
 #include "gl_ssao.h"
 #include "hashindex.h"
 #include "img_load.h"
 #include "gl_sky.h"
 #include "r_dlightvis.h"
+#include "r_dlightmark.h"
 
 /* gl_fog.c */
 void Fog_Init (void);
@@ -277,6 +279,7 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_skyalpha);
 	Cvar_RegisterVariable (&r_dynamic);
 	R_LightCluster_Init ();	/* uhexen2-a5nn.1 phase A */
+	R_Shadow_Init ();	/* GitHub #97, the cube shadow maps */
 	R_SSAO_Init ();		/* GitHub #188 */
 	Cvar_RegisterVariable (&r_lerplightstyles);
 	/* Ironwail parity toggles, uhexen2-a5nn.11 */
@@ -523,7 +526,7 @@ void R_TranslatePlayerSkin (int playernum)
 // call, not sure why for now, so I have to do this the old way until I figure it out.
 //	q_snprintf(texname, 19, "player%i", playernum);
 //	playertextures[playernum] = GL_LoadTexture(texname, (byte *)pixels, scaled_width, scaled_height, TEX_RGBA|TEX_LINEAR);
-	GL_Bind(playertextures[playernum]);
+	R_BindTextureSlot (0, playertextures[playernum]);
 	glTexImage2D_fp(GL_TEXTURE_2D, 0, gl_solid_format, scaled_width, scaled_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -607,6 +610,8 @@ void R_NewMap (void)
 	Sky_NewMap ();
 	Fog_NewMap ();
 	R_DlightVis_NewMap ();	/* GitHub #97 */
+	R_DlightMark_NewMap ();	/* GitHub #496 */
+	R_Shadow_NewMap ();	/* GitHub #97: the maps are of the old world */
 	mirrortexturenum = -1;
 	for (i = 0; i < cl.worldmodel->numtextures; i++)
 	{
@@ -655,19 +660,13 @@ void D_ClearOpenGLTextures (int last_tex)
 			Con_Printf ("[texgen]    drop %lu '%s'\n",
 				    (unsigned long)gltextures[i].texnum,
 				    gltextures[i].identifier);
-		glDeleteTextures_fp(1, &(gltextures[i].texnum));
+		R_DeleteTextures (1, &(gltextures[i].texnum));
 		key = Hash_GenerateKeyString (&hash_gltextures, gltextures[i].identifier, true);
 		Hash_Remove(&hash_gltextures, key, i);
 	}
 
 	memset(&(gltextures[last_tex]), 0, (numgltextures - last_tex) * sizeof(gltexture_t));
 	numgltextures = last_tex;
-
-	/* The deleted names may be ones the binding shadow still holds, and
-	 * GL recycles names -- so forget the shadow, or the next bind of a
-	 * recycled name folds away.  (The old test here compared a texture
-	 * NAME against a gltextures[] index, which answers nothing.) */
-	R_ResetTextureBindings ();
 
 	// Clear menu pic cache
 	memset(menu_cachepics, 0, menu_numcachepics * sizeof(cachepic_t));

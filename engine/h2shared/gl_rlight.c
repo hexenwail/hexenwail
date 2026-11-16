@@ -26,6 +26,7 @@
 #include "gl_vbo.h"
 #include "gl_lightcluster.h"
 #include "r_dlightvis.h"
+#include "r_dlightmark.h"
 
 static int	r_dlightframecount;
 
@@ -291,9 +292,12 @@ void R_MarkLights (dlight_t *light, int lnum, mnode_t *node, const entity_t *ent
 		{
 			DLIGHTBITS_CLEAR (surf->dlightbits);
 			surf->dlightframe = r_dlightframecount;
+			surf->dlightent = ent;
+			surf->dlightmarks = NULL;
 		}
+		else if (ent != surf->dlightent || surf->dlightmarks)
+			R_DlightMark_Shared (surf, lnum, ent, r_dlightframecount);
 		DLIGHTBIT_SET (surf->dlightbits, lnum);
-		surf->dlightent = ent;
 	}
 
 	R_MarkLights (light, lnum, node->children[0], ent);
@@ -373,12 +377,17 @@ loc0:
 			if (surf->dlightframe != r_dlightframecount)
 			{	// not dynamic until now
 				DLIGHTBITS_CLEAR (surf->dlightbits);
-				DLIGHTBIT_SET (surf->dlightbits, lnum);
 				surf->dlightframe = r_dlightframecount;
+				surf->dlightent = ent;
+				surf->dlightmarks = NULL;
 			}
-			else	// already dynamic
-				DLIGHTBIT_SET (surf->dlightbits, lnum);
-			surf->dlightent = ent;
+			/* Already dynamic, and through another entity: one sharing
+			 * this submodel.  Recorded per light, before the bit, so
+			 * each light is measured in the space it came in through
+			 * (GitHub #496, r_dlightmark.c). */
+			else if (ent != surf->dlightent || surf->dlightmarks)
+				R_DlightMark_Shared (surf, lnum, ent, r_dlightframecount);
+			DLIGHTBIT_SET (surf->dlightbits, lnum);
 		}
 	}
 

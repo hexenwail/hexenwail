@@ -23,6 +23,7 @@
 #include "gl_shader.h"
 #include "gl_uniforms.h"
 #include "gl_lightcluster.h"
+#include "gl_shadow.h"
 #include "r_dlightvis.h"
 #include "gl_ssao.h"
 #include "gl_pipeline.h"
@@ -58,8 +59,6 @@ int			c_brush_polys, c_alias_polys;
 int			c_texbinds;	/* glBindTexture calls that survived the redundancy filter (uhexen2-im9g) */
 
 qboolean	r_cache_thrash;			// compatability
-
-GLuint			currenttexture = GL_UNUSED_TEXTURE;	// to avoid unnecessary texture sets
 
 GLuint			particletexture;	// little dot for particles
 GLuint			playertextures[MAX_CLIENTS];	// up to MAX_CLIENTS color translated skins
@@ -314,13 +313,25 @@ cvar_t	r_dlight_model_list = {"r_dlight_model_list", "", CVAR_ARCHIVE};
 
 /* Dynamic-light occlusion (GitHub #97).  0 is vanilla: every tier lit both
  * sides of a face's plane, so a light lit the far side of the wall it stood
- * against.  1 (and anything above, kept for the visibility and shadow-map
- * phases still to come) drops a light that is more than DLIGHT_PLANE_EPSILON
+ * against.  1 and above drop a light that is more than DLIGHT_PLANE_EPSILON
  * behind a face, on the CPU path (R_AddDynamicLights, R_MarkLights; brush
  * entities too, measured in their model space, #495) and the GPU one
- * (ClusteredDlight).
- * Liquids are exempt: they are seen, and lit, from both sides.  The software renderer's copy is in r_soft_web.c. */
+ * (ClusteredDlight), and run the CPU path's visibility (r_dlightvis.c).  2 adds
+ * the cube shadow maps on desktop with r_lightclusters 1 (gl_shadow.c), which
+ * every other tier treats as 1.
+ * Liquids are exempt: they are seen, and lit, from both sides.  The software renderer's copy is in r_soft_web.c.
+ *
+ * The default is 2 on desktop since P5: the maps measured 0.06 ms GPU a frame
+ * redrawing two of them on the Tesla P4, and nothing for a cached one, inside
+ * the 0.5 ms the plan allowed the retro presets.  The ES tier keeps 1, the
+ * most it can do, so its menu and config say what it renders; the two web
+ * builds agree on it (tools/test_soft_cvar_defaults.py).  0 is still vanilla
+ * on every tier. */
+#ifdef USE_GLES
 cvar_t	r_dlight_occlusion = {"r_dlight_occlusion", "1", CVAR_ARCHIVE};
+#else
+cvar_t	r_dlight_occlusion = {"r_dlight_occlusion", "2", CVAR_ARCHIVE};
+#endif
 
 /* Evaluate the liquid warp per pixel in the fragment shader instead of per
  * vertex on the CPU (uhexen2-9o7u).  Default 0 = the legacy per-vertex path.
@@ -1224,16 +1235,11 @@ static void R_DrawSpriteModel (entity_t *e)
 
 	if (soft_active)
 	{
-		/* Unit 1 is bound by hand rather than through GL_Bind, which only
-		 * tracks unit 0.  Restore the active unit immediately so the
-		 * GL_Bind below still lands where it expects to. */
-		glActiveTexture_fp (GL_TEXTURE1);
-		glBindTexture_fp (GL_TEXTURE_2D, GL_SoftDepth_GetTex());
-		glActiveTexture_fp (GL_TEXTURE0);
+		R_BindTextureSlot (1, GL_SoftDepth_GetTex ());
 		GL_SetSoftParticles (soft_inv, soft_za, soft_zb);
 	}
 
-	GL_Bind(frame->gl_texturenum);
+	R_BindTextureSlot (0, frame->gl_texturenum);
 
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
@@ -1295,9 +1301,7 @@ static void R_DrawSpriteModel (entity_t *e)
 		/* Back to the resting state before any alias / warp / brush batch
 		 * picks up this program.  uhexen2-mf9u. */
 		GL_SetSoftParticles (0.0f, 0.0f, 0.0f);
-		glActiveTexture_fp (GL_TEXTURE1);
-		glBindTexture_fp (GL_TEXTURE_2D, 0);
-		glActiveTexture_fp (GL_TEXTURE0);
+		R_BindTextureSlot (1, 0);
 	}
 
 // restore tex parms
@@ -2405,6 +2409,7 @@ static qboolean R_SetAliasMaterial (GLuint norm, GLuint gloss, qboolean eyeframe
 {
 	vec3_t	dir;
 	float	nrm, gls;
+	GLuint	maps[2];
 
 	if (!r_materialmaps.integer || (!norm && !gloss))
 	{
@@ -2426,12 +2431,10 @@ static qboolean R_SetAliasMaterial (GLuint norm, GLuint gloss, qboolean eyeframe
 	 * specular is the common case -- so each falls back to the sentinel that
 	 * is the identity for this maths.  Both are bound whenever the path is
 	 * armed, because the shader samples both unconditionally once inside the
-	 * branch.  Leaves TU0 active, like GL_BindMaterialMaps in gl_rsurf.c. */
-	glActiveTexture_fp(GL_TEXTURE3);
-	glBindTexture_fp(GL_TEXTURE_2D, norm ? norm : gl_flat_normal_texture);
-	glActiveTexture_fp(GL_TEXTURE4);
-	glBindTexture_fp(GL_TEXTURE_2D, gloss ? gloss : gl_null_gloss_texture);
-	glActiveTexture_fp(GL_TEXTURE0);
+	 * branch. */
+	maps[0] = norm ? norm : gl_flat_normal_texture;
+	maps[1] = gloss ? gloss : gl_null_gloss_texture;
+	R_BindTextures (3, 2, maps);
 
 	if (eyeframe)
 		R_AliasMaterialLightDirEye (dir);
@@ -2573,6 +2576,90 @@ static void R_AliasModelTransform (entity_t *e, aliashdr_t *paliashdr,
 			mdl_t[0] += cl_gun_z.value * paliashdr->scale[2];
 		}
 	}
+}
+
+/*
+=================
+R_AliasShadowCaster
+
+Entity e posed for a dynamic light's cube shadow map (GitHub #97, P6): its GPU
+mesh, R_DrawAliasModel's model matrix -- R_RotateForEntity2, then
+R_AliasModelTransform's translate and scale, on an identity base, the chain
+the caustics matrix replays -- and the pose pair and blend R_AliasResolveLerp
+gives the draw.  All three formats draw through that one function, so the
+shadow is the model the view shows, whichever path draws it.
+
+On a copy of the entity: the lerp advances the entity's own state, and that
+belongs to the draw later this frame.  Run before it, at R_SetupGL time, the
+copy sees exactly what the draw will.  The matrix is built from the entity
+itself (its misc_modelpimp flags are looked up by its place in cl_entities),
+with the chase-camera pitch the draw loops apply to the player (FrikaC's 0.3)
+put on for it and taken off again.
+=================
+*/
+qboolean R_AliasShadowCaster (entity_t *e, r_aliascaster_t *out)
+{
+	static entity_t		tmp;
+	static float		tmatrix[3][4];	/* its own; see R_DrawAliasModel */
+	aliashdr_t		*hdr;
+	alias_gpu_mesh_t	*gm;
+	float			mdl_t[3], mdl_s[3], blend, pitch;
+	int			pose, prevpose, scale;
+
+	if (!e->model || e->model->type != mod_alias)
+		return false;
+	/* Resident only, not Mod_Extradata: this runs inside R_SetupGL, and a
+	 * load from here would be a load, with its console and screen updates,
+	 * in the middle of a frame.  An evicted model casts once the draw has
+	 * brought it back. */
+	hdr = (aliashdr_t *) (e->model->cache_is_hunk ? e->model->cache.data
+						      : Cache_Check (&e->model->cache));
+	if (!hdr || hdr->numposes < 1)
+		return false;
+	gm = GL_GetAliasGPUMesh (hdr);
+	if (!gm || !gm->valid || !gm->num_indices || !gm->vao)
+		return false;
+	switch (gm->poseverttype)
+	{
+	case PV_QUAKE1:	if (!gm->ssbo_pose) return false;	scale = gm->poseverts;	break;
+	case PV_MD3:	if (!gm->ssbo_pose_md3) return false;	scale = gm->poseverts;	break;
+	case PV_IQM:	if (!gm->ssbo_bones) return false;	scale = gm->numbones;	break;
+	default:	return false;
+	}
+
+	tmp = *e;
+	R_AliasResolveLerp (&tmp, hdr, &prevpose, &pose, &blend);
+	/* the clamp GL_DrawAliasSkeletal and R_CollectAliasInstance apply: the
+	 * indices become raw buffer offsets */
+	if (pose     < 0 || pose     >= gm->numposes) pose     = 0;
+	if (prevpose < 0 || prevpose >= gm->numposes) prevpose = pose;
+
+	GL_MatrixMode (GL_MAT_MODELVIEW);
+	GL_PushMatrix ();
+	GL_LoadIdentity ();
+	/* The transform from the entity itself, not the copy: R_GetPimpFlags
+	 * finds a misc_modelpimp's EF_SPIN / EF_FLOAT by the entity's index in
+	 * cl_entities, which a copy does not have.  The chase pitch is put on
+	 * and taken off again. */
+	pitch = e->angles[0];
+	if (e == &cl_entities[cl.viewentity])
+		e->angles[0] *= 0.3;
+	R_RotateForEntity2 (e);
+	R_AliasModelTransform (e, hdr, tmatrix, mdl_t, mdl_s);
+	e->angles[0] = pitch;
+	GL_Translatef (mdl_t[0], mdl_t[1], mdl_t[2]);
+	GL_Scalef (mdl_s[0], mdl_s[1], mdl_s[2]);
+	GL_GetModelview (out->model);
+	GL_PopMatrix ();
+
+	out->gm = gm;
+	out->pose0 = pose * scale;
+	out->pose1 = prevpose * scale;
+	out->blend = (pose == prevpose) ? 1.0f : blend;
+	out->format = gm->poseverttype;
+	out->spins = (e->model->flags & (EF_ROTATE | EF_FACE_VIEW)) ||
+		     (R_GetPimpFlags (e, NULL) & (EF_SPIN | EF_FLOAT));
+	return true;
 }
 
 
@@ -3070,7 +3157,7 @@ static void R_DrawAliasModel (entity_t *e)
 			gl_extra_textures[skinnum - 100] = gl->texnum;
 		}
 
-		GL_Bind(gl_extra_textures[skinnum - 100]);
+		R_BindTextureSlot (0, gl_extra_textures[skinnum - 100]);
 	}
 	else
 	{
@@ -3084,7 +3171,7 @@ static void R_DrawAliasModel (entity_t *e)
 				     paliashdr->numskins);
 			skinnum = 0;
 		}
-		GL_Bind(paliashdr->gl_texturenum[skinnum][anim]);
+		R_BindTextureSlot (0, paliashdr->gl_texturenum[skinnum][anim]);
 
 		// we can't dynamically colormap textures, so they are cached
 		// seperately for the players.  Heads are just uncolored.
@@ -3099,7 +3186,7 @@ static void R_DrawAliasModel (entity_t *e)
 				i = e - cl_entities - 1;
 				if (i >= 0 && i < cl.maxclients)
 				{
-					GL_Bind(playertextures[i]);
+					R_BindTextureSlot (0, playertextures[i]);
 				}
 			}
 		}
@@ -3175,7 +3262,7 @@ static void R_DrawAliasModel (entity_t *e)
 			 * forward-Z wants smaller Z, reversed-Z wants larger Z.
 			 * uhexen2-iir3. */
 			float fb_offset = gl_clipcontrol_able ? 1.0f : -1.0f;
-			GL_Bind(fb_tex);
+			R_BindTextureSlot (0, fb_tex);
 			R_SetBlend (true);
 			R_SetBlendFunc (GL_ONE, GL_ONE);	// additive
 			R_SetDepthMask (false);
@@ -3570,8 +3657,10 @@ void R_CollectBrushInstances (void)
 		 * a dlight is actually live this frame.  Skipped entirely when
 		 * the froxel grid is shading the world programs these surfaces
 		 * draw through; see the twin of this loop in gl_rsurf.c's
-		 * R_DrawBrushModel.  uhexen2-26bm. */
-		if (clmodel->firstmodelsurface != 0 && !R_LightCluster_ShadesWorld ())
+		 * R_DrawBrushModel.  uhexen2-26bm.  gl_flashblend draws dlights as
+		 * blobs instead, so it marks nothing here either, as the twin does. */
+		if (clmodel->firstmodelsurface != 0 && !gl_flashblend.integer &&
+		    !R_LightCluster_ShadesWorld ())
 		{
 			for (k = 0; k < MAX_DLIGHTS; k++)
 			{
@@ -3739,12 +3828,9 @@ static void R_DispatchBrushInstancedPass (
 			GLuint cur_fb  = keys[i].fb_tex;
 			/* Bind the fullbright mask at TU2 first so the matching
 			 * sworld_frag sample picks it up for this (instance, tex)
-			 * group.  Leave TU0 sticky for the diffuse bind below.
-			 * uhexen2-61bb. */
-			glActiveTexture_fp(GL_TEXTURE2);
-			glBindTexture_fp(GL_TEXTURE_2D, cur_fb);
-			glActiveTexture_fp(GL_TEXTURE0);
-			glBindTexture_fp(GL_TEXTURE_2D, cur_tex);
+			 * group, then the diffuse at TU0.  uhexen2-61bb. */
+			R_BindTextureSlot (2, cur_fb);
+			R_BindTextureSlot (0, cur_tex);
 			while (i < num_keys && keys[i].instance == inst &&
 			       keys[i].tex == cur_tex)
 			{
@@ -3811,16 +3897,16 @@ void R_DrawBrushInstanced (void)
 	 * so the same invariance covers cross-program coplanar joins too. */
 	glBindVertexArray_fp(world_vao);
 	glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
-	glActiveTexture_fp(GL_TEXTURE1);
-	glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
-	/* Seed TU2 with the null fullbright sentinel.  R_DispatchBrushInstancedPass
-	 * rebinds per (instance, texture) group using the per-key fb_tex stored
-	 * by R_CollectBrushInstances, so any brush ent that wraps a miptex with
+	/* Lightmap atlas at TU1, and TU2 seeded with the null fullbright
+	 * sentinel.  R_DispatchBrushInstancedPass rebinds TU2 per (instance,
+	 * texture) group using the per-key fb_tex stored by
+	 * R_CollectBrushInstances, so any brush ent that wraps a miptex with
 	 * fullbright pixels (e.g. a torch tex on a func_train) gets the same
 	 * additive contribution as the matching world surface.  uhexen2-61bb. */
-	glActiveTexture_fp(GL_TEXTURE2);
-	glBindTexture_fp(GL_TEXTURE_2D, gl_null_fb_texture);
-	glActiveTexture_fp(GL_TEXTURE0);
+	{
+		const GLuint	units12[2] = { lm_atlas_texture, gl_null_fb_texture };
+		R_BindTextures (1, 2, units12);
+	}
 
 	/* Optional polygon offset — kept as a tunable safety net (default 0).
 	 * With the shader unified, no offset should be needed; bumping the
@@ -4504,8 +4590,7 @@ static void R_DrawAliasInstanced (void)
 			continue;
 
 		/* Bind skin texture to unit 0 */
-		glActiveTexture_fp(GL_TEXTURE0);
-		GL_Bind(batch->skin_tex);
+		R_BindTextureSlot (0, batch->skin_tex);
 
 		/* Material maps at units 3 and 4 (uhexen2-4kcb).  Per batch rather
 		 * than per frame because a batch IS one (model, skin) pair, which is
@@ -4527,17 +4612,14 @@ static void R_DrawAliasInstanced (void)
 				float	nrm = r_normalmap_intensity.value;
 				float	gls = r_gloss_intensity.value;
 				vec3_t	dir;
+				GLuint	maps[2];
 
 				if (nrm < 0.0f) nrm = 0.0f;
 				if (gls < 0.0f) gls = 0.0f;
 
-				glActiveTexture_fp(GL_TEXTURE3);
-				glBindTexture_fp(GL_TEXTURE_2D,
-					batch->norm_tex ? batch->norm_tex : gl_flat_normal_texture);
-				glActiveTexture_fp(GL_TEXTURE4);
-				glBindTexture_fp(GL_TEXTURE_2D,
-					batch->gloss_tex ? batch->gloss_tex : gl_null_gloss_texture);
-				glActiveTexture_fp(GL_TEXTURE0);
+				maps[0] = batch->norm_tex ? batch->norm_tex : gl_flat_normal_texture;
+				maps[1] = batch->gloss_tex ? batch->gloss_tex : gl_null_gloss_texture;
+				R_BindTextures (3, 2, maps);
 
 				R_SetAliasMaterialU (nrm, gls, q_max(1.0f, r_gloss_exponent.value));
 				R_AliasMaterialLightDirWorld (dir);
@@ -4748,8 +4830,7 @@ static void R_DrawAliasInstanced (void)
 				if (!pose_ssbo)
 					continue;
 
-				glActiveTexture_fp(GL_TEXTURE0);
-				GL_Bind(batch->fb_tex);
+				R_BindTextureSlot (0, batch->fb_tex);
 				GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER,
 						  gm->poseverttype == PV_MD3 ? 3 : 1, pose_ssbo);
 				R_SetPoseVertType (gm->poseverttype);
@@ -6193,6 +6274,11 @@ static void R_SetupFrame (void)
 
 #define NEARCLIP	4
 
+/* r_speeds 2's shadow-map buckets (#97): the GPU pair is defined with the
+ * profiler below; the CPU half, R_Shadow_Prepare, is timed here. */
+static void R_ProfileShadowTimestamp (qboolean end);
+static double	rprof_cpu_shadow;
+
 /*
 =============
 R_SetupGL
@@ -6289,6 +6375,21 @@ static void R_SetupGL (void)
 	R_LightCluster_Update ();
 	R_LightCluster_BindForWorld ();
 	R_LightCluster_BindForAlias ();	/* uhexen2-waum, phase C */
+	/* The dynamic-light cube shadow maps (#97, P3/P4): after the cluster
+	 * update, whose light list their block indexes, and before anything is
+	 * drawn.  Not in the mirror pass: its lights and so its block are the
+	 * main pass's, already bound, and redrawing maps there would only spend
+	 * the frame's update budget twice. */
+	if (!mirror)
+	{
+		double t0 = (r_speeds.integer >= 2) ? Sys_DoubleTime () : 0;
+		R_Shadow_Prepare ();
+		if (r_speeds.integer >= 2)
+			rprof_cpu_shadow = Sys_DoubleTime () - t0;
+		R_ProfileShadowTimestamp (false);
+		R_Shadow_Draw ();
+		R_ProfileShadowTimestamp (true);
+	}
 	/* After the cluster update, whose SSBO carries LightStyles[]: the GPU
 	 * lightstyle mode reads them, and may rebuild the lightmaps here if the
 	 * mode it wants has changed (#439). */
@@ -7687,8 +7788,15 @@ r_refdef must be set before the first call
 #define RPROF_VM	4
 #define RPROF_MIRROR	5
 #define RPROF_COUNT	6	/* 6 passes = 7 timestamp queries */
+/* Plus a pair of its own around R_Shadow_Draw, which runs INSIDE the world
+ * bucket (from R_SetupGL), so the report takes it out of `world` and prints
+ * it apart; R_Shadow_Prepare, the CPU half, is outside the pair, so the pair
+ * is the drawing and not the GPU waiting on the caster walk.  Both are written every r_speeds 2 frame, a frame with nothing to
+ * draw included, so the pair is never read unwritten.  #97. */
+#define RPROF_SHADOW	(RPROF_COUNT + 1)
+#define RPROF_QUERIES	(RPROF_COUNT + 3)
 
-static GLuint	rprof_queries[RPROF_COUNT + 1];
+static GLuint	rprof_queries[RPROF_QUERIES];
 static qboolean	rprof_pending;		/* results from previous frame waiting */
 static qboolean	rprof_available;	/* queries have been allocated */
 static double	rprof_cpu_world;	/* CPU wall-clock for R_RenderScene */
@@ -7744,7 +7852,7 @@ static void R_ProfileInit (void)
 		rprof_gpu_unavailable_reason = "GL timer-query entry points missing";
 		return;
 	}
-	glGenQueries_fp(RPROF_COUNT + 1, rprof_queries);
+	glGenQueries_fp(RPROF_QUERIES, rprof_queries);
 	rprof_available = true;
 	rprof_pending = false;
 #endif
@@ -7756,9 +7864,15 @@ static void R_ProfileTimestamp (int idx)
 		glQueryCounter_fp(rprof_queries[idx], GL_TIMESTAMP);
 }
 
+static void R_ProfileShadowTimestamp (qboolean end)
+{
+	if (r_speeds.integer >= 2)
+		R_ProfileTimestamp (RPROF_SHADOW + (end ? 1 : 0));
+}
+
 static void R_ProfileReport (void)
 {
-	HWGLuint64 ts[RPROF_COUNT + 1];
+	HWGLuint64 ts[RPROF_QUERIES];
 	GLint ready = 0;
 	int i;
 
@@ -7767,24 +7881,26 @@ static void R_ProfileReport (void)
 
 	if (rprof_available)
 	{
-		double ms[RPROF_COUNT], total;
+		double ms[RPROF_COUNT], total, shadow;
 
 		/* Check if last timestamp is ready (implies all earlier ones are too) */
 		glGetQueryObjectiv_fp(rprof_queries[RPROF_COUNT], GL_QUERY_RESULT_AVAILABLE, &ready);
 		if (!ready)
 			return;
 
-		for (i = 0; i <= RPROF_COUNT; i++)
+		for (i = 0; i < RPROF_QUERIES; i++)
 			glGetQueryObjectui64v_fp(rprof_queries[i], GL_QUERY_RESULT, &ts[i]);
 
 		for (i = 0; i < RPROF_COUNT; i++)
 			ms[i] = (double)(ts[i + 1] - ts[i]) / 1000000.0;
 
 		total = (double)(ts[RPROF_COUNT] - ts[0]) / 1000000.0;
+		shadow = (double)(ts[RPROF_SHADOW + 1] - ts[RPROF_SHADOW]) / 1000000.0;
 
-		Con_Printf("GPU %.1f  CPU %.1f | world %.1f  part %.1f  water %.1f  trans %.1f  vm %.1f  mirr %.1f\n",
+		/* `world` without the shadow maps drawn inside it (#97). */
+		Con_Printf("GPU %.1f  CPU %.1f | world %.1f  shadow %.2f  part %.1f  water %.1f  trans %.1f  vm %.1f  mirr %.1f\n",
 			   total, rprof_cpu_world * 1000.0,
-			   ms[RPROF_WORLD], ms[RPROF_PARTICLES], ms[RPROF_WATER],
+			   ms[RPROF_WORLD] - shadow, shadow, ms[RPROF_PARTICLES], ms[RPROF_WATER],
 			   ms[RPROF_TRANS], ms[RPROF_VM], ms[RPROF_MIRROR]);
 	}
 	else if (rprof_gpu_source == RPROF_GPU_UNAVAILABLE)
@@ -7799,7 +7915,7 @@ static void R_ProfileReport (void)
 	else
 		return;	/* queries not allocated yet; nothing to report */
 
-	Con_Printf("  CPU: marklv %.1f  draw %.1f  sky %.1f  ents %.1f (collect %.1f, inst %.1f, loop %.1f [bC=%.1f bD=%.1f p1=%.1f p2=%.1f] a=%d/%.1fms b=%d bL=%d/%.1fms inst[op=%d fc=%d])  glows %.1f  dlt %.1f\n"
+	Con_Printf("  CPU: marklv %.1f  draw %.1f  sky %.1f  ents %.1f (collect %.1f, inst %.1f, loop %.1f [bC=%.1f bD=%.1f p1=%.1f p2=%.1f] a=%d/%.1fms b=%d bL=%d/%.1fms inst[op=%d fc=%d])  glows %.1f  dlt %.1f  shadow %.2f\n"
 		   "  draw: bsp %.1f  lmup %.1f (%d pages)  gcull %.1f  chains %.1f (gpufin %.1f, sky-stencil %.1f, sky-proc %.1f, loop %.1f, defer %.1f)\n"
 		   "  chains: fast=%d imm=%d slow=%d skypolys=%d  walk=%d (%.1f ms)  lmrebuild=%d (%.1f ms)\n"
 		   "  %4i wpoly  %4i epoly  %4i texbind\n",
@@ -7823,6 +7939,7 @@ static void R_ProfileReport (void)
 		   rprof_brush_inst_fence,
 		   rprof_cpu_glows * 1000.0,
 		   rprof_cpu_dlights * 1000.0,
+		   rprof_cpu_shadow * 1000.0,
 		   rprof_cpu_bsp * 1000.0,
 		   rprof_cpu_lmupload * 1000.0,
 		   rprof_lm_pages_uploaded,
@@ -8009,6 +8126,8 @@ void R_RenderView (void)
 	// render mirror view
 	R_Mirror ();
 	if (r_speeds.integer >= 2) { R_ProfileTimestamp(RPROF_COUNT); rprof_pending = true; }
+
+	R_Shadow_DrawDebug ();	/* r_shadow_debug, #97 */
 
 	R_PolyBlend ();
 

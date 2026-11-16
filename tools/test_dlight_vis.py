@@ -749,7 +749,8 @@ typedef struct entity_s { vec3_t origin; } entity_t;
 typedef struct { vec3_t normal; float dist; int type; } mplane_t;
 typedef struct { float vecs[2][4]; } mtexinfo_t;
 typedef struct { mplane_t *plane; int flags; mtexinfo_t *texinfo; int texturemins[2], extents[2];
-                 int dlightframe; unsigned int dlightbits[4]; const entity_t *dlightent; } msurface_t;
+                 int dlightframe; unsigned int dlightbits[4]; const entity_t *dlightent;
+                 struct dlightmark_s *dlightmarks; } msurface_t;
 typedef struct mnode_s { int numsurfaces; } mnode_t;
 typedef struct { vec3_t origin; float radius, die; int dark; float color[4]; } dlight_t;
 typedef struct { int integer; } cvar_t;
@@ -762,6 +763,9 @@ static mtexinfo_t texinfo = {{{1, 0, 0, 0}, {0, 1, 0, 0}}};
 static int stub_vis, vis_calls, vis_lnum; static const void *vis_what;
 static int R_DlightVis_Surface (int lnum, msurface_t *surf) { vis_calls++; vis_lnum = lnum; vis_what = surf; return stub_vis; }
 static int R_DlightVis_Entity (int lnum, const entity_t *e) { vis_calls++; vis_lnum = lnum; vis_what = e; return stub_vis; }
+/* each mark here is a surface's first this frame; a second entity's marks
+ * (#496) are tools/test_dlight_shared_submodel.py's */
+static void R_DlightMark_Shared (msurface_t *s, int l, const entity_t *e, int f) { (void)s; (void)l; (void)e; (void)f; }
 static int stub_gpuworld;
 static int R_LightCluster_ShadesWorld (void) { return stub_gpuworld; }
 """

@@ -282,7 +282,8 @@ include_directories(
 set(SHADER_SRC_DIR ${ENGINE_TOP}/shaders)
 set(SHADERS_GEN_H ${CMAKE_CURRENT_BINARY_DIR}/generated/shaders_gen.h)
 set(SHADERS_VK_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated/vk)
-file(GLOB SHADER_SOURCES ${SHADER_SRC_DIR}/*.glsl ${SHADER_SRC_DIR}/*.inc)
+file(GLOB SHADER_SOURCES ${SHADER_SRC_DIR}/*.glsl ${SHADER_SRC_DIR}/*.inc
+                         ${SHADER_SRC_DIR}/glonly/*.glsl)
 
 add_custom_command(
     OUTPUT ${SHADERS_GEN_H}
@@ -535,6 +536,7 @@ set(GL_RENDERER_SOURCES
     ${COMMONDIR}/gl_refrag.c
     ${COMMONDIR}/gl_rlight.c
     ${COMMONDIR}/r_dlightvis.c
+    ${COMMONDIR}/r_dlightmark.c
     ${COMMONDIR}/gl_sky.c
     ${COMMONDIR}/gl_screen.c
     ${COMMONDIR}/gl_warp.c
@@ -549,6 +551,7 @@ set(GL_RENDERER_SOURCES
     ${COMMONDIR}/gl_postprocess.c
     ${COMMONDIR}/gl_worldcull.c
     ${COMMONDIR}/gl_lightcluster.c
+    ${COMMONDIR}/gl_shadow.c
     ${COMMONDIR}/gl_ssao.c
     ${COMMONDIR}/gl_matrix.c
     ${COMMONDIR}/gl_shader.c
@@ -587,6 +590,7 @@ set(SOFT_RENDERER_SOURCES
     ${COMMONDIR}/r_efrag.c
     ${COMMONDIR}/r_light.c
     ${COMMONDIR}/r_dlightvis.c
+    ${COMMONDIR}/r_dlightmark.c
     ${COMMONDIR}/r_sky.c
     ${COMMONDIR}/r_sprite.c
     ${COMMONDIR}/r_surf.c

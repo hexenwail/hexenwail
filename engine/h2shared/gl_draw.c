@@ -478,7 +478,7 @@ static void Draw_TouchAllFilterModes (void)
 		if (glt->texnum == GL_UNUSED_TEXTURE) continue;	/* skip retired slots */
 		if (glt->flags & (TEX_NEAREST|TEX_LINEAR))	/* TEX_MIPMAP mustn't be set in this case */
 			continue;
-		GL_Bind (glt->texnum);
+		R_BindTextureSlot (0, glt->texnum);
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, gl_texmodes[gl_filter_idx].maximize);
 		if (glt->flags & TEX_MIPMAP)
 		{
@@ -728,10 +728,10 @@ static qboolean GL_ImageDumpEntry (const gltexture_t *glt, const char *dirpath,
 		return true;
 	}
 
-	/* Bound directly, not through GL_Bind: its currenttexture cache can
-	 * disagree with the real binding, and a skipped bind reads some other
-	 * texture into a buffer sized for this one. */
-	glBindTexture_fp (GL_TEXTURE_2D, glt->texnum);
+	/* A skipped bind would read some other texture into a buffer sized for
+	 * this one.  The old GL_Bind cache could skip it; the module's shadow
+	 * cannot, because nothing binds behind it. */
+	R_BindTextureForEdit (GL_TEXTURE_2D, glt->texnum);
 	glGetTexLevelParameteriv_fp (GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &w);
 	glGetTexLevelParameteriv_fp (GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &h);
 
@@ -789,13 +789,13 @@ static void GL_ImageDump_f (void)
 	const gltexture_t	*glt;
 	int		i, flags, written = 0, failed = 0, stale = 0;
 	qboolean	ok = true;
-	GLint		prev_unit = GL_TEXTURE0, prev_tex = 0, prev_pack = 4;
+	GLint		prev_tex = 0, prev_pack = 4;
 
 	FS_MakePath_BUF (FS_USERDIR, NULL, dirpath, sizeof(dirpath), "imagedump");
 	Sys_mkdir (dirpath, false);
 
-	glGetIntegerv_fp (GL_ACTIVE_TEXTURE, &prev_unit);
-	glActiveTexture_fp (GL_TEXTURE0);
+	/* Unit 0 is the active unit whenever gl_texbind.c is not mid-call, so
+	 * this is unit 0's binding, the one the dump moves. */
 	glGetIntegerv_fp (GL_TEXTURE_BINDING_2D, &prev_tex);
 	glGetIntegerv_fp (GL_PACK_ALIGNMENT, &prev_pack);
 	glPixelStorei_fp (GL_PACK_ALIGNMENT, 1);
@@ -815,13 +815,7 @@ static void GL_ImageDump_f (void)
 	}
 
 	glPixelStorei_fp (GL_PACK_ALIGNMENT, prev_pack);
-	glBindTexture_fp (GL_TEXTURE_2D, (GLuint)prev_tex);
-	glActiveTexture_fp ((GLenum)prev_unit);
-	/* The dump bound textures behind the module's back, so the shadow no
-	 * longer knows what the units hold.  Forget it (and re-assert unit 0);
-	 * the next module bind re-issues.  The GL binding itself was already
-	 * restored above. */
-	R_ResetTextureBindings ();
+	R_BindTextureForEdit (GL_TEXTURE_2D, (GLuint)prev_tex);
 
 	Con_Printf ("imagedump: wrote %d texture%s to %s\n",
 		    written, (written == 1) ? "" : "s", dirpath);
@@ -842,7 +836,7 @@ static void Draw_TouchMipmapFilterModes (void)
 		if (glt->texnum == GL_UNUSED_TEXTURE) continue;	/* skip retired slots */
 		if (glt->flags & TEX_MIPMAP)
 		{
-			GL_Bind (glt->texnum);
+			R_BindTextureSlot (0, glt->texnum);
 			glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, gl_texmodes[gl_filter_idx].maximize);
 			glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, gl_texmodes[gl_filter_idx].minimize);
 			glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, gl_texture_anisotropy.value);
@@ -901,7 +895,7 @@ static void Draw_LodBias_f (cvar_t *var)
 		if (glt->texnum == GL_UNUSED_TEXTURE) continue;	/* skip retired slots */
 		if (glt->flags & TEX_MIPMAP)
 		{
-			GL_Bind (glt->texnum);
+			R_BindTextureSlot (0, glt->texnum);
 			GL_ApplyLodBias ();
 		}
 	}
@@ -1170,7 +1164,7 @@ void Draw_Init (void)
 	char_texture = GL_LoadTexture ("charset", chars, CONCHARS_W, CONCHARS_H,
 				       TEX_ALPHA|TEX_NEAREST|TEX_UNCOMPRESSED);
 	/* Set CLAMP_TO_EDGE on charset atlas to prevent edge sampling artifacts */
-	GL_Bind (char_texture);
+	R_BindTextureSlot (0, char_texture);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
@@ -1183,7 +1177,7 @@ void Draw_Init (void)
 	}
 	char_smalltexture = GL_LoadTexture ("smallcharset", chars, 128, 32,
 					    TEX_ALPHA|TEX_NEAREST|TEX_UNCOMPRESSED);
-	GL_Bind (char_smalltexture);
+	R_BindTextureSlot (0, char_smalltexture);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
@@ -1200,7 +1194,7 @@ void Draw_Init (void)
 	}
 	char_menufonttexture = GL_LoadTexture ("menufont", p->data, p->width, p->height,
 					       TEX_ALPHA|TEX_LINEAR|TEX_UNCOMPRESSED);
-	GL_Bind (char_menufonttexture);
+	R_BindTextureSlot (0, char_menufonttexture);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
@@ -1240,7 +1234,7 @@ void Draw_FlushCharBatch (void)
 		return;
 	/* Draw_CachePic may GL_LoadTexture mid-batch and leave the new pic
 	 * bound; re-bind the atlas so the flush samples the right one. */
-	GL_Bind (char_batch_tex);
+	R_BindTextureSlot (0, char_batch_tex);
 	GL_ImmEnd (GL_QUADS, &gl_shader_2d);
 	char_batch_count = 0;
 	char_batch_tex = 0;
@@ -1256,7 +1250,7 @@ static void Draw_AddCharQuad (GLuint tex, int x, int y, int w, int h,
 	if (char_batch_tex != tex || char_batch_count >= MAX_CHAR_BATCH_QUADS)
 	{
 		Draw_FlushCharBatch ();
-		GL_Bind (tex);
+		R_BindTextureSlot (0, tex);
 		GL_ImmBegin ();
 		char_batch_tex = tex;
 	}
@@ -1412,7 +1406,7 @@ void Draw_Crosshair (void)
 	{
 		pColor = (unsigned char *) &d_8to24table[(byte) crosshaircolor.integer];
 
-		GL_Bind (cs_texture);
+		R_BindTextureSlot (0, cs_texture);
 
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
@@ -1577,7 +1571,7 @@ void Draw_Pic (int x, int y, qpic_t *pic)
 
 	Draw_FlushCharBatch ();
 	gl = (glpic_t *)pic->data;
-	GL_Bind (gl->texnum);
+	R_BindTextureSlot (0, gl->texnum);
 
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
@@ -1613,7 +1607,7 @@ void Draw_AlphaPic (int x, int y, qpic_t *pic, float alpha)
 	gl = (glpic_t *)pic->data;
 	R_SetBlend (true);
 	R_SetCullFace (GL_FRONT);
-	GL_Bind (gl->texnum);
+	R_BindTextureSlot (0, gl->texnum);
 
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
@@ -1706,7 +1700,7 @@ void Draw_IntermissionPic (qpic_t *pic)
 
 	Draw_FlushCharBatch ();
 	gl = (glpic_t *)pic->data;
-	GL_Bind (gl->texnum);
+	R_BindTextureSlot (0, gl->texnum);
 
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
@@ -1747,7 +1741,7 @@ void Draw_SubPic (int x, int y, qpic_t *pic, int srcx, int srcy, int width, int 
 	newtl = gl->tl + (srcy*oldglheight)/pic->height;
 	newth = newtl + (height*oldglheight)/pic->height;
 
-	GL_Bind (gl->texnum);
+	R_BindTextureSlot (0, gl->texnum);
 
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
@@ -1808,7 +1802,7 @@ void Draw_PicCropped (int x, int y, qpic_t *pic)
 		th = gl->th;//(height-0.01)/pic->height;
 	}
 
-	GL_Bind (gl->texnum);
+	R_BindTextureSlot (0, gl->texnum);
 
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
@@ -1876,7 +1870,7 @@ void Draw_SubPicCropped (int x, int y, int h, qpic_t *pic)
 		height = h;
 	}
 
-	GL_Bind (gl->texnum);
+	R_BindTextureSlot (0, gl->texnum);
 
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
@@ -1938,7 +1932,7 @@ void Draw_TransPicTranslate (int x, int y, qpic_t *pic, byte *translation, int p
 	int		p;
 
 	Draw_FlushCharBatch ();
-	GL_Bind(menuplyr_textures[p_class-1]);
+	R_BindTextureSlot (0, menuplyr_textures[p_class-1]);
 	dest = trans;
 	for (v = 0; v < 64; v++, dest += 64)
 	{
@@ -1999,7 +1993,7 @@ static void Draw_ConsolePic (int lines, float ofs, GLuint num, float alpha)
 	Draw_FlushCharBatch ();
 	R_SetBlend (true);
 	R_SetCullFace (GL_FRONT);
-	GL_Bind (num);
+	R_BindTextureSlot (0, num);
 
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
@@ -2041,7 +2035,7 @@ void Draw_MenuBackdrop (void)
 {
 	Draw_FlushCharBatch ();
 	R_SetBlend (false);
-	GL_Bind (conback);
+	R_BindTextureSlot (0, conback);
 
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
@@ -2147,7 +2141,7 @@ refresh window.
 void Draw_TileClear (int x, int y, int w, int h)
 {
 	Draw_FlushCharBatch ();
-	GL_Bind (draw_backtile);
+	R_BindTextureSlot (0, draw_backtile);
 	GL_ImmBegin();
 	GL_ImmColor3f (1, 1, 1);
 	GL_ImmTexCoord2f (x/64.0, y/64.0);
@@ -3444,8 +3438,6 @@ static GLuint GL_LoadTextureEx (const char *identifier, byte *data, int width, i
 						Con_DPrintf ("Texture cache mismatch: %lu, %s, creating new entry\n",
 								    (unsigned long)old_texnum, identifier);
 					R_DeleteTextures (1, &old_texnum);
-					if (currenttexture == old_texnum)
-						currenttexture = GL_UNUSED_TEXTURE;
 					Hash_Remove (&hash_gltextures, key, i);
 					glt->identifier[0] = '\0';	/* mark entry stale */
 					/* GL_UNUSED_TEXTURE is the marker GL_ClaimStaleTexture
@@ -3480,7 +3472,7 @@ static GLuint GL_LoadTextureEx (const char *identifier, byte *data, int width, i
 	glt->crc = crc;
 	glt->wateralpha = wateralpha;
 
-	GL_Bind (glt->texnum);
+	R_BindTextureSlot (0, glt->texnum);
 	if (cimg)
 		GL_UploadCompressed (cimg, cformat, glt);
 	else if (flags & TEX_RGBA)

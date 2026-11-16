@@ -59,8 +59,9 @@ byte:
   brush-state classification;
 - `r_light.c` and `r_surf.c`: the dlight mask, widened to 128 bits, and the larger
   `MAX_DLIGHTS`; the one-sided test (#97); a brush entity's light measured in
-  its model space (#495); `r_light.c` asks `r_dlightvis.c` whether a light can
-  see the surface it marks (#97).
+  its model space (#495), and in the space of the entity it came in through
+  when two share a submodel (#496, `r_dlightmark.c`); `r_light.c` asks
+  `r_dlightvis.c` whether a light can see the surface it marks (#97).
 
 So nine of the restored files differ from the original today; do not assume any
 one is pristine. To see exactly what a file carries beyond the original:
@@ -83,8 +84,8 @@ would silently have raised it.
 
 ## The four adapters
 
-Apart from `mod_placeholder.c` and `r_dlightvis.c` (#97), which the GL build
-compiles too, everything new
+Apart from `mod_placeholder.c`, `r_dlightvis.c` (#97) and `r_dlightmark.c`
+(#496), which the GL build compiles too, everything new
 is in four files. They exist to keep renderer `#ifdef`s out of
 shared client code (`console.c`, `menu.c`, `sbar.c`, `cl_*.c`, `pr_csqc.c`),
 which was written against the GL renderer's symbols: these supply software

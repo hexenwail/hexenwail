@@ -219,6 +219,33 @@ void R_GetDepthRange (double *znear, double *zfar)
 	if (zfar)  *zfar  = rp.depth_far;
 }
 
+qboolean R_GetDepthTest (void)
+{
+	return rp.depth_test;
+}
+
+GLenum R_GetDepthFunc (void)
+{
+	return rp.depth_func;
+}
+
+GLenum R_GetCullFace (void)
+{
+	return rp.cull_face;
+}
+
+qboolean R_GetStencilTest (void)
+{
+	return rp.stencil_test;
+}
+
+qboolean R_GetPolygonOffsetFill (float *factor, float *units)
+{
+	if (factor) *factor = rp.poly_factor;
+	if (units)  *units  = rp.poly_units;
+	return rp.poly_offset_fill;
+}
+
 /* The disable paths also zero factor/units, matching what the scattered
  * clusters did: every glDisable(GL_POLYGON_OFFSET_FILL) in the engine was
  * paired with a glPolygonOffset(0,0) on the next line. */
@@ -362,16 +389,18 @@ void R_SetAlphaToCoverage (qboolean enable)
 }
 
 /* ------------------------------------------------------------------ */
-/* Point size and scissor — unshadowed state                           */
+/* Point size, scissor, sample shading — unshadowed state              */
 /* ------------------------------------------------------------------ */
 
-/* Deliberately outside the shadow above: both are always set as a balanced
+/* Deliberately outside the shadow above: each is always set as a balanced
  * pair at the call site (point size 2.0 -> 1.0 around the square-particle
- * batch, scissor enable -> disable around the CSQC clip area), so there is
- * nothing for the shadow to deduplicate and no state for a later draw to
- * inherit unknowingly.  They live here, not at the call sites, so no raw
- * glFoo call sits outside the renderer modules: a second backend (SDL_GPU,
- * #447) needs one place that knows the whole draw state.  GitHub #453. */
+ * batch, scissor enable -> disable around the CSQC clip area and off ->
+ * saved state around gl_shadow.c's passes, sample shading on -> off around
+ * the 3D pass), so there is nothing for the shadow to deduplicate and no
+ * state for a later draw to inherit unknowingly.  They live here, not at the
+ * call sites, so no draw-state call sits outside this module: a second
+ * backend (SDL_GPU, #447) needs one place that knows the whole draw state.
+ * GitHub #453, #337. */
 void GL_SetPointSize (float size)
 {
 	/* No glPointSize on the ES tier (gl_func.h stubs it): point size comes
@@ -391,6 +420,25 @@ void GL_SetScissor (int x, int y, int width, int height)
 void GL_ResetScissor (void)
 {
 	glDisable_fp (GL_SCISSOR_TEST);
+}
+
+/* frac <= 0 disables.  Desktop only -- the ES tier has no
+ * glMinSampleShading, and the callers are compiled out there. */
+void GL_SetSampleShading (float frac)
+{
+#ifndef USE_GLES
+	if (frac > 0.0f)
+	{
+		glEnable_fp (GL_SAMPLE_SHADING);
+		glMinSampleShading_fp (frac);
+	}
+	else
+	{
+		glDisable_fp (GL_SAMPLE_SHADING);
+	}
+#else
+	(void) frac;
+#endif
 }
 
 /* ------------------------------------------------------------------ */

@@ -29,6 +29,7 @@
 #include "gl_matrix.h"
 #include "gl_postprocess.h"
 #include "gl_lightcluster.h"
+#include "r_dlightmark.h"
 
 /* fog globals from gl_fog.c */
 extern float r_fog_density;
@@ -408,6 +409,7 @@ static void R_AddDynamicLights (msurface_t *surf)
 	// vars for lit support
 	float		cred, cgreen, cblue, brightness;
 	unsigned int	*bl;
+	qboolean	known;
 
 	smax = (surf->extents[0] >> 4) + 1;
 	tmax = (surf->extents[1] >> 4) + 1;
@@ -429,15 +431,18 @@ static void R_AddDynamicLights (msurface_t *surf)
 
 		rad = cl_dlights[lnum].radius;
 		/* The plane is in the surface's model space; so must the light
-		 * be, for a door or plat that has moved (GitHub #495). */
-		R_DlightModelOrigin (surf->dlightent, cl_dlights[lnum].origin, lorg);
+		 * be, for a door or plat that has moved (GitHub #495) -- the
+		 * space of the entity the light came in through, when two share
+		 * this submodel (#496).  false: that is not known, so the
+		 * one-sided test below must not judge it. */
+		known = R_DlightSurfaceOrigin (surf, lnum, cl_dlights[lnum].origin, lorg);
 		dist = DotProduct (lorg, surf->plane->normal) - surf->plane->dist;
 		/* One-sided (GitHub #97): a light behind the face's front plane --
 		 * the BSP plane, flipped for a SURF_PLANEBACK face -- does not
 		 * light it.  Liquids keep vanilla's both sides.  R_MarkLights
 		 * makes the same call so such a face is not even rebuilt; this
 		 * is the one that decides what lands in the lightmap. */
-		if (r_dlight_occlusion.integer >= 1 && !(surf->flags & SURF_DRAWTURB) &&
+		if (known && r_dlight_occlusion.integer >= 1 && !(surf->flags & SURF_DRAWTURB) &&
 		    ((surf->flags & SURF_PLANEBACK) ? -dist : dist) < -DLIGHT_PLANE_EPSILON)
 			continue;
 		rad -= fabs(dist);
@@ -1178,7 +1183,7 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 	}
 
 	t = R_TextureAnimation (e, fa->texinfo->texture);
-	GL_Bind (t->gl_texturenum);
+	R_BindTextureSlot (0, t->gl_texturenum);
 	/* Bind per-miptex fullbright mask at TU2.  R_RenderBrushPoly runs
 	 * through gl_shader_world, so without this brush-ent surfaces inherit
 	 * whatever TU2 the previous caller left (DrawTextureChains' teardown
@@ -1444,7 +1449,7 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 	}
 
 	t = R_TextureAnimation (e, fa->texinfo->texture);
-	GL_Bind (t->gl_texturenum);
+	R_BindTextureSlot (0, t->gl_texturenum);
 	/* Bind per-miptex fullbright mask at TU2 — same rationale as the
 	 * sibling in R_RenderBrushPoly.  uhexen2-61bb. */
 	R_BindTextureSlot (2,
@@ -1733,7 +1738,7 @@ void R_DrawWaterSurfaces (int phase)
 		}
 
 		// set modulate mode explicitly
-		GL_Bind (t->gl_texturenum);
+		R_BindTextureSlot (0, t->gl_texturenum);
 
 		for ( ; s ; s = s->texturechain)
 			EmitWaterPolys (s);
@@ -2360,7 +2365,7 @@ static void DrawTextureChains_DrawDeferred (entity_t *e, msurface_t **deferred, 
 			 * coalescing of contiguous IBO ranges.  Also rebind
 			 * fullbright mask at TU2.  uhexen2-sjvf. */
 #define BIND_TEX_WITH_FB(_T_) do { \
-	GL_Bind((_T_)->gl_texturenum); \
+	R_BindTextureSlot (0, (_T_)->gl_texturenum); \
 	R_BindTextureSlot (2, \
 		(_T_)->gl_fb_texturenum ? (_T_)->gl_fb_texturenum : gl_null_fb_texture); \
 	GL_BindMaterialMaps (_T_);	/* uhexen2-mfql */ \
@@ -2851,7 +2856,7 @@ static void DrawTextureChains (entity_t *e)
 
 				{
 					texture_t *tt = R_TextureAnimation (e, s->texinfo->texture);
-					GL_Bind (tt->gl_texturenum);
+					R_BindTextureSlot (0, tt->gl_texturenum);
 				}
 				R_BindTextureSlot (1, lm_atlas_texture);
 
@@ -2866,7 +2871,7 @@ static void DrawTextureChains (entity_t *e)
 						R_RenderBrushPolyMTex (e, s, false);
 						{
 							texture_t *tt = R_TextureAnimation (e, s->texinfo->texture);
-							GL_Bind (tt->gl_texturenum);
+							R_BindTextureSlot (0, tt->gl_texturenum);
 						}
 						GL_ImmBegin ();
 						continue;
@@ -2988,16 +2993,6 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 
 	if (R_CullBox (mins, maxs))
 		return;
-
-#if 0 /* causes side effects in 16 bpp. alternative down below */
-	/* Get rid of Z-fighting for textures by offsetting the
-	 * drawing of entity models compared to normal polygons. */
-	if (gl_zfix.integer)
-	{
-		glEnable_fp(GL_POLYGON_OFFSET_FILL);
-		glEnable_fp(GL_POLYGON_OFFSET_LINE);
-	}
-#endif /* #if 0 */
 
 	GL_ImmColor3f (1,1,1);
 	memset (lightmap_polys, 0, sizeof(lightmap_polys));
@@ -3174,7 +3169,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 				int run_first = batch_surfs[0]->vbo_firstindex;
 				int run_total = batch_surfs[0]->vbo_numtris * 3;
 				int kk;
-				GL_Bind(cur_tex->gl_texturenum);
+				R_BindTextureSlot (0, cur_tex->gl_texturenum);
 				for (kk = 1; kk < batch_count; kk++)
 				{
 					int expected = run_first + run_total;
@@ -3239,7 +3234,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 				int run_first = batch_surfs[0]->vbo_firstindex;
 				int run_total = batch_surfs[0]->vbo_numtris * 3;
 				int kk;
-				GL_Bind(cur_tex->gl_texturenum);
+				R_BindTextureSlot (0, cur_tex->gl_texturenum);
 				for (kk = 1; kk < batch_count; kk++)
 				{
 					int expected = run_first + run_total;
@@ -3272,7 +3267,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 			int run_first = batch_surfs[0]->vbo_firstindex;
 			int run_total = batch_surfs[0]->vbo_numtris * 3;
 			int kk;
-			GL_Bind(cur_tex->gl_texturenum);
+			R_BindTextureSlot (0, cur_tex->gl_texturenum);
 			for (kk = 1; kk < batch_count; kk++)
 			{
 				int expected = run_first + run_total;
@@ -3339,13 +3334,6 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 
 	/* Lightmaps applied via multitexture in R_RenderBrushPoly */
 	GL_PopMatrix();
-#if 0 /* see above... */
-	if (gl_zfix.integer)
-	{
-		glDisable_fp(GL_POLYGON_OFFSET_FILL);
-		glDisable_fp(GL_POLYGON_OFFSET_LINE);
-	}
-#endif /* #if 0 */
 }
 
 

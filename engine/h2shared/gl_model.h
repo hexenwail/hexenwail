@@ -160,6 +160,8 @@ typedef struct msurface_s
 	const struct entity_s	*dlightent;	/* whose model space dlightbits' lights are measured in, NULL
 					 * for the world: set by R_MarkLights with them, read by
 					 * R_AddDynamicLights.  GitHub #495 */
+	struct dlightmark_s	*dlightmarks;	/* when entities sharing a submodel marked it: which
+					 * entity brought which light (r_dlightmark.c).  #496 */
 
 	unsigned int	lightmaptexturenum;
 	byte		styles[MAXLIGHTMAPS];
