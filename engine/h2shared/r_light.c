@@ -78,7 +78,7 @@ DYNAMIC LIGHTS
 R_MarkLights
 =============
 */
-void R_MarkLights (dlight_t *light, int lnum, mnode_t *node)
+void R_MarkLights (dlight_t *light, int lnum, mnode_t *node, const entity_t *ent)
 {
 	mplane_t	*splitplane;
 	float		dist;
@@ -95,12 +95,12 @@ void R_MarkLights (dlight_t *light, int lnum, mnode_t *node)
 	{
 		if (dist > light->radius)
 		{
-			R_MarkLights (light, lnum, node->children[0]);
+			R_MarkLights (light, lnum, node->children[0], ent);
 			return;
 		}
 		if (dist < -light->radius)
 		{
-			R_MarkLights (light, lnum, node->children[1]);
+			R_MarkLights (light, lnum, node->children[1], ent);
 			return;
 		}
 	}
@@ -108,12 +108,12 @@ void R_MarkLights (dlight_t *light, int lnum, mnode_t *node)
 	{
 		if (dist > -light->radius)
 		{
-			R_MarkLights (light, lnum, node->children[0]);
+			R_MarkLights (light, lnum, node->children[0], ent);
 			return;
 		}
 		if (dist < light->radius)
 		{
-			R_MarkLights (light, lnum, node->children[1]);
+			R_MarkLights (light, lnum, node->children[1], ent);
 			return;
 		}
 	}
@@ -124,7 +124,6 @@ void R_MarkLights (dlight_t *light, int lnum, mnode_t *node)
 	{
 		/* Not a face the light is behind (GitHub #97); see gl_rlight.c's twin. */
 		if (r_dlight_occlusion.integer >= 1 && !(surf->flags & SURF_DRAWTURB) &&
-		    DLIGHT_WORLD_SURFACE (surf) &&
 		    ((surf->flags & SURF_PLANEBACK) ? -dist : dist) < -DLIGHT_PLANE_EPSILON)
 			continue;
 		if (surf->dlightframe != r_dlightframecount)
@@ -133,10 +132,11 @@ void R_MarkLights (dlight_t *light, int lnum, mnode_t *node)
 			surf->dlightframe = r_dlightframecount;
 		}
 		DLIGHTBIT_SET (surf->dlightbits, lnum);
+		surf->dlightent = ent;
 	}
 
-	R_MarkLights (light, lnum, node->children[0]);
-	R_MarkLights (light, lnum, node->children[1]);
+	R_MarkLights (light, lnum, node->children[0], ent);
+	R_MarkLights (light, lnum, node->children[1], ent);
 }
 
 
@@ -161,7 +161,7 @@ void R_PushDlights (void)
 	{
 		if (l->die < cl.time || !l->radius)
 			continue;
-		R_MarkLights (l, i, cl.worldmodel->nodes );
+		R_MarkLights (l, i, cl.worldmodel->nodes, NULL);
 	}
 }
 

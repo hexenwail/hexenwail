@@ -157,6 +157,9 @@ typedef struct msurface_s
 // lighting info
 	int		dlightframe;
 	unsigned int		dlightbits[4];	/* one bit per dlight, MAX_DLIGHTS bits; see DLIGHTBIT_* in client.h. uhexen2-liqz */
+	const struct entity_s	*dlightent;	/* whose model space dlightbits' lights are measured in, NULL
+					 * for the world: set by R_MarkLights with them, read by
+					 * R_AddDynamicLights.  GitHub #495 */
 
 	unsigned int	lightmaptexturenum;
 	byte		styles[MAXLIGHTMAPS];

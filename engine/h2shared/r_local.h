@@ -378,7 +378,7 @@ int *R_LightPointColour (vec3_t p);
 void R_SetupFrame (void);
 void R_cshift_f (void);
 void R_SplitEntityOnNode2 (mnode_t *node);
-void R_MarkLights (dlight_t *light, int lnum, mnode_t *node);
+void R_MarkLights (dlight_t *light, int lnum, mnode_t *node, const entity_t *ent);
 
 #endif	/* !GLQUAKE	*/
 

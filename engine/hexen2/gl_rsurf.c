@@ -400,7 +400,7 @@ static void R_AddDynamicLights (msurface_t *surf)
 	int			lnum;
 	int			sd, td;
 	float		dist, rad, minlight;
-	vec3_t		impact, local;
+	vec3_t		impact, local, lorg;
 	int			s, t;
 	int			i;
 	int			smax, tmax;
@@ -428,15 +428,16 @@ static void R_AddDynamicLights (msurface_t *surf)
 			continue;		// not lit by this light
 
 		rad = cl_dlights[lnum].radius;
-		dist = DotProduct (cl_dlights[lnum].origin, surf->plane->normal) - surf->plane->dist;
+		/* The plane is in the surface's model space; so must the light
+		 * be, for a door or plat that has moved (GitHub #495). */
+		R_DlightModelOrigin (surf->dlightent, cl_dlights[lnum].origin, lorg);
+		dist = DotProduct (lorg, surf->plane->normal) - surf->plane->dist;
 		/* One-sided (GitHub #97): a light behind the face's front plane --
 		 * the BSP plane, flipped for a SURF_PLANEBACK face -- does not
-		 * light it.  Liquids keep vanilla's both sides, and so do brush
-		 * entities (DLIGHT_WORLD_SURFACE says why).  R_MarkLights
+		 * light it.  Liquids keep vanilla's both sides.  R_MarkLights
 		 * makes the same call so such a face is not even rebuilt; this
 		 * is the one that decides what lands in the lightmap. */
 		if (r_dlight_occlusion.integer >= 1 && !(surf->flags & SURF_DRAWTURB) &&
-		    DLIGHT_WORLD_SURFACE (surf) &&
 		    ((surf->flags & SURF_PLANEBACK) ? -dist : dist) < -DLIGHT_PLANE_EPSILON)
 			continue;
 		rad -= fabs(dist);
@@ -447,7 +448,7 @@ static void R_AddDynamicLights (msurface_t *surf)
 
 		for (i = 0; i < 3; i++)
 		{
-			impact[i] = cl_dlights[lnum].origin[i] - surf->plane->normal[i]*dist;
+			impact[i] = lorg[i] - surf->plane->normal[i]*dist;
 		}
 
 		local[0] = DotProduct (impact, tex->vecs[0]) + tex->vecs[0][3];
@@ -3020,41 +3021,25 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 // instanced model
 	/* R_LightCluster_ShadesWorld: the froxel grid lights brush entities too
 	 * -- they draw through the same world programs -- so marking here would
-	 * double-light them and re-dirty their lightmap pages.  It does it
-	 * BETTER, in fact: this path transforms the light into the entity's
-	 * local frame to cope with rotation, whereas the shader works from the
-	 * fragment's real world position and needs no such correction.
-	 * uhexen2-26bm. */
+	 * double-light them and re-dirty their lightmap pages.  The shader works
+	 * from the fragment's real world position, so it needs none of the
+	 * model-space transform this path does below.  uhexen2-26bm. */
 	if (clmodel->firstmodelsurface != 0 && !gl_flashblend.integer &&
 	    !R_LightCluster_ShadesWorld ())
 	{
 		for (k = 0; k < MAX_DLIGHTS; k++)
 		{
+			dlight_t	local;
+
 			if ((cl_dlights[k].die < cl.time) || (!cl_dlights[k].radius))
 				continue;
 
-			if (rotated)
-			{
-				// Transform light origin from world space to model space
-				dlight_t	transformedlight;
-				vec3_t		temp;
-				vec3_t		forward, right, up;
-
-				transformedlight = cl_dlights[k];
-				VectorSubtract(cl_dlights[k].origin, e->origin, temp);
-				AngleVectors(e->angles, forward, right, up);
-				transformedlight.origin[0] = DotProduct(temp, forward);
-				transformedlight.origin[1] = -DotProduct(temp, right);
-				transformedlight.origin[2] = DotProduct(temp, up);
-
-				R_MarkLights (&transformedlight, k,
-						clmodel->nodes + clmodel->hulls[0].firstclipnode);
-			}
-			else
-			{
-				R_MarkLights (&cl_dlights[k], k,
-						clmodel->nodes + clmodel->hulls[0].firstclipnode);
-			}
+			/* The node tree is the model's, so the light goes into
+			 * model space -- moved as well as rotated (GitHub #495). */
+			local = cl_dlights[k];
+			R_DlightModelOrigin (e, cl_dlights[k].origin, local.origin);
+			R_MarkLights (&local, k,
+					clmodel->nodes + clmodel->hulls[0].firstclipnode, e);
 		}
 	}
 

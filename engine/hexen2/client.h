@@ -92,19 +92,37 @@ typedef struct
  * what it keeps on the retail maps. */
 #define	DLIGHT_PLANE_EPSILON	2.0f
 
-/* Is this one of the world's own surfaces, rather than a brush entity's?  The
- * CPU path measures a dynamic light's world-space origin against the surface's
- * MODEL-space plane, which for a door that has opened or a plat that has
- * lowered is off by the entity's displacement -- inherited from Quake, where it
- * only misplaced and dimmed the light.  The one-sided test would turn that
- * error into no light at all (a plat lowered 128 units, a light 20 above it:
- * dist -108), so on the CPU path it applies to world surfaces only, and brush
- * entities keep vanilla's both sides there.  ClusteredDlight works from real
- * eye-space positions and tests every surface.  GitHub #97. */
-#define	DLIGHT_WORLD_SURFACE(s)	\
-	((s) >= cl.worldmodel->surfaces + cl.worldmodel->firstmodelsurface &&	\
-	 (s) < cl.worldmodel->surfaces + cl.worldmodel->firstmodelsurface +	\
-	       cl.worldmodel->nummodelsurfaces)
+/* A dynamic light's origin in a brush entity's model space, which is the space
+ * its BSP planes are in (GitHub #495).  R_MarkLights descends the entity's own
+ * node tree and R_AddDynamicLights measures against its surfaces' planes, so
+ * both must be given the light where the MODEL sees it: the inverse of the
+ * entity's translation and rotation, the same transform R_DrawBrushModel gives
+ * modelorg (software: R_RotateBmodel's entity_rotation, whose rows are these
+ * three vectors).  Quake measured the world-space origin there, which once a
+ * door had opened or a plat lowered lit it from the wrong place, and would put
+ * the light behind the face for the one-sided test (#97).  e is NULL for the
+ * world, whose model space is world space. */
+static inline void R_DlightModelOrigin (const struct entity_s *e, const vec3_t world, vec3_t out)
+{
+	vec3_t	d, forward, right, up;
+
+	if (!e)
+	{
+		VectorCopy (world, out);
+		return;
+	}
+	VectorSubtract (world, e->origin, d);
+	if (!(e->angles[0] || e->angles[1] || e->angles[2]))
+	{
+		VectorCopy (d, out);
+		return;
+	}
+	AngleVectors ((float *) e->angles, forward, right, up);
+	out[0] = DotProduct (d, forward);
+	out[1] = -DotProduct (d, right);
+	out[2] = DotProduct (d, up);
+}
+
 typedef struct
 {
 	vec3_t		origin;

@@ -315,8 +315,9 @@ cvar_t	r_dlight_model_list = {"r_dlight_model_list", "", CVAR_ARCHIVE};
  * sides of a face's plane, so a light lit the far side of the wall it stood
  * against.  1 (and anything above, kept for the visibility and shadow-map
  * phases still to come) drops a light that is more than DLIGHT_PLANE_EPSILON
- * behind a face, on the CPU path (R_AddDynamicLights, R_MarkLights; world
- * surfaces only, see DLIGHT_WORLD_SURFACE) and the GPU one (ClusteredDlight).
+ * behind a face, on the CPU path (R_AddDynamicLights, R_MarkLights; brush
+ * entities too, measured in their model space, #495) and the GPU one
+ * (ClusteredDlight).
  * Liquids are exempt: they are seen, and lit, from both sides.  The software renderer's copy is in r_soft_web.c. */
 cvar_t	r_dlight_occlusion = {"r_dlight_occlusion", "1", CVAR_ARCHIVE};
 
@@ -3412,7 +3413,7 @@ static qboolean		world_inst_collected[MAX_VISEDICTS];
 static qboolean		world_inst_needs_legacy[MAX_VISEDICTS];
 
 extern qboolean		R_CullBox (vec3_t mins, vec3_t maxs);
-extern void		R_MarkLights (dlight_t *light, int lnum, mnode_t *node);
+extern void		R_MarkLights (dlight_t *light, int lnum, mnode_t *node, const entity_t *ent);
 extern int		c_brush_polys;
 extern GLuint		world_vao;
 extern GLuint		world_ibo;
@@ -3565,25 +3566,15 @@ void R_CollectBrushInstances (void)
 		{
 			for (k = 0; k < MAX_DLIGHTS; k++)
 			{
-				dlight_t *dl = &cl_dlights[k];
-				if (dl->die < cl.time || !dl->radius)
+				dlight_t tdl;
+				if (cl_dlights[k].die < cl.time || !cl_dlights[k].radius)
 					continue;
-				if (rotated)
-				{
-					dlight_t tdl = *dl;
-					vec3_t tmp;
-					VectorSubtract (dl->origin, e->origin, tmp);
-					tdl.origin[0] =  DotProduct (tmp, fwd);
-					tdl.origin[1] = -DotProduct (tmp, rt);
-					tdl.origin[2] =  DotProduct (tmp, up);
-					R_MarkLights (&tdl, k,
-					    clmodel->nodes + clmodel->hulls[0].firstclipnode);
-				}
-				else
-				{
-					R_MarkLights (dl, k,
-					    clmodel->nodes + clmodel->hulls[0].firstclipnode);
-				}
+				/* Into model space, moved as well as rotated: see
+				 * R_DlightModelOrigin (GitHub #495). */
+				tdl = cl_dlights[k];
+				R_DlightModelOrigin (e, cl_dlights[k].origin, tdl.origin);
+				R_MarkLights (&tdl, k,
+				    clmodel->nodes + clmodel->hulls[0].firstclipnode, e);
 			}
 		}
 

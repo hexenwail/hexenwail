@@ -43,7 +43,8 @@ At the restore commit all but three came back byte for byte: `model.c`,
 `model.h` and `r_main.c` gained what the restored renderer needed to take part in
 today's engine (the PimpModel hooks, the `EF_*` effect flags, the MD3
 identifier). Those three have kept changing with the engine since. Among the
-changes: the dlight mask and `MAX_DLIGHTS` (`model.h`, `r_main.c`), the
+changes: the dlight mask and `MAX_DLIGHTS` (`model.h`, `r_main.c`), a brush
+entity's dynamic lights moved into its model space (#495, `model.h`, `r_main.c`), the
 brush-state classification (`r_main.c`), the `r_texture_external` rename
 (`model.c`, `r_main.c`), multiplayer transparency (#58, `r_main.c`), the MD3
 loader and the missing-precache placeholder (`model.{c,h}`), and the #104 cvar
@@ -56,7 +57,8 @@ byte:
 - `r_local.h`: the `r_texture_external` rename, the dlight changes and the
   brush-state classification;
 - `r_light.c` and `r_surf.c`: the dlight mask, widened to 128 bits, and the larger
-  `MAX_DLIGHTS`.
+  `MAX_DLIGHTS`; the one-sided test (#97); a brush entity's light measured in
+  its model space (#495).
 
 So nine of the restored files differ from the original today; do not assume any
 one is pristine. To see exactly what a file carries beyond the original:

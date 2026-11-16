@@ -1117,12 +1117,17 @@ static void R_DrawBEntitiesOnList (void)
 					{
 						for (k = 0; k < MAX_DLIGHTS; k++)
 						{
+							dlight_t	local;
+
 							if ((cl_dlights[k].die < cl.time) || (!cl_dlights[k].radius))
 							{
 								continue;
 							}
 
-							R_MarkLights (&cl_dlights[k], k, clmodel->nodes + clmodel->hulls[0].firstclipnode);
+							/* model space, as gl_rsurf.c's twin (GitHub #495) */
+							local = cl_dlights[k];
+							R_DlightModelOrigin (currententity, cl_dlights[k].origin, local.origin);
+							R_MarkLights (&local, k, clmodel->nodes + clmodel->hulls[0].firstclipnode, currententity);
 						}
 					}
 				}

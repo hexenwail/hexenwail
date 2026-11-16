@@ -258,7 +258,7 @@ R_MarkLights
  * overflow the array silently.  uhexen2-liqz */
 COMPILE_TIME_ASSERT(dlightbits, DLIGHTBITS_WORDS <= 4);
 
-void R_MarkLights (dlight_t *light, int lnum, mnode_t *node)
+void R_MarkLights (dlight_t *light, int lnum, mnode_t *node, const entity_t *ent)
 {
 	mplane_t	*splitplane;
 	float		dist;
@@ -273,12 +273,12 @@ void R_MarkLights (dlight_t *light, int lnum, mnode_t *node)
 
 	if (dist > light->radius)
 	{
-		R_MarkLights (light, lnum, node->children[0]);
+		R_MarkLights (light, lnum, node->children[0], ent);
 		return;
 	}
 	if (dist < -light->radius)
 	{
-		R_MarkLights (light, lnum, node->children[1]);
+		R_MarkLights (light, lnum, node->children[1], ent);
 		return;
 	}
 
@@ -292,13 +292,14 @@ void R_MarkLights (dlight_t *light, int lnum, mnode_t *node)
 			surf->dlightframe = r_dlightframecount;
 		}
 		DLIGHTBIT_SET (surf->dlightbits, lnum);
+		surf->dlightent = ent;
 	}
 
-	R_MarkLights (light, lnum, node->children[0]);
-	R_MarkLights (light, lnum, node->children[1]);
+	R_MarkLights (light, lnum, node->children[0], ent);
+	R_MarkLights (light, lnum, node->children[1], ent);
 }
 #else	/* the major speedup version by Lord Havoc */
-void R_MarkLights (dlight_t *light, int lnum, mnode_t *node)
+void R_MarkLights (dlight_t *light, int lnum, mnode_t *node, const entity_t *ent)
 {
 	mplane_t	*splitplane;
 	float		l, dist, maxdist;
@@ -339,7 +340,6 @@ loc0:
 		 * surface faces the other way.  The descent below is unchanged:
 		 * only whether THIS surface takes the light is. */
 		if (r_dlight_occlusion.integer >= 1 && !(surf->flags & SURF_DRAWTURB) &&
-		    DLIGHT_WORLD_SURFACE (surf) &&
 		    ((surf->flags & SURF_PLANEBACK) ? -dist : dist) < -DLIGHT_PLANE_EPSILON)
 			continue;
 		for (j = 0; j < 3; j++)
@@ -372,13 +372,14 @@ loc0:
 			}
 			else	// already dynamic
 				DLIGHTBIT_SET (surf->dlightbits, lnum);
+			surf->dlightent = ent;
 		}
 	}
 
 	if (node->children[0]->contents >= 0)
-		R_MarkLights (light, lnum, node->children[0]);
+		R_MarkLights (light, lnum, node->children[0], ent);
 	if (node->children[1]->contents >= 0)
-		R_MarkLights (light, lnum, node->children[1]);
+		R_MarkLights (light, lnum, node->children[1], ent);
 }
 #endif	/* end of 2 R_MarkLights versions */
 
@@ -483,7 +484,7 @@ void R_PushDlights (void)
 		}
 		if (culled)
 			continue;
-		R_MarkLights (l, i, cl.worldmodel->nodes );
+		R_MarkLights (l, i, cl.worldmodel->nodes, NULL);
 	}
 }
 
