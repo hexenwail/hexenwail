@@ -22,6 +22,7 @@
 #include "r_local.h"
 #include "d_local.h"
 #include "r_dlightvis.h"
+#include "r_dlightmark.h"
 
 //#define	PASSAGES
 
@@ -432,6 +433,7 @@ void R_NewMap (void)
 #endif
 
 	R_DlightVis_NewMap ();	/* GitHub #97 */
+	R_DlightMark_NewMap ();	/* GitHub #496 */
 }
 
 

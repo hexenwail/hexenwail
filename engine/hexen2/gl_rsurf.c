@@ -29,6 +29,7 @@
 #include "gl_matrix.h"
 #include "gl_postprocess.h"
 #include "gl_lightcluster.h"
+#include "r_dlightmark.h"
 
 /* fog globals from gl_fog.c */
 extern float r_fog_density;
@@ -408,6 +409,7 @@ static void R_AddDynamicLights (msurface_t *surf)
 	// vars for lit support
 	float		cred, cgreen, cblue, brightness;
 	unsigned int	*bl;
+	qboolean	known;
 
 	smax = (surf->extents[0] >> 4) + 1;
 	tmax = (surf->extents[1] >> 4) + 1;
@@ -429,15 +431,18 @@ static void R_AddDynamicLights (msurface_t *surf)
 
 		rad = cl_dlights[lnum].radius;
 		/* The plane is in the surface's model space; so must the light
-		 * be, for a door or plat that has moved (GitHub #495). */
-		R_DlightModelOrigin (surf->dlightent, cl_dlights[lnum].origin, lorg);
+		 * be, for a door or plat that has moved (GitHub #495) -- the
+		 * space of the entity the light came in through, when two share
+		 * this submodel (#496).  false: that is not known, so the
+		 * one-sided test below must not judge it. */
+		known = R_DlightSurfaceOrigin (surf, lnum, cl_dlights[lnum].origin, lorg);
 		dist = DotProduct (lorg, surf->plane->normal) - surf->plane->dist;
 		/* One-sided (GitHub #97): a light behind the face's front plane --
 		 * the BSP plane, flipped for a SURF_PLANEBACK face -- does not
 		 * light it.  Liquids keep vanilla's both sides.  R_MarkLights
 		 * makes the same call so such a face is not even rebuilt; this
 		 * is the one that decides what lands in the lightmap. */
-		if (r_dlight_occlusion.integer >= 1 && !(surf->flags & SURF_DRAWTURB) &&
+		if (known && r_dlight_occlusion.integer >= 1 && !(surf->flags & SURF_DRAWTURB) &&
 		    ((surf->flags & SURF_PLANEBACK) ? -dist : dist) < -DLIGHT_PLANE_EPSILON)
 			continue;
 		rad -= fabs(dist);

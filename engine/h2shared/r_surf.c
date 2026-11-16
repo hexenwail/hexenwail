@@ -21,6 +21,7 @@
 
 #include "quakedef.h"
 #include "r_local.h"
+#include "r_dlightmark.h"
 
 drawsurf_t	r_drawsurf;
 
@@ -78,6 +79,7 @@ static void R_AddDynamicLights (void)
 	unsigned int	*pos;
 	mtexinfo_t	*tex;
 	msurface_t	*surf;
+	qboolean	known;
 
 	if (!r_dynamic.integer)
 		return;
@@ -100,11 +102,12 @@ static void R_AddDynamicLights (void)
 			continue;		// not lit by this light
 
 		rad = fabs(cl_dlights[lnum].radius);
-		/* In the surface's model space (GitHub #495); see gl_rsurf.c's twin. */
-		R_DlightModelOrigin (surf->dlightent, cl_dlights[lnum].origin, lorg);
+		/* In the surface's model space, through the entity that brought
+		 * the light (GitHub #495, #496); see gl_rsurf.c's twin. */
+		known = R_DlightSurfaceOrigin (surf, lnum, cl_dlights[lnum].origin, lorg);
 		dist = DotProduct (lorg, surf->plane->normal) - surf->plane->dist;
 		/* One-sided (GitHub #97); the same test as gl_rsurf.c's. */
-		if (r_dlight_occlusion.integer >= 1 && !(surf->flags & SURF_DRAWTURB) &&
+		if (known && r_dlight_occlusion.integer >= 1 && !(surf->flags & SURF_DRAWTURB) &&
 		    ((surf->flags & SURF_PLANEBACK) ? -dist : dist) < -DLIGHT_PLANE_EPSILON)
 			continue;
 		rad -= fabs(dist);

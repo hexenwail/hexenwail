@@ -29,9 +29,14 @@ software renderer, where a 2 renders as 1.  Checked here:
     is not shown as "User"), and every cvar the detection reads is written by
     every preset, so the answer cannot hang on whatever came before;
   * the Misc menu's "DLight Occlusion" row: placed after "Wall Torch DLs", a
-    soft-ok row, stepping r_dlight_occlusion through 0..M_DLOCCLUSION_MAX with
-    wrap, drawn through M_DlightOcclusion (which reads a carried-over 2 as 1
-    where 2 is out of reach) as Off / Walls / Shadows;
+    soft-ok row, stepping r_dlight_occlusion through 0..M_DlightOcclusionMax ()
+    with wrap, drawn through M_DlightOcclusion (which reads a 2 as 1 where 2
+    does not render) as Off / Walls / Shadows.  M_DlightOcclusionMax is what
+    renders now: M_DLOCCLUSION_MAX, except 1 on desktop when
+    R_LightCluster_ShadesWorld () is false (r_lightclusters 0, or no compute),
+    because the cube maps light only the clustered path's receivers and
+    gl_shadow.c builds none without it.  There the row's note says why
+    Shadows is missing, inside M_ROWNOTE_MAX;
   * the defaults: r_dlight_occlusion 2 on desktop GL, 1 on the ES tier and in
     the software build, and r_shadow_casters 1 (alias casters only where a
     preset or the player asks).
@@ -237,14 +242,45 @@ if not re.search(r'"DLight Occlusion:",\s*/\* GFX_DLOCCLUSION \*/', menu_raw):
 ga = body_of(menu, r"static void M_Graphics_AdjustSliders \(int dir\)\s*\{") or ""
 row = re.search(r"case GFX_DLOCCLUSION:\s*\{(.*?)\}\s*case", ga, re.S)
 row = row.group(1) if row else ""
-for s in ("int v = M_DlightOcclusion () + dir;", "if (v < 0) v = M_DLOCCLUSION_MAX;",
-          "if (v > M_DLOCCLUSION_MAX) v = 0;", 'Cvar_SetValue ("r_dlight_occlusion", v);'):
+for s in ("int v = M_DlightOcclusion () + dir;", "if (v < 0) v = M_DlightOcclusionMax ();",
+          "if (v > M_DlightOcclusionMax ()) v = 0;", 'Cvar_SetValue ("r_dlight_occlusion", v);'):
     if s not in row:
         errors.append(f"the GFX_DLOCCLUSION row must step with `{s}`")
 fn = body_of(menu, r"static int M_DlightOcclusion \(void\)\s*\{") or ""
 if 'Cvar_VariableValue ("r_dlight_occlusion")' not in fn \
-        or "return v < 0 ? 0 : v > M_DLOCCLUSION_MAX ? M_DLOCCLUSION_MAX : v;" not in fn:
-    errors.append("M_DlightOcclusion must read r_dlight_occlusion clamped to 0..M_DLOCCLUSION_MAX")
+        or "int max = M_DlightOcclusionMax ();" not in fn \
+        or "return v < 0 ? 0 : v > max ? max : v;" not in fn:
+    errors.append("M_DlightOcclusion must read r_dlight_occlusion clamped to 0..M_DlightOcclusionMax ()")
+# The ceiling that renders: the cube maps are gl_shadow.c's, which selects
+# lights only while the cluster grid is up (R_LightCluster_Available), so on
+# desktop the ceiling follows R_LightCluster_ShadesWorld, its frame-stable twin.
+cap = re.search(r"static int M_DlightOcclusionMax \(void\)\s*\{\s*"
+                r"#if defined\(GLQUAKE\) && !defined\(USE_GLES\)\s*"
+                r"if \(!R_LightCluster_ShadesWorld \(\)\)\s*return 1;\s*#endif\s*"
+                r"return M_DLOCCLUSION_MAX;\s*\}", menu)
+if not cap:
+    errors.append("M_DlightOcclusionMax must return 1 on desktop GL when R_LightCluster_ShadesWorld () is false, "
+                  "M_DLOCCLUSION_MAX otherwise")
+if not re.search(r"r_dlight_occlusion\.integer >= 2 && !sh_failed && R_LightCluster_Available \(\)", shadow):
+    errors.append("gl_shadow.c no longer gates the maps on R_LightCluster_Available (); the row's ceiling "
+                  "(M_DlightOcclusionMax) must follow whatever it gates on now")
+if not re.search(r'#if defined\(GLQUAKE\)\n(?:#include "[^"]+"\n)*#include "gl_lightcluster.h"\n(?:#include "[^"]+"\n)*#endif',
+                 menu_raw):
+    errors.append('menu.c must #include "gl_lightcluster.h" under #if defined(GLQUAKE)')
+# Capped: the note says why -- the cvar when it is off, the GPU when it is on
+# (no compute, or the grid failed to build) -- each inside M_ROWNOTE_MAX.
+note = re.search(r'static const char \*M_Graphics_Note \(int row\)\s*\{\s*'
+                 r'if \(row == GFX_DLOCCLUSION && M_DlightOcclusionMax \(\) < M_DLOCCLUSION_MAX\)\s*'
+                 r'return Cvar_VariableValue \("r_lightclusters"\) \? "([^"]*)"\s*:\s*"([^"]*)";', menu)
+rowmax = re.search(r"#define\s+M_ROWNOTE_MAX\s+(\d+)", menu)
+if not note or "r_lightclusters 1" not in note.group(2) or "GPU" not in note.group(1):
+    errors.append("M_Graphics_Note must say, while the row is capped below the tier, that Shadows need "
+                  "r_lightclusters 1 (cvar off) or that the GPU cannot draw them (cvar on)")
+else:
+    for n in note.groups():
+        if not rowmax or len(n) > int(rowmax.group(1)):
+            errors.append(f"the capped row's note \"{n}\" runs past M_ROWNOTE_MAX")
+
 gd = body_of(menu, r"static void M_Graphics_Draw \(void\)\s*\{") or ""
 if not re.search(r'names\[\] = \{ "Off", "Walls", "Shadows" \};.*?names\[M_DlightOcclusion \(\)\]', gd, re.S):
     errors.append("the row must draw Off / Walls / Shadows through M_DlightOcclusion")

@@ -30,6 +30,7 @@
 #include "gl_vbo.h"
 #include "gl_shader.h"
 #include "gl_pipeline.h"
+#include "gl_lightcluster.h"
 #endif
 #include "sbar.h"
 #include "menu_pointer.h"
@@ -2848,10 +2849,25 @@ static void M_Options_Key (int k)
 #define	M_DLOCCLUSION_MAX	1
 #endif
 
+/* What r_dlight_occlusion reaches right now: the cube maps light only the
+ * clustered path's receivers (gl_shadow.c), so with r_lightclusters 0 -- or a
+ * driver without compute -- a desktop 2 renders as 1 too.  The presets still
+ * store the tier's M_DLOCCLUSION_MAX, which comes alive with the clusters;
+ * the row shows and steps through what renders. */
+static int M_DlightOcclusionMax (void)
+{
+#if defined(GLQUAKE) && !defined(USE_GLES)
+	if (!R_LightCluster_ShadesWorld ())
+		return 1;
+#endif
+	return M_DLOCCLUSION_MAX;
+}
+
 static int M_DlightOcclusion (void)
 {
 	int v = (int)Cvar_VariableValue ("r_dlight_occlusion");
-	return v < 0 ? 0 : v > M_DLOCCLUSION_MAX ? M_DLOCCLUSION_MAX : v;
+	int max = M_DlightOcclusionMax ();
+	return v < 0 ? 0 : v > max ? max : v;
 }
 
 /* A preset's shadow-map tier (#97, P5): cube size in texels, most lights
@@ -4459,12 +4475,12 @@ static void M_Graphics_AdjustSliders (int dir)
 		break;
 	case GFX_DLOCCLUSION:
 	{
-		/* Off, Walls (1), Shadows (2) where the tier has the maps.  A 2
-		 * carried in a config from desktop reads, and steps, as the 1 it
-		 * renders as here. */
+		/* Off, Walls (1), Shadows (2) where the maps render.  A 2 carried
+		 * in a config from desktop, or held with r_lightclusters 0, reads,
+		 * and steps, as the 1 it renders as. */
 		int v = M_DlightOcclusion () + dir;
-		if (v < 0) v = M_DLOCCLUSION_MAX;
-		if (v > M_DLOCCLUSION_MAX) v = 0;
+		if (v < 0) v = M_DlightOcclusionMax ();
+		if (v > M_DlightOcclusionMax ()) v = 0;
 		Cvar_SetValue ("r_dlight_occlusion", v);
 		break;
 	}
@@ -4513,6 +4529,11 @@ static void M_Graphics_AdjustSliders (int dir)
 
 static const char *M_Graphics_Note (int row)
 {
+	/* the row stops at Walls on desktop without the clusters: say why --
+	 * the cvar, or, with it on, a GPU the grid cannot run on */
+	if (row == GFX_DLOCCLUSION && M_DlightOcclusionMax () < M_DLOCCLUSION_MAX)
+		return Cvar_VariableValue ("r_lightclusters") ? "This GPU cannot draw the shadow maps"
+							       : "Shadows need r_lightclusters 1";
 	switch (row)
 	{
 	case GFX_CONMAXCOLS:	return "Wrap console text at this width";	/* con_maxcols */

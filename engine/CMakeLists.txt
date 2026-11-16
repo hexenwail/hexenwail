@@ -535,6 +535,7 @@ set(GL_RENDERER_SOURCES
     ${COMMONDIR}/gl_refrag.c
     ${COMMONDIR}/gl_rlight.c
     ${COMMONDIR}/r_dlightvis.c
+    ${COMMONDIR}/r_dlightmark.c
     ${COMMONDIR}/gl_sky.c
     ${COMMONDIR}/gl_screen.c
     ${COMMONDIR}/gl_warp.c
@@ -588,6 +589,7 @@ set(SOFT_RENDERER_SOURCES
     ${COMMONDIR}/r_efrag.c
     ${COMMONDIR}/r_light.c
     ${COMMONDIR}/r_dlightvis.c
+    ${COMMONDIR}/r_dlightmark.c
     ${COMMONDIR}/r_sky.c
     ${COMMONDIR}/r_sprite.c
     ${COMMONDIR}/r_surf.c

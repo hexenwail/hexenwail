@@ -27,6 +27,7 @@
 #include "img_load.h"
 #include "gl_sky.h"
 #include "r_dlightvis.h"
+#include "r_dlightmark.h"
 
 /* gl_fog.c */
 void Fog_Init (void);
@@ -609,6 +610,7 @@ void R_NewMap (void)
 	Sky_NewMap ();
 	Fog_NewMap ();
 	R_DlightVis_NewMap ();	/* GitHub #97 */
+	R_DlightMark_NewMap ();	/* GitHub #496 */
 	R_Shadow_NewMap ();	/* GitHub #97: the maps are of the old world */
 	mirrortexturenum = -1;
 	for (i = 0; i < cl.worldmodel->numtextures; i++)

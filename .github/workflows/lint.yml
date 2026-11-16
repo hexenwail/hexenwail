@@ -509,6 +509,11 @@ jobs:
       # (#97 P2).
       - name: Dynamic lights do not see through walls
         run: python3 tools/test_dlight_vis.py
+      # ...and on brush entities sharing one submodel, each light measured in
+      # the space of the copy it came in through: r_dlightmark.c compiled
+      # whole with both tiers' mark and add loops, run on two copies (#496).
+      - name: Shared submodels keep their own lights
+        run: python3 tools/test_dlight_shared_submodel.py
       # ...and on the GPU clustered path, the cube shadow maps: the six face
       # matrices against GL's cube-map table and the cull face that keeps the
       # walls' far sides, and the ShadowPass / DlShadow blocks against their C
