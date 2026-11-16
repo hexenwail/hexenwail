@@ -8,7 +8,11 @@
 
 layout (local_size_x = 8, local_size_y = 8) in;
 
-TEXBIND(8) uniform sampler2D u_scene_depth;	/* full-res snapshot, entities included */
+TEXBIND2(8, 0) uniform sampler2D u_scene_depth;	/* full-res snapshot, entities included */
+/* u_mip0 (imageLoad + imageStore) and u_depth_mismatch (imageAtomicOr) are
+ * read and written in one dispatch: under SDL_GPU their textures need
+ * COMPUTE_STORAGE_SIMULTANEOUS_READ_WRITE, which READ | WRITE is not, and
+ * which only some formats support (#340). */
 IMGBIND(0, rg16f) uniform image2D u_mip0;
 IMGBIND(1, rg16f) uniform writeonly image2D u_mip1;
 IMGBIND(2, rg16f) uniform writeonly image2D u_mip2;

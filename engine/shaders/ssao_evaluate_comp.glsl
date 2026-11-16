@@ -15,9 +15,9 @@
 const uint quality = uint (QUALITY);
 
 layout (local_size_x = 8, local_size_y = 8) in;
-TEXBIND(8) uniform sampler2D world_depth;	/* the pyramid: x world, y scene */
-TEXBIND(9) uniform usampler2D hilbert_lut;
-TEXBIND(10) uniform usampler2D depth_mismatch;
+TEXBIND2(8, 0) uniform sampler2D world_depth;	/* the pyramid: x world, y scene */
+TEXBIND2(9, 1) uniform usampler2D hilbert_lut;
+TEXBIND2(10, 2) uniform usampler2D depth_mismatch;
 IMGBIND(0, r8) uniform writeonly image2D out_working_ao_term;
 IMGBIND(1, r8) uniform writeonly image2D out_working_edges;
 

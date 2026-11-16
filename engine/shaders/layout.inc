@@ -67,6 +67,11 @@
  *   SSBO_RW(gl, vk)   storage buffer that is written (read-write or
  *                     writeonly -- SDL_GPU has no write-only kind); set 1
  *
+ * TEXBIND(b) is only right when b is also the dense set-0 index: the SSAO
+ * stages' TEXBIND(8..10) gave SDL_GPU bindings 8.. in a set that holds two or
+ * three textures (#340).  tools/test_sdlgpu_bindings.py checks every stage's
+ * Vulkan SPIR-V against this numbering, in the shaders-spirv CI job.
+ *
  * The GL arms use `gl` only, so the driver sees exactly the qualifiers it
  * would from a hand-written layout(std430, binding = gl).  Storage blocks
  * take layout(binding=) wherever compute exists (GL 4.3 / ES 3.1), unlike

@@ -14,6 +14,11 @@ name: Shaders SPIR-V
 # numbering only failed there (#448).  The flake.nix shadercross pin is
 # already in the paths below.
 #
+# Last, tools/test_sdlgpu_bindings.py reads the Vulkan .spv and checks
+# that every resource sits at the set and dense binding SDL_GPU will bind
+# it at.  Neither compiler checks that; it needs the .spv, so it runs here
+# and not in lint.yml (#340).
+#
 # The paths are everything the gate reads: the shaders themselves
 # (.glsl AND .inc -- layout.inc/ssao.inc are the risk), the three CMake
 # scripts that expand, compile and cross-compile them, the CMakeLists
@@ -30,6 +35,7 @@ on:
       - 'engine/CMakeLists.txt'
       - 'flake.nix'
       - '.github/workflows/shaders-spirv.yml'
+      - 'tools/test_sdlgpu_bindings.py'
   push:
     branches: [master]
     paths:
@@ -40,6 +46,7 @@ on:
       - 'engine/CMakeLists.txt'
       - 'flake.nix'
       - '.github/workflows/shaders-spirv.yml'
+      - 'tools/test_sdlgpu_bindings.py'
 
 # Builds and throws the result away; nothing here writes to the repository.
 permissions:
@@ -84,3 +91,16 @@ jobs:
         run: |
           set -euo pipefail
           nix develop -c cmake --build /tmp/shader-build --target shaders_cross
+
+      # The .vk.spv are what SDL_GPU will be handed, and SDL_GPU binds by
+      # position: within each descriptor set, sampled textures, then storage
+      # textures, then storage buffers, numbered densely from 0.  glslang and
+      # shadercross both accept a shader that breaks that (the four SSAO
+      # compute stages had their samplers at set 0 bindings 8..), so check it
+      # here, on the SPIR-V itself.  --sources fails any stage the gate did
+      # not compile.  Stock python3; no tool from the dev shell.  #340.
+      - name: Check SDL_GPU binding layout
+        run: |
+          set -euo pipefail
+          python3 tools/test_sdlgpu_bindings.py /tmp/shader-build/engine/generated/spirv \
+            --sources /tmp/shader-build/engine/generated/vk -v
