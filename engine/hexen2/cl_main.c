@@ -924,14 +924,29 @@ static void CL_RelinkEntities (void)
 		if (ent->msgtime != cl.mtime[0] && !(ent->baseline.flags & BE_ON))
 		{
 			ent->model = NULL;
+			/* Whatever reuses this slot, or brings this entity back, has
+			 * nothing to lerp from: CL_ParseUpdate reads this as "no
+			 * previous frame".  svc_reference can restore ->model for an
+			 * entity still in the reference frame, so ->model alone does
+			 * not say the client dropped it. */
+			ent->forcelink = true;
 			continue;
 		}
 
 		VectorCopy (ent->origin, oldorg);
 
-		if (ent->forcelink || ent->msgtime != cl.mtime[0])
-		{	// the entity was not updated in the last message
-			// so move to the final spot
+		/* Hexen II delta-codes entities against the acknowledged reference
+		 * frame and skips the ones that have not changed, so an entity with
+		 * BE_ON that is missing from the last message is being held, not
+		 * lost: msgtime != cl.mtime[0] is the normal state of anything that
+		 * stands still.  Quake keyed the lerp reset on that test because
+		 * there every visible entity is in every packet; here it reset the
+		 * pose lerp of every held model on every frame it was held, so a
+		 * pose change never got to blend (#494).  Only a real (re)appearance
+		 * -- forcelink, from CL_ParseUpdate, svc_clear_edicts or the drop
+		 * above -- resets the lerps. */
+		if (ent->forcelink)
+		{	// no previous frame: move to the final spot
 			VectorCopy (ent->msg_origins[0], ent->origin);
 			VectorCopy (ent->msg_angles[0], ent->angles);
 			ent->lerpflags |= LERP_RESETMOVE | LERP_RESETANIM;
@@ -945,8 +960,10 @@ static void CL_RelinkEntities (void)
 			// detect msg_origins changes here, lerp over 0.1s.  Whatever
 			// multi-tick gap exists between actual server-side moves, the
 			// 0.1s window naturally covers it.
+			// A held entity's msg_origins pair is from its last update,
+			// already acted on: re-testing it would reset every frame.
 			qboolean teleport = false;
-			for (j = 0; j < 3; j++)
+			for (j = 0; j < 3 && ent->msgtime == cl.mtime[0]; j++)
 			{
 				delta[j] = ent->msg_origins[0][j] - ent->msg_origins[1][j];
 				if (delta[j] > 100 || delta[j] < -100)
@@ -1021,6 +1038,14 @@ static void CL_RelinkEntities (void)
 					ent->angles[j] = ent->previousangles[j] + dang[j] * blend;
 				}
 			}
+		}
+		else if (ent->msgtime != cl.mtime[0])
+		{	// held by the delta scheme: it is where its last update put
+			// it.  Not the msg_origins[1] -> [0] lerp: that pair is the
+			// last update's, and frac is the last *message's* interval,
+			// so lerping it would pull the entity back to [1] each message.
+			VectorCopy (ent->msg_origins[0], ent->origin);
+			VectorCopy (ent->msg_angles[0], ent->angles);
 		}
 		else
 		{	// if the delta is large, assume a teleport and don't lerp.
