@@ -94,6 +94,14 @@ jobs:
       - name: No GL calls outside the renderer modules
         run: python3 tools/test_gl_call_sites.py
 
+      # gl_pipeline.c shadows the GL draw state and drops calls that would not
+      # change it, which is only right while nothing writes that state behind
+      # its back.  No draw-state call outside gl_pipeline.c, except the
+      # context-time switches allowlisted in the script, the loader table
+      # (gl_func.h) and the web canvas blit (web_canvas_gl2.c).  GitHub #337.
+      - name: No draw-state GL call bypasses the pipeline
+        run: python3 tools/test_draw_state_routing.py
+
       # The linker already guarantees the software build *defines* every
       # renderer cvar shared code touches -- r_soft_web.c exists for that, and
       # CI builds the WEBSOFT config on every PR.  What nothing catches is a

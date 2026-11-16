@@ -159,6 +159,9 @@ cvar_t	r_shadow_casters = {"r_shadow_casters", "1", CVAR_ARCHIVE};
 #ifndef GL_SCISSOR_TEST
 #define GL_SCISSOR_TEST			0x0C11
 #endif
+#ifndef GL_SCISSOR_BOX
+#define GL_SCISSOR_BOX			0x0C10
+#endif
 #ifndef GL_DEPTH
 #define GL_DEPTH			0x1801
 #endif
@@ -1270,7 +1273,7 @@ static void SH_DrawMap (const shdraw_t *d)
 /* ------------------------------------------------------------------ */
 
 typedef struct {
-	GLint		fbo, vp[4];
+	GLint		fbo, vp[4], scissor_box[4];
 	qboolean	scissor, depth_test, depth_mask, cull, stencil, poly;
 	GLenum		depth_func, cull_face;
 	double		znear, zfar;
@@ -1282,6 +1285,8 @@ static void SH_SaveState (shstate_t *s)
 	glGetIntegerv_fp (GL_FRAMEBUFFER_BINDING, &s->fbo);
 	glGetIntegerv_fp (GL_VIEWPORT, s->vp);
 	s->scissor = glIsEnabled_fp (GL_SCISSOR_TEST) ? true : false;
+	if (s->scissor)
+		glGetIntegerv_fp (GL_SCISSOR_BOX, s->scissor_box);
 	s->depth_test = R_GetDepthTest ();
 	s->depth_mask = R_GetDepthMask ();
 	s->depth_func = R_GetDepthFunc ();
@@ -1298,8 +1303,11 @@ static void SH_RestoreState (const shstate_t *s)
 	R_UseProgram (0);
 	glBindFramebuffer_fp (GL_FRAMEBUFFER, (GLuint)s->fbo);
 	glViewport_fp (s->vp[0], s->vp[1], s->vp[2], s->vp[3]);
+	/* The passes only disable the test and never move the box, so
+	 * re-setting the saved box puts back exactly what was there. */
 	if (s->scissor)
-		glEnable_fp (GL_SCISSOR_TEST);
+		GL_SetScissor (s->scissor_box[0], s->scissor_box[1],
+			       s->scissor_box[2], s->scissor_box[3]);
 	R_SetDepthTest (s->depth_test);
 	R_SetDepthMask (s->depth_mask);
 	if (s->depth_func != RP_ENUM_UNKNOWN)
@@ -1315,7 +1323,7 @@ static void SH_RestoreState (const shstate_t *s)
 static void SH_PassState (void)
 {
 	glViewport_fp (0, 0, sh_res, sh_res);
-	glDisable_fp (GL_SCISSOR_TEST);
+	GL_ResetScissor ();
 	R_SetDepthTest (true);
 	R_SetDepthMask (true);
 	R_SetDepthFunc (GL_LESS);
@@ -1609,7 +1617,7 @@ void R_Shadow_DrawDebug (void)
 		w = h * 4 / 3;
 	}
 	glViewport_fp (saved.vp[0], saved.vp[1], w, h);
-	glDisable_fp (GL_SCISSOR_TEST);
+	GL_ResetScissor ();
 	R_SetDepthTest (false);
 	R_SetCull (false);
 	R_SetBlend (false);

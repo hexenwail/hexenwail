@@ -24,15 +24,16 @@
  *
  * The shadow is only correct as long as nothing writes these states behind
  * its back, so the raw glEnable/glDepthMask/glBlendFunc/... calls belong here
- * and nowhere else.  Exceptions, all deliberate: one-time context setup in
- * gl_vidsdl.c for state this module does not track (multisample, debug
- * output); three #if 0 fragments of the old fixed-function zfix hack
- * (gl_vidsdl.c GL_Init, gl_rsurf.c R_DrawBrushModel) which do not compile
- * and so cannot desync anything; and state that is deliberately not
- * pipeline state -- sample shading (SDL_GPU has no API for it; GL-only
- * path), scissor and viewport (dynamic command-buffer state in SDL_GPU,
- * not pipeline state), and the web_canvas_gl2.c presentation canvas
- * (a separate renderer path, raw GLES by design).
+ * and nowhere else.  Scissor and sample shading are not shadowed (scissor is
+ * dynamic command-buffer state in SDL_GPU, and SDL_GPU has no sample-shading
+ * API at all), but their calls still live here, as the GL_Set* entry points.
+ * Exceptions, all deliberate: context-wide switches set at context or
+ * allocation time and never per draw -- debug output, multisample and clip
+ * control in gl_vidsdl.c GL_Init, seamless cube sampling when gl_shadow.c
+ * allocates its maps; viewport and clear values, which are not draw state; and the web_canvas_gl2.c presentation canvas (a separate
+ * renderer path, raw GLES by design).  tools/test_draw_state_routing.py holds
+ * that list and fails on any other draw-state call outside this module.
+ * GitHub #337.
  */
 
 #ifndef GL_PIPELINE_H
@@ -97,11 +98,13 @@ void	R_SetStencilOp (GLenum sfail, GLenum dpfail, GLenum dppass);
 void	R_SetColorMask (qboolean r, qboolean g, qboolean b, qboolean a);
 void	R_SetAlphaToCoverage (qboolean enable);
 
-/* Point size and scissor.  Unshadowed (see gl_pipeline.c): the only callers
- * set them as balanced pairs.  GitHub #453. */
+/* Point size, scissor and sample shading.  Unshadowed (see gl_pipeline.c):
+ * every caller puts back what it changed -- set/reset pairs, or for
+ * gl_shadow.c's passes reset then restore the saved scissor.  #453, #337. */
 void	GL_SetPointSize (float size);
 void	GL_SetScissor (int x, int y, int width, int height);
 void	GL_ResetScissor (void);
+void	GL_SetSampleShading (float frac);	/* <= 0 turns it off */
 void	R_UseProgram (GLuint program);
 
 /* Deleting a program invalidates the bound-program shadow: GL reuses names, so

@@ -2170,12 +2170,6 @@ static void GL_Init (void)
 
 //	glClearColor_fp(1,0,0,0);
 	R_SetCullFace (GL_FRONT);
-#if 0 /* causes side effects at least in 16 bpp.  */
-	/* Get rid of Z-fighting for textures by offsetting the
-	 * drawing of entity models compared to normal polygons.
-	 * (See: R_DrawBrushModel.) */
-	glPolygonOffset_fp(0.05f, 25.0f);
-#endif /* #if 0 */
 
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);

@@ -2569,15 +2569,7 @@ static void PP_ApplySampleShading (void)
 	else if (frac > 1.0f)
 		frac = 1.0f;
 
-	if (frac > 0.0f)
-	{
-		glEnable_fp (GL_SAMPLE_SHADING);
-		glMinSampleShading_fp (frac);
-	}
-	else
-	{
-		glDisable_fp (GL_SAMPLE_SHADING);
-	}
+	GL_SetSampleShading (frac);
 
 	/* Reported on change only -- per frame it would be a wall of text, and
 	 * never reported at all leaves no way to tell "the cvar did nothing"
@@ -2596,7 +2588,7 @@ static void PP_EndSampleShading (void)
 {
 #ifndef USE_GLES
 	if (gl_renderer_caps.sample_shading)
-		glDisable_fp (GL_SAMPLE_SHADING);
+		GL_SetSampleShading (0.0f);
 #endif
 }
 
