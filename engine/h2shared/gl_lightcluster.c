@@ -520,8 +520,11 @@ void R_LightCluster_BindForWorld (void)
 	 * (the trap uhexen2-uxpp documents for caustics); one shared block makes
 	 * that impossible.  The lookup constants are read only while the scale
 	 * is non-zero, so on a frame the grid is not live they are simply
-	 * whatever the last live frame left. */
-	R_SetWorldDlight (scale, lc_view, lc_vp, lc_zlogscale, lc_zlogbias);
+	 * whatever the last live frame left.  The last argument is the
+	 * one-sided tolerance ClusteredDlight drops a light behind a face with,
+	 * the same test and the same constant as the CPU path's (#97). */
+	R_SetWorldDlight (scale, lc_view, lc_vp, lc_zlogscale, lc_zlogbias,
+			  r_dlight_occlusion.integer >= 1 ? DLIGHT_PLANE_EPSILON : 0.0f);
 
 	if (scale <= 0.0f)
 		return;

@@ -311,6 +311,15 @@ cvar_t	r_lerp_complete = {"r_lerp_complete", "1", CVAR_ARCHIVE};
  * uhexen2-vdmz */
 cvar_t	r_dlight_model_list = {"r_dlight_model_list", "", CVAR_ARCHIVE};
 
+/* Dynamic-light occlusion (GitHub #97).  0 is vanilla: every tier lit both
+ * sides of a face's plane, so a light lit the far side of the wall it stood
+ * against.  1 (and anything above, kept for the visibility and shadow-map
+ * phases still to come) drops a light that is more than DLIGHT_PLANE_EPSILON
+ * behind a face, on the CPU path (R_AddDynamicLights, R_MarkLights; world
+ * surfaces only, see DLIGHT_WORLD_SURFACE) and the GPU one (ClusteredDlight).
+ * Liquids are exempt: they are seen, and lit, from both sides.  The software renderer's copy is in r_soft_web.c. */
+cvar_t	r_dlight_occlusion = {"r_dlight_occlusion", "1", CVAR_ARCHIVE};
+
 /* Evaluate the liquid warp per pixel in the fragment shader instead of per
  * vertex on the CPU (uhexen2-9o7u).  Default 0 = the legacy per-vertex path.
  *

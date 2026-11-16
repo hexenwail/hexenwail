@@ -97,7 +97,8 @@ if "COMPILE_TIME_ASSERT(worldfrag_size, sizeof(r_worldfrag_t) == 64 + 6 * 16);" 
     errors.append("COMPILE_TIME_ASSERT must pin r_worldfrag_t at 64 + 6*16")
 # Old loose name -> where its value lives now.
 WORLD_ALIASES = {"u_lightview": "u_wflightview", "u_lightgrid_xy": "u_wfgrid", "u_lightgrid_z": "u_wfgridz.xy",
-                 "u_dlight_scale": "u_wfgridz.z", "u_turb": "u_wfwarp.xy", "u_spans": "u_wfwarp.z",
+                 "u_dlight_scale": "u_wfgridz.z", "u_dlight_onesided": "u_wfgridz.w",
+                 "u_turb": "u_wfwarp.xy", "u_spans": "u_wfwarp.z",
                  "u_material": "u_wfmaterial.xyz", "u_softemu": "u_wfsoftemu", "u_lmstyles": "u_wflmstyles.xy"}
 FRAG_ALIASES = {"u_fog_color": "u_ffogv.xyz", "u_fog_density": "u_ffogv.w", "u_alpha_threshold": "u_fmask.x",
                 "u_force_opaque_alpha": "u_fmask.y", "u_overbright": "u_fmask.z", "u_lightmap_bicubic": "u_fmask.w",
@@ -210,7 +211,7 @@ def preprocess(text, defined):
 
 TOK = r"\d+\.\d*(?:[eE][-+]?\d+)?|\.\d+(?:[eE][-+]?\d+)?|0x[0-9A-Fa-f]+u?|\d+u?|\w+|[-+*/%<>=!&|^]=|&&|\|\||\+\+|--|<<=|>>=|<<|>>|\S"
 ALIASES = {**WORLD_ALIASES, **FRAG_ALIASES}
-DESKTOP_ONLY = {"u_dlight_scale", "u_lightview", "u_lightgrid_xy", "u_lightgrid_z", "u_lmstyles"}
+DESKTOP_ONLY = {"u_dlight_scale", "u_dlight_onesided", "u_lightview", "u_lightgrid_xy", "u_lightgrid_z", "u_lmstyles"}
 ES_FORBIDDEN = DESKTOP_ONLY | {"u_lightgrid", "u_lmlayer1", "u_lmlayer2", "u_lmlayer3", "Lights", "LightStyles",
                                "findLSB", "early_fragment_tests", "buffer", "u_wflightview", "u_wfgrid",
                                "u_wflmstyles"}
@@ -251,11 +252,13 @@ def digest(fns):
 # token-identical to the literals they replaced (aliases expanded) on both
 # tiers and for the OIT splice (and at W3, the OIT twin re-proven against that
 # splice as a `#define OIT 1` variant).  A deliberate shader change updates them:
-# run this file with --golden.
+# run this file with --golden.  The desktop pair moved with GitHub #97's
+# one-sided dynamic-light test in world_dlight.inc (tools/test_dlight_onesided.py
+# pins the test itself); the ES pair did not, ClusteredDlight being desktop only.
 GOLDEN = {
-    ("sworld_frag", "desk"): "b569cef5ad4db0cb",
+    ("sworld_frag", "desk"): "2714c90648360cc0",
     ("sworld_frag", "es"): "20aa06ceead5c04e",
-    ("sworld_opaque_frag", "desk"): "41dd74c6e03d48d0",
+    ("sworld_opaque_frag", "desk"): "ab4d128f7c15d9a6",
     ("sworld_opaque_frag", "es"): "63569b0838c0cfaa",
 }
 ARMS = {"desk": set(), "es": {"GL_ES"}}
@@ -374,7 +377,10 @@ FRAME = {
     "R_SetWorldSpans": [r"worldframe\.warp\[2\] = cell;"],
     "R_SetWorldDlight": [r"RU_SetMat \(worldframe\.lightview, view16\);",
                          r"RU_Set4 \(worldframe\.grid, grid4\[0\], grid4\[1\], grid4\[2\], grid4\[3\]\);",
-                         r"RU_Set4 \(worldframe\.gridz, zlogscale, zlogbias, scale, 0\.0f\);"],
+                         r"RU_Set4 \(worldframe\.gridz, zlogscale, zlogbias, scale, onesided\);",
+                         r"worldframe_onesided = onesided;"],
+    # Lit water's bracket around its batches (GitHub #97): 0 = light both sides.
+    "R_SetWorldLiquid": [r"worldframe\.gridz\[3\] = liquid \? 0\.0f : worldframe_onesided;"],
     "R_SetWorldLMStyles": [r"RU_Set4 \(worldframe\.lmstyles, on, shift, 0\.0f, 0\.0f\);"],
 }
 for fn, wants in FRAME.items():
@@ -410,7 +416,8 @@ if not re.search(r"GL_MaterialParams \(mat\);\s*R_SoftEmuParams \(se\);\s*R_SetW
 if sf.find("R_SetWorldFrame") < sf.find("r_viewleaf = Mod_PointInLeaf"):
     errors.append("R_SetupFrame must set the caustics after r_viewleaf moves (R_CausticsIntensity reads it)")
 bfw = body_of(lc, r"void R_LightCluster_BindForWorld \(void\)\s*\{") or ""
-if not re.search(r"\}\s*R_SetWorldDlight \(scale, lc_view, lc_vp, lc_zlogscale, lc_zlogbias\);\s*if \(scale <= 0\.0f\)", bfw):
+if not re.search(r"\}\s*R_SetWorldDlight \(scale, lc_view, lc_vp, lc_zlogscale, lc_zlogbias,\s*"
+                 r"r_dlight_occlusion\.integer >= 1 \? DLIGHT_PLANE_EPSILON : 0\.0f\);\s*if \(scale <= 0\.0f\)", bfw):
     errors.append("R_LightCluster_BindForWorld must record the scale and lookup for every frame, after deciding the scale")
 lsf = body_of(rsurf, r"void R_LightStyles_FrameSetup \(void\)\s*\{") or ""
 if "R_SetWorldLMStyles (lm_gpu_styles ? 1.0f : 0.0f, gl_overbright.integer ? 1.0f : 2.0f);" not in lsf:
@@ -421,7 +428,12 @@ if not re.search(r"if \(p->ub_wfrag >= 0\)\s*R_SetWorldSpans \(cell\);", spc):
 ewp = body_of(warp, r"void EmitWaterPolys \(msurface_t \*fa\)\s*\{") or ""
 if not re.search(r"R_SetSpanCell \(prog, R_SpanCell \(true\)\);.*R_SetSpanCell \(prog, lit \? R_SpanCell \(false\) : 0\.0f\);", ewp, re.S):
     errors.append("lit water must bracket its batches' span cell and leave the frame's behind")
-CALLS = {"R_SetWorldFrame": 1, "R_SetWorldSpans": 2, "R_SetWorldDlight": 1, "R_SetWorldLMStyles": 1}
+if not re.search(r"R_SetWorldLiquid \(true\);.*GL_ImmBegin \(\);.*GL_ImmEnd \(GL_TRIANGLES, prog\);.*"
+                 r"R_SetWorldLiquid \(false\);", ewp, re.S):
+    errors.append("lit water must bracket its batches with R_SetWorldLiquid (true) / (false): a liquid is lit "
+                  "from both sides (GitHub #97)")
+CALLS = {"R_SetWorldFrame": 1, "R_SetWorldSpans": 2, "R_SetWorldDlight": 1, "R_SetWorldLMStyles": 1,
+         "R_SetWorldLiquid": 2}
 engine_c = {p: strip(p.read_text(errors="replace")) for d in ("engine/h2shared", "engine/hexen2")
             for p in sorted((ROOT / d).glob("*.c")) if p.name != "gl_uniforms.c"}
 for fn, n in CALLS.items():

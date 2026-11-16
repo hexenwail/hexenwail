@@ -87,6 +87,7 @@ extern cvar_t	r_teamcolor;
 extern cvar_t	r_external_textures;
 extern cvar_t	r_texture_external;
 extern cvar_t	r_dynamic;
+extern cvar_t	r_dlight_occlusion;	/* r_soft_web.c; GitHub #97 */
 
 #define XCENTERING	(1.0 / 2.0)
 #define YCENTERING	(1.0 / 2.0)

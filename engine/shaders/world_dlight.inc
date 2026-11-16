@@ -47,8 +47,29 @@
  * normal IS the surface normal with no interpolation error.  Same reasoning as
  * the material-map tangent frame (material.inc), and the same reason neither
  * needs a normal attribute on the vertex.  Its sign follows triangle winding
- * and does NOT need correcting: the plane distance below is used through abs(),
- * and the projection N * dot(lpos - p, N) is unchanged when N flips.
+ * and screen orientation, so it is arbitrary, and it is turned toward the eye
+ * (the eye-space origin) before anything reads it.  That is the face's FRONT:
+ * with gl_cull on (the default; the mirror pass swaps the face) the rasterizer
+ * passes only the side a BSP face's winding faces, so the side a fragment is
+ * seen from is the side its lightmap belongs to.  Under gl_cull 0 a back face
+ * seen from inside solid is lit from the eye's side, which nobody can see.  The projection
+ * N * dot(lpos - p, N) does not care which way N points; the test below does.
+ *
+ * A LIGHT BEHIND THE FACE DOES NOT LIGHT IT (GitHub #97, r_dlight_occlusion).
+ * R_AddDynamicLights lit both sides of a plane, so a torch lit the far side of
+ * its own wall; the one-sided test drops a light more than u_dlight_onesided
+ * units behind the face's front plane, the same test the CPU twins make
+ * against the BSP plane (gl_rsurf.c, gl_rlight.c, r_surf.c, r_light.c).  The
+ * tolerance, about 2 units, is for torches whose origin sits a unit or two
+ * inside their wall; the lit side keeps abs(pdist), so a light inside that
+ * band falls off exactly as it did.  0 is vanilla, both sides: what
+ * r_dlight_occlusion 0 writes, and what lit water writes around its batches
+ * (EmitWaterPolys), because a liquid surface is seen, and lit, from both.
+ *
+ * THE ALIAS HALF HAS NO SUCH TEST, deliberately.  alias_dlight.inc lights a
+ * model as a point-ish receiver with no surface plane to be behind: a torch
+ * behind a monster's back still lights the monster, as it should, and what
+ * would stop it lighting one through a wall is visibility, not a plane.
  *
  * IT WORKS IN EYE SPACE, so lights are transformed by u_lightview per light per
  * fragment.  The froxel grid is defined in eye space, v_eyepos is the one
@@ -75,6 +96,7 @@
 vec3 ClusteredDlight(vec3 lm, highp vec3 p) {
     /* Geometric normal first -- see the header comment on derivatives. */
     highp vec3 N = normalize(cross(dFdx(p), dFdy(p)));
+    if (dot(N, p) > 0.0) N = -N;   /* toward the eye: the face's front */
     uvec4 mask = LightGridMask(p);
     for (int w = 0; w < 4; w++) {
         uint bits = mask[w];
@@ -83,6 +105,7 @@ vec3 ClusteredDlight(vec3 lm, highp vec3 p) {
             bits &= bits - 1u;  /* clear that bit before any continue */
             vec3 lpos = (u_lightview * vec4(Lights[i].origin, 1.0)).xyz;
             float pdist = dot(lpos - p, N);
+            if (u_dlight_onesided > 0.0 && pdist < -u_dlight_onesided) continue;
             float rad = Lights[i].radius - abs(pdist);
             float ml = Lights[i].minlight;
             if (rad < ml) continue;

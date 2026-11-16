@@ -82,6 +82,29 @@ typedef struct
 #define	DLIGHTBIT_TEST(b,i)	((b)[(i) >> 5] & (1u << ((i) & 31)))
 #define	DLIGHTBIT_SET(b,i)	((b)[(i) >> 5] |= (1u << ((i) & 31)))
 #define	DLIGHTBITS_CLEAR(b)	memset ((b), 0, sizeof(unsigned int) * DLIGHTBITS_WORDS)
+
+/* How far behind a face's front plane a dynamic light may sit and still light
+ * it, under r_dlight_occlusion (GitHub #97).  Not 0: a wall torch's origin can
+ * sit a unit or two inside its own wall, and a light's own face must not go
+ * dark for that.  One value for every tier -- R_AddDynamicLights and
+ * R_MarkLights in both the GL and software renderers, and ClusteredDlight,
+ * which gets it through WorldFrag.  tools/bsp_dlight_leak.py --eps measures
+ * what it keeps on the retail maps. */
+#define	DLIGHT_PLANE_EPSILON	2.0f
+
+/* Is this one of the world's own surfaces, rather than a brush entity's?  The
+ * CPU path measures a dynamic light's world-space origin against the surface's
+ * MODEL-space plane, which for a door that has opened or a plat that has
+ * lowered is off by the entity's displacement -- inherited from Quake, where it
+ * only misplaced and dimmed the light.  The one-sided test would turn that
+ * error into no light at all (a plat lowered 128 units, a light 20 above it:
+ * dist -108), so on the CPU path it applies to world surfaces only, and brush
+ * entities keep vanilla's both sides there.  ClusteredDlight works from real
+ * eye-space positions and tests every surface.  GitHub #97. */
+#define	DLIGHT_WORLD_SURFACE(s)	\
+	((s) >= cl.worldmodel->surfaces + cl.worldmodel->firstmodelsurface &&	\
+	 (s) < cl.worldmodel->surfaces + cl.worldmodel->firstmodelsurface +	\
+	       cl.worldmodel->nummodelsurfaces)
 typedef struct
 {
 	vec3_t		origin;

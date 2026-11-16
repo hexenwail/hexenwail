@@ -141,17 +141,20 @@ typedef struct {
  * Everything else comes from the frame
  * record the R_SetWorldFrame* setters below fill, once a frame, from where the
  * values are decided: R_SetupFrame (caustics, bicubic, debug views, material,
- * softemu, span cell), R_LightCluster_BindForWorld (the froxel lookup and
- * dlight scale) and R_LightStyles_FrameSetup (the lightstyle mode).  The span
- * cell is the one frame value overridden mid-frame: lit water brackets its
- * batches with R_SetSpanCell, exactly as it did the loose u_spans.
+ * softemu, span cell), R_LightCluster_BindForWorld (the froxel lookup, dlight
+ * scale and one-sided tolerance) and R_LightStyles_FrameSetup (the lightstyle
+ * mode).  Two frame values are overridden mid-frame, both by lit water around
+ * its batches: the span cell, through R_SetSpanCell, exactly as it did the
+ * loose u_spans, and the one-sided tolerance, through R_SetWorldLiquid, which
+ * turns it off because a liquid is seen, and lit, from both sides (#97).
  *
  * Seeded like the loose uniforms started: all zero (every effect off), with an
  * identity lightview. */
 typedef struct {
 	float	lightview[16];	/*   0  world -> eye, no entity transform */
 	float	grid[4];	/*  64  xy viewport origin, zw froxels per pixel */
-	float	gridz[4];	/*  80  xy zlogscale, zlogbias; z dynamic-light scale */
+	float	gridz[4];	/*  80  xy zlogscale, zlogbias; z dynamic-light scale;
+				 *      w one-sided tolerance, 0 = both sides (#97) */
 	float	warp[4];	/*  96  xy liquid warp (amplitude, time), z span cell */
 	float	material[4];	/* 112  xyz normal-map, gloss intensity, gloss exponent */
 	float	softemu[4];	/* 128  texture dither, banding, screen dither, any live */
@@ -278,7 +281,11 @@ void	R_SetWorldFrame (float caustics_intensity, float caustics_time, float bicub
 			 const float *material3, const float *softemu4);
 void	R_SetWorldSpans (float cell);
 void	R_SetWorldDlight (float scale, const float *view16, const float *grid4,
-			  float zlogscale, float zlogbias);
+			  float zlogscale, float zlogbias, float onesided);
+/* Lit water's bracket: true before its batches, false after.  true writes a
+ * one-sided tolerance of 0 (light both sides) into the record, false puts the
+ * frame's back. */
+void	R_SetWorldLiquid (qboolean liquid);
 void	R_SetWorldLMStyles (float on, float shift);
 
 /* Everything the world fragment stages read, for the draw about to be made:

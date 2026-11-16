@@ -334,6 +334,14 @@ loc0:
 	for (i = 0; i < node->numsurfaces; i++, surf++)
 	{	// eliminates marking of surfaces too far away from light,
 		// thus preventing unnecessary renders and uploads
+		/* ...and behind it (GitHub #97).  dist is to the node's plane,
+		 * which is every one of its surfaces' plane; a SURF_PLANEBACK
+		 * surface faces the other way.  The descent below is unchanged:
+		 * only whether THIS surface takes the light is. */
+		if (r_dlight_occlusion.integer >= 1 && !(surf->flags & SURF_DRAWTURB) &&
+		    DLIGHT_WORLD_SURFACE (surf) &&
+		    ((surf->flags & SURF_PLANEBACK) ? -dist : dist) < -DLIGHT_PLANE_EPSILON)
+			continue;
 		for (j = 0; j < 3; j++)
 			impact[j] = light->origin[j] - surf->plane->normal[j]*dist;
 

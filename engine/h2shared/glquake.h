@@ -452,6 +452,7 @@ extern	cvar_t	r_lerp_complete;
 extern	cvar_t	r_nolerp_list;
 extern	cvar_t	r_noshadow_list;	/* per-model r_shadows exclusion, uhexen2-a5nn.11 */
 extern	cvar_t	r_dlight_model_list;	/* uhexen2-vdmz */
+extern	cvar_t	r_dlight_occlusion;	/* GitHub #97 */
 extern	cvar_t	r_water_pixel_warp;	/* uhexen2-9o7u */
 extern	cvar_t	r_lerp_autodetect;
 extern	cvar_t	r_lerp_autodetect_threshold;

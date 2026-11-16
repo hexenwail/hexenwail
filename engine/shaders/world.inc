@@ -40,7 +40,8 @@
 FRAG_UBO(1) uniform WorldFrag {
     highp mat4 u_wflightview;   /*   0  world -> eye, no entity transform (froxel grid) */
     highp vec4 u_wfgrid;        /*  64  xy viewport origin, zw froxels per pixel */
-    highp vec4 u_wfgridz;       /*  80  xy zlogscale, zlogbias; z dynamic-light scale (0 = off) */
+    highp vec4 u_wfgridz;       /*  80  xy zlogscale, zlogbias; z dynamic-light scale (0 = off);
+                                 *      w one-sided tolerance in units (0 = both sides) */
     highp vec4 u_wfwarp;        /*  96  xy liquid warp (amplitude, time), z span cell */
     highp vec4 u_wfmaterial;    /* 112  xyz normal-map and gloss intensity, gloss exponent */
     highp vec4 u_wfsoftemu;     /* 128  software emulation: texture dither, banding, screen dither, any live */
@@ -51,6 +52,7 @@ FRAG_UBO(1) uniform WorldFrag {
 #define u_lightgrid_xy  u_wfgrid
 #define u_lightgrid_z   u_wfgridz.xy
 #define u_dlight_scale  u_wfgridz.z
+#define u_dlight_onesided u_wfgridz.w
 #define u_turb          u_wfwarp.xy
 #define u_spans         u_wfwarp.z
 #define u_material      u_wfmaterial.xyz

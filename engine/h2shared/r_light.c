@@ -122,6 +122,11 @@ void R_MarkLights (dlight_t *light, int lnum, mnode_t *node)
 	surf = cl.worldmodel->surfaces + node->firstsurface;
 	for (i = 0; i < node->numsurfaces; i++, surf++)
 	{
+		/* Not a face the light is behind (GitHub #97); see gl_rlight.c's twin. */
+		if (r_dlight_occlusion.integer >= 1 && !(surf->flags & SURF_DRAWTURB) &&
+		    DLIGHT_WORLD_SURFACE (surf) &&
+		    ((surf->flags & SURF_PLANEBACK) ? -dist : dist) < -DLIGHT_PLANE_EPSILON)
+			continue;
 		if (surf->dlightframe != r_dlightframecount)
 		{
 			DLIGHTBITS_CLEAR (surf->dlightbits);

@@ -429,6 +429,16 @@ static void R_AddDynamicLights (msurface_t *surf)
 
 		rad = cl_dlights[lnum].radius;
 		dist = DotProduct (cl_dlights[lnum].origin, surf->plane->normal) - surf->plane->dist;
+		/* One-sided (GitHub #97): a light behind the face's front plane --
+		 * the BSP plane, flipped for a SURF_PLANEBACK face -- does not
+		 * light it.  Liquids keep vanilla's both sides, and so do brush
+		 * entities (DLIGHT_WORLD_SURFACE says why).  R_MarkLights
+		 * makes the same call so such a face is not even rebuilt; this
+		 * is the one that decides what lands in the lightmap. */
+		if (r_dlight_occlusion.integer >= 1 && !(surf->flags & SURF_DRAWTURB) &&
+		    DLIGHT_WORLD_SURFACE (surf) &&
+		    ((surf->flags & SURF_PLANEBACK) ? -dist : dist) < -DLIGHT_PLANE_EPSILON)
+			continue;
 		rad -= fabs(dist);
 		minlight = cl_dlights[lnum].minlight;
 		if (rad < minlight)

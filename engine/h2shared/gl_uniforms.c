@@ -62,6 +62,7 @@ static r_worldfrag_t	worldframe;
 static float		worldframe_caustics[2];
 static float		worldframe_bicubic;
 static float		worldframe_debug[2];
+static float		worldframe_onesided;	/* the frame's, for R_SetWorldLiquid (false) */
 
 static qboolean		vert_dirty;
 static qboolean		frag_dirty;
@@ -397,11 +398,17 @@ void R_SetWorldSpans (float cell)
 }
 
 void R_SetWorldDlight (float scale, const float *view16, const float *grid4,
-		       float zlogscale, float zlogbias)
+		       float zlogscale, float zlogbias, float onesided)
 {
 	RU_SetMat (worldframe.lightview, view16);
 	RU_Set4 (worldframe.grid, grid4[0], grid4[1], grid4[2], grid4[3]);
-	RU_Set4 (worldframe.gridz, zlogscale, zlogbias, scale, 0.0f);
+	RU_Set4 (worldframe.gridz, zlogscale, zlogbias, scale, onesided);
+	worldframe_onesided = onesided;
+}
+
+void R_SetWorldLiquid (qboolean liquid)
+{
+	worldframe.gridz[3] = liquid ? 0.0f : worldframe_onesided;
 }
 
 void R_SetWorldLMStyles (float on, float shift)
@@ -695,6 +702,7 @@ void R_Uniforms_Init (void)
 	worldframe_caustics[0] = worldframe_caustics[1] = 0.0f;
 	worldframe_bicubic = 0.0f;
 	worldframe_debug[0] = worldframe_debug[1] = 0.0f;
+	worldframe_onesided = 0.0f;
 	layout_checked = false;
 	afrag_layout_checked = false;
 	avert_layout_checked = false;

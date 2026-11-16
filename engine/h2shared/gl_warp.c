@@ -23,6 +23,7 @@
 #include "gl_pipeline.h"
 #include "gl_vbo.h"
 #include "gl_postprocess.h"
+#include "gl_uniforms.h"	/* R_SetWorldLiquid */
 
 int		skytexturenum;
 
@@ -384,6 +385,10 @@ void EmitWaterPolys (msurface_t *fa)
 
 	GL_SetTurb (pixelwarp ? warpamt * 8.0f : 0.0f, wtime);
 	R_SetSpanCell (prog, R_SpanCell (true));	/* Turbulent8's 16 (#176) */
+	/* A liquid is seen, and lit, from both sides: the one-sided dynamic
+	 * light test is off for these batches (GitHub #97).  Only the world
+	 * program reads it, so the unlit path's bracket is a no-op. */
+	R_SetWorldLiquid (true);
 
 	/* Batch all polygons as triangles in one draw call */
 	GL_ImmBegin ();
@@ -451,6 +456,7 @@ void EmitWaterPolys (msurface_t *fa)
 	/* Same reason for the span cell (#176): the world program goes back to
 	 * the world's, the shared alias program to none. */
 	R_SetSpanCell (prog, lit ? R_SpanCell (false) : 0.0f);
+	R_SetWorldLiquid (false);
 
 	if (lit)
 		R_LitWaterReleaseTextures ();

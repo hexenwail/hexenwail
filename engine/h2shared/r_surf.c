@@ -101,6 +101,11 @@ static void R_AddDynamicLights (void)
 
 		rad = fabs(cl_dlights[lnum].radius);
 		dist = DotProduct (cl_dlights[lnum].origin, surf->plane->normal) - surf->plane->dist;
+		/* One-sided (GitHub #97); the same test as gl_rsurf.c's. */
+		if (r_dlight_occlusion.integer >= 1 && !(surf->flags & SURF_DRAWTURB) &&
+		    DLIGHT_WORLD_SURFACE (surf) &&
+		    ((surf->flags & SURF_PLANEBACK) ? -dist : dist) < -DLIGHT_PLANE_EPSILON)
+			continue;
 		rad -= fabs(dist);
 		minlight = cl_dlights[lnum].minlight;
 		if (rad < minlight)

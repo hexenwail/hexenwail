@@ -497,3 +497,9 @@ jobs:
       # glUniform* left is the sampler bind (#19).
       - name: No loose value uniforms
         run: python3 tools/test_no_loose_uniforms.py
+      # A dynamic light behind a face does not light it, on every tier: the
+      # CPU twins' R_AddDynamicLights prologue and R_MarkLights surface loop
+      # lifted and run, the GPU test in ClusteredDlight, its WorldFrag lane,
+      # writer and lit water's bracket pinned, and the cvar (#97).
+      - name: Dynamic lights stop at the wall
+        run: python3 tools/test_dlight_onesided.py

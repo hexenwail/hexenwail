@@ -101,7 +101,10 @@ Their declarations are in `engine/h2shared/soft_web.h` and
 
 - **Policy cvars.** `gl_missile_glows`, `gl_torch_dlight`, `gl_flashintensity`,
   `gl_extra_dynamic_lights` and friends mean the same thing here as in the GL
-  build (`gl_rmain.c`), and the client honours them. The GPU-only ones (`gl_fxaa`,
+  build (`gl_rmain.c`), and the client honours them. So does `r_dlight_occlusion`
+  (GitHub #97), which the rasterizer itself reads: `r_surf.c` and `r_light.c`
+  make the GL renderer's one-sided test, so a dynamic light stops at the wall it
+  stands against here too. The GPU-only ones (`gl_fxaa`,
   `r_hdr`, `r_softemu`, `r_softemu_mdl_warp`, `scr_demobar_timeout`, ...) exist so
   shared code links, and the other four `r_softemu_*` sub-cvars only so a GL
   config round-trips; the menu
