@@ -85,7 +85,7 @@ def main():
     fast = function(src, "static void EmitSkyPolysFast (msurface_t *fa)")
     if "gl_shader_flat" not in fast or "Sky_FastColor" not in fast:
         failures.append("EmitSkyPolysFast: must draw gl_shader_flat in Sky_FastColor")
-    if re.search(r"\b(GL_Bind|glBindTexture_fp)\b|gl_shader_sky_", fast + (chain or "")):
+    if re.search(r"\b(R_BindTexture\w*|glBindTexture_fp)\b|gl_shader_sky_", fast + (chain or "")):
         failures.append("fast sky path binds a sky texture or sky program")
 
     color = function(src, "static void Sky_FastColor (void)")

@@ -1043,7 +1043,7 @@ void R_DrawWorldCulled (void)
 			continue;
 
 		/* Bind diffuse texture + matching fullbright mask (uhexen2-sjvf) */
-		GL_Bind(t->gl_texturenum);
+		R_BindTextureSlot (0, t->gl_texturenum);
 		glActiveTexture_fp(GL_TEXTURE2);
 		glBindTexture_fp(GL_TEXTURE_2D,
 			t->gl_fb_texturenum ? t->gl_fb_texturenum : gl_null_fb_texture);

@@ -1836,7 +1836,7 @@ static void R_DrawParticles_Real (qboolean showtris)
      * Reported against SoT by Garrett; uhexen2-2rxl. */
     if (!showtris)
     {
-    GL_Bind(square ? gl_solid_white_texture : particletexture);
+    R_BindTextureSlot (0, square ? gl_solid_white_texture : particletexture);
     R_SetBlend (true);
     /* Inside an OIT pass, OIT_BeginTranslucency already configured the
      * per-buffer blend funcs (accum: ONE/ONE, reveal: ZERO/ONE_MINUS_SRC_COLOR).

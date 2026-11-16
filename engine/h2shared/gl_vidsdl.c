@@ -642,8 +642,6 @@ static qboolean GL_RunFramebufferSelfTest (void)
 	glActiveTexture_fp((GLenum)old_active);
 	glViewport_fp(old_viewport[0], old_viewport[1], old_viewport[2], old_viewport[3]);
 	glClearColor_fp(old_clear[0], old_clear[1], old_clear[2], old_clear[3]);
-	/* Bound behind GL_Bind's back above; tell the cache what is bound now. */
-	currenttexture = GL_UNUSED_TEXTURE;
 
 	gl_renderer_caps.fbo_selftest = passed;
 	/* Quiet when it passes, loud when it does not: the pixel/status detail

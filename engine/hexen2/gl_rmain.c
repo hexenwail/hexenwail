@@ -60,8 +60,6 @@ int			c_texbinds;	/* glBindTexture calls that survived the redundancy filter (uh
 
 qboolean	r_cache_thrash;			// compatability
 
-GLuint			currenttexture = GL_UNUSED_TEXTURE;	// to avoid unnecessary texture sets
-
 GLuint			particletexture;	// little dot for particles
 GLuint			playertextures[MAX_CLIENTS];	// up to MAX_CLIENTS color translated skins
 GLuint			gl_extra_textures[MAX_EXTRA_TEXTURES];   // generic textures for models
@@ -1246,7 +1244,7 @@ static void R_DrawSpriteModel (entity_t *e)
 		GL_SetSoftParticles (soft_inv, soft_za, soft_zb);
 	}
 
-	GL_Bind(frame->gl_texturenum);
+	R_BindTextureSlot (0, frame->gl_texturenum);
 
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
@@ -3167,7 +3165,7 @@ static void R_DrawAliasModel (entity_t *e)
 			gl_extra_textures[skinnum - 100] = gl->texnum;
 		}
 
-		GL_Bind(gl_extra_textures[skinnum - 100]);
+		R_BindTextureSlot (0, gl_extra_textures[skinnum - 100]);
 	}
 	else
 	{
@@ -3181,7 +3179,7 @@ static void R_DrawAliasModel (entity_t *e)
 				     paliashdr->numskins);
 			skinnum = 0;
 		}
-		GL_Bind(paliashdr->gl_texturenum[skinnum][anim]);
+		R_BindTextureSlot (0, paliashdr->gl_texturenum[skinnum][anim]);
 
 		// we can't dynamically colormap textures, so they are cached
 		// seperately for the players.  Heads are just uncolored.
@@ -3196,7 +3194,7 @@ static void R_DrawAliasModel (entity_t *e)
 				i = e - cl_entities - 1;
 				if (i >= 0 && i < cl.maxclients)
 				{
-					GL_Bind(playertextures[i]);
+					R_BindTextureSlot (0, playertextures[i]);
 				}
 			}
 		}
@@ -3272,7 +3270,7 @@ static void R_DrawAliasModel (entity_t *e)
 			 * forward-Z wants smaller Z, reversed-Z wants larger Z.
 			 * uhexen2-iir3. */
 			float fb_offset = gl_clipcontrol_able ? 1.0f : -1.0f;
-			GL_Bind(fb_tex);
+			R_BindTextureSlot (0, fb_tex);
 			R_SetBlend (true);
 			R_SetBlendFunc (GL_ONE, GL_ONE);	// additive
 			R_SetDepthMask (false);
@@ -4604,7 +4602,7 @@ static void R_DrawAliasInstanced (void)
 
 		/* Bind skin texture to unit 0 */
 		glActiveTexture_fp(GL_TEXTURE0);
-		GL_Bind(batch->skin_tex);
+		R_BindTextureSlot (0, batch->skin_tex);
 
 		/* Material maps at units 3 and 4 (uhexen2-4kcb).  Per batch rather
 		 * than per frame because a batch IS one (model, skin) pair, which is
@@ -4848,7 +4846,7 @@ static void R_DrawAliasInstanced (void)
 					continue;
 
 				glActiveTexture_fp(GL_TEXTURE0);
-				GL_Bind(batch->fb_tex);
+				R_BindTextureSlot (0, batch->fb_tex);
 				GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER,
 						  gm->poseverttype == PV_MD3 ? 3 : 1, pose_ssbo);
 				R_SetPoseVertType (gm->poseverttype);

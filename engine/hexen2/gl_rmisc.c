@@ -526,7 +526,7 @@ void R_TranslatePlayerSkin (int playernum)
 // call, not sure why for now, so I have to do this the old way until I figure it out.
 //	q_snprintf(texname, 19, "player%i", playernum);
 //	playertextures[playernum] = GL_LoadTexture(texname, (byte *)pixels, scaled_width, scaled_height, TEX_RGBA|TEX_LINEAR);
-	GL_Bind(playertextures[playernum]);
+	R_BindTextureSlot (0, playertextures[playernum]);
 	glTexImage2D_fp(GL_TEXTURE_2D, 0, gl_solid_format, scaled_width, scaled_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);

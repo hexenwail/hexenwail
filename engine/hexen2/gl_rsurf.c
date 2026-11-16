@@ -1183,7 +1183,7 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 	}
 
 	t = R_TextureAnimation (e, fa->texinfo->texture);
-	GL_Bind (t->gl_texturenum);
+	R_BindTextureSlot (0, t->gl_texturenum);
 	/* Bind per-miptex fullbright mask at TU2.  R_RenderBrushPoly runs
 	 * through gl_shader_world, so without this brush-ent surfaces inherit
 	 * whatever TU2 the previous caller left (DrawTextureChains' teardown
@@ -1449,7 +1449,7 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 	}
 
 	t = R_TextureAnimation (e, fa->texinfo->texture);
-	GL_Bind (t->gl_texturenum);
+	R_BindTextureSlot (0, t->gl_texturenum);
 	/* Bind per-miptex fullbright mask at TU2 — same rationale as the
 	 * sibling in R_RenderBrushPoly.  uhexen2-61bb. */
 	R_BindTextureSlot (2,
@@ -1738,7 +1738,7 @@ void R_DrawWaterSurfaces (int phase)
 		}
 
 		// set modulate mode explicitly
-		GL_Bind (t->gl_texturenum);
+		R_BindTextureSlot (0, t->gl_texturenum);
 
 		for ( ; s ; s = s->texturechain)
 			EmitWaterPolys (s);
@@ -2365,7 +2365,7 @@ static void DrawTextureChains_DrawDeferred (entity_t *e, msurface_t **deferred, 
 			 * coalescing of contiguous IBO ranges.  Also rebind
 			 * fullbright mask at TU2.  uhexen2-sjvf. */
 #define BIND_TEX_WITH_FB(_T_) do { \
-	GL_Bind((_T_)->gl_texturenum); \
+	R_BindTextureSlot (0, (_T_)->gl_texturenum); \
 	R_BindTextureSlot (2, \
 		(_T_)->gl_fb_texturenum ? (_T_)->gl_fb_texturenum : gl_null_fb_texture); \
 	GL_BindMaterialMaps (_T_);	/* uhexen2-mfql */ \
@@ -2856,7 +2856,7 @@ static void DrawTextureChains (entity_t *e)
 
 				{
 					texture_t *tt = R_TextureAnimation (e, s->texinfo->texture);
-					GL_Bind (tt->gl_texturenum);
+					R_BindTextureSlot (0, tt->gl_texturenum);
 				}
 				R_BindTextureSlot (1, lm_atlas_texture);
 
@@ -2871,7 +2871,7 @@ static void DrawTextureChains (entity_t *e)
 						R_RenderBrushPolyMTex (e, s, false);
 						{
 							texture_t *tt = R_TextureAnimation (e, s->texinfo->texture);
-							GL_Bind (tt->gl_texturenum);
+							R_BindTextureSlot (0, tt->gl_texturenum);
 						}
 						GL_ImmBegin ();
 						continue;
@@ -3169,7 +3169,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 				int run_first = batch_surfs[0]->vbo_firstindex;
 				int run_total = batch_surfs[0]->vbo_numtris * 3;
 				int kk;
-				GL_Bind(cur_tex->gl_texturenum);
+				R_BindTextureSlot (0, cur_tex->gl_texturenum);
 				for (kk = 1; kk < batch_count; kk++)
 				{
 					int expected = run_first + run_total;
@@ -3234,7 +3234,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 				int run_first = batch_surfs[0]->vbo_firstindex;
 				int run_total = batch_surfs[0]->vbo_numtris * 3;
 				int kk;
-				GL_Bind(cur_tex->gl_texturenum);
+				R_BindTextureSlot (0, cur_tex->gl_texturenum);
 				for (kk = 1; kk < batch_count; kk++)
 				{
 					int expected = run_first + run_total;
@@ -3267,7 +3267,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 			int run_first = batch_surfs[0]->vbo_firstindex;
 			int run_total = batch_surfs[0]->vbo_numtris * 3;
 			int kk;
-			GL_Bind(cur_tex->gl_texturenum);
+			R_BindTextureSlot (0, cur_tex->gl_texturenum);
 			for (kk = 1; kk < batch_count; kk++)
 			{
 				int expected = run_first + run_total;

@@ -30,8 +30,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "gl_vbo.h"
 #include "gl_sky.h"
 
-// Don't include gl_texmgr.h because GL_Bind macro in glquake.h conflicts
-// Just declare what we need from it
+// There is no gl_texmgr.h; declare what we need from gl_texmgr.c
 extern gltexture_t *notexture;
 
 // Source format enum from gl_texmgr.h
@@ -60,11 +59,6 @@ extern void TexMgr_FreeTexture (gltexture_t *kill);
 #define TEXPREF_RGBA			0x1000
 #define TEXPREF_TRANSPARENT		0x2000
 
-// Undef the GL_Bind macro so we can use the function from gl_texmgr
-#undef GL_Bind
-
-// Forward declaration of GL_Bind function from gl_texmgr
-extern void GL_Bind (gltexture_t *texture);
 extern qboolean have_stencil;
 
 #define	MAX_CLIP_VERTS 64

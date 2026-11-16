@@ -14,14 +14,9 @@ of the License, or (at your option) any later version.
 
 #include "quakedef.h"
 
-// Undef the GL_Bind macro so we can define our function
-#undef GL_Bind
-
 /* gltexture_t is already defined in glquake.h with a simpler structure.
  * We provide compatibility functions for gl_sky.c and gl_fog.c.
  */
-
-extern GLuint currenttexture;
 
 /* Palette tables - these are defined elsewhere in uhexen2 */
 extern unsigned int d_8to24table[256];
@@ -130,7 +125,6 @@ static void TexMgr_UploadPlaceholder (gltexture_t *tex, const char *name, const 
 
 	glGenTextures_fp (1, &tex->texnum);
 	glBindTexture_fp (GL_TEXTURE_2D, tex->texnum);
-	currenttexture = tex->texnum;
 
 	glTexParameterf_fp (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameterf_fp (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
@@ -183,8 +177,6 @@ void TexMgr_ContextLost (void)
 
 	if (r_notexture_mip)
 		r_notexture_mip->gl_texturenum = 0;
-
-	currenttexture = GL_UNUSED_TEXTURE;
 }
 
 /* Skybox faces differ only in their last few characters ("_rt",
@@ -382,15 +374,3 @@ int TexMgr_PadConditional(int s)
 	return s;
 }
 
-/*
-================
-GL_Bind - gltexture_t overload; the GLuint form is a macro in glquake.h
-================
-*/
-void GL_Bind (gltexture_t *texture)
-{
-	if (!texture)
-		return;
-
-	R_BindTextureSlot (0, texture->texnum);
-}

@@ -135,7 +135,7 @@ static void glDeleteTextures_fp (int n, GLuint *t) { (void)n; (void)t; }
 /* gl_texbind.h (#338): GL_LoadTextureEx's cache-mismatch delete goes through
  * the binding module so a recycled name cannot hit a stale shadow entry. */
 static void R_DeleteTextures (int n, const GLuint *t) { (void)n; (void)t; }
-static void GL_Bind (GLuint t) { (void)t; }
+static void R_BindTextureSlot (GLuint s, GLuint t) { (void)s; (void)t; }
 static void GL_UploadCompressed (const imgreplace_t *r, unsigned f, gltexture_t *g)
 { (void)r; (void)f; (void)g; }
 static void GL_Upload32 (unsigned int *d, gltexture_t *g) { (void)d; (void)g; uploads32++; }

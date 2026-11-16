@@ -109,7 +109,6 @@ static void SS_DeleteTargets (void)
 	if (ss_world_fbo) { glDeleteFramebuffers_fp (1, &ss_world_fbo); ss_world_fbo = 0; }
 	if (ss_scene_fbo) { glDeleteFramebuffers_fp (1, &ss_scene_fbo); ss_scene_fbo = 0; }
 	ss_w = ss_h = ss_scale = 0;
-	currenttexture = GL_UNUSED_TEXTURE;
 }
 
 void R_SSAO_Shutdown (void)
@@ -312,7 +311,6 @@ static qboolean SS_EnsureTargets (int w, int h, int scale)
 	ss_mismatch = SS_Tex2D (1, GL_R32UI, ss_mismatch_w, ss_mismatch_h, GL_NEAREST);
 	SS_UploadHilbert ();
 	glBindTexture_fp (GL_TEXTURE_2D, 0);
-	currenttexture = GL_UNUSED_TEXTURE;
 	return true;
 }
 
@@ -483,7 +481,6 @@ void R_SSAO_Apply (void)
 	glTexSubImage2D_fp (GL_TEXTURE_2D, 0, 0, 0, ss_mismatch_w, ss_mismatch_h,
 			    GL_RED_INTEGER, GL_UNSIGNED_INT, zeros);
 	glBindTexture_fp (GL_TEXTURE_2D, 0);
-	currenttexture = GL_UNUSED_TEXTURE;
 	glMemoryBarrier_fp (GL_TEXTURE_UPDATE_BARRIER_BIT);
 
 	/* mip: scene depth in, the whole pyramid and the tile tags out */

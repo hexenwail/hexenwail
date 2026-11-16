@@ -933,8 +933,8 @@ static void EmitSkyPolysMulti (msurface_t *fa)
 	if (alpha >= 1.0f)
 	{
 		/* single-pass multitexture: blend both layers in the shader.
-		 * One R_BindTextures call, not a GL_Bind plus a unit-1 detour:
-		 * GL_Bind only ever names slot 0, so the second bind above
+		 * One R_BindTextures call, not a slot-0 bind plus a unit-1 detour:
+		 * the old GL_Bind only ever named slot 0, so the second bind above
 		 * used to land on TU0 and leave TU1 holding stale contents. */
 		{
 			const GLuint sky_layers[2] = { solidskytexture, alphaskytexture };
@@ -976,7 +976,7 @@ static void EmitSkyPolysMulti (msurface_t *fa)
 		 * with r_skyalpha controlling the front layer's opacity */
 
 		/* pass 1: solid (back) layer, fully opaque */
-		GL_Bind (solidskytexture);
+		R_BindTextureSlot (0, solidskytexture);
 
 		for (p = fa->polys ; p ; p = p->next)
 		{
@@ -1004,7 +1004,7 @@ static void EmitSkyPolysMulti (msurface_t *fa)
 		}
 
 		/* pass 2: alpha (front) layer, blended at r_skyalpha */
-		GL_Bind (alphaskytexture);
+		R_BindTextureSlot (0, alphaskytexture);
 		R_SetBlend (true);
 
 		for (p = fa->polys ; p ; p = p->next)
@@ -1238,12 +1238,12 @@ void R_DrawSkyChain (msurface_t *s)
 		 * texture with vertex UVs, which is the boxside program. */
 
 		/* pass 1: back layer, opaque */
-		GL_Bind (solidskytexture);
+		R_BindTextureSlot (0, solidskytexture);
 		EMIT_LOOP (&gl_shader_sky_boxside, SKYWARP_VERT_BACK,
 			   GL_ImmColor3f(1.0f, 1.0f, 1.0f));
 
 		/* pass 2: front layer, blended at r_skyalpha */
-		GL_Bind (alphaskytexture);
+		R_BindTextureSlot (0, alphaskytexture);
 		R_SetBlend (true);
 		EMIT_LOOP (&gl_shader_sky_boxside, SKYWARP_VERT_FRONT,
 			   GL_ImmColor4f(1.0f, 1.0f, 1.0f, alpha));
@@ -1855,7 +1855,7 @@ void R_DrawSkyChain (msurface_t *s)
 	float		*v0;
 
 //	c_sky = 0;
-	GL_Bind(solidskytexture);
+	R_BindTextureSlot (0, solidskytexture);
 
 	// calculate vertex values for sky box
 	for (fa = s ; fa ; fa = fa->texturechain)
@@ -1971,7 +1971,7 @@ void R_DrawSkyBox (void)
 		if ( (skymins[0][i] >= skymaxs[0][i]) || (skymins[1][i] >= skymaxs[1][i]) )
 			continue;
 
-		GL_Bind(sky_tex[skytexorder[i]]);
+		R_BindTextureSlot (0, sky_tex[skytexorder[i]]);
 #if 0
 		skymins[0][i] = -1;
 		skymins[1][i] = -1;
