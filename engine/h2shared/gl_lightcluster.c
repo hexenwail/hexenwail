@@ -249,8 +249,7 @@ static qboolean R_LightCluster_Build (void)
 	GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, 0);
 
 	glGenTextures_fp (1, &lc_grid);
-	glActiveTexture_fp (GL_TEXTURE0);
-	glBindTexture_fp (GL_TEXTURE_3D, lc_grid);
+	R_BindTextureForEdit (GL_TEXTURE_3D, lc_grid);
 	glTexImage3D_fp (GL_TEXTURE_3D, 0, GL_RGBA32UI,
 			 LIGHT_TILES_X, LIGHT_TILES_Y, LIGHT_TILES_Z, 0,
 			 GL_RGBA_INTEGER, GL_UNSIGNED_INT, NULL);
@@ -259,7 +258,7 @@ static qboolean R_LightCluster_Build (void)
 	glTexParameterf_fp (GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameterf_fp (GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	glTexParameterf_fp (GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-	glBindTexture_fp (GL_TEXTURE_3D, 0);
+	R_BindTextureForEdit (GL_TEXTURE_3D, 0);
 
 	if (!lc_ssbo || !lc_grid)
 	{
@@ -422,10 +421,10 @@ static void LC_UploadAndDispatch (void)
 				    ubo, ofs, sizeof(params));
 	}
 
-	glBindImageTexture_fp (0, lc_grid, 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_RGBA32UI);
+	R_BindImageTexture (0, lc_grid, 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_RGBA32UI);
 	glDispatchCompute_fp (LIGHT_TILES_X / 8, LIGHT_TILES_Y / 8, LIGHT_TILES_Z);
 	glMemoryBarrier_fp (GL_TEXTURE_FETCH_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
-	glBindImageTexture_fp (0, 0, 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_RGBA32UI);
+	R_BindImageTexture (0, 0, 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_RGBA32UI);
 
 	R_UseProgram (0);
 }
@@ -556,13 +555,7 @@ void R_LightCluster_BindForWorld (void)
 	 * can take it back -- see the header for what happened when it wasn't. */
 	GL_BindBufferBase (GL_SHADER_STORAGE_BUFFER, LIGHT_SSBO_BINDING, lc_ssbo);
 
-	glActiveTexture_fp (GL_TEXTURE0 + LIGHT_GRID_TMU);
-	glBindTexture_fp (GL_TEXTURE_3D, lc_grid);
-	/* Back to unit 0, which every other binding site in the renderer both
-	 * expects on entry and leaves behind.  `currenttexture` is untouched:
-	 * it caches GL_TEXTURE_2D on unit 0 and nothing above went through
-	 * GL_Bind. */
-	glActiveTexture_fp (GL_TEXTURE0);
+	R_BindTextureTarget (LIGHT_GRID_TMU, GL_TEXTURE_3D, lc_grid);
 }
 
 /* ------------------------------------------------------------------ */
@@ -679,10 +672,9 @@ static void R_LightCluster_Verify_f (void)
 		return;
 	}
 
-	glActiveTexture_fp (GL_TEXTURE0);
-	glBindTexture_fp (GL_TEXTURE_3D, lc_grid);
+	R_BindTextureForEdit (GL_TEXTURE_3D, lc_grid);
 	glGetTexImage_fp (GL_TEXTURE_3D, 0, GL_RGBA_INTEGER, GL_UNSIGNED_INT, readback);
-	glBindTexture_fp (GL_TEXTURE_3D, 0);
+	R_BindTextureForEdit (GL_TEXTURE_3D, 0);
 
 	/* The frustum straight from the field of view R_SetupGL built it with.
 	 * At view depth d, NDC x spans +/- tan(fov_x/2)*d.  Deliberately NOT the
@@ -774,7 +766,7 @@ void R_LightCluster_Shutdown (void)
 	R_PipelineForgetProgram ();	/* GL reuses program names */
 	if (lc_prog) { glDeleteProgram_fp (lc_prog); lc_prog = 0; }
 	if (lc_ssbo) { GL_ForgetBuffer (lc_ssbo); glDeleteBuffers_fp (1, &lc_ssbo); lc_ssbo = 0; }
-	if (lc_grid) { glDeleteTextures_fp (1, &lc_grid); lc_grid = 0; }
+	if (lc_grid) { R_DeleteTextures (1, &lc_grid); lc_grid = 0; }
 	lc_ready = false;
 	lc_failed = false;
 	lc_valid_this_frame = false;

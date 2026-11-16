@@ -13,8 +13,9 @@ Three parts:
      slot disappearing, slot recycling, and long sky names keeping their
      face suffix.
   2. Compile the real GL_ImageDumpEntry against a fake GL.  The readback
-     buffer must be sized from GL's level-0 size, the bind must not go
-     through the currenttexture cache, and names GL no longer recognises or
+     buffer must be sized from GL's level-0 size, the bind must be a real
+     one (the old currenttexture cache could skip it; gl_texbind.c's edit
+     bind cannot), and names GL no longer recognises or
      that now hold a larger texture (a dead name after vid_restart,
      reissued) must be skipped.
   3. Source-level: GL_ImageList_f and the desktop GL_ImageDump_f both walk
@@ -90,6 +91,7 @@ static inline void glBindTexture_fp (GLenum a, GLuint b) { (void)a; (void)b; }
  * still counts as a delete here. */
 static inline void R_DeleteTextures (int n, const GLuint *t) { (void)n; (void)t; deleted++; }
 static inline void R_BindTextureSlot (GLuint slot, GLuint t) { (void)slot; (void)t; }
+static inline void R_BindTextureForEdit (GLenum a, GLuint t) { (void)a; (void)t; }
 static inline void glTexParameterf_fp (GLenum a, GLenum b, float c) { (void)a; (void)b; (void)c; }
 static inline void glTexImage2D_fp (GLenum a, int b, int c, int w, int h, int d,
 				    GLenum e, GLenum f, const void *p)
@@ -277,6 +279,9 @@ static faketex_t *find (GLuint n)
 }
 static GLboolean glIsTexture_fp (GLuint n) { return find (n) != NULL; }
 static void glBindTexture_fp (GLenum t, GLuint n) { (void)t; bound = n; }
+/* gl_texbind.c's bind for edit (#338): nothing binds behind its shadow, so
+ * it never folds a bind GL needs -- model it as the real bind it issues. */
+static void R_BindTextureForEdit (GLenum t, GLuint n) { glBindTexture_fp (t, n); }
 static void glGetTexLevelParameteriv_fp (GLenum t, GLint l, GLenum p, GLint *v)
 {
 	faketex_t *f = find (bound);
@@ -368,20 +373,16 @@ def source_check():
             raise AssertionError(f"{name} no longer walks gltextures[]")
         if not re.search(r"TexMgr_NumTextures\s*\(\s*\).*?TexMgr_TextureAt\s*\(", body, re.S):
             raise AssertionError(f"{name} does not walk the TexMgr pool (issue #127)")
-    # imagedump changes the binding, the active unit and GL_PACK_ALIGNMENT;
-    # it must put all three back and leave GL_Bind's cache truthful.
+    # imagedump changes unit 0's binding and GL_PACK_ALIGNMENT and must put
+    # both back.  The binds go through gl_texbind.c's edit bind (#338), which
+    # keeps unit 0 active and the shadow true, so restoring the binding the
+    # same way leaves nothing to resync; test_texture_bind_routing.py keeps
+    # raw binds and unit switches out of it.
     for pattern, what in (
             (r"glGetIntegerv_fp\s*\(\s*GL_PACK_ALIGNMENT.*glPixelStorei_fp\s*\(\s*GL_PACK_ALIGNMENT\s*,\s*prev_pack",
              "restore GL_PACK_ALIGNMENT"),
-            (r"glGetIntegerv_fp\s*\(\s*GL_TEXTURE_BINDING_2D.*glBindTexture_fp\s*\(\s*GL_TEXTURE_2D\s*,\s*\(GLuint\)\s*prev_tex",
-             "restore the previous binding"),
-            (r"glGetIntegerv_fp\s*\(\s*GL_ACTIVE_TEXTURE.*glActiveTexture_fp\s*\(\s*\(GLenum\)\s*prev_unit",
-             "restore the active texture unit"),
-            # GL_Bind's cache is the gl_texbind.c shadow since #338 (GL_Bind
-            # is R_BindTextureSlot (0, ...)), so the resync is forgetting
-            # that shadow, after the raw binding has been restored.
-            (r"glBindTexture_fp\s*\(\s*GL_TEXTURE_2D\s*,\s*\(GLuint\)\s*prev_tex.*R_ResetTextureBindings\s*\(\s*\)",
-             "resync the texture-binding shadow (R_ResetTextureBindings)")):
+            (r"glGetIntegerv_fp\s*\(\s*GL_TEXTURE_BINDING_2D.*R_BindTextureForEdit\s*\(\s*GL_TEXTURE_2D\s*,\s*\(GLuint\)\s*prev_tex",
+             "restore the previous binding through gl_texbind.c")):
         if not re.search(pattern, dump, re.S):
             raise AssertionError(f"imagedump does not {what}")
     print("PASS: imagelist and imagedump walk both texture pools; imagedump restores GL state")

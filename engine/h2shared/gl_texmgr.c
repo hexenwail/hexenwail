@@ -124,7 +124,7 @@ static void TexMgr_UploadPlaceholder (gltexture_t *tex, const char *name, const 
 		return;
 
 	glGenTextures_fp (1, &tex->texnum);
-	glBindTexture_fp (GL_TEXTURE_2D, tex->texnum);
+	R_BindTextureForEdit (GL_TEXTURE_2D, tex->texnum);
 
 	glTexParameterf_fp (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameterf_fp (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);

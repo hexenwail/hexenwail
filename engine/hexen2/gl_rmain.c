@@ -1235,12 +1235,7 @@ static void R_DrawSpriteModel (entity_t *e)
 
 	if (soft_active)
 	{
-		/* Unit 1 is bound by hand rather than through GL_Bind, which only
-		 * tracks unit 0.  Restore the active unit immediately so the
-		 * GL_Bind below still lands where it expects to. */
-		glActiveTexture_fp (GL_TEXTURE1);
-		glBindTexture_fp (GL_TEXTURE_2D, GL_SoftDepth_GetTex());
-		glActiveTexture_fp (GL_TEXTURE0);
+		R_BindTextureSlot (1, GL_SoftDepth_GetTex ());
 		GL_SetSoftParticles (soft_inv, soft_za, soft_zb);
 	}
 
@@ -1306,9 +1301,7 @@ static void R_DrawSpriteModel (entity_t *e)
 		/* Back to the resting state before any alias / warp / brush batch
 		 * picks up this program.  uhexen2-mf9u. */
 		GL_SetSoftParticles (0.0f, 0.0f, 0.0f);
-		glActiveTexture_fp (GL_TEXTURE1);
-		glBindTexture_fp (GL_TEXTURE_2D, 0);
-		glActiveTexture_fp (GL_TEXTURE0);
+		R_BindTextureSlot (1, 0);
 	}
 
 // restore tex parms
@@ -2416,6 +2409,7 @@ static qboolean R_SetAliasMaterial (GLuint norm, GLuint gloss, qboolean eyeframe
 {
 	vec3_t	dir;
 	float	nrm, gls;
+	GLuint	maps[2];
 
 	if (!r_materialmaps.integer || (!norm && !gloss))
 	{
@@ -2437,12 +2431,10 @@ static qboolean R_SetAliasMaterial (GLuint norm, GLuint gloss, qboolean eyeframe
 	 * specular is the common case -- so each falls back to the sentinel that
 	 * is the identity for this maths.  Both are bound whenever the path is
 	 * armed, because the shader samples both unconditionally once inside the
-	 * branch.  Leaves TU0 active, like GL_BindMaterialMaps in gl_rsurf.c. */
-	glActiveTexture_fp(GL_TEXTURE3);
-	glBindTexture_fp(GL_TEXTURE_2D, norm ? norm : gl_flat_normal_texture);
-	glActiveTexture_fp(GL_TEXTURE4);
-	glBindTexture_fp(GL_TEXTURE_2D, gloss ? gloss : gl_null_gloss_texture);
-	glActiveTexture_fp(GL_TEXTURE0);
+	 * branch. */
+	maps[0] = norm ? norm : gl_flat_normal_texture;
+	maps[1] = gloss ? gloss : gl_null_gloss_texture;
+	R_BindTextures (3, 2, maps);
 
 	if (eyeframe)
 		R_AliasMaterialLightDirEye (dir);
@@ -3836,12 +3828,9 @@ static void R_DispatchBrushInstancedPass (
 			GLuint cur_fb  = keys[i].fb_tex;
 			/* Bind the fullbright mask at TU2 first so the matching
 			 * sworld_frag sample picks it up for this (instance, tex)
-			 * group.  Leave TU0 sticky for the diffuse bind below.
-			 * uhexen2-61bb. */
-			glActiveTexture_fp(GL_TEXTURE2);
-			glBindTexture_fp(GL_TEXTURE_2D, cur_fb);
-			glActiveTexture_fp(GL_TEXTURE0);
-			glBindTexture_fp(GL_TEXTURE_2D, cur_tex);
+			 * group, then the diffuse at TU0.  uhexen2-61bb. */
+			R_BindTextureSlot (2, cur_fb);
+			R_BindTextureSlot (0, cur_tex);
 			while (i < num_keys && keys[i].instance == inst &&
 			       keys[i].tex == cur_tex)
 			{
@@ -3908,16 +3897,16 @@ void R_DrawBrushInstanced (void)
 	 * so the same invariance covers cross-program coplanar joins too. */
 	glBindVertexArray_fp(world_vao);
 	glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
-	glActiveTexture_fp(GL_TEXTURE1);
-	glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
-	/* Seed TU2 with the null fullbright sentinel.  R_DispatchBrushInstancedPass
-	 * rebinds per (instance, texture) group using the per-key fb_tex stored
-	 * by R_CollectBrushInstances, so any brush ent that wraps a miptex with
+	/* Lightmap atlas at TU1, and TU2 seeded with the null fullbright
+	 * sentinel.  R_DispatchBrushInstancedPass rebinds TU2 per (instance,
+	 * texture) group using the per-key fb_tex stored by
+	 * R_CollectBrushInstances, so any brush ent that wraps a miptex with
 	 * fullbright pixels (e.g. a torch tex on a func_train) gets the same
 	 * additive contribution as the matching world surface.  uhexen2-61bb. */
-	glActiveTexture_fp(GL_TEXTURE2);
-	glBindTexture_fp(GL_TEXTURE_2D, gl_null_fb_texture);
-	glActiveTexture_fp(GL_TEXTURE0);
+	{
+		const GLuint	units12[2] = { lm_atlas_texture, gl_null_fb_texture };
+		R_BindTextures (1, 2, units12);
+	}
 
 	/* Optional polygon offset — kept as a tunable safety net (default 0).
 	 * With the shader unified, no offset should be needed; bumping the
@@ -4601,7 +4590,6 @@ static void R_DrawAliasInstanced (void)
 			continue;
 
 		/* Bind skin texture to unit 0 */
-		glActiveTexture_fp(GL_TEXTURE0);
 		R_BindTextureSlot (0, batch->skin_tex);
 
 		/* Material maps at units 3 and 4 (uhexen2-4kcb).  Per batch rather
@@ -4624,17 +4612,14 @@ static void R_DrawAliasInstanced (void)
 				float	nrm = r_normalmap_intensity.value;
 				float	gls = r_gloss_intensity.value;
 				vec3_t	dir;
+				GLuint	maps[2];
 
 				if (nrm < 0.0f) nrm = 0.0f;
 				if (gls < 0.0f) gls = 0.0f;
 
-				glActiveTexture_fp(GL_TEXTURE3);
-				glBindTexture_fp(GL_TEXTURE_2D,
-					batch->norm_tex ? batch->norm_tex : gl_flat_normal_texture);
-				glActiveTexture_fp(GL_TEXTURE4);
-				glBindTexture_fp(GL_TEXTURE_2D,
-					batch->gloss_tex ? batch->gloss_tex : gl_null_gloss_texture);
-				glActiveTexture_fp(GL_TEXTURE0);
+				maps[0] = batch->norm_tex ? batch->norm_tex : gl_flat_normal_texture;
+				maps[1] = batch->gloss_tex ? batch->gloss_tex : gl_null_gloss_texture;
+				R_BindTextures (3, 2, maps);
 
 				R_SetAliasMaterialU (nrm, gls, q_max(1.0f, r_gloss_exponent.value));
 				R_AliasMaterialLightDirWorld (dir);
@@ -4845,7 +4830,6 @@ static void R_DrawAliasInstanced (void)
 				if (!pose_ssbo)
 					continue;
 
-				glActiveTexture_fp(GL_TEXTURE0);
 				R_BindTextureSlot (0, batch->fb_tex);
 				GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER,
 						  gm->poseverttype == PV_MD3 ? 3 : 1, pose_ssbo);

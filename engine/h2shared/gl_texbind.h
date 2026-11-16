@@ -14,6 +14,12 @@
  * range of slots in one call.  This module is the second shape, implemented
  * on the first, so the call sites stop naming the cursor.  uhexen2-p4ln.3.
  *
+ * It is the only renderer code that calls glActiveTexture, glBindTexture,
+ * glBindImageTexture or glDeleteTextures (the loader table gl_func.h and
+ * WEBSOFT's raw-GLES canvas web_canvas_gl2.c aside);
+ * tools/test_texture_bind_routing.py fails on any other caller, and
+ * tools/test_texbind_shadow.py checks the shadow against a fake GL.  #338.
+ *
  * The slot convention was already fixed before this existed -- unit 0 diffuse,
  * unit 1 lightmap atlas or soft-depth snapshot, unit 2 fullbright mask, unit 3
  * normal map, unit 4 gloss map, unit 5 light grid, units 6-8 GPU lightstyle
@@ -47,12 +53,29 @@ void	R_BindTextureSlot (GLuint slot, GLuint texture);
 
 /* Single slot on a non-2D target -- the softemu palette LUT and light grid
  * (GL_TEXTURE_3D), the MSAA OIT attachments (GL_TEXTURE_2D_MULTISAMPLE),
- * and the skybox (GL_TEXTURE_CUBE_MAP). */
+ * the skybox (GL_TEXTURE_CUBE_MAP), and the shadow maps
+ * (GL_TEXTURE_CUBE_MAP_ARRAY -- not shadowed, so always issued). */
 void	R_BindTextureTarget (GLuint slot, GLenum target, GLuint texture);
 
-/* What slot 0 currently holds.  A handful of sites compare against it to
- * decide whether a texture they are about to delete is live. */
-GLuint	R_CurrentTexture (void);
+/* Bind to edit: glTexImage*, glTexSubImage*, glTexStorage*, glTexParameter*,
+ * glCopyTexSubImage*, glGenerateMipmap and the glGetTex* reads all act on
+ * the texture bound to the ACTIVE unit, and the invariant below pins that at
+ * 0 -- so an edit bind is a tracked bind on unit 0, with no slot to name.
+ * Going through here is what keeps the shadow true: a raw edit bind leaves
+ * unit 0 holding a texture the shadow knows nothing about, and the next
+ * R_BindTextureSlot (0, ...) of what the shadow believes is there folds
+ * away.  The texture stays bound afterwards; pass 0 to unbind.  SDL_GPU has
+ * no such bind -- uploads go through a copy pass -- which is why these
+ * sites are spelled apart from the sampling ones. */
+void	R_BindTextureForEdit (GLenum target, GLuint texture);
+
+/* A compute pass's storage image (glBindImageTexture).  Image units are not
+ * texture units -- binding one cannot change what a sampler reads -- so
+ * there is nothing to shadow; it is here so a pass's storage textures are
+ * named in the same module as its sampled ones.  No-op on the GLES tier,
+ * which has no compute (gl_func.h). */
+void	R_BindImageTexture (GLuint unit, GLuint texture, GLint level, GLboolean layered,
+			    GLint layer, GLenum access, GLenum format);
 
 /* Delete textures and forget the shadow in one step.  Deleting behind the
  * shadow's back is the one way to corrupt it: GL recycles names, so the very
@@ -61,11 +84,11 @@ GLuint	R_CurrentTexture (void);
  * gets folded away -- after which its glTexImage2D lands on nothing. */
 void	R_DeleteTextures (GLsizei n, const GLuint *textures);
 
-/* Forget the shadow.  For context boundaries, and for anything that binds a
- * texture without going through this module.  Also re-asserts unit 0 as the
- * active unit: while the conversion is partial, raw code outside this module
- * can move the GL cursor, and the shadowed cursor would otherwise disagree
- * with it -- the next slot-0 bind would then land on the wrong unit. */
+/* Forget the shadow, so the next bind of every slot is issued.  For context
+ * boundaries and for code that would rather not trust the shadow across one
+ * of its own boundaries.  Nothing binds behind this module's back any more
+ * -- tools/test_texture_bind_routing.py fails the build if anything does --
+ * so this is never a repair, only a re-issue. */
 void	R_ResetTextureBindings (void);
 
 #endif	/* GL_TEXBIND_H */

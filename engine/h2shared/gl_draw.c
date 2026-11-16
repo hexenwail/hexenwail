@@ -728,10 +728,10 @@ static qboolean GL_ImageDumpEntry (const gltexture_t *glt, const char *dirpath,
 		return true;
 	}
 
-	/* Bound directly, not through GL_Bind: its currenttexture cache can
-	 * disagree with the real binding, and a skipped bind reads some other
-	 * texture into a buffer sized for this one. */
-	glBindTexture_fp (GL_TEXTURE_2D, glt->texnum);
+	/* A skipped bind would read some other texture into a buffer sized for
+	 * this one.  The old GL_Bind cache could skip it; the module's shadow
+	 * cannot, because nothing binds behind it. */
+	R_BindTextureForEdit (GL_TEXTURE_2D, glt->texnum);
 	glGetTexLevelParameteriv_fp (GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &w);
 	glGetTexLevelParameteriv_fp (GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &h);
 
@@ -789,13 +789,13 @@ static void GL_ImageDump_f (void)
 	const gltexture_t	*glt;
 	int		i, flags, written = 0, failed = 0, stale = 0;
 	qboolean	ok = true;
-	GLint		prev_unit = GL_TEXTURE0, prev_tex = 0, prev_pack = 4;
+	GLint		prev_tex = 0, prev_pack = 4;
 
 	FS_MakePath_BUF (FS_USERDIR, NULL, dirpath, sizeof(dirpath), "imagedump");
 	Sys_mkdir (dirpath, false);
 
-	glGetIntegerv_fp (GL_ACTIVE_TEXTURE, &prev_unit);
-	glActiveTexture_fp (GL_TEXTURE0);
+	/* Unit 0 is the active unit whenever gl_texbind.c is not mid-call, so
+	 * this is unit 0's binding, the one the dump moves. */
 	glGetIntegerv_fp (GL_TEXTURE_BINDING_2D, &prev_tex);
 	glGetIntegerv_fp (GL_PACK_ALIGNMENT, &prev_pack);
 	glPixelStorei_fp (GL_PACK_ALIGNMENT, 1);
@@ -815,13 +815,7 @@ static void GL_ImageDump_f (void)
 	}
 
 	glPixelStorei_fp (GL_PACK_ALIGNMENT, prev_pack);
-	glBindTexture_fp (GL_TEXTURE_2D, (GLuint)prev_tex);
-	glActiveTexture_fp ((GLenum)prev_unit);
-	/* The dump bound textures behind the module's back, so the shadow no
-	 * longer knows what the units hold.  Forget it (and re-assert unit 0);
-	 * the next module bind re-issues.  The GL binding itself was already
-	 * restored above. */
-	R_ResetTextureBindings ();
+	R_BindTextureForEdit (GL_TEXTURE_2D, (GLuint)prev_tex);
 
 	Con_Printf ("imagedump: wrote %d texture%s to %s\n",
 		    written, (written == 1) ? "" : "s", dirpath);

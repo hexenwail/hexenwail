@@ -454,7 +454,7 @@ static void SH_FreeTexture (void)
 		glDeleteFramebuffers_fp (sh_maps * 6, sh_fbos);
 	memset (sh_fbos, 0, sizeof(sh_fbos));
 	if (sh_tex)
-		glDeleteTextures_fp (1, &sh_tex);
+		R_DeleteTextures (1, &sh_tex);
 	sh_tex = 0;
 	sh_res = sh_maps = 0;
 	sh_filter = -1;
@@ -489,8 +489,7 @@ static qboolean SH_EnsureTexture (void)
 	if (!sh_tex)
 	{
 		glGenTextures_fp (1, &sh_tex);
-		glActiveTexture_fp (GL_TEXTURE0 + DLSHADOW_TMU);
-		glBindTexture_fp (GL_TEXTURE_CUBE_MAP_ARRAY, sh_tex);
+		R_BindTextureForEdit (GL_TEXTURE_CUBE_MAP_ARRAY, sh_tex);
 		glTexImage3D_fp (GL_TEXTURE_CUBE_MAP_ARRAY, 0, GL_DEPTH_COMPONENT16,
 				 res, res, maps * 6, 0, GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT, NULL);
 		glTexParameteri_fp (GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_BASE_LEVEL, 0);
@@ -500,7 +499,9 @@ static qboolean SH_EnsureTexture (void)
 		glTexParameteri_fp (GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
 		glTexParameteri_fp (GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
 		glTexParameteri_fp (GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
-		glActiveTexture_fp (GL_TEXTURE0);
+		/* Off unit 0 again: the passes render into this array, and nothing
+		 * should hold it on a unit but DLSHADOW_TMU when it is sampled. */
+		R_BindTextureForEdit (GL_TEXTURE_CUBE_MAP_ARRAY, 0);
 		/* PCF's 2x2 footprint across a face edge: without this it clamps
 		 * inside the face and draws faint lines along the cube's twelve
 		 * edges.  Context-wide in GL; it only ever improves cube sampling,
@@ -536,11 +537,10 @@ static qboolean SH_EnsureTexture (void)
 	if (filter != sh_filter)
 	{
 		GLint f = filter ? GL_LINEAR : GL_NEAREST;
-		glActiveTexture_fp (GL_TEXTURE0 + DLSHADOW_TMU);
-		glBindTexture_fp (GL_TEXTURE_CUBE_MAP_ARRAY, sh_tex);
+		R_BindTextureForEdit (GL_TEXTURE_CUBE_MAP_ARRAY, sh_tex);
 		glTexParameteri_fp (GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_MIN_FILTER, f);
 		glTexParameteri_fp (GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_MAG_FILTER, f);
-		glActiveTexture_fp (GL_TEXTURE0);
+		R_BindTextureForEdit (GL_TEXTURE_CUBE_MAP_ARRAY, 0);
 		sh_filter = filter;
 	}
 	return true;
@@ -1624,14 +1624,15 @@ void R_Shadow_DrawDebug (void)
 	R_SetStencilTest (false);
 	R_UseProgram (sh_dbgprog);
 	R_BindTextureTarget (DLSHADOW_TMU, GL_TEXTURE_CUBE_MAP_ARRAY, sh_tex);
-	glActiveTexture_fp (GL_TEXTURE0 + DLSHADOW_TMU);
+	/* The compare mode is texture state, so it is set through unit 0 and
+	 * reaches the DLSHADOW_TMU binding: same texture object. */
+	R_BindTextureForEdit (GL_TEXTURE_CUBE_MAP_ARRAY, sh_tex);
 	glTexParameteri_fp (GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_COMPARE_MODE, GL_NONE);
-	glActiveTexture_fp (GL_TEXTURE0);
 	glBindVertexArray_fp (sh_dbgvao);
 	glDrawArrays_fp (GL_TRIANGLES, 0, 3);
-	glActiveTexture_fp (GL_TEXTURE0 + DLSHADOW_TMU);
+	R_BindTextureForEdit (GL_TEXTURE_CUBE_MAP_ARRAY, sh_tex);
 	glTexParameteri_fp (GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
-	glActiveTexture_fp (GL_TEXTURE0);
+	R_BindTextureForEdit (GL_TEXTURE_CUBE_MAP_ARRAY, 0);
 	R_SetBlend (blend);
 	SH_RestoreState (&saved);
 }

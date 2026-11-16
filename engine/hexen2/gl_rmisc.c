@@ -660,19 +660,13 @@ void D_ClearOpenGLTextures (int last_tex)
 			Con_Printf ("[texgen]    drop %lu '%s'\n",
 				    (unsigned long)gltextures[i].texnum,
 				    gltextures[i].identifier);
-		glDeleteTextures_fp(1, &(gltextures[i].texnum));
+		R_DeleteTextures (1, &(gltextures[i].texnum));
 		key = Hash_GenerateKeyString (&hash_gltextures, gltextures[i].identifier, true);
 		Hash_Remove(&hash_gltextures, key, i);
 	}
 
 	memset(&(gltextures[last_tex]), 0, (numgltextures - last_tex) * sizeof(gltexture_t));
 	numgltextures = last_tex;
-
-	/* The deleted names may be ones the binding shadow still holds, and
-	 * GL recycles names -- so forget the shadow, or the next bind of a
-	 * recycled name folds away.  (The old test here compared a texture
-	 * NAME against a gltextures[] index, which answers nothing.) */
-	R_ResetTextureBindings ();
 
 	// Clear menu pic cache
 	memset(menu_cachepics, 0, menu_numcachepics * sizeof(cachepic_t));

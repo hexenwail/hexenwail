@@ -102,6 +102,20 @@ jobs:
       - name: No draw-state GL call bypasses the pipeline
         run: python3 tools/test_draw_state_routing.py
 
+      # gl_texbind.c shadows what every texture unit holds and which unit is
+      # active, and drops binds that would not change them, which is only
+      # right while nothing binds, switches units or deletes a texture behind
+      # its back.  No glActiveTexture / glBindTexture / glBindImageTexture /
+      # glDeleteTextures (or sampler / multi-bind) call outside gl_texbind.c,
+      # except the loader table (gl_func.h) and the web canvas blit
+      # (web_canvas_gl2.c); and the shadow itself checked against a fake GL.
+      # GitHub #338.
+      - name: No texture bind bypasses gl_texbind.c
+        run: python3 tools/test_texture_bind_routing.py
+
+      - name: gl_texbind.c shadow agrees with GL
+        run: python3 tools/test_texbind_shadow.py
+
       # The linker already guarantees the software build *defines* every
       # renderer cvar shared code touches -- r_soft_web.c exists for that, and
       # CI builds the WEBSOFT config on every PR.  What nothing catches is a

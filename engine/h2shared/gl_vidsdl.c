@@ -592,23 +592,20 @@ static qboolean GL_RunFramebufferSelfTest (void)
 {
 	GLuint		texture = 0, framebuffer = 0;
 	GLenum		status;
-	GLint		old_fbo = 0, old_texture = 0, old_active = GL_TEXTURE0, old_viewport[4];
+	GLint		old_fbo = 0, old_texture = 0, old_viewport[4];
 	GLfloat		old_clear[4];
 	unsigned char	pixel[4] = {0, 0, 0, 0};
 	qboolean	passed;
 
 	glGetIntegerv_fp(GL_FRAMEBUFFER_BINDING, &old_fbo);
-	glGetIntegerv_fp(GL_ACTIVE_TEXTURE, &old_active);
 	glGetIntegerv_fp(GL_VIEWPORT, old_viewport);
 	glGetFloatv_fp(GL_COLOR_CLEAR_VALUE, old_clear);
 
-	/* Select the unit *before* reading its 2D binding: GL_TEXTURE_BINDING_2D
-	 * is per-unit, so querying it first and restoring it after the switch
-	 * would copy the entry unit's binding onto unit 0. */
-	glActiveTexture_fp(GL_TEXTURE0);
+	/* GL_TEXTURE_BINDING_2D is per-unit; this is unit 0's, which gl_texbind.c
+	 * keeps active between its calls, and the unit the edit bind below uses. */
 	glGetIntegerv_fp(GL_TEXTURE_BINDING_2D, &old_texture);
 	glGenTextures_fp(1, &texture);
-	glBindTexture_fp(GL_TEXTURE_2D, texture);
+	R_BindTextureForEdit (GL_TEXTURE_2D, texture);
 	glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_RGBA8, 2, 2, 0,
 			GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -637,9 +634,8 @@ static qboolean GL_RunFramebufferSelfTest (void)
 
 	glBindFramebuffer_fp(GL_FRAMEBUFFER, (GLuint)old_fbo);
 	glDeleteFramebuffers_fp(1, &framebuffer);
-	glBindTexture_fp(GL_TEXTURE_2D, (GLuint)old_texture);
-	glDeleteTextures_fp(1, &texture);
-	glActiveTexture_fp((GLenum)old_active);
+	R_BindTextureForEdit (GL_TEXTURE_2D, (GLuint)old_texture);
+	R_DeleteTextures (1, &texture);
 	glViewport_fp(old_viewport[0], old_viewport[1], old_viewport[2], old_viewport[3]);
 	glClearColor_fp(old_clear[0], old_clear[1], old_clear[2], old_clear[3]);
 
