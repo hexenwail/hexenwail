@@ -144,7 +144,7 @@ static qboolean	cull_initialized;
 /* hiz_copy lives in engine/shaders/hiz_copy_comp.glsl and reaches us as
  * hiz_copy_comp[] via shaders_gen.h.  Its #version is supplied separately, as
  * a second glShaderSource chunk, so the file itself stays tier-agnostic. */
-#define HIZ_COMPUTE_VERSION	"#version 430 core\n"
+#define HIZ_COMPUTE_VERSION	TIER_CORE	/* engine/shaders/glonly/tier_core.glsl */
 
 /* Uniform-block binding point for HizParams.  GLSL ES 3.00 cannot put
  * layout(binding=) on a block, so the shader does not name this and

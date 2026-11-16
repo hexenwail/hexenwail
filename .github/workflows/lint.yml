@@ -415,6 +415,12 @@ jobs:
       - name: Shader include bound
         run: python3 tools/test_embed_include_bound.py
 
+      # No C string literal under engine/h2shared or engine/hexen2 holds a
+      # GLSL #version: the tier preambles and the WEBSOFT canvas blit live in
+      # engine/shaders/glonly, embedded as macros (#450).
+      - name: No #version string in the C
+        run: python3 tools/test_no_version_in_c.py
+
       # salias_vert reads VertParams: the C mirror matches the block member
       # for member (sizes AND int/float kinds), all four alias builds compile
       # the file, GL_ImmPushBlocks feeds it, MSL targets 2.1 (#450 S1).

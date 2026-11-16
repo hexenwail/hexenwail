@@ -31,6 +31,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SHADER_SOURCE = resolve(ROOT, 'engine/h2shared/gl_shader.c');
 const POSTPROCESS_SOURCE = resolve(ROOT, 'engine/h2shared/gl_postprocess.c');
 const SHADER_FILE_DIR = resolve(ROOT, 'engine/shaders');
+const GLONLY_DIR = resolve(SHADER_FILE_DIR, 'glonly');
 
 const PROGRAM_SPECS = [
   ['2d', 'shader', 's2d_vert', 's2d_frag'],
@@ -308,6 +309,19 @@ async function readFileBackedShaders() {
   return sources;
 }
 
+// engine/shaders/glonly/*.glsl, keyed by the macro EmbedShaders.cmake makes of
+// each: the basename in upper case, holding the file verbatim.  The tier
+// headers (GLSL_VERT_HEADER, PP_VERT_HEADER, ...) are defined in terms of these
+// since no #version is left in C (#450), so they seed the macro table.
+async function readGlOnlyMacros() {
+  const files = (await readdir(GLONLY_DIR)).filter((f) => f.endsWith('.glsl')).sort();
+  const macros = new Map();
+  for (const file of files)
+    macros.set(file.slice(0, -'.glsl'.length).toUpperCase(),
+      await readFile(resolve(GLONLY_DIR, file), 'utf8'));
+  return macros;
+}
+
 // Which #version header the engine compiles a file-backed stage with.
 //
 // The .glsl files carry no #version line on purpose -- the GL side passes one
@@ -346,16 +360,17 @@ function splitHeaderFor(ctx, symbol) {
 }
 
 export async function extractEngineWebGLPrograms() {
-  const [shaderSource, postprocessSource, fileBacked] = await Promise.all([
+  const [shaderSource, postprocessSource, fileBacked, glOnly] = await Promise.all([
     readFile(SHADER_SOURCE, 'utf8'),
     readFile(POSTPROCESS_SOURCE, 'utf8'),
     readFileBackedShaders(),
+    readGlOnlyMacros(),
   ]);
 
   // One shared macro table, as before: the two files' macro namespaces are
   // disjoint in practice (GLSL_* in gl_shader.c, PP_* in gl_postprocess.c) and
   // a name already in the table is never looked up again.
-  const macros = new Map();
+  const macros = new Map(glOnly);
   const shaderCtx = { name: 'gl_shader.c', source: shaderSource, resolving: new Set() };
   const postprocessCtx = { name: 'gl_postprocess.c', source: postprocessSource, resolving: new Set() };
 
@@ -374,7 +389,7 @@ export async function extractEngineWebGLPrograms() {
   for (const name of ['GLSL_VERT_HEADER', 'GLSL_FRAG_HEADER', 'GLSL_LIGHTGRID_CONSTS']) {
     macros.set(name, readDefine(glesBranchDefining(shaderSource, name), name, macros, shaderCtx));
   }
-  // gl_postprocess.c keeps its own headers; PP_ES_PRECISION feeds the other two.
+  // gl_postprocess.c keeps its own headers (TIER_ES_PP on the ES tier).
   for (const name of ['PP_VERT_HEADER', 'PP_FRAG_HEADER']) {
     macros.set(name, readDefine(glesBranchDefining(postprocessSource, name), name, macros, postprocessCtx));
   }

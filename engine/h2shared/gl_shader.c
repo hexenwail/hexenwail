@@ -353,13 +353,16 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 /* Shader sources                                                      */
 /* ------------------------------------------------------------------ */
 
-/* GLSL version header: desktop GL 4.3 vs WebGL2 (ES 3.0) */
+/* GLSL version header: desktop GL 4.3 vs WebGL2 (ES 3.0).  The text is
+ * engine/shaders/glonly/tier_core.glsl / tier_es.glsl, which shaders_gen.h
+ * embeds as string-literal macros so the headers below can still paste
+ * further #defines onto them. */
 #ifdef USE_GLES
-#define GLSL_VERT_HEADER	"#version 300 es\nprecision highp float;\n"
-#define GLSL_FRAG_HEADER	"#version 300 es\nprecision highp float;\n"
+#define GLSL_VERT_HEADER	TIER_ES
+#define GLSL_FRAG_HEADER	TIER_ES
 #else
-#define GLSL_VERT_HEADER	"#version 430 core\n"
-#define GLSL_FRAG_HEADER	"#version 430 core\n"
+#define GLSL_VERT_HEADER	TIER_CORE
+#define GLSL_FRAG_HEADER	TIER_CORE
 #endif
 /* The tier switches the world fragment stages used to splice in -- no
  * early_fragment_tests below ES 3.10, the bitfieldReverse fallback ES 3.00

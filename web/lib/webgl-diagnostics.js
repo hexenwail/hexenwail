@@ -437,7 +437,8 @@ export function runWebGLDiagnostics({ canvas = null } = {}) {
 
 /*
  * The software-renderer artifact's presenter, mirrored from
- * engine/h2shared/web_canvas_gl2.c.  That build rasterizes on the CPU and
+ * engine/h2shared/web_canvas_gl2.c (its shaders are
+ * engine/shaders/glonly/webcanvas_blit_*.glsl).  That build rasterizes on the CPU and
  * asks the GPU for exactly one thing: expand an R8UI framebuffer through a
  * 256-entry RGBA8 palette and scale it to the canvas.  So it must be gated on
  * that, and only that -- running the engine's world/post-process families

@@ -73,18 +73,19 @@
  * so it must be stated.  int is declared mediump there, which is as little as
  * 16 bits -- not enough for bayer16's 32-bit shifts below -- hence highp int.
  * sampler3D likewise has no default (only sampler2D and samplerCube do), and
- * softemu's palette LUT is a sampler3D, so it wants a stated precision too. */
+ * softemu's palette LUT is a sampler3D, so it wants a stated precision too.
+ * Those lines are engine/shaders/glonly/tier_es_pp.glsl (TIER_ES_PP in
+ * shaders_gen.h); the desktop header is tier_core.glsl, as in gl_shader.c. */
 #ifdef USE_GLES
-#define PP_ES_PRECISION	"precision highp float;\nprecision highp int;\nprecision highp sampler3D;\n"
-#define PP_VERT_HEADER	"#version 300 es\n" PP_ES_PRECISION
-#define PP_FRAG_HEADER	"#version 300 es\n" PP_ES_PRECISION
+#define PP_VERT_HEADER	TIER_ES_PP
+#define PP_FRAG_HEADER	TIER_ES_PP
 /* bitfieldReverse (GLSL 4.00 / ES 3.10) used to be spliced in here for the
  * ES tier as PP_BITFIELD_REVERSE.  Since #450 the polyfill lives in
  * engine/shaders/spp_frag.glsl under #ifdef GL_ES, which the ES compiler
  * predefines, so the tier choice no longer needs C. */
 #else
-#define PP_VERT_HEADER	"#version 430 core\n"
-#define PP_FRAG_HEADER	"#version 430 core\n"
+#define PP_VERT_HEADER	TIER_CORE
+#define PP_FRAG_HEADER	TIER_CORE
 #endif
 
 /* FBO state — scaled 3D scene */
@@ -1667,7 +1668,7 @@ static qboolean PP_BuildPaletteLUT_GPU (softemu_metric_t metric)
 
 	if (!pp_palette_init_prog[metric])
 	{
-		q_snprintf(header, sizeof(header), "#version 430 core\n#define MODE %d\n#define LUT_DIM %d\n",
+		q_snprintf(header, sizeof(header), TIER_CORE "#define MODE %d\n#define LUT_DIM %d\n",
 			   (int)metric, PP_LUT_DIM);
 		pp_palette_init_prog[metric] =
 			GL_LoadComputeProgram(header, softemu_lut_comp, "palette init");

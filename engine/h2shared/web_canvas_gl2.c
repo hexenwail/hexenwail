@@ -30,6 +30,8 @@
 
 #include <GLES3/gl3.h>
 
+#include "shaders_gen.h"	/* WEBCANVAS_BLIT_VERT / _FRAG -- engine/shaders/glonly */
+
 /* Unlike alextnewman/hexenwail 0b1906add, this backend does not create its
  * own WebGL2 context: vid_soft_web.c already owns an SDL3 window with an ES
  * 3.0 context, and a canvas can only ever hand out one.  Everything below
@@ -44,51 +46,21 @@ static int src_width, src_height;
 static int filter_smooth;
 static byte palette_rgba[256 * 4];
 
-/* Fullscreen triangle generated from gl_VertexID: no vertex buffer, no
- * attribute fetch.  v_uv is flipped vertically because the software
- * framebuffer is stored top-down while GL clip space is bottom-up. */
-static const char *blit_vertex_source =
-	"#version 300 es\n"
-	"out vec2 v_uv;\n"
-	"void main(){\n"
-	" vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));\n"
-	" v_uv = vec2(p.x, 1.0 - p.y);\n"
-	" gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);\n"
-	"}\n";
-
-static const char *blit_fragment_source =
-	"#version 300 es\n"
-	"precision highp float;\n"
-	"precision highp int;\n"
-	"uniform highp usampler2D u_indexed;\n"
-	"uniform highp sampler2D u_palette;\n"
-	"uniform vec2 u_srcsize;\n"
-	"uniform int u_smooth;\n"
-	"in vec2 v_uv;\n"
-	"out vec4 frag_color;\n"
-	"vec3 lookup(ivec2 t){\n"
-	" ivec2 c = clamp(t, ivec2(0), ivec2(u_srcsize) - 1);\n"
-	" uint idx = texelFetch(u_indexed, c, 0).r;\n"
-	" return texelFetch(u_palette, ivec2(int(idx), 0), 0).rgb;\n"
-	"}\n"
-	"void main(){\n"
-	" vec2 pixel = v_uv * u_srcsize;\n"
-	" if (u_smooth == 0){\n"
-	"  frag_color = vec4(lookup(ivec2(floor(pixel))), 1.0);\n"
-	"  return;\n"
-	" }\n"
-	/* Pixel-art antialiasing: a bilinear tap whose weights are sharpened by
-	 * the on-screen size of one source texel.  Collapses to exact nearest
-	 * neighbour at integer scale and only softens the seams otherwise. */
-	"	vec2 base = floor(pixel - 0.5);\n"
-	"	vec2 frac = pixel - 0.5 - base;\n"
-	"	vec2 scale = max(vec2(1.0), 1.0 / max(fwidth(pixel), vec2(1e-5)));\n"
-	"	frac = clamp(0.5 + (frac - 0.5) * scale, 0.0, 1.0);\n"
-	"	ivec2 t = ivec2(base);\n"
-	"	vec3 a = mix(lookup(t), lookup(t + ivec2(1, 0)), frac.x);\n"
-	"	vec3 b = mix(lookup(t + ivec2(0, 1)), lookup(t + ivec2(1, 1)), frac.x);\n"
-	"	frag_color = vec4(mix(a, b, frac.y), 1.0);\n"
-	"}\n";
+/* The blit pair is engine/shaders/glonly/webcanvas_blit_{vert,frag}.glsl,
+ * whole shaders carrying their own ES 3.00 #version: they only ever run on this
+ * WebGL2 context, never on the desktop tier or SDL_GPU, so they take no tier
+ * header and stay out of the SPIR-V gates (#450).
+ *
+ * The vertex stage is a fullscreen triangle generated from gl_VertexID: no
+ * vertex buffer, no attribute fetch.  v_uv is flipped vertically because the
+ * software framebuffer is stored top-down while GL clip space is bottom-up.
+ *
+ * The fragment stage's smooth path is pixel-art antialiasing: a bilinear tap
+ * whose weights are sharpened by the on-screen size of one source texel.
+ * Collapses to exact nearest neighbour at integer scale and only softens the
+ * seams otherwise. */
+static const char *blit_vertex_source = WEBCANVAS_BLIT_VERT;
+static const char *blit_fragment_source = WEBCANVAS_BLIT_FRAG;
 
 static GLuint WebCanvas_CompileShader (GLenum type, const char *source)
 {

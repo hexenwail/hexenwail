@@ -199,7 +199,7 @@ static qboolean R_LightCluster_Build (void)
 	}
 
 	q_snprintf (header, sizeof(header),
-		    "#version 430 core\n"
+		    TIER_CORE
 		    "#define LIGHT_TILES_X %d\n"
 		    "#define LIGHT_TILES_Y %d\n"
 		    "#define LIGHT_TILES_Z %d\n"

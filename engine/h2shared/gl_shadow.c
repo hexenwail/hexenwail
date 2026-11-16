@@ -361,7 +361,7 @@ static void SH_BuildFaceMatrices (void)
 
 static GLuint SH_LinkProgram (const char *vs, const char *fs, const char *name)
 {
-	GLuint p = GL_LoadProgramHeaders ("#version 430 core\n", vs, "#version 430 core\n", fs);
+	GLuint p = GL_LoadProgramHeaders (TIER_CORE, vs, TIER_CORE, fs);
 	if (!p)
 		Con_Printf ("Shadow maps: the %s program failed to build\n", name);
 	return p;

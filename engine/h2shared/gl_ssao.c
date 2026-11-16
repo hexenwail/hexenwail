@@ -68,7 +68,7 @@ void R_SSAO_Init (void)
 #define SSAO_UBO_BINDING	3	/* 0 Hi-Z, 1 and 2 the shared vert/frag blocks, 4 CullParams */
 #define SSAO_TEX_UNIT		8	/* the shaders' TEXBIND(8..11): clear of the units draws cache */
 #define SSAO_PYRAMID_LEVELS	5
-#define SSAO_VERSION		"#version 430 core\n"
+#define SSAO_VERSION		TIER_CORE	/* engine/shaders/glonly/tier_core.glsl */
 /* Tile tags: one bit per 128x128 AO tile, 8x4 tiles per texel.  16x16 texels
  * covers a 16384x8192 AO target; R_SSAO_Apply clears them from a buffer this
  * size. */

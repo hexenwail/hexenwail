@@ -288,6 +288,11 @@ def enclosing(pos):
 
 
 hdr_spans, hdr_texts, hdr_macros, unresolved = [], [], set(), []
+# The tier preambles are engine/shaders/glonly files, embedded by EmbedShaders
+# as upper-case string macros (tier_es.glsl -> TIER_ES), since #450 left no
+# #version in C.  They are header text like any other macro body.
+GLONLY = {p.stem.upper(): p.read_text()
+          for p in (ROOT / "engine/shaders/glonly").glob("*.glsl")}
 
 
 def resolve(expr, pos, depth=0):
@@ -312,6 +317,9 @@ def resolve(expr, pos, depth=0):
                     resolve(body, s, depth + 1)
         elif ident == "NULL":
             continue
+        elif ident in GLONLY:
+            hdr_macros.add(ident)
+            hdr_texts.append(GLONLY[ident])
         elif fn and ident in fn[1]:
             idx = fn[1].index(ident)
             sites = [(p, a) for p, a in calls(gsc, gsb, fn[0]) if not (fn[2] <= p < fn[3])]
