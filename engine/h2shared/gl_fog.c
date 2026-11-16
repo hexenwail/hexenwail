@@ -24,6 +24,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "mathlib.h"
 #include "gl_shader.h"
+#include "gl_uniforms.h"
+
+extern float skyfog;	/* gl_sky.c: r_skyfog, or the worldspawn key */
 
 #define CLAMP(min,val,max) ((val) < (min) ? (min) : ((val) > (max) ? (max) : (val)))
 
@@ -263,6 +266,13 @@ float *Fog_GetColor (void)
 		c[3] = 1.0;
 	}
 
+	/* Ironwail's clamp, after the fade.  The fog command clamps its colour,
+	 * but the worldspawn "fog" key is sscanf'd raw, and out-of-range values
+	 * would otherwise reach u_skyfog and the flat sky fog passes, which
+	 * r_hdr's RGBA16F targets do not clamp. */
+	for (i=0;i<3;i++)
+		c[i] = CLAMP(0.0f, c[i], 1.0f);
+
 	//find closest 24-bit RGB value, so solid-colored sky can match the fog perfectly
 	for (i=0;i<3;i++)
 		c[i] = (float)(Q_rint(c[i] * 255)) / 255.0f;
@@ -312,6 +322,14 @@ void Fog_SetupFrame (void)
 	 * eye is submerged, and vice versa.  Visible-across-the-waterline
 	 * is the correct look. */
 	r_fog_density = Fog_GetDensity() / 64.0;
+
+	/* Ironwail's skyfogdata.  Here, not in Sky_DrawSky, which returns early
+	 * on a map with no skybox: the scrolling sky's single-pass shader
+	 * (ssky_layers) is the reader, drawn from R_DrawSkyChain inside
+	 * R_DrawWorld.  Alpha 0 with fog off keeps that blend an exact no-op.
+	 * GitHub #486. */
+	R_SetSkyFog (c[0], c[1], c[2],
+		     Fog_GetDensity() > 0 ? CLAMP(0.0f, skyfog, 1.0f) : 0.0f);
 }
 
 /*

@@ -25,9 +25,6 @@ extern GLuint currenttexture;
 
 /* Palette tables - these are defined elsewhere in uhexen2 */
 extern unsigned int d_8to24table[256];
-extern unsigned int d_8to24table_fbright[256];
-extern unsigned int d_8to24table_nobright[256];
-extern unsigned int d_8to24table_conchars[256];
 
 /* Texture flags for TEXPREF_* - need to match what gl_sky.c expects */
 #define TEXPREF_NONE			0x0000

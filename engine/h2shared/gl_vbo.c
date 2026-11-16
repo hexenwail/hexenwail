@@ -22,12 +22,6 @@
 extern float r_fog_density;
 extern float r_fog_color[3];
 
-/* gl_overbright cvar (gl_rmain.c) — read directly for the u_overbright uniform.
- * Kept here so GL_ImmEnd can push the value alongside other auto-uploaded
- * uniforms.  uhexen2-f29y. */
-extern cvar_t gl_overbright;
-extern cvar_t r_fullbright;
-
 /* ------------------------------------------------------------------ */
 /* Vertex format for the streaming VBO:                                */
 /*   pos[3] + texcoord[2] + lmcoord[2] + color[4] = 11 floats         */
@@ -68,10 +62,6 @@ static float	imm_alias_caustics[2] = { 0.0f, 0.0f };
  * back to zero on the way out for exactly that reason. */
 static float	imm_alias_dlight = 0.0f;
 static float	imm_turb[2] = { 0.0f, 0.0f };	/* uhexen2-9o7u: x=amplitude (0=off), y=time */
-/* Its cache lives up here beside it rather than down with the other
- * imm_cache_* values, because GL_ClearTurb below needs both and sits with
- * GL_SetTurb.  -1 is the "never pushed" sentinel; see GL_ImmEnd. */
-static float	imm_cache_turb[2] = { -1.0f, -1.0f };
 /* Soft-particle fade for sprite batches (uhexen2-mf9u).  Like the caustics
  * pair above, 0 intensity is the resting state rather than a -1 sentinel, and
  * R_DrawSpriteModel restores it after each sprite so the alias / warp / brush
@@ -277,24 +267,6 @@ void GL_SetTurb (float amplitude, float time)
 	imm_turb[1] = time;
 }
 
-/* Put one program's warp back to rest RIGHT NOW rather than at the next
- * GL_ImmEnd.  gl_shader_world is shared by the liquid pass and by the opaque
- * world paths, and those set their uniforms by hand -- the MDI dispatch, the
- * DrawTextureChains fast path -- so they never push a u_turb of their own.  A
- * hot value left behind by lit water would warp the entire map from the next
- * draw on.  Clearing the cache too forces the next batch to push whatever it
- * wants, whichever program it turns out to use.  uhexen2-a5nn.2. */
-void GL_ClearTurb (const glprogram_t *shader)
-{
-	imm_turb[0] = imm_turb[1] = 0.0f;
-	if (shader && shader->u_turb >= 0)
-	{
-		R_UseProgram (shader->program);
-		glUniform2f_fp (shader->u_turb, 0.0f, 0.0f);
-	}
-	imm_cache_turb[0] = imm_cache_turb[1] = -1.0f;
-}
-
 /* uhexen2-mf9u.  inv_dist 0 disables the fade entirely; za/zb are the
  * window-depth -> view-distance coefficients for the live projection. */
 void GL_SetSoftParticles (float inv_dist, float za, float zb)
@@ -429,41 +401,10 @@ void GL_ImmVertex2f (float x, float y)
  * triangles using the pre-built index buffer.  (The enum itself comes from
  * glheader.h, which shims it for GLES3.) */
 
-/* Per-shader uniform cache: most HUD/2D draws share identical fog,
- * alpha threshold, and MVP. Driver-side glUniform calls aren't free —
- * skipping the redundant uploads cuts ~100 calls/frame on a typical
- * scene with HUD + center print + several pic draws. The cache is
- * invalidated when the shader changes (different uniform locations)
- * and via GL_ImmInvalidateState() at context boundaries. */
-static const glprogram_t *imm_cache_shader;
-static float	imm_cache_mvp[16];
-static float	imm_cache_mv[16];
-static float	imm_cache_alpha = -2.0f;
-static float	imm_cache_force_opaque_alpha = -2.0f;
-static float	imm_cache_alias_caustics[2] = { -1.0f, -1.0f };	/* uhexen2-0gn3 */
-static float	imm_cache_alias_dlight = -1.0f;	/* uhexen2-waum */
-static float	imm_cache_soft[3] = { -1.0f, -1.0f, -1.0f };	/* uhexen2-mf9u */
-/* uhexen2-4kcb.  -1 is unreachable for an intensity (clamped at 0) and for a
- * unit direction component, so it is a safe "never pushed" sentinel for both. */
-static float	imm_cache_alias_material[3] = { -1.0f, -1.0f, -1.0f };
-static float	imm_cache_alias_lightdir[3] = { -2.0f, -2.0f, -2.0f };
-static float	imm_cache_alias_model[16];
-static qboolean	imm_cache_alias_model_set;
-static float	imm_cache_fog_density = -1.0f;
-static float	imm_cache_fog_color[3] = { -1.0f, -1.0f, -1.0f };
-static float	imm_cache_time = -1.0f;
-static float	imm_cache_eyepos[3] = { -99999.0f, -99999.0f, -99999.0f };
-static float	imm_cache_wind[2] = { -99999.0f, -99999.0f };
-static float	imm_cache_wind3[3] = { -99999.0f, -99999.0f, -99999.0f };
-static float	imm_cache_skyrot = -99999.0f;
-static float	imm_cache_overbright = -1.0f;	/* uhexen2-f29y */
-static qboolean	imm_cache_mvp_set;
-static qboolean	imm_cache_mv_set;
-
-void GL_ImmResetState (void)
-{
-	/* no-op — kept for API compat */
-}
+/* No per-program uniform cache any more: the world programs were the last to
+ * declare loose non-opaque uniforms, and since #450 W2 every program GL_ImmEnd
+ * draws with reads its per-batch values from blocks, whose shadow in
+ * gl_uniforms.c already skips an upload when nothing changed. */
 
 /*
 ===============
@@ -479,7 +420,7 @@ push takes fresh storage and rebinds for each value, so a second value either
 lands in a range the first one is no longer bound to, or silently orphans the
 first -- an arrangement that only works while a block has exactly one member.
 
-Nothing is cached against the program the way the loose uniforms below are.  A
+Nothing is cached against the program the way the loose uniforms were.  A
 loose uniform is per-PROGRAM state, so "we already sent this" is a fact about
 the program; a block is context-wide, so the only meaningful question is
 whether the CONTENTS changed, and that is exactly what the shadow's dirty flags
@@ -491,10 +432,13 @@ static void GL_ImmPushBlocks (const glprogram_t *shader, const float *mvp)
 {
 	/* Eye position and the sky wind used to reach the sky programs as loose
 	 * uniforms pushed from the same globals in the glUniform* half of
-	 * GL_ImmEnd.  Writing them here unconditionally is what keeps that
-	 * behaviour: the shadow's dirty flags make an unchanged value free, and
-	 * only the ssky_* stages read these members, so no other program sees a
-	 * difference.  R_SetEyePos fills both blocks' copies from one value. */
+	 * GL_ImmEnd; this is now their only feed on that path.  Written
+	 * unconditionally, because the shadow's dirty flags make an unchanged
+	 * value free.  The wind members are read only by the ssky_* stages.  The
+	 * eye position is also read by salias_inst_vert (u_eyepos, VertParams
+	 * u_vscene), whose draw path sets the same r_origin itself, so this
+	 * changes nothing it sees.  R_SetEyePos fills both blocks' copies from
+	 * one value. */
 	if (shader->ub_vert >= 0 || shader->ub_frag >= 0)
 		R_SetEyePos (r_origin);
 
@@ -502,14 +446,21 @@ static void GL_ImmPushBlocks (const glprogram_t *shader, const float *mvp)
 	{
 		float mv[16];
 
+		/* u_mvp and u_modelview (VertParams u_mvpm / u_modelviewm): the
+		 * only feed on this path for every program, the world family
+		 * included since sworld_vert moved to a file (#450 W1) -- no
+		 * program declares either loose any more.  Both written every
+		 * batch; the shadow's dirty flags make an unchanged value free. */
 		R_SetMVP (mvp);
-		/* spart_vert reads u_modelview (VertParams u_modelviewm); the
-		 * loose half below fetches the same matrix for programs that
-		 * still declare it loose.  No migrated file read it before this
-		 * slice, so feeding it here is harmless to s2d/sflat/sky -- the
-		 * shadow's dirty flags make an unchanged value free. */
 		GL_GetModelview(mv);
 		R_SetModelView (mv);
+		/* The alias vertex stages read u_alias_model and u_alias_dlight
+		 * from VertParams since #450, and no program declares either
+		 * loose any more, so this is their only feed.  No other block
+		 * program reads either member, and an unchanged value costs
+		 * nothing. */
+		R_SetModelMatrix (imm_alias_model);
+		R_SetAliasDlight (imm_alias_dlight);
 	}
 
 	if (shader->ub_frag >= 0)
@@ -532,45 +483,66 @@ static void GL_ImmPushBlocks (const glprogram_t *shader, const float *mvp)
 		R_SetAlphaMask (imm_alpha_threshold >= 0.0f ? imm_alpha_threshold : 0.0f,
 				imm_force_opaque_alpha >= 0.0f ? imm_force_opaque_alpha : 0.0f);
 		/* spart_frag reads u_fog_density / u_fog_color (FragParams
-		 * u_ffogv); the loose half below pushes the same globals for
-		 * programs that still declare them loose. */
+		 * u_ffogv). */
 		R_SetFog (r_fog_density, r_fog_color);
+
+		/* salias_frag reads the rest of its per-batch state from FragParams
+		 * and AliasFrag since #450.  Every value comes from an imm_* global
+		 * (u_turb's is the one the world programs take too), and is
+		 * written unconditionally: the loose copies were
+		 * per-program and cached, so at every alias draw the program
+		 * already held exactly imm_*, and a write per batch is what gives a
+		 * global block the same property.  Gated on AliasFrag because only the ten programs
+		 * that link salias_frag read any of these.  Not written here: the
+		 * span cell, which R_SetSpanCell puts in AliasFrag around its own
+		 * batches, and the froxel lookup, which R_LightCluster_BindForAlias
+		 * writes once a frame. */
+		if (shader->ub_afrag >= 0)
+		{
+			R_SetAliasCausticsU (imm_alias_caustics[0], imm_alias_caustics[1]);
+			R_SetSoftParams (imm_soft[0], imm_soft[1], imm_soft[2]);
+			R_SetAliasTurb (imm_turb[0], imm_turb[1]);
+			R_SetAliasMaterialU (imm_alias_material[0], imm_alias_material[1],
+					    imm_alias_material[2]);
+			R_SetAliasLightDirU (imm_alias_lightdir);
+		}
+
+		/* The world programs' whole fragment set (#450 W2): lit water,
+		 * underwater walls, the legacy brush-poly fallback and translucent
+		 * world polys, on gl_shader_world or its OIT twin.  The values the
+		 * loose half of GL_ImmEnd used to push per program -- the alpha
+		 * pair from the same imm_* (with -1 resolved as above), fog,
+		 * overbright (R_WorldOverbright, as every world path), and
+		 * the liquid warp -- plus the frame record, which these programs
+		 * held per program from R_SetupFrame on.  Every batch, because the
+		 * block is global: the DrawTextureChains fast path, a brush entity
+		 * or an alias batch may have drawn since the last one.  The span
+		 * cell rides the frame record, where lit water's R_SetSpanCell
+		 * brackets put it. */
+		if (shader->ub_wfrag >= 0)
+			R_SetWorldFrag (r_fog_density, r_fog_color,
+					imm_alpha_threshold >= 0.0f ? imm_alpha_threshold : 0.0f,
+					imm_force_opaque_alpha >= 0.0f ? imm_force_opaque_alpha : 0.0f,
+					R_WorldOverbright (),
+					imm_turb[0], imm_turb[1]);
 	}
 
 	R_FlushUniforms ();
 }
 
-/* Force the cache to miss on the next GL_ImmEnd. Call after any
- * external glUseProgram / glUniform / matrix manipulation that
- * GL_ImmEnd doesn't see, or after a vid_restart that invalidates
- * shader handles. */
+/* Force a full re-upload and rebind of every block at the next flush, after
+ * a vid_restart.  (It also reset GL_ImmEnd's per-program loose-uniform cache,
+ * which went with the last loose world uniform, #450 W2.  That is what the
+ * world draw paths called it for, so they stopped, W3: nothing outside
+ * R_FlushUniforms binds GL_UNIFORM_BUFFER points 1, 2 or 10-13 -- every other
+ * indexed uniform binding is 0 or 3-9, and only gl_buffer.c issues any -- and
+ * a block's buffer is written only by that flush, so between flushes the
+ * shadow is what the GPU holds.) */
 void GL_ImmInvalidateState (void)
 {
-	/* The blocks have no per-program state to drop, but they do have a
-	 * binding this cannot see being moved, so re-assert rather than assume.
-	 * A redundant flush is one glBufferData of a few hundred bytes. */
+	/* Re-upload every block and re-assert its binding at the next flush:
+	 * after a vid_restart the buffers are new. */
 	R_InvalidateUniforms ();
-
-	imm_cache_shader = NULL;
-	imm_cache_alpha = -2.0f;
-	imm_cache_force_opaque_alpha = -2.0f;
-	imm_cache_alias_caustics[0] = imm_cache_alias_caustics[1] = -1.0f;
-	imm_cache_alias_dlight = -1.0f;
-	imm_cache_turb[0] = imm_cache_turb[1] = -1.0f;
-	imm_cache_soft[0] = imm_cache_soft[1] = imm_cache_soft[2] = -1.0f;
-	imm_cache_alias_material[0] = imm_cache_alias_material[1] = imm_cache_alias_material[2] = -1.0f;
-	imm_cache_alias_lightdir[0] = imm_cache_alias_lightdir[1] = imm_cache_alias_lightdir[2] = -2.0f;
-	imm_cache_alias_model_set = false;
-	imm_cache_fog_density = -1.0f;
-	imm_cache_fog_color[0] = imm_cache_fog_color[1] = imm_cache_fog_color[2] = -1.0f;
-	imm_cache_time = -1.0f;
-	imm_cache_eyepos[0] = imm_cache_eyepos[1] = imm_cache_eyepos[2] = -99999.0f;
-	imm_cache_wind[0] = imm_cache_wind[1] = -99999.0f;
-	imm_cache_wind3[0] = imm_cache_wind3[1] = imm_cache_wind3[2] = -99999.0f;
-	imm_cache_skyrot = -99999.0f;
-	imm_cache_overbright = -1.0f;
-	imm_cache_mvp_set = false;
-	imm_cache_mv_set = false;
 }
 
 void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
@@ -599,245 +571,15 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 	}
 #endif
 
-	/* activate shader; reset uniform cache when the program changes
-	 * because uniform locations are per-program */
 	R_UseProgram (shader->program);
-	if (shader != imm_cache_shader)
-	{
-		imm_cache_shader = shader;
-		imm_cache_alpha = -2.0f;
-	imm_cache_force_opaque_alpha = -2.0f;
-	imm_cache_alias_caustics[0] = imm_cache_alias_caustics[1] = -1.0f;
-	imm_cache_alias_dlight = -1.0f;
-	/* Uniform state is per-program, so a cached value proves nothing about the
-	 * program we are about to use.  Every other cache here is reset for that
-	 * reason; u_turb was missed, and it stopped mattering only because
-	 * gl_shader_alias was the one program that had one.  Lit water gives the
-	 * world program a u_turb too (uhexen2-a5nn.2), and a stale cache would
-	 * then leave one of the two unwarped. */
-	imm_cache_turb[0] = imm_cache_turb[1] = -1.0f;
-	imm_cache_soft[0] = imm_cache_soft[1] = imm_cache_soft[2] = -1.0f;
-	imm_cache_alias_material[0] = imm_cache_alias_material[1] = imm_cache_alias_material[2] = -1.0f;
-	imm_cache_alias_lightdir[0] = imm_cache_alias_lightdir[1] = imm_cache_alias_lightdir[2] = -2.0f;
-	imm_cache_alias_model_set = false;
-		imm_cache_fog_density = -1.0f;
-		imm_cache_fog_color[0] = imm_cache_fog_color[1] = imm_cache_fog_color[2] = -1.0f;
-		imm_cache_time = -1.0f;
-		imm_cache_eyepos[0] = imm_cache_eyepos[1] = imm_cache_eyepos[2] = -99999.0f;
-		imm_cache_wind[0] = imm_cache_wind[1] = -99999.0f;
-		imm_cache_wind3[0] = imm_cache_wind3[1] = imm_cache_wind3[2] = -99999.0f;
-		imm_cache_skyrot = -99999.0f;
-		imm_cache_overbright = -1.0f;
-		imm_cache_mvp_set = false;
-		imm_cache_mv_set = false;
-	}
 
 	GL_GetMVP(mvp);
 
-	/* Dual path, keyed on whether this program has a block index and never
-	 * on which shader it is.  gl_shader_world and the other programs still
-	 * inline in gl_shader.c declare loose uniforms and must keep
-	 * working through the glUniform* half below while the migrated programs
-	 * take the block half. */
+	/* Every program drawn here reads its non-opaque uniforms from blocks
+	 * (#450; the world family's fragment stages since W2), keyed on whether
+	 * the program has a block index and never on which shader it is. */
 	if (shader->ub_vert >= 0 || shader->ub_frag >= 0)
 		GL_ImmPushBlocks(shader, mvp);
-
-	if (shader->u_mvp >= 0 &&
-	    (!imm_cache_mvp_set || memcmp(mvp, imm_cache_mvp, sizeof(mvp)) != 0))
-	{
-		glUniformMatrix4fv_fp(shader->u_mvp, 1, GL_FALSE, mvp);
-		memcpy(imm_cache_mvp, mvp, sizeof(mvp));
-		imm_cache_mvp_set = true;
-	}
-
-	if (shader->u_modelview >= 0)
-	{
-		float mv[16];
-		GL_GetModelview(mv);
-		if (!imm_cache_mv_set || memcmp(mv, imm_cache_mv, sizeof(mv)) != 0)
-		{
-			glUniformMatrix4fv_fp(shader->u_modelview, 1, GL_FALSE, mv);
-			memcpy(imm_cache_mv, mv, sizeof(mv));
-			imm_cache_mv_set = true;
-		}
-	}
-
-	if (imm_alpha_threshold >= 0.0f && shader->u_alpha_threshold >= 0 &&
-	    imm_alpha_threshold != imm_cache_alpha)
-	{
-		glUniform1f_fp(shader->u_alpha_threshold, imm_alpha_threshold);
-		imm_cache_alpha = imm_alpha_threshold;
-	}
-
-	if (imm_force_opaque_alpha >= 0.0f && shader->u_force_opaque_alpha >= 0 &&
-	    imm_force_opaque_alpha != imm_cache_force_opaque_alpha)
-	{
-		glUniform1f_fp(shader->u_force_opaque_alpha, imm_force_opaque_alpha);
-		imm_cache_force_opaque_alpha = imm_force_opaque_alpha;
-	}
-
-	/* uhexen2-0gn3.  Both sit at their resting values (0 intensity,
-	 * identity matrix) unless an alias draw asked for caustics, so on dry
-	 * land these only fire on a program switch, never per batch. */
-	if (shader->u_alias_caustics >= 0 &&
-	    (imm_alias_caustics[0] != imm_cache_alias_caustics[0] ||
-	     imm_alias_caustics[1] != imm_cache_alias_caustics[1]))
-	{
-		glUniform2f_fp(shader->u_alias_caustics,
-			       imm_alias_caustics[0], imm_alias_caustics[1]);
-		imm_cache_alias_caustics[0] = imm_alias_caustics[0];
-		imm_cache_alias_caustics[1] = imm_alias_caustics[1];
-	}
-
-	/* uhexen2-waum.  Same shape again: zero at rest, so with r_lightclusters
-	 * off or no dlights alive this fires once per program switch and never
-	 * per batch. */
-	if (shader->u_alias_dlight >= 0 && imm_alias_dlight != imm_cache_alias_dlight)
-	{
-		glUniform1f_fp(shader->u_alias_dlight, imm_alias_dlight);
-		imm_cache_alias_dlight = imm_alias_dlight;
-	}
-
-	/* uhexen2-9o7u.  Resting amplitude is 0, so with r_water_pixel_warp off
-	 * this fires once per program switch and never again -- same shape as the
-	 * caustics push above. */
-	if (shader->u_turb >= 0 &&
-	    (imm_turb[0] != imm_cache_turb[0] || imm_turb[1] != imm_cache_turb[1]))
-	{
-		glUniform2f_fp(shader->u_turb, imm_turb[0], imm_turb[1]);
-		imm_cache_turb[0] = imm_turb[0];
-		imm_cache_turb[1] = imm_turb[1];
-	}
-
-	/* uhexen2-mf9u.  Resting value is 0 intensity, so on a build with
-	 * r_softparticles off this fires once per program switch and never
-	 * again — same shape as the caustics push above. */
-	if (shader->u_soft_params >= 0 &&
-	    (imm_soft[0] != imm_cache_soft[0] ||
-	     imm_soft[1] != imm_cache_soft[1] ||
-	     imm_soft[2] != imm_cache_soft[2]))
-	{
-		glUniform3f_fp(shader->u_soft_params,
-			       imm_soft[0], imm_soft[1], imm_soft[2]);
-		imm_cache_soft[0] = imm_soft[0];
-		imm_cache_soft[1] = imm_soft[1];
-		imm_cache_soft[2] = imm_soft[2];
-	}
-
-	/* uhexen2-4kcb.  Resting intensity is 0, so on a build with no material
-	 * sidecars anywhere -- or r_materialmaps 0 -- this fires once per program
-	 * switch and never again, the same shape as the caustics push above.  The
-	 * light direction only moves when the camera does, so it costs one push
-	 * per program per frame while any model is actually wearing a sidecar. */
-	if (shader->u_alias_material >= 0 &&
-	    (imm_alias_material[0] != imm_cache_alias_material[0] ||
-	     imm_alias_material[1] != imm_cache_alias_material[1] ||
-	     imm_alias_material[2] != imm_cache_alias_material[2]))
-	{
-		glUniform3f_fp(shader->u_alias_material,
-			       imm_alias_material[0], imm_alias_material[1],
-			       imm_alias_material[2]);
-		imm_cache_alias_material[0] = imm_alias_material[0];
-		imm_cache_alias_material[1] = imm_alias_material[1];
-		imm_cache_alias_material[2] = imm_alias_material[2];
-	}
-
-	if (shader->u_alias_lightdir >= 0 &&
-	    (imm_alias_lightdir[0] != imm_cache_alias_lightdir[0] ||
-	     imm_alias_lightdir[1] != imm_cache_alias_lightdir[1] ||
-	     imm_alias_lightdir[2] != imm_cache_alias_lightdir[2]))
-	{
-		glUniform3f_fp(shader->u_alias_lightdir,
-			       imm_alias_lightdir[0], imm_alias_lightdir[1],
-			       imm_alias_lightdir[2]);
-		imm_cache_alias_lightdir[0] = imm_alias_lightdir[0];
-		imm_cache_alias_lightdir[1] = imm_alias_lightdir[1];
-		imm_cache_alias_lightdir[2] = imm_alias_lightdir[2];
-	}
-
-	if (shader->u_alias_model >= 0 &&
-	    (!imm_cache_alias_model_set ||
-	     memcmp(imm_alias_model, imm_cache_alias_model, sizeof(imm_alias_model)) != 0))
-	{
-		glUniformMatrix4fv_fp(shader->u_alias_model, 1, GL_FALSE, imm_alias_model);
-		memcpy(imm_cache_alias_model, imm_alias_model, sizeof(imm_alias_model));
-		imm_cache_alias_model_set = true;
-	}
-
-	if (shader->u_fog_density >= 0 && r_fog_density != imm_cache_fog_density)
-	{
-		glUniform1f_fp(shader->u_fog_density, r_fog_density);
-		imm_cache_fog_density = r_fog_density;
-	}
-	if (shader->u_fog_color >= 0 &&
-	    (r_fog_color[0] != imm_cache_fog_color[0] ||
-	     r_fog_color[1] != imm_cache_fog_color[1] ||
-	     r_fog_color[2] != imm_cache_fog_color[2]))
-	{
-		glUniform3f_fp(shader->u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
-		imm_cache_fog_color[0] = r_fog_color[0];
-		imm_cache_fog_color[1] = r_fog_color[1];
-		imm_cache_fog_color[2] = r_fog_color[2];
-	}
-
-	if (shader->u_time >= 0 && cl.time != imm_cache_time)
-	{
-		glUniform1f_fp(shader->u_time, cl.time);
-		imm_cache_time = cl.time;
-	}
-
-	if (shader->u_eyepos >= 0 &&
-	    (r_origin[0] != imm_cache_eyepos[0] ||
-	     r_origin[1] != imm_cache_eyepos[1] ||
-	     r_origin[2] != imm_cache_eyepos[2]))
-	{
-		glUniform3f_fp(shader->u_eyepos, r_origin[0], r_origin[1], r_origin[2]);
-		imm_cache_eyepos[0] = r_origin[0];
-		imm_cache_eyepos[1] = r_origin[1];
-		imm_cache_eyepos[2] = r_origin[2];
-	}
-
-	if (shader->u_wind >= 0 &&
-	    (sky_wind_uv[0] != imm_cache_wind[0] ||
-	     sky_wind_uv[1] != imm_cache_wind[1]))
-	{
-		glUniform2f_fp(shader->u_wind, sky_wind_uv[0], sky_wind_uv[1]);
-		imm_cache_wind[0] = sky_wind_uv[0];
-		imm_cache_wind[1] = sky_wind_uv[1];
-	}
-
-	/* The same wind as a direction offset, for the cubemap sky.  Only
-	 * gl_shader_sky_cubemap declares it, so this folds away everywhere else.
-	 * uhexen2-ctk9. */
-	if (shader->u_skyrot >= 0 && sky_box_rot != imm_cache_skyrot)
-	{
-		glUniform1f_fp(shader->u_skyrot, sky_box_rot);
-		imm_cache_skyrot = sky_box_rot;
-	}
-
-	if (shader->u_wind3 >= 0 &&
-	    (sky_wind_vec[0] != imm_cache_wind3[0] ||
-	     sky_wind_vec[1] != imm_cache_wind3[1] ||
-	     sky_wind_vec[2] != imm_cache_wind3[2]))
-	{
-		glUniform3f_fp(shader->u_wind3, sky_wind_vec[0], sky_wind_vec[1], sky_wind_vec[2]);
-		imm_cache_wind3[0] = sky_wind_vec[0];
-		imm_cache_wind3[1] = sky_wind_vec[1];
-		imm_cache_wind3[2] = sky_wind_vec[2];
-	}
-
-	if (shader->u_overbright >= 0)
-	{
-		/* Same gate as R_SetupFrame: r_fullbright already replaces the
-		 * lightmap sample with white, so doubling it blows every surface
-		 * to pure white.  uhexen2-isq7. */
-		float ob = (gl_overbright.integer && !r_fullbright.integer) ? 2.0f : 1.0f;
-		if (ob != imm_cache_overbright)
-		{
-			glUniform1f_fp(shader->u_overbright, ob);
-			imm_cache_overbright = ob;
-		}
-	}
 
 	/* A global glEnable(GL_BLEND) in the translucent draw paths resets the
 	 * per-buffer blend funcs to the global default on some drivers, which

@@ -252,57 +252,6 @@ void *Z_Malloc (int size, int zone_id)
 	return buf;
 }
 
-void *Z_Realloc (void *ptr, int size, int zone_id)
-{
-	int		old_size;
-	void		*old_ptr;
-	zonelist_t	*z;
-	memblock_t	*block;
-
-	if (!ptr)
-		return Z_Malloc (size, zone_id);
-
-	block = (memblock_t *) ((byte *) ptr - sizeof (memblock_t));
-	if (block->tag == 0)
-		Sys_Error ("%s: realloced a freed pointer", __thisfunc__);
-
-	z = zonelist;
-	while (z != NULL)
-	{
-		if (z->magic == block->magic)
-			break;
-		z = z->next;
-	}
-	if (z == NULL)
-		Sys_Error ("%s: realloced a pointer without ZMAGIC", __thisfunc__);
-
-	old_size = block->size;
-	old_size -= (4 + (int)sizeof(memblock_t));	/* see Z_TagMalloc() */
-	old_ptr = ptr;
-
-	Z_Free (ptr);
-	z = zonelist;
-	while (z != NULL)
-	{
-		if (z->id & zone_id)
-			break;
-		z = z->next;
-	}
-	if (z == NULL)
-		Sys_Error ("%s: Bad zone id %i", __thisfunc__, zone_id);
-
-	ptr = Z_TagMalloc (z, size, 1);
-	if (!ptr)
-		Sys_Error ("%s: failed on allocation of %i bytes", __thisfunc__, size);
-
-	if (ptr != old_ptr)
-		memmove (ptr, old_ptr, q_min(old_size, size));
-	if (old_size < size)
-		memset ((byte *)ptr + old_size, 0, size - old_size);
-
-	return ptr;
-}
-
 char *Z_Strdup (const char *s)
 {
 	size_t sz = strlen(s) + 1;

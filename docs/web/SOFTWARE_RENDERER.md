@@ -43,9 +43,11 @@ At the restore commit all but three came back byte for byte: `model.c`,
 `model.h` and `r_main.c` gained what the restored renderer needed to take part in
 today's engine (the PimpModel hooks, the `EF_*` effect flags, the MD3
 identifier). Those three have kept changing with the engine since. Among the
-changes: the dlight mask and `MAX_DLIGHTS` (`model.h`, `r_main.c`), the
+changes: the dlight mask and `MAX_DLIGHTS` (`model.h`, `r_main.c`), a brush
+entity's dynamic lights moved into its model space (#495, `model.h`, `r_main.c`), the
 brush-state classification (`r_main.c`), the `r_texture_external` rename
-(`model.c`, `r_main.c`), multiplayer transparency (#58, `r_main.c`), the MD3
+(`model.c`, `r_main.c`), multiplayer transparency (#58, `r_main.c`), the alias
+models' dynamic lights asking whether the light can see them (#97, `r_main.c`), the MD3
 loader and the missing-precache placeholder (`model.{c,h}`), and the #104 cvar
 flags (`r_main.c`). `git log` on each file has the full list. Engine-wide work has also reached six that came back byte for
 byte:
@@ -56,7 +58,9 @@ byte:
 - `r_local.h`: the `r_texture_external` rename, the dlight changes and the
   brush-state classification;
 - `r_light.c` and `r_surf.c`: the dlight mask, widened to 128 bits, and the larger
-  `MAX_DLIGHTS`.
+  `MAX_DLIGHTS`; the one-sided test (#97); a brush entity's light measured in
+  its model space (#495); `r_light.c` asks `r_dlightvis.c` whether a light can
+  see the surface it marks (#97).
 
 So nine of the restored files differ from the original today; do not assume any
 one is pristine. To see exactly what a file carries beyond the original:
@@ -79,7 +83,8 @@ would silently have raised it.
 
 ## The four adapters
 
-Apart from `mod_placeholder.c`, which the GL build compiles too, everything new
+Apart from `mod_placeholder.c` and `r_dlightvis.c` (#97), which the GL build
+compiles too, everything new
 is in four files. They exist to keep renderer `#ifdef`s out of
 shared client code (`console.c`, `menu.c`, `sbar.c`, `cl_*.c`, `pr_csqc.c`),
 which was written against the GL renderer's symbols: these supply software
@@ -101,7 +106,11 @@ Their declarations are in `engine/h2shared/soft_web.h` and
 
 - **Policy cvars.** `gl_missile_glows`, `gl_torch_dlight`, `gl_flashintensity`,
   `gl_extra_dynamic_lights` and friends mean the same thing here as in the GL
-  build (`gl_rmain.c`), and the client honours them. The GPU-only ones (`gl_fxaa`,
+  build (`gl_rmain.c`), and the client honours them. So does `r_dlight_occlusion`
+  (GitHub #97), which the rasterizer itself reads: `r_surf.c` and `r_light.c`
+  make the GL renderer's one-sided test, and `r_light.c` and `r_main.c` ask the
+  shared `r_dlightvis.c` whether the light can see the surface or model, so a
+  dynamic light stops at the wall it stands against, and at any other, here too. The GPU-only ones (`gl_fxaa`,
   `r_hdr`, `r_softemu`, `r_softemu_mdl_warp`, `scr_demobar_timeout`, ...) exist so
   shared code links, and the other four `r_softemu_*` sub-cvars only so a GL
   config round-trips; the menu

@@ -1778,7 +1778,7 @@ void VID_ShiftPalette (const unsigned char *palette)
 }
 
 
-/* GL_CompileShader and GL_LinkProgram are now in gl_shader.c */
+/* GL_LinkProgram and the shader compile helpers are in gl_shader.c */
 
 #ifndef USE_GLES
 static void GL_LoadFunctionPointers (void)
@@ -1800,10 +1800,6 @@ static void GL_LoadFunctionPointers (void)
 	glGetProgramInfoLog_fp = (glGetProgramInfoLog_f) SDL_GL_GetProcAddress("glGetProgramInfoLog");
 	glGetUniformLocation_fp = (glGetUniformLocation_f) SDL_GL_GetProcAddress("glGetUniformLocation");
 	glUniform1i_fp = (glUniform1i_f) SDL_GL_GetProcAddress("glUniform1i");
-	glUniform1f_fp = (glUniform1f_f) SDL_GL_GetProcAddress("glUniform1f");
-	glUniform3f_fp = (glUniform3f_f) SDL_GL_GetProcAddress("glUniform3f");
-	glUniform4f_fp = (glUniform4f_f) SDL_GL_GetProcAddress("glUniform4f");
-	glUniformMatrix4fv_fp = (glUniformMatrix4fv_f) SDL_GL_GetProcAddress("glUniformMatrix4fv");
 	glBindAttribLocation_fp = (glBindAttribLocation_f) SDL_GL_GetProcAddress("glBindAttribLocation");
 
 	/* VBO/VAO functions */
@@ -1840,7 +1836,6 @@ static void GL_LoadFunctionPointers (void)
 	glGetActiveUniformBlockiv_fp = (glGetActiveUniformBlockiv_f) SDL_GL_GetProcAddress("glGetActiveUniformBlockiv");
 	glBindBufferRange_fp = (glBindBufferRange_f) SDL_GL_GetProcAddress("glBindBufferRange");
 
-	glUniform4fv_fp = (glUniform4fv_f) SDL_GL_GetProcAddress("glUniform4fv");
 
 	/* Compute shader + indirect draw (GL 4.3) */
 	glDispatchCompute_fp = (glDispatchCompute_f) SDL_GL_GetProcAddress("glDispatchCompute");
@@ -1851,7 +1846,6 @@ static void GL_LoadFunctionPointers (void)
 	/* Image load/store + immutable storage (GL 4.2) — Hi-Z (uhexen2-xd87) */
 	glBindImageTexture_fp = (glBindImageTexture_f) SDL_GL_GetProcAddress("glBindImageTexture");
 	glTexStorage2D_fp = (glTexStorage2D_f) SDL_GL_GetProcAddress("glTexStorage2D");
-	glUniform2i_fp = (glUniform2i_f) SDL_GL_GetProcAddress("glUniform2i");
 
 	/* SSBO functions (GL 4.3 core) */
 	glBindBufferBase_fp = (glBindBufferBase_f) SDL_GL_GetProcAddress("glBindBufferBase");
@@ -1892,8 +1886,7 @@ static void GL_LoadFunctionPointers (void)
 
 	if (!glCreateShader_fp || !glShaderSource_fp || !glCompileShader_fp ||
 	    !glCreateProgram_fp || !glAttachShader_fp || !glLinkProgram_fp ||
-	    !glUseProgram_fp || !glGetUniformLocation_fp || !glUniform1i_fp ||
-	    !glUniform1f_fp)
+	    !glUseProgram_fp || !glGetUniformLocation_fp || !glUniform1i_fp)
 	{
 		Sys_Error("Required GL 4.3 shader functions not found");
 	}

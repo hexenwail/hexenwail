@@ -23,6 +23,7 @@
 #include "gl_shader.h"
 #include "gl_uniforms.h"
 #include "gl_lightcluster.h"
+#include "r_dlightvis.h"
 #include "gl_ssao.h"
 #include "gl_pipeline.h"
 #include "gl_vbo.h"
@@ -310,6 +311,16 @@ cvar_t	r_lerp_complete = {"r_lerp_complete", "1", CVAR_ARCHIVE};
  * the next map load.  gl_torch_dlight 0 still switches the whole group off.
  * uhexen2-vdmz */
 cvar_t	r_dlight_model_list = {"r_dlight_model_list", "", CVAR_ARCHIVE};
+
+/* Dynamic-light occlusion (GitHub #97).  0 is vanilla: every tier lit both
+ * sides of a face's plane, so a light lit the far side of the wall it stood
+ * against.  1 (and anything above, kept for the visibility and shadow-map
+ * phases still to come) drops a light that is more than DLIGHT_PLANE_EPSILON
+ * behind a face, on the CPU path (R_AddDynamicLights, R_MarkLights; brush
+ * entities too, measured in their model space, #495) and the GPU one
+ * (ClusteredDlight).
+ * Liquids are exempt: they are seen, and lit, from both sides.  The software renderer's copy is in r_soft_web.c. */
+cvar_t	r_dlight_occlusion = {"r_dlight_occlusion", "1", CVAR_ARCHIVE};
 
 /* Evaluate the liquid warp per pixel in the fragment shader instead of per
  * vertex on the CPU (uhexen2-9o7u).  Default 0 = the legacy per-vertex path.
@@ -1398,6 +1409,52 @@ static float R_AliasDlightScale (qboolean want)
 	return R_AliasLightScale ();
 }
 
+/*
+=================
+R_AliasFinishLight
+
+The last step of both alias lighting setups (R_DrawAliasModel, which every
+non-instanced path draws through -- MDL, MD3, skeletal and the viewmodel --
+and R_CollectAliasInstance for r_alias_gpu): takes lightcolor from 0..255 to
+the shader's range, or under r_fullbright replaces it with the flat light that
+draws the skin at nominal unlit brightness.  One function, so no alias path can
+stay lit under r_fullbright while the others go flat (GitHub #490).
+
+The flat value is 1.0 after scaling.  No alias shader doubles its light, so
+texture * 1.0 * shadedot is the unlit skin, and that matches Ironwail, which
+sets lightcolor to 0.5 under r_fullbright (Quake/r_alias.c:640-641) and doubles
+it in the vertex shader with its default gl_overbright_models 1
+(Quake/gl_shaders.h:1158-1160).  The shadedots stay: they are the model's own
+fixed shading, not environment light, and Ironwail keeps them too.  The
+gl_overbright_models 2 boost is dropped, as R_WorldOverbright drops the
+world's 2x, so the model and the floor under it are both at 1x.
+
+It overrides every arm of the chain, MLS_ABSLIGHT and the model lightstyles
+included, as R_BrushAbsLight does for an abslight brush: r_fullbright shows
+the unlit texture, whatever light the server asked for.  Dynamic light goes
+too.  The CPU loops' contribution is overwritten here, and model_dlight_gpu
+is cleared so neither GL_SetAliasDlight nor the instance's dlight bit asks the
+froxel grid for anything.  R_DrawViewModel's cl.light_level, which monster AI
+reads, is computed before this and is unchanged.  The entity's colorshade
+tint still applies downstream: it is the entity's colour, not its light.
+=================
+*/
+static void R_AliasFinishLight (void)
+{
+	if (r_fullbright.integer)
+	{
+		lightcolor[0] = lightcolor[1] = lightcolor[2] = 1.0f;
+		ambientlight = shadelight = 1.0f;
+		model_dlight_gpu = false;
+		return;
+	}
+	{
+		const float lightscale = R_AliasLightScale ();
+		shadelight *= lightscale;
+		VectorScale(lightcolor, lightscale, lightcolor);
+	}
+}
+
 static int	lastposenum;
 
 /*
@@ -1463,78 +1520,71 @@ static void GL_DrawAliasSkeletal (entity_t *e, aliashdr_t *paliashdr,
 
 	R_UseProgram (prog->program);
 
-	if (prog->u_mvp >= 0)
-		glUniformMatrix4fv_fp (prog->u_mvp, 1, GL_FALSE, mvp);
-	if (prog->u_modelview >= 0)
-		glUniformMatrix4fv_fp (prog->u_modelview, 1, GL_FALSE, mv);
-	if (prog->u_alias_model >= 0)
-		glUniformMatrix4fv_fp (prog->u_alias_model, 1, GL_FALSE, model);
-
-	if (prog->u_pose_base >= 0)
-		glUniform1i_fp (prog->u_pose_base, posenum * gm->numbones);
-	if (prog->u_pose_base2 >= 0)
-		glUniform1i_fp (prog->u_pose_base2, prevposenum * gm->numbones);
-	if (prog->u_skel_blend >= 0)
-		glUniform1f_fp (prog->u_skel_blend, lerpfrac);
-
-	if (prog->u_shadevector >= 0)
-		glUniform3f_fp (prog->u_shadevector,
-				shadevector[0], shadevector[1], shadevector[2]);
+	/* Both stages read blocks since #450 (sskeletal_vert.glsl in slice S4,
+	 * salias_frag.glsl in S2).  A block member is shared by every program,
+	 * where the loose uniforms these writes replace were this program's own,
+	 * so every member either stage reads is written here, every draw, before
+	 * the flush: nothing may be inherited from whatever batch drew last
+	 * (#19's lesson).  The values are the ones the loose writes made.
+	 *
+	 * The vertex stage first: VertParams' matrices and pose selection, and
+	 * AliasVert's lighting. */
+	R_SetMVP (mvp);
+	R_SetModelView (mv);
+	R_SetModelMatrix (model);
+	R_SetSkelPose (posenum * gm->numbones, prevposenum * gm->numbones, lerpfrac);
 	/* lightcolor already carries R_AliasLightScale's /200 (and the overbright
 	 * boost); the per-entity colorshade tint is the one factor the immediate
 	 * path applies per vertex, so fold it in here instead. */
-	if (prog->u_lightcolor >= 0)
-		glUniform4f_fp (prog->u_lightcolor,
-				lightcolor[0] * r, lightcolor[1] * g, lightcolor[2] * b,
-				model_constant_alpha);
-	if (prog->u_fullbright >= 0)
-		glUniform1f_fp (prog->u_fullbright, model_fullbright_pass ? 1.0f : 0.0f);
+	{
+		float	light[4];
 
-	if (prog->u_fog_density >= 0)
-		glUniform1f_fp (prog->u_fog_density, r_fog_density);
-	if (prog->u_fog_color >= 0)
-		glUniform3f_fp (prog->u_fog_color,
-				r_fog_color[0], r_fog_color[1], r_fog_color[2]);
-	if (prog->u_alpha_threshold >= 0)
-		glUniform1f_fp (prog->u_alpha_threshold, GL_GetAlphaThreshold());
-	if (prog->u_force_opaque_alpha >= 0)
-		glUniform1f_fp (prog->u_force_opaque_alpha, GL_GetForceOpaqueAlpha());
-	if (prog->u_alias_caustics >= 0)
-		glUniform2f_fp (prog->u_alias_caustics, caustics[0], caustics[1]);
+		light[0] = lightcolor[0] * r;
+		light[1] = lightcolor[1] * g;
+		light[2] = lightcolor[2] * b;
+		light[3] = model_constant_alpha;
+		R_SetSkelLight (shadevector, light, model_fullbright_pass ? 1.0f : 0.0f);
+	}
 	/* uhexen2-waum.  This path bypasses GL_ImmEnd -- there is no streamed
-	 * vertex data to end -- so it owns pushing the per-batch state itself, the
-	 * same way it already does for caustics, turb and the soft-particle fade.
+	 * vertex data to end -- so it owns pushing the per-batch state itself.
 	 * The froxel-lookup constants come from R_LightCluster_BindForAlias once a
 	 * frame; only the scale travels with the draw. */
-	if (prog->u_alias_dlight >= 0)
-		glUniform1f_fp (prog->u_alias_dlight, GL_GetAliasDlight ());
+	R_SetAliasDlight (GL_GetAliasDlight ());
+
+	/* Then the fragment stage's FragParams and AliasFrag. */
+	R_SetFog (r_fog_density, r_fog_color);
+	/* Raw, as the loose writes passed them: by the time a model draws, both
+	 * have long been set non-negative, and a -1 would test the same as the 0
+	 * GL_ImmEnd resolves it to (alpha is never below 0, and -1 < 0.5). */
+	R_SetAlphaMask (GL_GetAlphaThreshold(), GL_GetForceOpaqueAlpha());
+	R_SetAliasCausticsU (caustics[0], caustics[1]);
 	/* Shared with the sprite path through salias_frag; nothing here wants
 	 * the soft-particle fade, and leaving a hot value would dissolve the
 	 * model against whatever is behind it. */
-	if (prog->u_soft_params >= 0)
-		glUniform3f_fp (prog->u_soft_params, 0.0f, 0.0f, 0.0f);
-	/* Same reasoning for the liquid warp: this program is shared with
-	 * EmitWaterPolys, and this path sets its uniforms directly rather than
-	 * through GL_ImmEnd, so it must clear it itself.  uhexen2-9o7u */
-	if (prog->u_turb >= 0)
-		glUniform2f_fp (prog->u_turb, 0.0f, 0.0f);
+	R_SetSoftParams (0.0f, 0.0f, 0.0f);
+	/* Same reasoning for the liquid warp (EmitWaterPolys, uhexen2-9o7u) and
+	 * the softemu span cell (R_SetSpanCell, #176): this path draws neither
+	 * and must not inherit a water poly's (#450, hazards 1 and 2). */
+	R_SetAliasTurb (0.0f, 0.0f);
+	R_SetAliasSpans (0.0f);
 	/* Material maps.  Unlike the three above this is PASSED THROUGH rather
 	 * than cleared: R_DrawAliasModel armed it for this entity's skin just
 	 * before dispatching here, and the skeletal program's v_matpos is eye
 	 * space exactly like salias_vert's, so the direction it staged applies
 	 * unchanged.  Read back rather than recomputed for the same reason
 	 * GL_GetAliasModelMatrix exists -- replaying the derivation here risks a
-	 * different answer than the batch beside it.  uhexen2-4kcb. */
+	 * different answer than the batch beside it.  uhexen2-4kcb.  Written
+	 * as a pair every draw, so neither a world-space direction from the
+	 * instanced path nor anyone else's survives into this one (hazard 5). */
 	{
 		float	mat[3], dir[3];
 
 		GL_GetAliasMaterial (mat);
 		GL_GetAliasLightDir (dir);
-		if (prog->u_alias_material >= 0)
-			glUniform3f_fp (prog->u_alias_material, mat[0], mat[1], mat[2]);
-		if (prog->u_alias_lightdir >= 0)
-			glUniform3f_fp (prog->u_alias_lightdir, dir[0], dir[1], dir[2]);
+		R_SetAliasMaterialU (mat[0], mat[1], mat[2]);
+		R_SetAliasLightDirU (dir);
 	}
+	R_FlushUniforms ();
 
 	GL_BindBufferBase (GL_SHADER_STORAGE_BUFFER, 4, gm->ssbo_bones);
 
@@ -2166,7 +2216,7 @@ static void R_AliasResolveLerp (entity_t *e, aliashdr_t *paliashdr,
 	}
 	}
 
-	if (r_lerpmodels.integer && !model_fullbright_pass &&
+	if (r_lerpmodels.integer &&
 	    !(e->model->flags & MOD_NOLERP) && e->lerptime > 0.0f &&
 	    !R_AliasPairSnaps (e->model, e->previouspose, e->currentpose) &&
 	    (e != &cl.viewent || r_lerp_viewmodel.integer))
@@ -2210,15 +2260,15 @@ static void R_AliasResolveLerp (entity_t *e, aliashdr_t *paliashdr,
 =================
 R_SetupAliasFrame
 
+Draws the pose pair R_AliasResolveLerp resolved.  R_DrawAliasModel resolves
+once and hands the same pair to the base pass and the fullbright pass, so
+the glow sits on the mesh it lights mid-lerp, as the instanced path's does
+(GitHub #493).
 =================
 */
-static void R_SetupAliasFrame (entity_t *e, aliashdr_t *paliashdr)
+static void R_SetupAliasFrame (entity_t *e, aliashdr_t *paliashdr,
+			       int prevpose, int pose, float blend)
 {
-	int	pose, prevpose;
-	float	blend;
-
-	R_AliasResolveLerp (e, paliashdr, &prevpose, &pose, &blend);
-
 	/* Skeletal models blend their two poses inside the shader, so they take
 	 * the resolved pair as-is rather than going through the three-way
 	 * GL_DrawAliasFrame call below (which exists to normalize the trivertx
@@ -2391,7 +2441,7 @@ static qboolean R_SetAliasMaterial (GLuint norm, GLuint gloss, qboolean eyeframe
 
 	/* pow() with a zero or negative exponent returns 1 for every angle, so a
 	 * mistyped r_gloss_exponent would flood the model with flat white rather
-	 * than doing nothing.  Floor it at 1, as GL_MaterialUniform does. */
+	 * than doing nothing.  Floor it at 1, as GL_MaterialParams does. */
 	GL_SetAliasMaterial (nrm, gls, q_max(1.0f, r_gloss_exponent.value));
 	return true;
 }
@@ -2547,6 +2597,8 @@ static void R_DrawAliasModel (entity_t *e)
 	 * r_vm_watch capture. */
 	qboolean	viewmodel = (e == &cl.viewent);
 	const char	*branch_taken = "(none)";	/* for r_aliasinfo */
+	int		lerp_prevpose, lerp_pose;
+	float		lerp_blend;
 
 	clmodel = e->model;
 
@@ -2626,6 +2678,14 @@ static void R_DrawAliasModel (entity_t *e)
 			{
 				VectorSubtract (e->origin, cl_dlights[lnum].origin, dist);
 				add = cl_dlights[lnum].radius - VectorLengthFast(dist);
+				/* not through a wall (GitHub #97 P2, r_dlightvis.c).  Not
+				 * while the GPU grid lights the world (r_lightclusters 1
+				 * with r_lightclusters_models 0): it still lights through
+				 * walls until P4, and a model must not disagree with it */
+				if (add > 0 && r_dlight_occlusion.integer >= 1 &&
+				    !R_LightCluster_ShadesWorld () &&
+				    !R_DlightVis_Entity (lnum, e))
+					add = 0;
 				if (add > 0)
 				{
 					if (cl_dlights[lnum].dark)
@@ -2697,11 +2757,7 @@ static void R_DrawAliasModel (entity_t *e)
 
 	shadedot_row_index = ((int)(e->angles[1] * (SHADEDOT_QUANT / 360.0))) & (SHADEDOT_QUANT - 1);
 	shadedots = r_avertexnormal_dots[shadedot_row_index];
-	{
-		const float lightscale = R_AliasLightScale ();
-		shadelight *= lightscale;
-		VectorScale(lightcolor, lightscale, lightcolor);
-	}
+	R_AliasFinishLight ();
 
 	an = e->angles[1] / 180 * M_PI;
 	shadevector[0] = cos(-an);
@@ -3065,6 +3121,12 @@ static void R_DrawAliasModel (entity_t *e)
 	else
 		R_ClearAliasMaterial ();
 
+	/* Once per draw, and both passes draw this pair: the glow has to sit on
+	 * the blend the skin under it was drawn at.  A second resolve is also
+	 * only idempotent by luck -- were anything to set LERP_RESETANIM2, the
+	 * first call would leave lerpstart 0 and the second reset it.  #493. */
+	R_AliasResolveLerp (e, paliashdr, &lerp_prevpose, &lerp_pose, &lerp_blend);
+
 	/* A skin with no opaque texels in it cannot occlude anything, and SoT
 	 * draws its mist eight times over the same volume -- with depth writes
 	 * on, each instance's own faint edge hard-rejects the next and the
@@ -3083,7 +3145,7 @@ static void R_DrawAliasModel (entity_t *e)
 		if (soft && !OIT_InPass())
 			R_SetDepthMask (false);
 
-		R_SetupAliasFrame (e, paliashdr);
+		R_SetupAliasFrame (e, paliashdr, lerp_prevpose, lerp_pose, lerp_blend);
 
 		if (soft && !OIT_InPass())
 			R_SetDepthMask (true);
@@ -3140,7 +3202,7 @@ static void R_DrawAliasModel (entity_t *e)
 			R_ClearAliasMaterial ();
 
 			model_fullbright_pass = true;
-			R_SetupAliasFrame (e, paliashdr);
+			R_SetupAliasFrame (e, paliashdr, lerp_prevpose, lerp_pose, lerp_blend);
 			model_fullbright_pass = false;
 			if (viewmodel)
 				r_vm_fullbright = true;
@@ -3360,14 +3422,12 @@ static qboolean		world_inst_collected[MAX_VISEDICTS];
 static qboolean		world_inst_needs_legacy[MAX_VISEDICTS];
 
 extern qboolean		R_CullBox (vec3_t mins, vec3_t maxs);
-extern void		R_MarkLights (dlight_t *light, int lnum, mnode_t *node);
+extern void		R_MarkLights (dlight_t *light, int lnum, mnode_t *node, const entity_t *ent);
 extern int		c_brush_polys;
 extern GLuint		world_vao;
 extern GLuint		world_ibo;
-extern int		world_num_indices;
 extern GLuint		lm_atlas_texture;
 extern qboolean		lm_atlas_enabled;
-extern int		lightmap_bytes;
 /* No LM_BLOCK_WIDTH/HEIGHT or lightmaps[] mirror here: both were unused
  * copies of gl_rsurf.c internals, and the 128 they hardcoded silently went
  * stale when the page size changed.  Anything needing page geometry should
@@ -3515,25 +3575,15 @@ void R_CollectBrushInstances (void)
 		{
 			for (k = 0; k < MAX_DLIGHTS; k++)
 			{
-				dlight_t *dl = &cl_dlights[k];
-				if (dl->die < cl.time || !dl->radius)
+				dlight_t tdl;
+				if (cl_dlights[k].die < cl.time || !cl_dlights[k].radius)
 					continue;
-				if (rotated)
-				{
-					dlight_t tdl = *dl;
-					vec3_t tmp;
-					VectorSubtract (dl->origin, e->origin, tmp);
-					tdl.origin[0] =  DotProduct (tmp, fwd);
-					tdl.origin[1] = -DotProduct (tmp, rt);
-					tdl.origin[2] =  DotProduct (tmp, up);
-					R_MarkLights (&tdl, k,
-					    clmodel->nodes + clmodel->hulls[0].firstclipnode);
-				}
-				else
-				{
-					R_MarkLights (dl, k,
-					    clmodel->nodes + clmodel->hulls[0].firstclipnode);
-				}
+				/* Into model space, moved as well as rotated: see
+				 * R_DlightModelOrigin (GitHub #495). */
+				tdl = cl_dlights[k];
+				R_DlightModelOrigin (e, cl_dlights[k].origin, tdl.origin);
+				R_MarkLights (&tdl, k,
+				    clmodel->nodes + clmodel->hulls[0].firstclipnode, e);
 			}
 		}
 
@@ -3652,8 +3702,8 @@ void R_CollectBrushInstances (void)
 
 }
 
-/* Walk a sorted-by-(instance, texture, first) key array, uploading the
- * per-instance mvp/mv uniforms once per entity, binding each texture
+/* Walk a sorted-by-(instance, texture, first) key array, writing the
+ * per-instance mvp/mv to VertParams once per entity, binding each texture
  * once per (instance, texture) group, and run-coalescing contiguous
  * (firstIndex, count) ranges into single glDrawElements calls.  Used
  * twice — once for the opaque pass, once for the fence pass.  Reuses
@@ -3662,18 +3712,27 @@ void R_CollectBrushInstances (void)
  * cross-shader z-fight, no polygon-offset backstop needed. */
 #ifndef USE_GLES
 static void R_DispatchBrushInstancedPass (
-	const world_surf_key_t *keys, int num_keys, glprogram_t *prog)
+	const world_surf_key_t *keys, int num_keys, float alpha_threshold)
 {
+	/* Draws with whichever world program the caller bound; since #450 W1
+	 * nothing here is per-program, so the program is not a parameter.  The
+	 * pass's alpha threshold is: the two programs share one block set. */
+	extern float r_fog_density;
+	extern float r_fog_color[3];
 	int i = 0;
 	while (i < num_keys)
 	{
 		GLuint inst = keys[i].instance;
-		if (prog->u_mvp >= 0)
-			glUniformMatrix4fv_fp(prog->u_mvp, 1, GL_FALSE,
-					      world_instances[inst].mvp);
-		if (prog->u_modelview >= 0)
-			glUniformMatrix4fv_fp(prog->u_modelview, 1, GL_FALSE,
-					      world_instances[inst].mv);
+		/* The fragment set (#450 W2) -- the fog, alpha threshold and forced
+		 * opaque alpha the caller used to upload by hand, and the one world
+		 * overbright (R_WorldOverbright, #489) -- and sworld_vert's pair from
+		 * VertParams (W1), once per instance, before its draws; the
+		 * texture binds between here and them write no block. */
+		R_SetWorldFrag (r_fog_density, r_fog_color, alpha_threshold, 1.0f,
+				R_WorldOverbright (), 0.0f, 0.0f);
+		R_SetMVP (world_instances[inst].mvp);
+		R_SetModelView (world_instances[inst].mv);
+		R_FlushUniforms ();
 		while (i < num_keys && keys[i].instance == inst)
 		{
 			GLuint cur_tex = keys[i].tex;
@@ -3716,8 +3775,6 @@ void R_DrawBrushInstanced (void)
 	 * the discard for fence textures.  uhexen2-5c6r. */
 	glprogram_t *prog_opaque = &gl_shader_world_opaque;
 	glprogram_t *prog_cutout = &gl_shader_world;
-	extern float r_fog_density;
-	extern float r_fog_color[3];
 
 	if (!prog_opaque->program || !prog_cutout->program ||
 	    num_world_instances == 0 ||
@@ -3764,7 +3821,6 @@ void R_DrawBrushInstanced (void)
 	glActiveTexture_fp(GL_TEXTURE2);
 	glBindTexture_fp(GL_TEXTURE_2D, gl_null_fb_texture);
 	glActiveTexture_fp(GL_TEXTURE0);
-	GL_ImmInvalidateState();
 
 	/* Optional polygon offset — kept as a tunable safety net (default 0).
 	 * With the shader unified, no offset should be needed; bumping the
@@ -3777,41 +3833,24 @@ void R_DrawBrushInstanced (void)
 	}
 
 	/* Opaque pass: opaque program (early_fragment_tests), threshold near
-	 * zero (unused — shader has no discard, kept for uniform layout parity),
-	 * no A2C. */
+	 * zero (unread -- the shader has no discard), no A2C.  uhexen2-khsa r13:
+	 * world opaque passes force fragColor.a=1. */
 	if (num_world_surf_keys > 0)
 	{
 		R_UseProgram (prog_opaque->program);
-		if (prog_opaque->u_fog_density >= 0)
-			glUniform1f_fp(prog_opaque->u_fog_density, r_fog_density);
-		if (prog_opaque->u_fog_color >= 0)
-			glUniform3f_fp(prog_opaque->u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
-		if (prog_opaque->u_alpha_threshold >= 0)
-			glUniform1f_fp(prog_opaque->u_alpha_threshold, 0.01f);
-		/* uhexen2-khsa r13: world opaque pass forces fragColor.a=1. */
-		if (prog_opaque->u_force_opaque_alpha >= 0)
-			glUniform1f_fp(prog_opaque->u_force_opaque_alpha, 1.0f);
-		R_DispatchBrushInstancedPass(world_surf_keys, num_world_surf_keys, prog_opaque);
+		R_DispatchBrushInstancedPass(world_surf_keys, num_world_surf_keys, 0.01f);
 	}
 
-	/* Fence pass: cutout program (has discard), threshold 0.666, optional A2C. */
+	/* Fence pass: cutout program (has discard), threshold 0.666, optional
+	 * A2C.  uhexen2-khsa r13: surviving fence/cutout fragments are opaque
+	 * (the alpha-test discard killed transparent ones), so the forced
+	 * fragColor.a=1 holds here too. */
 	if (num_world_surf_keys_fence > 0)
 	{
 		R_UseProgram (prog_cutout->program);
-		if (prog_cutout->u_fog_density >= 0)
-			glUniform1f_fp(prog_cutout->u_fog_density, r_fog_density);
-		if (prog_cutout->u_fog_color >= 0)
-			glUniform3f_fp(prog_cutout->u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
-		if (prog_cutout->u_alpha_threshold >= 0)
-			glUniform1f_fp(prog_cutout->u_alpha_threshold, 0.666f);
-		/* uhexen2-khsa r13: surviving fence/cutout fragments are opaque
-		 * (the alpha-test discard killed transparent ones), so force
-		 * fragColor.a=1 too. */
-		if (prog_cutout->u_force_opaque_alpha >= 0)
-			glUniform1f_fp(prog_cutout->u_force_opaque_alpha, 1.0f);
 		if (r_alphatocoverage.integer)
 			R_SetAlphaToCoverage (true);
-		R_DispatchBrushInstancedPass(world_surf_keys_fence, num_world_surf_keys_fence, prog_cutout);
+		R_DispatchBrushInstancedPass(world_surf_keys_fence, num_world_surf_keys_fence, 0.666f);
 		if (r_alphatocoverage.integer)
 			R_SetAlphaToCoverage (false);
 	}
@@ -3928,7 +3967,14 @@ static qboolean R_CollectAliasInstance (entity_t *e)
 
 	paliashdr = (aliashdr_t *)Mod_Extradata(clmodel);
 	gm = GL_GetAliasGPUMesh(paliashdr);
-	if (!gm || !gm->ssbo_pose)
+	/* GL_MakeAliasGPUMesh builds one pose buffer per mesh, ssbo_pose for
+	 * PV_QUAKE1 and ssbo_pose_md3 for PV_MD3, so admit a mesh on its own
+	 * format's.  Testing ssbo_pose alone kept every .md3 out, and with it
+	 * the MD3 arms of both passes in R_DrawAliasInstanced.  A skeletal mesh
+	 * (PV_IQM) has neither and stays with R_DrawAliasModel, which skins it
+	 * on the GPU through GL_DrawAliasSkeletal.  GitHub #492. */
+	if (!gm || !gm->valid || gm->poseverttype == PV_IQM ||
+	    !(gm->poseverttype == PV_MD3 ? gm->ssbo_pose_md3 : gm->ssbo_pose))
 		return false;
 
 	/* --- Lighting (same as R_DrawAliasModel) --- */
@@ -3978,6 +4024,14 @@ static qboolean R_CollectAliasInstance (entity_t *e)
 			{
 				VectorSubtract(e->origin, cl_dlights[lnum].origin, dist);
 				add = cl_dlights[lnum].radius - VectorLengthFast(dist);
+				/* not through a wall (GitHub #97 P2, r_dlightvis.c).  Not
+				 * while the GPU grid lights the world (r_lightclusters 1
+				 * with r_lightclusters_models 0): it still lights through
+				 * walls until P4, and a model must not disagree with it */
+				if (add > 0 && r_dlight_occlusion.integer >= 1 &&
+				    !R_LightCluster_ShadesWorld () &&
+				    !R_DlightVis_Entity (lnum, e))
+					add = 0;
 				if (add > 0)
 				{
 					if (cl_dlights[lnum].dark)
@@ -4034,11 +4088,7 @@ static qboolean R_CollectAliasInstance (entity_t *e)
 		}
 	}
 
-	{
-		const float lightscale = R_AliasLightScale ();
-		shadelight *= lightscale;
-		VectorScale(lightcolor, lightscale, lightcolor);
-	}
+	R_AliasFinishLight ();
 
 	/* --- Build world matrix with scale/origin baked in --- */
 	/* Save current modelview (which is the VIEW matrix), load identity,
@@ -4171,10 +4221,22 @@ static qboolean R_CollectAliasInstance (entity_t *e)
 	inst->shadedot_row = ((int)(e->angles[1] * (SHADEDOT_QUANT / 360.0))) & (SHADEDOT_QUANT - 1);
 	/* Bit 8 rides along in the same int rather than widening the 80-byte
 	 * instance record, which salias_inst_vert's struct layout hardcodes.  The
-	 * row is 0..15, so there is nothing to collide with; the shader masks it
-	 * off before indexing the shadedots table.  uhexen2-waum. */
+	 * row is 0..15, below the dlight bit, the glow mark (bit 9, set only by the
+	 * glow pass) and the yaw (bits 16..31); the shader masks them all off
+	 * before indexing the shadedots table.  uhexen2-waum. */
 	if (model_dlight_gpu)
 		inst->shadedot_row |= ALIAS_INST_DLIGHT_BIT;
+	/* The entity yaw itself, to 1/65536 of a turn, in the top 16 bits: an
+	 * MD3 shades by its real normal against R_DrawAliasModel's unquantized
+	 * shadevector (GL_DrawAliasFrameMD3), and rebuilding that vector from the
+	 * truncated 16-step row put a turned .md3 up to 22.5 degrees off its CPU
+	 * shading.
+	 * The trivertx arm keeps the row, as the CPU path's shadedots table
+	 * does.  GitHub #492. */
+	{
+		int yaw = (int)floorf(e->angles[1] * (65536.0f / 360.0f) + 0.5f);
+		inst->shadedot_row |= (int)((unsigned int)(yaw & 0xFFFF) << ALIAS_INST_YAW_SHIFT);
+	}
 
 	/* Save entity info + resolved skin for shadow/batch passes.
 	 * Resolve skin HERE while paliashdr is valid — a second
@@ -4335,13 +4397,11 @@ static void R_DrawAliasInstanced (void)
 	GLintptr	inst_ofs;
 	size_t		inst_bytes;
 	static GLuint last_pose_ssbo = 0;
-	static int last_poseverttype = -1;
 
 	if (num_alias_instances == 0 || !prog->program)
 	{
 		/* Reset SSBO cache on early exit */
 		last_pose_ssbo = 0;
-		last_poseverttype = -1;
 		return;
 	}
 
@@ -4361,42 +4421,47 @@ static void R_DrawAliasInstanced (void)
 	/* Activate instanced shader */
 	R_UseProgram (prog->program);
 
-	/* Set uniforms (view-proj, fog, alpha threshold, eye position) */
-	if (prog->u_viewproj >= 0)
-		glUniformMatrix4fv_fp(prog->u_viewproj, 1, GL_FALSE,
-				      alias_inst_view_proj);
+	/* The vertex stage, salias_inst_vert, reads VertParams since #450 slice
+	 * S3, where these were its own loose uniforms.  VertParams is every block
+	 * program's, and GL_ImmEnd rewrites the eye position and the dlight scale
+	 * for each of its batches, so the whole set is written here before the
+	 * first batch flushes; the instance base and pose vertex type follow per
+	 * batch below. */
+	R_SetViewProj (alias_inst_view_proj);
+	R_SetEyePos (r_origin);
+	/* Clustered dynamic light (uhexen2-waum).  One value for the whole draw:
+	 * WHETHER a given instance takes it is bit 8 of its shadedot_row, so what
+	 * this carries is only the scale and ceiling, and true is the right
+	 * argument here -- the per-entity decision was made in the collector. */
+	R_SetAliasDlight (R_AliasDlightScale (true));
+
+	/* The fragment stage, salias_frag, reads FragParams and AliasFrag since
+	 * #450 slice S2: blocks every program shares, where these were this
+	 * program's own loose uniforms.  So the whole set it reads is written
+	 * here, before the first batch flushes, and nothing is inherited from
+	 * the draw before -- the instanced path used to lean on its program's
+	 * untouched zeros for the warp, the soft fade and the span cell, which a
+	 * shared block would have replaced with a water poly's (hazard 1).  Same
+	 * values the loose writes and those zeros gave. */
 	/* Use r_fog_density (pre-scaled by Fog_SetupFrame) not raw Fog_GetDensity() */
-	if (prog->u_fog_density >= 0)
-		glUniform1f_fp(prog->u_fog_density, r_fog_density);
-	if (prog->u_eyepos >= 0)
-		glUniform3f_fp(prog->u_eyepos, r_origin[0], r_origin[1], r_origin[2]);
-	if (prog->u_fog_color >= 0)
-		glUniform3f_fp(prog->u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
+	R_SetFog (r_fog_density, r_fog_color);
 	/* R_CollectAliasInstance filters out EF_HOLEY/EF_TRANSPARENT/translucent
 	 * entities, so every batch here is opaque. Use the inert 0.01 threshold
 	 * (matches Ironwail's ALPHATEST=0 shader variant for non-holey alias) —
 	 * a global 0.666 would discard skin pixels whose alpha dips below 2/3 due
 	 * to bilinear filtering of palette index 255 or PNG alpha edges, even on
-	 * models that were never tagged as cutouts. uhexen2-6eab. */
-	if (prog->u_alpha_threshold >= 0)
-		glUniform1f_fp(prog->u_alpha_threshold, 0.01f);
-	/* uhexen2-khsa r13: instanced alias batch is opaque-only (collector
+	 * models that were never tagged as cutouts. uhexen2-6eab.
+	 * uhexen2-khsa r13: instanced alias batch is opaque-only (collector
 	 * filters out DRF_TRANSLUCENT / EF_TRANSPARENT / EF_HOLEY / non-default
-	 * ENTALPHA), so we can force fragColor.a=1 unconditionally here. */
-	if (prog->u_force_opaque_alpha >= 0)
-		glUniform1f_fp(prog->u_force_opaque_alpha, 1.0f);
+	 * ENTALPHA), so we can force an opaque output alpha unconditionally. */
+	R_SetAlphaMask (0.01f, 1.0f);
 	/* Underwater caustics.  Same intensity source as the world and legacy
 	 * alias paths; the instance world matrix already puts v_worldxy in world
 	 * space, so nothing else is needed here.  uhexen2-0gn3. */
-	if (prog->u_alias_caustics >= 0)
-		glUniform2f_fp(prog->u_alias_caustics,
-			       R_CausticsIntensity(), (float)cl.time);
-	/* Clustered dynamic light (uhexen2-waum).  One value for the whole draw:
-	 * WHETHER a given instance takes it is bit 8 of its shadedot_row, so what
-	 * this carries is only the scale and ceiling, and true is the right
-	 * argument here -- the per-entity decision was made in the collector. */
-	if (prog->u_alias_dlight >= 0)
-		glUniform1f_fp(prog->u_alias_dlight, R_AliasDlightScale (true));
+	R_SetAliasCausticsU (R_CausticsIntensity(), (float)cl.time);
+	R_SetSoftParams (0.0f, 0.0f, 0.0f);
+	R_SetAliasTurb (0.0f, 0.0f);
+	R_SetAliasSpans (0.0f);
 
 	/* Bind shadedots SSBO at binding 2 (matches non-instanced GPU alias path) */
 	GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, prog->ubo_shadedots);
@@ -4450,7 +4515,11 @@ static void R_DrawAliasInstanced (void)
 		 * v_matpos is world_pos - u_eyepos, because it has no u_modelview and
 		 * its only eye-space vector rides u_lightview, which gl_lightcluster.c
 		 * uploads only while clustered lighting is live. */
-		if (prog->u_alias_material >= 0)
+		/* AliasFrag members since #450, so set in the shadow and flushed
+		 * with this batch below.  The light direction is written whenever
+		 * the material is on, in this path's world frame, and is only read
+		 * then (hazard 5). */
+		if (prog->ub_afrag >= 0)
 		{
 			if (r_materialmaps.integer &&
 			    (batch->norm_tex || batch->gloss_tex))
@@ -4470,17 +4539,12 @@ static void R_DrawAliasInstanced (void)
 					batch->gloss_tex ? batch->gloss_tex : gl_null_gloss_texture);
 				glActiveTexture_fp(GL_TEXTURE0);
 
-				glUniform3f_fp (prog->u_alias_material, nrm, gls,
-						q_max(1.0f, r_gloss_exponent.value));
-				if (prog->u_alias_lightdir >= 0)
-				{
-					R_AliasMaterialLightDirWorld (dir);
-					glUniform3f_fp (prog->u_alias_lightdir,
-							dir[0], dir[1], dir[2]);
-				}
+				R_SetAliasMaterialU (nrm, gls, q_max(1.0f, r_gloss_exponent.value));
+				R_AliasMaterialLightDirWorld (dir);
+				R_SetAliasLightDirU (dir);
 			}
 			else
-				glUniform3f_fp (prog->u_alias_material, 0.0f, 0.0f, 1.0f);
+				R_SetAliasMaterialU (0.0f, 0.0f, 1.0f);
 		}
 
 		/* Bind pose SSBO only if changed from last batch */
@@ -4493,19 +4557,20 @@ static void R_DrawAliasInstanced (void)
 			last_pose_ssbo = pose_ssbo;
 		}
 
-		/* Set poseverttype uniform only if changed from last batch */
-		if (gm->poseverttype != last_poseverttype && prog->u_poseverttype >= 0)
-		{
-			glUniform1i_fp(prog->u_poseverttype, gm->poseverttype);
-			last_poseverttype = gm->poseverttype;
-		}
-
-		/* Set base instance offset for this batch */
-		if (prog->u_inst_base >= 0)
-			glUniform1i_fp(prog->u_inst_base, batch->first);
+		/* VertParams members since #450 S3, written every batch.  The
+		 * static "only if changed" cache this used was per-PROGRAM state, so
+		 * it could not see a block another pass or program had written; the
+		 * shadow's own compare is the change test now (hazard 4: the
+		 * instance base differs every batch, so each batch flushes it). */
+		R_SetPoseVertType (gm->poseverttype);
+		R_SetInstBase (batch->first);
 
 		/* Use model's VAO (texcoords + IBO already set up) */
 		glBindVertexArray_fp(gm->vao);
+
+		/* This batch's blocks.  Free when nothing changed: the shadow only
+		 * re-uploads a block it marked dirty. */
+		R_FlushUniforms ();
 
 		/* Draw! */
 		glDrawElementsInstanced_fp(GL_TRIANGLES, gm->num_indices,
@@ -4523,7 +4588,6 @@ static void R_DrawAliasInstanced (void)
 
 	/* Reset SSBO cache for next frame */
 	last_pose_ssbo = 0;
-	last_poseverttype = -1;
 
 	/* Shadow pass — drawn individually per entity */
 	if (r_shadows.integer)
@@ -4575,12 +4639,17 @@ static void R_DrawAliasInstanced (void)
 
 		if (has_fb)
 		{
-			/* Override light_color to uniform brightness for fullbright */
+			/* Flat white, unshaded: the CPU redraw's vertex colour is a
+			 * constant 1 (GL_DrawAliasFrame, model_fullbright_pass), and
+			 * the bit tells the shader to drop the shadedot term too,
+			 * which a light of 1 alone left multiplying the glow by 0.7
+			 * to 2.  GitHub #491. */
 			for (i = 0; i < num_alias_instances; i++)
 			{
 				alias_instances[i].light_color[0] = 1.0f;
 				alias_instances[i].light_color[1] = 1.0f;
 				alias_instances[i].light_color[2] = 1.0f;
+				alias_instances[i].shadedot_row |= ALIAS_INST_FULLBRIGHT_BIT;
 			}
 
 			/* Re-stream the modified instance data into a fresh
@@ -4601,38 +4670,44 @@ static void R_DrawAliasInstanced (void)
 			}
 
 			R_UseProgram (prog->program);
-			if (prog->u_viewproj >= 0)
-				glUniformMatrix4fv_fp(prog->u_viewproj, 1, GL_FALSE,
-						      alias_inst_view_proj);
-			/* Use r_fog_density (pre-scaled by Fog_SetupFrame) not raw
+			/* VertParams, in full, for the same reason as the fragment
+			 * blocks below: the shadow pass between the two may have drawn
+			 * through GL_ImmEnd, which rewrites the eye position and the
+			 * dlight scale (#450 S3). */
+			R_SetViewProj (alias_inst_view_proj);
+			R_SetEyePos (r_origin);
+			/* The dynamic light was already added underneath by the main
+			 * pass, and this one's vertex colour is a flat white the shader
+			 * would add to a second time.  uhexen2-waum. */
+			R_SetAliasDlight (0.0f);
+			/* The fragment blocks, in full, as for the main pass (#450,
+			 * hazard 3): the shadow pass between the two may have drawn
+			 * through GL_ImmEnd, which rewrites FragParams, so nothing
+			 * the main pass left there can be assumed to have survived.
+			 *
+			 * Use r_fog_density (pre-scaled by Fog_SetupFrame) not raw
 			 * Fog_GetDensity(). This pass blends GL_ONE,GL_ONE, so fog
 			 * must fade to black — a non-black fog color would be ADDED
-			 * over the whole silhouette. See Fog_StartAdditive. */
-			if (prog->u_fog_density >= 0)
-				glUniform1f_fp(prog->u_fog_density, r_fog_density);
-			if (prog->u_fog_color >= 0)
-				glUniform3f_fp(prog->u_fog_color, 0.0f, 0.0f, 0.0f);
-			if (prog->u_alpha_threshold >= 0)
-				glUniform1f_fp(prog->u_alpha_threshold, 0.01f);
+			 * over the whole silhouette. See Fog_StartAdditive.  Put back
+			 * after the pass: FragParams' fog is every block program's. */
+			R_SetFog (r_fog_density, vec3_origin);
 			/* uhexen2-khsa r13: fullbright pass is additive and we don't
-			 * want fragColor.a to leak garbage into FB.a. */
-			if (prog->u_force_opaque_alpha >= 0)
-				glUniform1f_fp(prog->u_force_opaque_alpha, 1.0f);
-			/* This pass reuses the main pass's program, and every uniform
-			 * it does not overwrite is still hot.  The dynamic light was
-			 * already added underneath by that pass, and this one's vertex
-			 * colour is a flat white the shader would add to a second
-			 * time.  uhexen2-waum. */
-			if (prog->u_alias_dlight >= 0)
-				glUniform1f_fp(prog->u_alias_dlight, 0.0f);
-			/* Same argument again for the relief, and it matters more here
-			 * than it does for the dlight: the per-batch loop below never
-			 * writes u_alias_material, so without this the last batch of the
-			 * MAIN pass leaves its value hot for every glow batch.  That
-			 * would scale the glow mask by the relief and add the specular a
-			 * second time.  uhexen2-4kcb. */
-			if (prog->u_alias_material >= 0)
-				glUniform3f_fp(prog->u_alias_material, 0.0f, 0.0f, 1.0f);
+			 * want a garbage output alpha leaking into FB.a. */
+			R_SetAlphaMask (0.01f, 1.0f);
+			/* The main pass's caustics, which its program used to keep. */
+			R_SetAliasCausticsU (R_CausticsIntensity(), (float)cl.time);
+			R_SetSoftParams (0.0f, 0.0f, 0.0f);
+			R_SetAliasTurb (0.0f, 0.0f);
+			R_SetAliasSpans (0.0f);
+			/* Same argument as the dlight for the relief, and it matters
+			 * more here: the per-batch loop below never writes the
+			 * material, so without this the last batch of the MAIN pass
+			 * leaves its value hot for every glow batch.  That would scale
+			 * the glow mask by the relief and add the specular a second
+			 * time.  uhexen2-4kcb.  The light direction is left as the
+			 * main pass left it; with the material off nothing reads it. */
+			R_SetAliasMaterialU (0.0f, 0.0f, 1.0f);
+			R_FlushUniforms ();
 
 			GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, prog->ubo_shadedots);
 			R_SetBlend (true);
@@ -4650,20 +4725,37 @@ static void R_DrawAliasInstanced (void)
 			{
 				alias_batch_t *batch = &alias_batches[b];
 				alias_gpu_mesh_t *gm;
+				GLuint pose_ssbo;
 
 				if (!batch->fb_tex)
 					continue;
 
 				gm = GL_GetAliasGPUMesh(batch->hdr);
-				if (!gm || !gm->valid || !gm->ssbo_pose)
+				if (!gm || !gm->valid)
+					continue;
+
+				/* GL_MakeAliasGPUMesh builds one pose buffer per mesh,
+				 * ssbo_pose or ssbo_pose_md3, so the buffer, its binding
+				 * and the pose type are all this batch's, exactly as in
+				 * the main pass.  Testing ssbo_pose alone here skipped
+				 * every MD3 batch, and a pose type fixed for the whole
+				 * loop would decode one format's buffer as the other's.
+				 * GitHub #485. */
+				if (gm->poseverttype == PV_MD3)
+					pose_ssbo = gm->ssbo_pose_md3;
+				else
+					pose_ssbo = gm->ssbo_pose;
+				if (!pose_ssbo)
 					continue;
 
 				glActiveTexture_fp(GL_TEXTURE0);
 				GL_Bind(batch->fb_tex);
-				GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, gm->ssbo_pose);
-				if (prog->u_inst_base >= 0)
-					glUniform1i_fp(prog->u_inst_base, batch->first);
+				GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER,
+						  gm->poseverttype == PV_MD3 ? 3 : 1, pose_ssbo);
+				R_SetPoseVertType (gm->poseverttype);
+				R_SetInstBase (batch->first);	/* hazard 4 */
 				glBindVertexArray_fp(gm->vao);
+				R_FlushUniforms ();
 
 				glDrawElementsInstanced_fp(GL_TRIANGLES, gm->num_indices,
 							   GL_UNSIGNED_SHORT, NULL, batch->count);
@@ -4673,12 +4765,17 @@ static void R_DrawAliasInstanced (void)
 			R_SetDepthMask (true);
 			R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 			R_SetBlend (false);
+			/* The black additive fog went into FragParams, which every
+			 * block program reads; the scene's goes back into the shadow
+			 * for whichever flushes next (#450, hazard 3). */
+			R_SetFog (r_fog_density, r_fog_color);
 
 			glBindVertexArray_fp(0);
 			R_UseProgram (0);
 			GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, 0);
 			GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, 0);
 			GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, 0);
+			GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, 0);
 		}
 	}
 }
@@ -6044,176 +6141,45 @@ static void R_SetupFrame (void)
 	V_SetContentsColor (r_viewleaf->contents);
 	V_CalcBlend ();
 
-	/* Upload caustics uniform on all three world programs.  GL uniform state
-	 * is per-program and persists across glUseProgram cycles, so setting once
-	 * per frame (immediately after r_viewleaf updates) is enough — every
-	 * subsequent world-shader draw this frame picks up the right value
-	 * without per-bind plumbing.  uhexen2-6bfm. */
+	/* The world fragment stages' per-frame values, into the world frame
+	 * record every world draw copies into WorldFrag and FragParams (#450 W2).
+	 * Set once per frame (immediately after r_viewleaf updates), as they
+	 * were when each was a loose uniform pushed to all three world programs
+	 * here -- one write now, because one shared block cannot hold a value
+	 * per program, which is also what retires the trap those three uploads
+	 * kept documenting: a translucent surface on the OIT twin rendering
+	 * uncausticked (uhexen2-uxpp) or flat (uhexen2-mfql) next to the opaque
+	 * one.
+	 *   caustics    R_CausticsIntensity is 0 unless the view leaf is
+	 *               CONTENTS_WATER and the cvar is on (uhexen2-6bfm).
+	 *   bicubic     r_lightmap_bicubic (uhexen2-b2f0).
+	 *   debug       r_fullbright whites out the lightmap sample, r_lightmap
+	 *               the diffuse one and the fullbright mask, so the two
+	 *               halves of a world fragment can be looked at separately
+	 *               (uhexen2-isq7).
+	 *   material    the intensities are global cvars; whether a texture has
+	 *               maps is what is bound at units 3 and 4 (uhexen2-mfql).
+	 *   softemu     R_SoftEmuParams, all zeros at r_softemu 0, the default
+	 *               (uhexen2-a5nn.3).
+	 *   span cell   the 1997 span cell (#176), always written, so turning
+	 *               the cvar off reaches the next frame; lit water brackets
+	 *               its own (R_SetSpanCell).
+	 * Overbright is not here: each world draw path passes it per draw,
+	 * the one R_WorldOverbright value (see r_worldfrag_t). */
 	{
-		float intensity = R_CausticsIntensity();
-		float t = (float)cl.time;
-		if (gl_shader_world.program && gl_shader_world.u_caustics >= 0)
-		{
-			R_UseProgram (gl_shader_world.program);
-			glUniform2f_fp(gl_shader_world.u_caustics, intensity, t);
-		}
-		if (gl_shader_world_opaque.program && gl_shader_world_opaque.u_caustics >= 0)
-		{
-			R_UseProgram (gl_shader_world_opaque.program);
-			glUniform2f_fp(gl_shader_world_opaque.u_caustics, intensity, t);
-		}
-		/* Translucent world surfaces are drawn with gl_shader_world_oit
-		 * while an OIT pass is active (gl_rsurf.c DrawGLWaterPoly /
-		 * DrawGLPolyMTex), so it needs the same value or those surfaces
-		 * render uncausticked next to causticked opaque ones.
-		 * uhexen2-uxpp. */
-		if (gl_shader_world_oit.program && gl_shader_world_oit.u_caustics >= 0)
-		{
-			R_UseProgram (gl_shader_world_oit.program);
-			glUniform2f_fp(gl_shader_world_oit.u_caustics, intensity, t);
-		}
+		float	mat[3], se[4];
 
-		/* Material maps ride the same once-per-frame channel, and for
-		 * exactly the reason spelled out above: uniform state is
-		 * per-program and persists, so one upload here reaches every
-		 * world draw this frame without threading a program pointer
-		 * through the dozen per-texture binding sites in gl_rsurf.c.
-		 * All three programs, because a translucent surface picks the
-		 * OIT variant and would otherwise render flat next to a
-		 * normal-mapped opaque one -- the same trap uhexen2-uxpp
-		 * documents for caustics.  uhexen2-mfql. */
-		if (gl_shader_world.program)
-		{
-			R_UseProgram (gl_shader_world.program);
-			GL_MaterialUniform (&gl_shader_world);
-		}
-		if (gl_shader_world_opaque.program)
-		{
-			R_UseProgram (gl_shader_world_opaque.program);
-			GL_MaterialUniform (&gl_shader_world_opaque);
-		}
-		if (gl_shader_world_oit.program)
-		{
-			R_UseProgram (gl_shader_world_oit.program);
-			GL_MaterialUniform (&gl_shader_world_oit);
-		}
-		/* Per-frame world overbright (Ironwail-style).  Pushing it once
-		 * per frame here covers the OIT and brush-batch paths that don't
-		 * route through GL_ImmEnd or the per-binding-site uploads.
-		 * uhexen2-f29y. */
-		{
-			/* r_fullbright forces the multiplier back to 1: it replaces the
-			 * lightmap sample with white, and overbright would then double a
-			 * value that is already at full scale, blowing every surface to
-			 * pure white and hiding the very texture detail the mode exists
-			 * to show.  uhexen2-isq7. */
-			float ob = (gl_overbright.integer && !r_fullbright.integer) ? 2.0f : 1.0f;
-			if (gl_shader_world.program && gl_shader_world.u_overbright >= 0)
-			{
-				R_UseProgram (gl_shader_world.program);
-				glUniform1f_fp(gl_shader_world.u_overbright, ob);
-			}
-			if (gl_shader_world_opaque.program && gl_shader_world_opaque.u_overbright >= 0)
-			{
-				R_UseProgram (gl_shader_world_opaque.program);
-				glUniform1f_fp(gl_shader_world_opaque.u_overbright, ob);
-			}
-			if (gl_shader_world_oit.program && gl_shader_world_oit.u_overbright >= 0)
-			{
-				R_UseProgram (gl_shader_world_oit.program);
-				glUniform1f_fp(gl_shader_world_oit.u_overbright, ob);
-			}
-		}
-		/* Per-frame world lighting-debug switches.  Same plumbing again:
-		 * r_fullbright whites out the lightmap sample, r_lightmap whites out
-		 * the diffuse sample and suppresses the fullbright mask, so the two
-		 * halves of a world fragment can be looked at separately.  Both were
-		 * previously inert for brush surfaces -- r_fullbright reached only the
-		 * alias fullbright pass and r_lightmap was registered and never read,
-		 * which quietly invalidated any "is this lighting or texture" test
-		 * anyone ran with them.  uhexen2-isq7. */
-		{
-			float ld[2];
-			ld[0] = r_fullbright.integer ? 1.0f : 0.0f;
-			ld[1] = r_lightmap.integer ? 1.0f : 0.0f;
-			if (gl_shader_world.program && gl_shader_world.u_lightdebug >= 0)
-			{
-				R_UseProgram (gl_shader_world.program);
-				glUniform2f_fp(gl_shader_world.u_lightdebug, ld[0], ld[1]);
-			}
-			if (gl_shader_world_opaque.program && gl_shader_world_opaque.u_lightdebug >= 0)
-			{
-				R_UseProgram (gl_shader_world_opaque.program);
-				glUniform2f_fp(gl_shader_world_opaque.u_lightdebug, ld[0], ld[1]);
-			}
-			if (gl_shader_world_oit.program && gl_shader_world_oit.u_lightdebug >= 0)
-			{
-				R_UseProgram (gl_shader_world_oit.program);
-				glUniform2f_fp(gl_shader_world_oit.u_lightdebug, ld[0], ld[1]);
-			}
-		}
-		/* Per-frame world bicubic lightmap toggle.  Same plumbing as
-		 * u_overbright above: set on all three world program variants so
-		 * the OIT and brush-batch paths pick it up without per-bind
-		 * uploads.  uhexen2-b2f0. */
-		{
-			float bicubic = r_lightmap_bicubic.integer ? 1.0f : 0.0f;
-			if (gl_shader_world.program && gl_shader_world.u_lightmap_bicubic >= 0)
-			{
-				R_UseProgram (gl_shader_world.program);
-				glUniform1f_fp(gl_shader_world.u_lightmap_bicubic, bicubic);
-			}
-			if (gl_shader_world_opaque.program && gl_shader_world_opaque.u_lightmap_bicubic >= 0)
-			{
-				R_UseProgram (gl_shader_world_opaque.program);
-				glUniform1f_fp(gl_shader_world_opaque.u_lightmap_bicubic, bicubic);
-			}
-			if (gl_shader_world_oit.program && gl_shader_world_oit.u_lightmap_bicubic >= 0)
-			{
-				R_UseProgram (gl_shader_world_oit.program);
-				glUniform1f_fp(gl_shader_world_oit.u_lightmap_bicubic, bicubic);
-			}
-		}
-		/* Per-frame software-emulation stage scales (uhexen2-a5nn.3).  Same
-		 * plumbing again, and for the same reason: the MDI dispatch and the
-		 * DrawTextureChains fast path upload their own uniforms and would
-		 * otherwise never see these.  R_SoftEmuParams returns all zeros at
-		 * r_softemu 0, which is the default. */
-		{
-			float se[4];
-			R_SoftEmuParams (se);
-			if (gl_shader_world.program && gl_shader_world.u_softemu >= 0)
-			{
-				R_UseProgram (gl_shader_world.program);
-				glUniform4f_fp(gl_shader_world.u_softemu, se[0], se[1], se[2], se[3]);
-			}
-			if (gl_shader_world_opaque.program && gl_shader_world_opaque.u_softemu >= 0)
-			{
-				R_UseProgram (gl_shader_world_opaque.program);
-				glUniform4f_fp(gl_shader_world_opaque.u_softemu, se[0], se[1], se[2], se[3]);
-			}
-			if (gl_shader_world_oit.program && gl_shader_world_oit.u_softemu >= 0)
-			{
-				R_UseProgram (gl_shader_world_oit.program);
-				glUniform4f_fp(gl_shader_world_oit.u_softemu, se[0], se[1], se[2], se[3]);
-			}
-		}
-		/* The 1997 span cells on the world programs (#176).  Always pushed,
-		 * so turning the cvar off reaches them on the next frame. */
-		{
-			const float	spans = R_SpanCell (false);
-			const glprogram_t	*wp[3] = { &gl_shader_world, &gl_shader_world_opaque, &gl_shader_world_oit };
-			int		k;
-
-			for (k = 0; k < 3; k++)
-			{
-				if (wp[k]->program && wp[k]->u_spans >= 0)
-				{
-					R_UseProgram (wp[k]->program);
-					glUniform1f_fp(wp[k]->u_spans, spans);
-				}
-			}
-		}
+		GL_MaterialParams (mat);
+		R_SoftEmuParams (se);
+		R_SetWorldFrame (R_CausticsIntensity(), (float)cl.time,
+				 r_lightmap_bicubic.integer ? 1.0f : 0.0f,
+				 r_fullbright.integer ? 1.0f : 0.0f,
+				 r_lightmap.integer ? 1.0f : 0.0f, mat, se);
+		R_SetWorldSpans (R_SpanCell (false));
+		/* Nothing bound on the way out, as when this block ended its
+		 * per-program uploads; tools/test_world_vert_block.py's flow pass
+		 * counts on it, since the cheat clamp above may run a cvar
+		 * callback. */
 		R_UseProgram (0);
 	}
 
@@ -6375,8 +6341,6 @@ static void R_RenderScene (void)
 	R_SetFrustum ();
 
 	R_SetupGL ();
-
-	GL_ImmResetState ();	/* reset cached GL state for new frame */
 
 	Fog_SetupFrame ();
 
@@ -7368,7 +7332,6 @@ static void R_ShowTris (void)
 	}
 	glBindVertexArray_fp (0);
 	R_UseProgram (0);
-	GL_ImmInvalidateState ();
 	R_SetDepthTest (true);
 }
 
@@ -7920,13 +7883,30 @@ float R_SpanCell (qboolean liquid)
 
 /* For the immediate-mode draws that override it around one batch: brush polys
  * and liquids through gl_shader_alias, lit liquids through the world program.
- * Nothing when the mode is off, so the default path does no uniform traffic. */
+ * Nothing when the mode is off, so the default path does no uniform traffic.
+ *
+ * Two arms (#450), one per block.  salias_frag reads it from AliasFrag, which
+ * every alias-family program shares: the cell lands in the shadow and reaches
+ * the GPU with the batch's own flush in GL_ImmEnd.  That is the same value at
+ * the same draws only because every caller brackets one batch -- set, draw,
+ * back to 0 -- so the block holds 0 everywhere else, and the skeletal and
+ * instanced draws, which never come through here, write 0 themselves.  The
+ * world programs read it from WorldFrag (W2), which every world draw fills
+ * from the world frame record, so their arm writes the record: lit water's
+ * bracket -- set the liquid cell, draw, back to R_SpanCell (false) -- leaves
+ * it at the frame's value for every other world draw, as it left the loose
+ * u_spans. */
 void R_SetSpanCell (const glprogram_t *p, float cell)
 {
-	if (!r_softemu_spans.integer || !p->program || p->u_spans < 0)
+	if (!r_softemu_spans.integer || !p->program)
 		return;
-	R_UseProgram (p->program);
-	glUniform1f_fp (p->u_spans, cell);
+	if (p->ub_afrag >= 0)
+	{
+		R_SetAliasSpans (cell);
+		return;
+	}
+	if (p->ub_wfrag >= 0)
+		R_SetWorldSpans (cell);
 }
 
 void R_RenderView (void)

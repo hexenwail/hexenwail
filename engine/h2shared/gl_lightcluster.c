@@ -17,8 +17,9 @@
  * rewriting lightmap blocks on the CPU every frame.
  *
  * THE CONSUMER IS THE WORLD FRAGMENT SHADER (phase B, uhexen2-26bm): see
- * GLSL_DLIGHT_FN in gl_shader.c, which reads a fragment's froxel out of this
- * grid and evaluates only the lights whose bits are set in it.  Alias models
+ * engine/shaders/world_dlight.inc (with lightgrid.inc), which reads a
+ * fragment's froxel out of this grid and evaluates only the lights whose bits
+ * are set in it.  Alias models
  * are NOT a consumer and stay on the CPU term -- finding 2 on uhexen2-a5nn.1.
  *
  * `lightcluster_verify` at the bottom reads the grid back and checks it against
@@ -50,7 +51,7 @@
  *    sphere as a bright one -- so the colour rides negated, and the shading
  *    side accumulates with a clamp at zero, which is what the CPU path does
  *    (gl_rsurf.c, the `dark` arm of R_AddDynamicLights).  Decided in phase B;
- *    see GLSL_DLIGHT_FN.
+ *    see world_dlight.inc.
  *
  * A NOTE ON NEGATIVE RADII, which look like a fourth case and are not.
  * EF_SPIT allocates a dlight with radius -120 (cl_main.c) and leaves `dark`
@@ -67,12 +68,14 @@
 #include "sdl_inc.h"
 #include "gl_matrix.h"
 #include "gl_shader.h"
-#include "gl_vbo.h"		/* GL_ImmInvalidateState -- see R_LightCluster_BindForAlias */
 #include "gl_pipeline.h"
 #include "gl_sky.h"		/* gl_farclip -- the projection far plane lives there */
 #include "gl_lightcluster.h"
+#include "gl_uniforms.h"	/* R_SetWorldDlight, R_SetAliasLightGrid -- see the two binds */
 
 #ifndef USE_GLES
+
+#include "shaders_gen.h"	/* lightcluster_comp[] -- engine/shaders/lightcluster_comp.glsl */
 
 #define LIGHT_MASK_WORDS	(MAX_DLIGHTS / 32)	/* 4 at MAX_DLIGHTS 128 */
 #define LIGHT_FROXELS		(LIGHT_TILES_X * LIGHT_TILES_Y * LIGHT_TILES_Z)
@@ -101,8 +104,24 @@ static qboolean		lc_ready;		/* resources built */
 static qboolean		lc_failed;		/* build failed; do not retry */
 static qboolean		lc_valid_this_frame;
 
-static GLint		lc_loc_view, lc_loc_tproj;
-static GLint		lc_loc_zlogscale, lc_loc_zlogbias, lc_loc_numlights;
+/* Uniform-block binding point for LcParams.  0 Hi-Z, 1/2 the shared
+ * vert/frag blocks, 3 SsaoParams, 4 CullParams; see gl_shader.h.  The shader
+ * cannot name it (ES 3.00 has no layout(binding=) on a block), so it is
+ * assigned once per program with glUniformBlockBinding. */
+#define LC_PARAMS_UBO_BINDING	5
+
+/* Mirrors the std140 LcParams block in engine/shaders/lightcluster_comp.glsl:
+ * every member mat4/vec4/ivec4, so the C layout is std140's by construction.
+ * The matrices are copied as the 16 floats glUniformMatrix4fv was handed with
+ * transpose GL_FALSE, which is std140's default column_major order. */
+typedef struct {
+	float	view[16];
+	float	tproj[16];
+	float	zlog[4];	/* x log-depth scale, y log-depth bias */
+	GLint	count[4];	/* x number of lights */
+} lc_params_t;			/* 160 bytes */
+
+COMPILE_TIME_ASSERT(lcparams_size, sizeof(lc_params_t) == 160);
 
 /* This frame's lights, in the order the shader indexes them, kept so the
  * verifier can recompute without guessing which dlights were live. */
@@ -125,138 +144,9 @@ static void LC_UploadAndDispatch (void);
 /* The compute pass                                                    */
 /* ------------------------------------------------------------------ */
 
-static const char lc_compute_body[] =
-	"layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;\n"
-	"\n"
-	"struct Light\n"
-	"{\n"
-	"    vec3  origin;\n"
-	"    float radius;\n"
-	"    vec3  color;\n"
-	"    float minlight;\n"
-	"};\n"
-	"\n"
-	"layout(std430, binding = LIGHT_SSBO_BINDING) restrict readonly buffer LightBuffer\n"
-	"{\n"
-	"    float LightStyles[MAX_LIGHTSTYLES];\n"
-	"    Light Lights[];\n"
-	"};\n"
-	"\n"
-	"layout(rgba32ui, binding = 0) uniform writeonly uimage3D LightClusters;\n"
-	"\n"
-	"uniform mat4  u_view;\n"
-	"uniform mat4  u_transposed_proj;\n"
-	"uniform float u_zlogscale;\n"
-	"uniform float u_zlogbias;\n"
-	"uniform int   u_numlights;\n"
-	"\n"
-	"shared vec4 local_lights[MAX_LIGHTS];\n"	/* xyz view-space pos, w radius */
-	"\n"
-	"vec3 cluster_center;\n"
-	"vec3 cluster_half_size;\n"
-	"\n"
-	/* A tile edge as a view-space plane, straight out of the projection.
-	 * Convention-independent, so this half is upstream's unchanged. */
-	"vec4 ExtractFrustumPlane(int axis, float ndcval, float side)\n"
-	"{\n"
-	"    vec4 plane = u_transposed_proj[axis] - ndcval * u_transposed_proj[3];\n"
-	"    return inversesqrt(dot(plane.xyz, plane.xyz)) * side * plane;\n"
-	"}\n"
-	"\n"
-	/* Where a ray from the eye crosses view-space depth `dist` in front of it.
-	 * We look down -Z, so that plane is z == -dist. */
-	"vec3 IntersectDepthPlane(vec3 dir, float dist)\n"
-	"{\n"
-	"    return dir * (-dist / dir.z);\n"
-	"}\n"
-	"\n"
-	"void ComputeClusterExtents(uvec3 gid)\n"
-	"{\n"
-	"    const float TileSizeX = 2.0 / float(LIGHT_TILES_X);\n"
-	"    const float TileSizeY = 2.0 / float(LIGHT_TILES_Y);\n"
-	"    float x0 = -1.0 + float(gid.x) * TileSizeX;\n"
-	"    float y0 = -1.0 + float(gid.y) * TileSizeY;\n"
-	/* Logarithmic depth slices: slice 0 is the near plane, slice
-	 * LIGHT_TILES_Z the far one, so froxels stay roughly cubic in
-	 * screen terms all the way out. */
-	"    float d0 = exp2((float(gid.z)        - u_zlogbias) / u_zlogscale);\n"
-	"    float d1 = exp2((float(gid.z) + 1.0  - u_zlogbias) / u_zlogscale);\n"
-	"\n"
-	"    vec4 left   = ExtractFrustumPlane(0, x0,              -1.0);\n"
-	"    vec4 right  = ExtractFrustumPlane(0, x0 + TileSizeX,   1.0);\n"
-	"    vec4 bottom = ExtractFrustumPlane(1, y0,              -1.0);\n"
-	"    vec4 top    = ExtractFrustumPlane(1, y0 + TileSizeY,   1.0);\n"
-	"\n"
-	/* Two opposite corner rays, as the intersection of the plane pairs
-	 * that meet there.  cross() fixes the line but not which way along
-	 * it, so point them into the frustum explicitly rather than relying
-	 * on a handedness that a projection change could flip. */
-	"    vec3 bl = cross(bottom.xyz, left.xyz);\n"
-	"    vec3 tr = cross(top.xyz, right.xyz);\n"
-	"    if (bl.z > 0.0) bl = -bl;\n"
-	"    if (tr.z > 0.0) tr = -tr;\n"
-	"\n"
-	"    vec3 p0 = IntersectDepthPlane(bl, d0);\n"
-	"    vec3 p1 = IntersectDepthPlane(bl, d1);\n"
-	"    vec3 p2 = IntersectDepthPlane(tr, d0);\n"
-	"    vec3 p3 = IntersectDepthPlane(tr, d1);\n"
-	"\n"
-	"    vec3 mins = vec3(min(min(p0.xy, p1.xy), min(p2.xy, p3.xy)), -d1);\n"
-	"    vec3 maxs = vec3(max(max(p0.xy, p1.xy), max(p2.xy, p3.xy)), -d0);\n"
-	"    cluster_center    = (maxs + mins) * 0.5;\n"
-	"    cluster_half_size = (maxs - mins) * 0.5;\n"
-	"}\n"
-	"\n"
-	/* Sphere against the froxel's bounding box.  Upstream's cheap test, and
-	 * it needs no convention at all. */
-	"bool LightTouchesCluster(vec4 l)\n"
-	"{\n"
-	"    vec3 delta = max(abs(l.xyz - cluster_center) - cluster_half_size, 0.0);\n"
-	"    return dot(delta, delta) < l.w * l.w;\n"
-	"}\n"
-	"\n"
-	"void main()\n"
-	"{\n"
-	"    uvec3 gid = gl_GlobalInvocationID;\n"
-	"    if (any(greaterThanEqual(gid, uvec3(LIGHT_TILES_X, LIGHT_TILES_Y, LIGHT_TILES_Z))))\n"
-	"        return;\n"
-	"\n"
-	"    uint numlights = uint(max(u_numlights, 0));\n"
-	"    if (numlights == 0u)\n"
-	"    {\n"
-	"        imageStore(LightClusters, ivec3(gid), uvec4(0u));\n"
-	"        return;\n"
-	"    }\n"
-	"\n"
-	"    uint groupsize = gl_WorkGroupSize.x * gl_WorkGroupSize.y * gl_WorkGroupSize.z;\n"
-	"    uint ofs;\n"
-	"    for (ofs = 0u; ofs < numlights; ofs += groupsize)\n"
-	"    {\n"
-	"        uint index = gl_LocalInvocationIndex + ofs;\n"
-	"        if (index < numlights)\n"
-	"            local_lights[index] = vec4((u_view * vec4(Lights[index].origin, 1.0)).xyz,\n"
-	"                                       Lights[index].radius);\n"
-	"    }\n"
-	"    memoryBarrierShared();\n"
-	"    barrier();\n"
-	"\n"
-	"    ComputeClusterExtents(gid);\n"
-	"\n"
-	"    uvec4 mask = uvec4(0u);\n"
-	"    uint i;\n"
-	"    for (i = 0u; i < numlights; i++)\n"
-	"    {\n"
-	"        if (!LightTouchesCluster(local_lights[i]))\n"
-	"            continue;\n"
-	"        uint word = i >> 5u;\n"
-	"        uint bit  = 1u << (i & 31u);\n"
-	"        if      (word == 0u) mask.x |= bit;\n"
-	"        else if (word == 1u) mask.y |= bit;\n"
-	"        else if (word == 2u) mask.z |= bit;\n"
-	"        else                 mask.w |= bit;\n"
-	"    }\n"
-	"    imageStore(LightClusters, ivec3(gid), mask);\n"
-	"}\n";
+/* The pass itself is engine/shaders/lightcluster_comp.glsl (#450), reaching
+ * us as lightcluster_comp[] via shaders_gen.h.  Its #version and sizes come
+ * from the header chunk R_LightCluster_Build passes alongside it. */
 
 /* row-major mat4 (the layout GL_GetModelview hands back) times a column vec4 */
 static void LC_TransformVec4 (const float m[16], const float v[4], float out[4])
@@ -318,18 +208,37 @@ static qboolean R_LightCluster_Build (void)
 		    LIGHT_TILES_X, LIGHT_TILES_Y, LIGHT_TILES_Z,
 		    MAX_DLIGHTS, MAX_LIGHTSTYLES, LIGHT_SSBO_BINDING);
 
-	lc_prog = GL_LoadComputeProgram (header, lc_compute_body, "light cluster");
+	lc_prog = GL_LoadComputeProgram (header, lightcluster_comp, "light cluster");
 	if (!lc_prog)
 	{
 		lc_failed = true;
 		return false;
 	}
 
-	lc_loc_view      = glGetUniformLocation_fp (lc_prog, "u_view");
-	lc_loc_tproj     = glGetUniformLocation_fp (lc_prog, "u_transposed_proj");
-	lc_loc_zlogscale = glGetUniformLocation_fp (lc_prog, "u_zlogscale");
-	lc_loc_zlogbias  = glGetUniformLocation_fp (lc_prog, "u_zlogbias");
-	lc_loc_numlights = glGetUniformLocation_fp (lc_prog, "u_numlights");
+	/* Pin LcParams to its binding point, and check the driver laid the block
+	 * out as lc_params_t does (the RU_CheckBlockSize practice).  The binding
+	 * dies with the program, so vid_restart is covered by construction. */
+	if (glGetUniformBlockIndex_fp && glUniformBlockBinding_fp)
+	{
+		GLuint	blk = glGetUniformBlockIndex_fp (lc_prog, "LcParams");
+		GLint	size = 0;
+
+		if (blk == GL_INVALID_INDEX)
+		{
+			Con_SafePrintf ("LightCluster: disabled, no LcParams block in the program\n");
+			lc_failed = true;
+			return false;
+		}
+		if (glGetActiveUniformBlockiv_fp)
+		{
+			glGetActiveUniformBlockiv_fp (lc_prog, blk, GL_UNIFORM_BLOCK_DATA_SIZE, &size);
+			if (size != (GLint)sizeof(lc_params_t))
+				Con_Printf ("WARNING: uniform block LcParams is %d bytes on this driver, "
+					    "C mirror is %d -- light clustering will be wrong\n",
+					    (int)size, (int)sizeof(lc_params_t));
+		}
+		glUniformBlockBinding_fp (lc_prog, blk, LC_PARAMS_UBO_BINDING);
+	}
 
 	glGenBuffers_fp (1, &lc_ssbo);
 	GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, lc_ssbo);
@@ -495,11 +404,21 @@ static void LC_UploadAndDispatch (void)
 	GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, 0);
 
 	R_UseProgram (lc_prog);
-	if (lc_loc_view >= 0)      glUniformMatrix4fv_fp (lc_loc_view, 1, GL_FALSE, lc_view);
-	if (lc_loc_tproj >= 0)     glUniformMatrix4fv_fp (lc_loc_tproj, 1, GL_FALSE, lc_tproj);
-	if (lc_loc_zlogscale >= 0) glUniform1f_fp (lc_loc_zlogscale, lc_zlogscale);
-	if (lc_loc_zlogbias >= 0)  glUniform1f_fp (lc_loc_zlogbias, lc_zlogbias);
-	if (lc_loc_numlights >= 0) glUniform1i_fp (lc_loc_numlights, lc_numlights);
+	{
+		lc_params_t	params;
+		GLuint		ubo;
+		GLintptr	ofs;
+
+		memset (&params, 0, sizeof(params));
+		memcpy (params.view, lc_view, sizeof(params.view));
+		memcpy (params.tproj, lc_tproj, sizeof(params.tproj));
+		params.zlog[0] = lc_zlogscale;
+		params.zlog[1] = lc_zlogbias;
+		params.count[0] = lc_numlights;
+		GL_Upload (GL_UNIFORM_BUFFER, &params, sizeof(params), &ubo, &ofs);
+		GL_BindBufferRange (GL_UNIFORM_BUFFER, LC_PARAMS_UBO_BINDING,
+				    ubo, ofs, sizeof(params));
+	}
 
 	glBindImageTexture_fp (0, lc_grid, 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_RGBA32UI);
 	glDispatchCompute_fp (LIGHT_TILES_X / 8, LIGHT_TILES_Y / 8, LIGHT_TILES_Z);
@@ -562,28 +481,6 @@ qboolean R_LightCluster_AliasActive (void)
 /* Phase B: handing the grid to the world fragment shaders             */
 /* ------------------------------------------------------------------ */
 
-/* One program's worth of the froxel-lookup state.  Split out because the three
- * world programs -- cutout, opaque and OIT -- are three separately linked
- * programs with three sets of uniform locations, and a surface that misses one
- * of them renders next to its neighbours with different lighting.  The same
- * trap uhexen2-uxpp documents for caustics and uhexen2-mfql for material maps. */
-static void LC_SetWorldUniforms (const glprogram_t *p, float scale)
-{
-	if (!p->program)
-		return;
-	R_UseProgram (p->program);
-	if (p->u_dlight_scale >= 0)
-		glUniform1f_fp (p->u_dlight_scale, scale);
-	if (scale <= 0.0f)
-		return;		/* the shader takes no other branch; skip the rest */
-	if (p->u_lightview >= 0)
-		glUniformMatrix4fv_fp (p->u_lightview, 1, GL_FALSE, lc_view);
-	if (p->u_lightgrid_xy >= 0)
-		glUniform4f_fp (p->u_lightgrid_xy, lc_vp[0], lc_vp[1], lc_vp[2], lc_vp[3]);
-	if (p->u_lightgrid_z >= 0)
-		glUniform2f_fp (p->u_lightgrid_z, lc_zlogscale, lc_zlogbias);
-}
-
 void R_LightCluster_BindForWorld (void)
 {
 	float	scale;
@@ -616,10 +513,18 @@ void R_LightCluster_BindForWorld (void)
 		scale = 256.0f / (255.0f * (float)(1 << lmshift));
 	}
 
-	LC_SetWorldUniforms (&gl_shader_world, scale);
-	LC_SetWorldUniforms (&gl_shader_world_opaque, scale);
-	LC_SetWorldUniforms (&gl_shader_world_oit, scale);
-	R_UseProgram (0);
+	/* Into the world frame record, which every world draw copies into
+	 * WorldFrag (#450 W2).  It was three per-program glUniform rounds, one
+	 * per world program -- cutout, opaque and OIT -- because a surface that
+	 * missed one rendered next to its neighbours with different lighting
+	 * (the trap uhexen2-uxpp documents for caustics); one shared block makes
+	 * that impossible.  The lookup constants are read only while the scale
+	 * is non-zero, so on a frame the grid is not live they are simply
+	 * whatever the last live frame left.  The last argument is the
+	 * one-sided tolerance ClusteredDlight drops a light behind a face with,
+	 * the same test and the same constant as the CPU path's (#97). */
+	R_SetWorldDlight (scale, lc_view, lc_vp, lc_zlogscale, lc_zlogbias,
+			  r_dlight_occlusion.integer >= 1 ? DLIGHT_PLANE_EPSILON : 0.0f);
 
 	if (scale <= 0.0f)
 		return;
@@ -645,78 +550,33 @@ void R_LightCluster_BindForWorld (void)
 /* Phase C: handing the same grid to the alias family (uhexen2-waum)    */
 /* ------------------------------------------------------------------ */
 
-/* The froxel-lookup constants only.  The SCALE is deliberately not set here:
- * it is per-batch state that R_DrawAliasModel drives through GL_SetAliasDlight
- * and GL_ImmEnd pushes, because one entity may take dynamic light and the
- * sprite drawn after it must not.  These three change once a frame and are
- * read only when the scale is non-zero, so pushing them here costs one
- * R_UseProgram per program per frame and saves the draw path from caring. */
-static void LC_SetAliasUniforms (const glprogram_t *p)
-{
-	if (!p->program)
-		return;
-	/* Nothing to say to a program that did not link this half of the shader:
-	 * every one of these is -1 on the ES tier, where the macros expand to
-	 * nothing, and on the plain 2d / flat / sky programs. */
-	if (p->u_lightview < 0 && p->u_lightgrid_xy < 0 && p->u_lightgrid_z < 0)
-		return;
-	R_UseProgram (p->program);
-	if (p->u_lightview >= 0)
-		glUniformMatrix4fv_fp (p->u_lightview, 1, GL_FALSE, lc_view);
-	if (p->u_lightgrid_xy >= 0)
-		glUniform4f_fp (p->u_lightgrid_xy, lc_vp[0], lc_vp[1], lc_vp[2], lc_vp[3]);
-	if (p->u_lightgrid_z >= 0)
-		glUniform2f_fp (p->u_lightgrid_z, lc_zlogscale, lc_zlogbias);
-}
-
-/* The instanced programs are a different struct with their own location table
- * -- see the note on gl_alias_inst_prog_t.  Same three uniforms, same values. */
-static void LC_SetAliasInstUniforms (const gl_alias_inst_prog_t *p)
-{
-	if (!p->program)
-		return;
-	R_UseProgram (p->program);
-	if (p->u_lightview >= 0)
-		glUniformMatrix4fv_fp (p->u_lightview, 1, GL_FALSE, lc_view);
-	if (p->u_lightgrid_xy >= 0)
-		glUniform4f_fp (p->u_lightgrid_xy, lc_vp[0], lc_vp[1], lc_vp[2], lc_vp[3]);
-	if (p->u_lightgrid_z >= 0)
-		glUniform2f_fp (p->u_lightgrid_z, lc_zlogscale, lc_zlogbias);
-}
-
 void R_LightCluster_BindForAlias (void)
 {
 	if (!R_LightCluster_AliasActive ())
 		return;
 
-	/* EVERY PROGRAM THAT LINKS salias_frag, not just the ones that draw
-	 * models today.  A model reaches the screen through the plain program,
-	 * its NOPERSP twin under r_softemu_mdl_warp, either of their OIT variants
-	 * when translucent, the skeletal program for MD5, and the instanced
-	 * program when r_alias_gpu is on -- which of those it takes depends on
-	 * cvars and on the format the model shipped in.  Missing one shows up as
-	 * "this monster is lit differently from that identical monster", which is
-	 * the trap uhexen2-uxpp documents for caustics and uhexen2-mfql for
-	 * material maps. */
-	LC_SetAliasUniforms (&gl_shader_alias);
-	LC_SetAliasUniforms (&gl_shader_alias_np);
-	LC_SetAliasUniforms (&gl_shader_alias_oit);
-	LC_SetAliasUniforms (&gl_shader_alias_np_oit);
-	LC_SetAliasUniforms (&gl_shader_skeletal);
-	LC_SetAliasUniforms (&gl_shader_skeletal_np);
-	LC_SetAliasUniforms (&gl_shader_skeletal_oit);
-	LC_SetAliasUniforms (&gl_shader_skeletal_np_oit);
-	LC_SetAliasInstUniforms (&gl_shader_alias_inst);
-	LC_SetAliasInstUniforms (&gl_shader_alias_inst_np);
-	R_UseProgram (0);
-
-	/* GL_ImmEnd caches uniform values per program and did not see any of the
-	 * above.  Its cache keys on the program pointer, so without this the next
-	 * batch on a program we just touched would trust a stale entry.  In
-	 * practice the three uniforms here are not ones GL_ImmEnd tracks, but the
-	 * rule in this engine is that anything setting uniforms behind its back
-	 * says so -- see the header comment on GL_ImmInvalidateState. */
-	GL_ImmInvalidateState ();
+	/* The froxel-lookup constants only.  The SCALE is deliberately not set
+	 * here: it is per-batch state that R_DrawAliasModel drives through
+	 * GL_SetAliasDlight and GL_ImmEnd pushes, because one entity may take
+	 * dynamic light and the sprite drawn after it must not.  These change
+	 * once a frame and are read only when the scale is non-zero.
+	 *
+	 * ONE WRITE for every program that links salias_frag.  It used to be ten
+	 * glUniform rounds, one per program, because missing one showed up as
+	 * "this monster is lit differently from that identical monster" (the
+	 * trap uhexen2-uxpp documents for caustics).  Since #450 the fragment
+	 * stage reads these from AliasFrag, which all ten share, so that trap is
+	 * gone by construction; the shadow reaches the GPU with the next alias
+	 * batch's flush.  A frame on which the grid is not live writes nothing
+	 * and leaves last frame's values, which nothing reads: the scale that
+	 * gates the lookup is 0 on such a frame (R_AliasDlightScale).
+	 *
+	 * The same call writes AliasVert's copy of lc_view, which the instanced
+	 * vertex stage builds v_eyepos with (#450 S3).  That was the last
+	 * per-program write here -- a glUniform on each instanced program, with
+	 * the GL_ImmInvalidateState it obliged -- so nothing here touches a
+	 * program any more. */
+	R_SetAliasLightGrid (lc_view, lc_vp, lc_zlogscale, lc_zlogbias);
 
 	/* The SSBO and the grid texture are already bound for the frame by
 	 * R_LightCluster_BindForWorld, which runs immediately before this, and

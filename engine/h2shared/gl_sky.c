@@ -33,7 +33,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // Don't include gl_texmgr.h because GL_Bind macro in glquake.h conflicts
 // Just declare what we need from it
 extern gltexture_t *notexture;
-extern gltexture_t *nulltexture;
 
 // Source format enum from gl_texmgr.h
 enum srcformat { SRC_INDEXED, SRC_LIGHTMAP, SRC_RGBA, SRC_EXTERNAL };
@@ -109,7 +108,6 @@ gltexture_t	*solidskytexture, *alphaskytexture;
  * distance and is overwritten per level by protocol (gl_rmisc.c).  This one is
  * the frustum.  uhexen2-li13. */
 cvar_t gl_farclip = {"gl_farclip", "16384", CVAR_ARCHIVE};
-extern cvar_t r_skyalpha; /* defined in gl_rmain.c */
 cvar_t r_fastsky = {"r_fastsky", "0", CVAR_ARCHIVE};	/* archived, as in Ironwail */
 cvar_t r_sky_quality = {"r_sky_quality", "12", CVAR_NONE};
 cvar_t r_skyfog = {"r_skyfog", "0.5", CVAR_NONE};
@@ -138,8 +136,8 @@ static float skywind_period = 30.0f;	/* seconds per oscillation cycle */
  * through us and through Ironwail, which does use it. */
 static float skywind_pitch  = 0.0f;	/* vertical direction, degrees */
 
-/* Per-frame wind UV offset.  GL_ImmFlush pushes it to u_wind on whichever
- * program declares one, which is both sky programs (uhexen2-a5nn.4). */
+/* Per-frame wind UV offset.  GL_ImmPushBlocks writes it into FragParams
+ * (u_wind, u_fsky.xy), which both sky programs read (uhexen2-a5nn.4). */
 float sky_wind_uv[2] = { 0.0f, 0.0f };
 /* The same wind as an offset applied to the cubemap sample direction, in the
  * shader's swizzled space.  uhexen2-ctk9. */
@@ -1132,8 +1130,8 @@ Sky_UpdateWind
 
 Computes the per-frame wind UV offset from the parsed per-skybox params
 and the global r_skywind scalar.  Phase oscillates as a triangle wave
-so wind blows one way, then reverses.  Result is stashed in sky_wind_uv
-for GL_ImmFlush to push to u_wind on the sky programs.  Called once per
+so wind blows one way, then reverses.  Result is stashed in sky_wind_uv,
+which GL_ImmPushBlocks writes into FragParams (u_wind).  Called once per
 frame from Sky_DrawSky (only path that uses skyboxes).
 ==================
 */
@@ -1896,7 +1894,12 @@ void Sky_DrawSky (void)
 	//
 	// render skybox
 	//
-	if (!r_fastsky.value && !(Fog_GetDensity() > 0 && skyfog >= 1))
+	/* Not skipped at skyfog >= 1, as QuakeSpasm does: it had painted the sky
+	 * surfaces the fog colour first, but here they only write depth and
+	 * stencil, so a skipped box left the sky the clear colour (black).  As in
+	 * Ironwail, the box always draws and its flat fog pass at alpha
+	 * CLAMP(0, skyfog, 1) turns it solid fog colour at 1.  GitHub #487. */
+	if (!r_fastsky.value)
 	{
 		R_SetBlend (false);
 		GL_ImmColor4f(1, 1, 1, 1);

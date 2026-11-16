@@ -70,7 +70,7 @@ static void R_AddDynamicLights (void)
 	int			lnum;
 	int			sd, td;
 	float		dist, rad, minlight, lightval;
-	vec3_t		impact;
+	vec3_t		impact, lorg;
 	vec_t			local0, local1;
 	int			s, t;
 	int			i;
@@ -100,7 +100,13 @@ static void R_AddDynamicLights (void)
 			continue;		// not lit by this light
 
 		rad = fabs(cl_dlights[lnum].radius);
-		dist = DotProduct (cl_dlights[lnum].origin, surf->plane->normal) - surf->plane->dist;
+		/* In the surface's model space (GitHub #495); see gl_rsurf.c's twin. */
+		R_DlightModelOrigin (surf->dlightent, cl_dlights[lnum].origin, lorg);
+		dist = DotProduct (lorg, surf->plane->normal) - surf->plane->dist;
+		/* One-sided (GitHub #97); the same test as gl_rsurf.c's. */
+		if (r_dlight_occlusion.integer >= 1 && !(surf->flags & SURF_DRAWTURB) &&
+		    ((surf->flags & SURF_PLANEBACK) ? -dist : dist) < -DLIGHT_PLANE_EPSILON)
+			continue;
 		rad -= fabs(dist);
 		minlight = cl_dlights[lnum].minlight;
 		if (rad < minlight)
@@ -112,7 +118,7 @@ static void R_AddDynamicLights (void)
 
 		for (i = 0; i < 3; i++)
 		{
-			impact[i] = cl_dlights[lnum].origin[i] - surf->plane->normal[i]*dist;
+			impact[i] = lorg[i] - surf->plane->normal[i]*dist;
 		}
 
 		local0 = DotProduct (impact, tex->vecs[0]) + tex->vecs[0][3] - surf->texturemins[0];

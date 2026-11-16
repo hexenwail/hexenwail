@@ -194,6 +194,15 @@ jobs:
       - name: r_fastsky reaches the classic sky
         run: python3 tools/test_fastsky_classic.py
 
+      # The scrolling sky ignored r_skyfog under fog: R_SetSkyFog had no
+      # caller and the two-pass layers had no fog pass (GitHub #486).  Pins
+      # the per-frame write in Fog_SetupFrame and both two-pass fog passes;
+      # and the skybox is never skipped on skyfog (GitHub #487).
+      # Fog_GetColor clamps as Ironwail does, and R_SetSkyFog alone writes
+      # fragparams.skyfog (the #486 review).
+      - name: Sky fog reaches the scrolling sky
+        run: python3 tools/test_skyfog_layers.py
+
       # r_softemu_spans: the 1997 span rasteriser's texture coordinates on the
       # world, brush polys and liquids, at 1997's proportion (GitHub #176).
       - name: Retro spans reach every span-drawn surface
@@ -291,6 +300,11 @@ jobs:
       - name: gfx.wad off the secondary zone
         run: python3 tools/test_gfx_malloc.py
 
+      # The progs known-string tables grow with realloc and zero the new
+      # slots; Z_Realloc wrote its split header into uncopied slots (GitHub #488).
+      - name: Known-string tables off the zone
+        run: python3 tools/test_knownstrings_heap.py
+
       # 320x200 is a valid mode again, and the main menu fits (GitHub #135).
       - name: Video mode floor 320x200
         run: python3 tools/test_vid_floor_200.py
@@ -374,3 +388,124 @@ jobs:
       - name: Ironwail scorecard matches its own rows
         run: python3 tools/ironwail_scorecard.py --check
 
+
+      # The vendored SDL3 still declares every SDL_GPU capability #77's
+      # backend plan rests on (#452): a vendored-SDL bump that drops one
+      # fails here instead of surfacing mid-#340.
+      - name: SDL_GPU feasibility list holds for the vendored SDL3
+        run: python3 tools/test_sdl_gpu_feasibility.py
+
+      # The Flatpak's FluidSynth has libsndfile off, so it must carry the
+      # vorbisfile SF3 patch too, or SF3 soundfonts are refused (#168).
+      - name: Flatpak FluidSynth decodes SF3 without libsndfile
+        run: python3 tools/test_flatpak_sf3.py
+
+      # The light-cluster pass's LcParams block and its C mirror agree, and
+      # no loose uniform plumbing is left for it (#450).
+      - name: LcParams block covers the light-cluster pass
+        run: python3 tools/test_lcparams_block.py
+
+      # The bloom passes' BloomParams block and its C mirror agree, and its
+      # upload avoids GL_Upload, which is a stub on the ES tier (#450).
+      - name: BloomParams block covers the bloom passes on both tiers
+        run: python3 tools/test_bloomparams_block.py
+
+      # The shader include expander and its WebGL-smoke mirror allow the same
+      # number of passes, and no stage exceeds it (#450).
+      - name: Shader include bound
+        run: python3 tools/test_embed_include_bound.py
+
+      # salias_vert reads VertParams: the C mirror matches the block member
+      # for member (sizes AND int/float kinds), all four alias builds compile
+      # the file, GL_ImmPushBlocks feeds it, MSL targets 2.1 (#450 S1).
+      - name: Alias vertex stage on VertParams
+        run: python3 tools/test_alias_vert_block.py
+
+      # salias_frag reads FragParams and AliasFrag: the AliasFrag mirror and
+      # its own binding, the .inc copies of the world's GLSL helpers, all ten
+      # program builds, and every draw path writing the block members it reads
+      # before it draws, since they are global where the loose uniforms were
+      # per-program (#450 S2).
+      - name: Alias fragment stage on FragParams + AliasFrag
+        run: python3 tools/test_alias_frag_block.py
+
+      # salias_inst_vert reads VertParams and AliasVert: both mirrors by
+      # member name, the vertex-stage SSBO macros, the ShadedotRow constants
+      # pinned to gl_shader.h, both instanced builds, and the per-batch
+      # instance base set and flushed before every instanced draw in both
+      # passes (#450 S3).
+      - name: Instanced alias vertex stage on VertParams + AliasVert
+        run: python3 tools/test_alias_inst_vert_block.py
+
+      # sskeletal_vert reads VertParams and AliasVert: both mirrors by member
+      # name, one setter per lane, the bones on VERT_SSBO, every input pinned
+      # to the IQM VAO's slot, width and integer-ness, all four skeletal
+      # builds, and GL_DrawAliasSkeletal writing every member the stage reads
+      # before one unconditional flush and its draw (#450 S4).
+      - name: Skeletal alias vertex stage on VertParams + AliasVert
+        run: python3 tools/test_skeletal_vert_block.py
+
+      # No alias-family program regains a loose non-opaque uniform: the names
+      # the four alias stages read from blocks (derived, minus every name a
+      # live shader still declares loose) have no location field, lookup,
+      # glUniform write or GL_ImmEnd cache anywhere in C (#450 S5).
+      - name: Alias family has no loose uniform plumbing
+        run: python3 tools/test_alias_no_loose.py
+
+      # sworld_vert reads VertParams: the mirror by member name, the two
+      # matrices it reads and their setters, every input on its ATTR_* slot,
+      # its outputs against both world fragment files, the three world
+      # builds, and every world draw path (GL_ImmEnd, the fast path, deferred,
+      # brush model, instanced, GPU-culled) writing both matrices before an
+      # unconditional flush and its draws; a flow pass that follows world
+      # programs and block writers through calls, pointers and locals, and
+      # world_state_set to every FlushBatch (#450 world slice W1); and a
+      # member pass that follows every world-read block slot, fragment set
+      # included, through each of those paths to its draws (W2).
+      - name: World vertex stage on VertParams
+        run: python3 tools/test_world_vert_block.py
+      # sworld_frag / sworld_opaque_frag read FragParams + WorldFrag: the
+      # WorldFrag mirror by member name, its binding and upload, the files'
+      # shared layout, pinned bodies on both tiers and ES arm, the world frame
+      # record's writers and every path's R_SetWorldFrag arguments.  That
+      # every path writes and flushes all of it before each draw is the member
+      # pass in test_world_vert_block.py (#450 world slice W2).
+      - name: World fragment stages on FragParams + WorldFrag
+        run: python3 tools/test_world_frag_block.py
+
+      # The OIT twins' output stage is engine/shaders/oit.inc, taken under
+      # #ifdef OIT, and its mode switches are OitFrag's: the mirror and
+      # binding, R_SetOITMode as the one writer at the four pass transitions,
+      # every OIT draw flushing, the three stages' arms and slot counts, and
+      # the desktop-only builds (#450 W3).
+      - name: OIT twins on oit.inc + OitFrag
+        run: python3 tools/test_oit_frag_block.py
+      # r_fullbright flattens alias model light on every alias path: one
+      # helper, both lighting setups through it, every consumer fed from it
+      # and reached only from those setups (#490).
+      - name: Alias models flat under r_fullbright
+        run: python3 tools/test_alias_fullbright.py
+      # The CPU alias glow draws at the base pass's pose blend, resolved once
+      # per draw for both passes, as the instanced glow does (#493).
+      - name: CPU alias glow at the base pass's blend
+        run: python3 tools/test_alias_fullbright_lerp.py
+      # A model the delta protocol is holding (skipped as unchanged) keeps its
+      # pose and move lerps; only a real (re)appearance resets them (#494).
+      - name: Held entities keep their lerps
+        run: python3 tools/test_delta_held_lerp.py
+      # Every value a shader reads comes through a std140 block; the only
+      # glUniform* left is the sampler bind (#19).
+      - name: No loose value uniforms
+        run: python3 tools/test_no_loose_uniforms.py
+      # A dynamic light behind a face does not light it, on every tier: the
+      # CPU twins' R_AddDynamicLights prologue and R_MarkLights surface loop
+      # lifted and run, the GPU test in ClusteredDlight, its WorldFrag lane,
+      # writer and lit water's bracket pinned, and the cvar (#97).
+      - name: Dynamic lights stop at the wall
+        run: python3 tools/test_dlight_onesided.py
+      # ...and at any wall, on the CPU light path: r_dlightvis.c compiled whole
+      # and run on a synthetic BSP against bsp_dlight_leak.py's segments and
+      # samples, and R_MarkLights' and the alias loops' hooks lifted and run
+      # (#97 P2).
+      - name: Dynamic lights do not see through walls
+        run: python3 tools/test_dlight_vis.py

@@ -76,8 +76,9 @@ GLuint		lightmap_textures[MAX_LIGHTMAPS];
  * Bilinear needs none: LM_SurfaceLightmapUV's "+ 8" half-luxel inset centres
  * the sample so a +/-0.5 texel footprint stays inside the rect, which is
  * exactly what that inset was sized for and no more.  Bicubic
- * (r_lightmap_bicubic, GLSL_BICUBIC_LM_FN) has the 4x4 B-spline support, so
- * from the edge luxels it reaches one luxel before the rect and two past it.
+ * (r_lightmap_bicubic, engine/shaders/bicubic_lm.inc) has the 4x4 B-spline
+ * support, so from the edge luxels it reaches one luxel before the rect and
+ * two past it.
  * AllocBlock packed surfaces edge to edge, so those taps landed on an
  * unrelated surface -- or, at a page edge with the atlas on, on an unrelated
  * PAGE -- and drew bright or dark seams along surface boundaries.
@@ -256,27 +257,24 @@ qboolean gl_materialmaps_present;
 
 /*
 ===============
-GL_MaterialUniform
+GL_MaterialParams
 
-Upload the world shader's vec3(normalmap intensity, gloss intensity, gloss
-exponent).  Both intensities zero switches the whole material path off inside
+The world shader's vec3(normalmap intensity, gloss intensity, gloss exponent),
+into out[3].  Both intensities zero switches the whole material path off inside
 the shader, which is the state every map without material maps runs in.
 
-Called once per frame per program from R_SetupFrame, not per texture: the
-intensities are global cvars, and whether a PARTICULAR texture has maps is
-expressed by what is bound at units 3 and 4 -- the flat-normal and black-gloss
-sentinels are the identity for this maths, so a texture without maps comes out
-unchanged without needing its own uniform upload.  Uniform state is per-program
-and persists across glUseProgram, which is what makes one upload enough.
+Called once per frame from R_SetupFrame, not per texture: the intensities are
+global cvars, and whether a PARTICULAR texture has maps is expressed by what is
+bound at units 3 and 4 -- the flat-normal and black-gloss sentinels are the
+identity for this maths, so a texture without maps comes out unchanged without
+needing a value of its own.  The result goes into the world frame record
+(R_SetWorldFrame), which every world draw copies into WorldFrag (#450 W2).
 uhexen2-mfql.
 ===============
 */
-void GL_MaterialUniform (const glprogram_t *prog)
+void GL_MaterialParams (float *out)
 {
 	float	nrm, gls;
-
-	if (prog->u_material < 0)
-		return;
 
 	if (gl_materialmaps_present && r_materialmaps.integer)
 	{
@@ -293,8 +291,9 @@ void GL_MaterialUniform (const glprogram_t *prog)
 	/* pow() with a zero or negative exponent returns 1 for every angle, so
 	 * a mistyped r_gloss_exponent would flood the screen with flat white
 	 * specular rather than doing nothing.  Floor it at 1. */
-	glUniform3f_fp(prog->u_material, nrm, gls,
-		       q_max(1.0f, r_gloss_exponent.value));
+	out[0] = nrm;
+	out[1] = gls;
+	out[2] = q_max(1.0f, r_gloss_exponent.value);
 }
 
 /*
@@ -401,7 +400,7 @@ static void R_AddDynamicLights (msurface_t *surf)
 	int			lnum;
 	int			sd, td;
 	float		dist, rad, minlight;
-	vec3_t		impact, local;
+	vec3_t		impact, local, lorg;
 	int			s, t;
 	int			i;
 	int			smax, tmax;
@@ -429,7 +428,18 @@ static void R_AddDynamicLights (msurface_t *surf)
 			continue;		// not lit by this light
 
 		rad = cl_dlights[lnum].radius;
-		dist = DotProduct (cl_dlights[lnum].origin, surf->plane->normal) - surf->plane->dist;
+		/* The plane is in the surface's model space; so must the light
+		 * be, for a door or plat that has moved (GitHub #495). */
+		R_DlightModelOrigin (surf->dlightent, cl_dlights[lnum].origin, lorg);
+		dist = DotProduct (lorg, surf->plane->normal) - surf->plane->dist;
+		/* One-sided (GitHub #97): a light behind the face's front plane --
+		 * the BSP plane, flipped for a SURF_PLANEBACK face -- does not
+		 * light it.  Liquids keep vanilla's both sides.  R_MarkLights
+		 * makes the same call so such a face is not even rebuilt; this
+		 * is the one that decides what lands in the lightmap. */
+		if (r_dlight_occlusion.integer >= 1 && !(surf->flags & SURF_DRAWTURB) &&
+		    ((surf->flags & SURF_PLANEBACK) ? -dist : dist) < -DLIGHT_PLANE_EPSILON)
+			continue;
 		rad -= fabs(dist);
 		minlight = cl_dlights[lnum].minlight;
 		if (rad < minlight)
@@ -438,7 +448,7 @@ static void R_AddDynamicLights (msurface_t *surf)
 
 		for (i = 0; i < 3; i++)
 		{
-			impact[i] = cl_dlights[lnum].origin[i] - surf->plane->normal[i]*dist;
+			impact[i] = lorg[i] - surf->plane->normal[i]*dist;
 		}
 
 		local[0] = DotProduct (impact, tex->vecs[0]) + tex->vecs[0][3];
@@ -988,6 +998,30 @@ void R_UpdateLightmaps (qboolean Translucent)
 	}
 }
 
+
+/*
+================
+R_WorldOverbright
+
+The overbright factor every world draw path passes R_SetWorldFrag: 2 with
+gl_overbright, 1 without, and 1 under r_fullbright.  One value for all of them,
+or r_fullbright draws the batched world and lit water / fences at different
+brightness (GitHub #489).
+
+r_fullbright makes the lightmap sample 1.0 (R_BuildLightMap fills it white, the
+shader's u_lightdebug.x mixes it to white), so with the doubling kept it would
+draw every texture at 2x.  Ironwail lands on 1x: it binds a 50% grey lightmap
+under r_fullbright and keeps its doubling, 127/255 * 2 ~ 1
+(Quake/r_world.c:464 `r_fullbright_cheatsafe ? greytexture : lightmap_texture`,
+Quake/gl_shaders.h:714 `total_light *= 2.0;`).  Our white sample with the
+doubling dropped is the same unlit-texture brightness, and R_BrushAbsLight
+below takes 1 under r_fullbright for the same reason.
+================
+*/
+float R_WorldOverbright (void)
+{
+	return (gl_overbright.integer && !r_fullbright.integer) ? 2.0f : 1.0f;
+}
 
 /*
 ================
@@ -1944,9 +1978,6 @@ void R_LightmapRebuildIfDirty (msurface_t *surf)
 
 void R_BeginBrushBatch (void)
 {
-	extern float r_fog_density;
-	extern float r_fog_color[3];
-
 	if (!world_vao || !lm_atlas_enabled || !lm_atlas_texture || !world_ibo)
 		return;
 	/* Brush-batch fast path emits opaque non-special surfaces only — fence
@@ -1955,18 +1986,11 @@ void R_BeginBrushBatch (void)
 	glBindVertexArray_fp(world_vao);
 	glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
 	R_UseProgram (gl_shader_world_opaque.program);
-	if (gl_shader_world_opaque.u_fog_density >= 0)
-		glUniform1f_fp(gl_shader_world_opaque.u_fog_density, r_fog_density);
-	if (gl_shader_world_opaque.u_fog_color >= 0)
-		glUniform3f_fp(gl_shader_world_opaque.u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
-	if (gl_shader_world_opaque.u_alpha_threshold >= 0)
-		glUniform1f_fp(gl_shader_world_opaque.u_alpha_threshold, 0.01f);
-	if (gl_shader_world_opaque.u_overbright >= 0)
-		glUniform1f_fp(gl_shader_world_opaque.u_overbright, gl_overbright.integer ? 2.0f : 1.0f);
+	/* No uniforms here: R_DrawBrushModel writes the program's whole block
+	 * set before each of its draws (#450 W1, W2). */
 	R_BindTextureSlot (1, lm_atlas_texture);
 	R_BindTextureSlot (2, gl_null_fb_texture);	/* sjvf: default fb */
 	GL_BindMaterialDefaults ();		/* uhexen2-mfql */
-	GL_ImmInvalidateState();
 	brush_batch_active = true;
 }
 
@@ -2003,13 +2027,25 @@ int	rprof_chains_n_imm;
 int	rprof_chains_n_slow;
 int	rprof_chains_n_skypoly;
 
-/* Bind the per-frame world-VBO render state (VAO, shader, MVP/MV/fog/alpha
- * uniforms, lightmap atlas on TU1, color attribute white, TU0 sticky). Called
+/* The matrices and fog DrawTextureChains_BindWorldState saw, which
+ * DrawTextureChains_FlushBatch writes to VertParams and FragParams before
+ * every batch.  sworld_vert reads u_mvp / u_modelview from VertParams since
+ * #450 W1, sworld_opaque_frag its fog from FragParams since W2, and a block
+ * member is global where the loose uniforms were this program's own: a
+ * GL_ImmEnd on any other program between the bind and a batch would leave its
+ * own values there.  Re-writing the bind-time values per batch keeps exactly
+ * the loose semantics (the value set at bind time is the value drawn with). */
+static float	world_state_mvp[16];
+static float	world_state_mv[16];
+static float	world_state_fog_density;
+static float	world_state_fog_color[3];
+
+/* Bind the per-frame world-VBO render state (VAO, shader, the MVP/MV/fog its
+ * batches draw with, lightmap atlas on TU1, color attribute white, TU0 sticky). Called
  * once before the texture loop and again from inside the fast-path branch if
  * a sibling branch (mirror/translucent/sky-no-skybox) invalidated state. */
 static void DrawTextureChains_BindWorldState (void)
 {
-	float mvp[16], mv[16];
 	/* Fast path emits opaque non-special surfaces (fence/water/sky/turb get
 	 * sorted into separate buffers and the deferred section rebinds the
 	 * cutout variant explicitly).  Use the early_fragment_tests variant
@@ -2018,21 +2054,10 @@ static void DrawTextureChains_BindWorldState (void)
 	glBindVertexArray_fp(world_vao);
 	glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
 	R_UseProgram (prog->program);
-	GL_GetMVP(mvp);
-	GL_GetModelview(mv);
-	if (prog->u_mvp >= 0)
-		glUniformMatrix4fv_fp(prog->u_mvp, 1, GL_FALSE, mvp);
-	if (prog->u_modelview >= 0)
-		glUniformMatrix4fv_fp(prog->u_modelview, 1, GL_FALSE, mv);
-	if (prog->u_fog_density >= 0)
-		glUniform1f_fp(prog->u_fog_density, r_fog_density);
-	if (prog->u_fog_color >= 0)
-		glUniform3f_fp(prog->u_fog_color,
-			       r_fog_color[0], r_fog_color[1], r_fog_color[2]);
-	if (prog->u_alpha_threshold >= 0)
-		glUniform1f_fp(prog->u_alpha_threshold, 0.01f);
-	if (prog->u_overbright >= 0)
-		glUniform1f_fp(prog->u_overbright, gl_overbright.integer ? 2.0f : 1.0f);
+	GL_GetMVP(world_state_mvp);
+	GL_GetModelview(world_state_mv);
+	world_state_fog_density = r_fog_density;
+	VectorCopy (r_fog_color, world_state_fog_color);
 	R_BindTextureSlot (1, lm_atlas_texture);
 	/* TU2 is the fullbright mask sampled by sworld_frag.  Default to the
 	 * 1x1 black sentinel so unit 2 always has SOMETHING bound when the
@@ -2041,10 +2066,6 @@ static void DrawTextureChains_BindWorldState (void)
 	 * pixels.  uhexen2-sjvf. */
 	R_BindTextureSlot (2, gl_null_fb_texture);
 	GL_BindMaterialDefaults ();		/* uhexen2-mfql */
-	/* These uploads bypass GL_ImmEnd's uniform cache. If the next
-	 * GL_ImmEnd reuses gl_shader_world (e.g. fallback brush path),
-	 * its cache must miss so it re-uploads the right values. */
-	GL_ImmInvalidateState();
 }
 
 /*
@@ -2059,14 +2080,30 @@ the caller set up, so a mid-chain flush draws exactly what the terminal one
 would.  uhexen2-cj1s.
 =================
 */
-static void DrawTextureChains_FlushBatch (msurface_t **batch_surfs, int batch_count)
+static void DrawTextureChains_FlushBatch (qboolean world_state_set, msurface_t **batch_surfs, int batch_count)
 {
 	int	run_start = 0;
 	int	run_first_idx, run_total_idx;
 	int	k;
 
+	/* world_state_mvp / _mv belong to this DrawTextureChains call only while
+	 * its BindWorldState is live; otherwise they hold the previous call's
+	 * (the previous frame's, or the mirror view's).  #450 W1 review. */
+	if (!world_state_set)
+		Sys_Error ("%s: world state not bound", __thisfunc__);
+
 	if (batch_count <= 0)
 		return;
+
+	/* sworld_opaque_frag's whole set, with the fog
+	 * DrawTextureChains_BindWorldState captured and the values it used to
+	 * upload by hand (#450 W2); then sworld_vert's VertParams, from the same
+	 * capture (W1). */
+	R_SetWorldFrag (world_state_fog_density, world_state_fog_color, 0.01f, 1.0f,
+			R_WorldOverbright (), 0.0f, 0.0f);
+	R_SetMVP (world_state_mvp);
+	R_SetModelView (world_state_mv);
+	R_FlushUniforms ();
 
 	run_first_idx = batch_surfs[0]->vbo_firstindex;
 	run_total_idx = batch_surfs[0]->vbo_numtris * 3;
@@ -2271,6 +2308,7 @@ static void DrawTextureChains_DrawDeferred (entity_t *e, msurface_t **deferred, 
 
 		if (fence_n > 0 || water_n > 0)
 		{
+			float mvp[16], mv[16];
 			/* Sort each group by vbo_firstindex so contiguous
 			 * runs collapse into single glDrawElements calls. */
 #define DEF_LESS(a,b) ((a)->vbo_firstindex < (b)->vbo_firstindex)
@@ -2304,25 +2342,18 @@ static void DrawTextureChains_DrawDeferred (entity_t *e, msurface_t **deferred, 
 			glBindVertexArray_fp(world_vao);
 			glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
 			R_UseProgram (gl_shader_world.program);
-			{
-				float mvp[16], mv[16];
-				GL_GetMVP(mvp);
-				GL_GetModelview(mv);
-				if (gl_shader_world.u_mvp >= 0)
-					glUniformMatrix4fv_fp(gl_shader_world.u_mvp, 1, GL_FALSE, mvp);
-				if (gl_shader_world.u_modelview >= 0)
-					glUniformMatrix4fv_fp(gl_shader_world.u_modelview, 1, GL_FALSE, mv);
-			}
-			if (gl_shader_world.u_fog_density >= 0)
-				glUniform1f_fp(gl_shader_world.u_fog_density, r_fog_density);
-			if (gl_shader_world.u_fog_color >= 0)
-				glUniform3f_fp(gl_shader_world.u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
-			if (gl_shader_world.u_overbright >= 0)
-				glUniform1f_fp(gl_shader_world.u_overbright, gl_overbright.integer ? 2.0f : 1.0f);
+			GL_GetMVP(mvp);
+			GL_GetModelview(mv);
 			R_BindTextureSlot (1, lm_atlas_texture);
 			R_BindTextureSlot (2, gl_null_fb_texture);	/* sjvf: default fb */
 			GL_BindMaterialDefaults ();		/* uhexen2-mfql */
-			GL_ImmInvalidateState();
+			/* sworld_vert reads both from VertParams (#450 W1).  Nothing
+			 * between here and EMIT_BATCH's draws writes the block;
+			 * EMIT_BATCH flushes again for its own fragment set, which
+			 * leaves VertParams as it is. */
+			R_SetMVP (mvp);
+			R_SetModelView (mv);
+			R_FlushUniforms ();
 
 			/* Emit one batched draw per texture run.  When the
 			 * texture changes we flush the running glDrawElements
@@ -2334,10 +2365,19 @@ static void DrawTextureChains_DrawDeferred (entity_t *e, msurface_t **deferred, 
 		(_T_)->gl_fb_texturenum ? (_T_)->gl_fb_texturenum : gl_null_fb_texture); \
 	GL_BindMaterialMaps (_T_);	/* uhexen2-mfql */ \
 } while (0)
+/* sworld_frag's whole set per batch (#450 W2): its own alpha threshold, the
+ * fog and overbright the bind above used to upload by hand, and opaque output
+ * alpha -- fences and underwater surfaces are opaque world, as the brush
+ * fence pass says outright.  (No write here set it before; the program held
+ * its last writer's value: usually 0, GL_ImmEnd's resting value, 1 when the
+ * brush fence pass ran last.  Only output alpha reads it: blending is off and
+ * nothing reads destination alpha, so it shows only under r_alphatocoverage
+ * with MSAA, as harder fence edges.) */
 #define EMIT_BATCH(BUF, N, ALPHA_T, A2C_ON) do { \
 	if ((N) <= 0) break; \
-	if (gl_shader_world.u_alpha_threshold >= 0) \
-		glUniform1f_fp(gl_shader_world.u_alpha_threshold, (ALPHA_T)); \
+	R_SetWorldFrag (r_fog_density, r_fog_color, (ALPHA_T), 1.0f, \
+			R_WorldOverbright (), 0.0f, 0.0f); \
+	R_FlushUniforms (); \
 	if (A2C_ON) \
 		R_SetAlphaToCoverage (true); \
 	else \
@@ -2502,7 +2542,6 @@ static void DrawTextureChains (entity_t *e)
 			{
 				glBindVertexArray_fp(0);
 				R_UseProgram (0);
-				GL_ImmInvalidateState();
 				/* Force the chain loop's hoisted world-state bind to redo
 				 * itself; we just stomped on VAO + program. */
 				world_state_set = false;
@@ -2732,7 +2771,7 @@ static void DrawTextureChains (entity_t *e)
 					{
 						if (batch_count == MAX_BATCH_SURFS)
 						{
-							DrawTextureChains_FlushBatch (batch_surfs, batch_count);
+							DrawTextureChains_FlushBatch (world_state_set, batch_surfs, batch_count);
 							batch_count = 0;
 						}
 						batch_surfs[batch_count++] = s;
@@ -2794,7 +2833,7 @@ static void DrawTextureChains (entity_t *e)
 				}
 
 				/* Merge contiguous IBO ranges and draw */
-				DrawTextureChains_FlushBatch (batch_surfs, batch_count);
+				DrawTextureChains_FlushBatch (world_state_set, batch_surfs, batch_count);
 				/* No per-chain teardown — state is reused by the next
 				 * fast-path chain and torn down once after the loop. */
 			}
@@ -2919,7 +2958,6 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 	brush_render_state_t render_state;
 
 	R_ResetTextureBindings ();
-	GL_ImmResetState();
 	/* uhexen2-view-dep: guarantee GL_BLEND is disabled on entry. Different
 	 * world surfaces leave GL_BLEND in different states depending on what's
 	 * visible from the current angle. Without this reset, brush entities
@@ -2983,41 +3021,25 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 // instanced model
 	/* R_LightCluster_ShadesWorld: the froxel grid lights brush entities too
 	 * -- they draw through the same world programs -- so marking here would
-	 * double-light them and re-dirty their lightmap pages.  It does it
-	 * BETTER, in fact: this path transforms the light into the entity's
-	 * local frame to cope with rotation, whereas the shader works from the
-	 * fragment's real world position and needs no such correction.
-	 * uhexen2-26bm. */
+	 * double-light them and re-dirty their lightmap pages.  The shader works
+	 * from the fragment's real world position, so it needs none of the
+	 * model-space transform this path does below.  uhexen2-26bm. */
 	if (clmodel->firstmodelsurface != 0 && !gl_flashblend.integer &&
 	    !R_LightCluster_ShadesWorld ())
 	{
 		for (k = 0; k < MAX_DLIGHTS; k++)
 		{
+			dlight_t	local;
+
 			if ((cl_dlights[k].die < cl.time) || (!cl_dlights[k].radius))
 				continue;
 
-			if (rotated)
-			{
-				// Transform light origin from world space to model space
-				dlight_t	transformedlight;
-				vec3_t		temp;
-				vec3_t		forward, right, up;
-
-				transformedlight = cl_dlights[k];
-				VectorSubtract(cl_dlights[k].origin, e->origin, temp);
-				AngleVectors(e->angles, forward, right, up);
-				transformedlight.origin[0] = DotProduct(temp, forward);
-				transformedlight.origin[1] = -DotProduct(temp, right);
-				transformedlight.origin[2] = DotProduct(temp, up);
-
-				R_MarkLights (&transformedlight, k,
-						clmodel->nodes + clmodel->hulls[0].firstclipnode);
-			}
-			else
-			{
-				R_MarkLights (&cl_dlights[k], k,
-						clmodel->nodes + clmodel->hulls[0].firstclipnode);
-			}
+			/* The node tree is the model's, so the light goes into
+			 * model space -- moved as well as rotated (GitHub #495). */
+			local = cl_dlights[k];
+			R_DlightModelOrigin (e, cl_dlights[k].origin, local.origin);
+			R_MarkLights (&local, k,
+					clmodel->nodes + clmodel->hulls[0].firstclipnode, e);
 		}
 	}
 
@@ -3077,8 +3099,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 		 * the sky programs and leave it active when it returns.  Mesa
 		 * fast-paths redundant binds to the same object so this is
 		 * cheap when nothing changed.  When a brush batch is active
-		 * we still skip the program-resident fog/alpha/color uniform
-		 * uploads — those persist across glUseProgram cycles.
+		 * we still skip the color attribute, which persists.
 		 * Fast path emits opaque non-special surfaces only; bind the
 		 * early_fragment_tests variant.  uhexen2-5c6r. */
 		glprogram_t *prog = &gl_shader_world_opaque;
@@ -3093,22 +3114,21 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 		if (!brush_batch_active)
 		{
 			glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
-			if (prog->u_fog_density >= 0)
-				glUniform1f_fp(prog->u_fog_density, r_fog_density);
-			if (prog->u_fog_color >= 0)
-				glUniform3f_fp(prog->u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
-			if (prog->u_alpha_threshold >= 0)
-				glUniform1f_fp(prog->u_alpha_threshold, 0.01f);
-			if (prog->u_overbright >= 0)
-				glUniform1f_fp(prog->u_overbright, gl_overbright.integer ? 2.0f : 1.0f);
-			GL_ImmInvalidateState();
 		}
+		/* sworld_opaque_frag's whole set (#450 W2) -- the fog, alpha and
+		 * overbright this path, or R_BeginBrushBatch for it, used to upload
+		 * by hand -- and the entity transform R_RotateForEntity pushed, for
+		 * sworld_vert's VertParams (W1).  Written every call, brush batch or
+		 * not: the blocks are global, so the last entity's (or any other
+		 * program's) values are still in them.  Nothing between here and
+		 * the batched draws below writes a block. */
 		GL_GetMVP(mvp);
 		GL_GetModelview(mv);
-		if (prog->u_mvp >= 0)
-			glUniformMatrix4fv_fp(prog->u_mvp, 1, GL_FALSE, mvp);
-		if (prog->u_modelview >= 0)
-			glUniformMatrix4fv_fp(prog->u_modelview, 1, GL_FALSE, mv);
+		R_SetWorldFrag (r_fog_density, r_fog_color, 0.01f, 1.0f,
+				R_WorldOverbright (), 0.0f, 0.0f);
+		R_SetMVP (mvp);
+		R_SetModelView (mv);
+		R_FlushUniforms ();
 
 		/* Claim an id for this pass's special-surface handoff.  Ids stay
 		 * negative so they never collide with the r_framecount stamp the
@@ -4520,12 +4540,13 @@ static void LM_SettleStyleLayers (void)
 }
 
 /* Once per frame, before the world draws: rebuild when the wanted mode moved
- * (a cvar, r_lightclusters), then bind the layers and tell the three world
- * programs which mode their lightmap is in.  u_lmstyles.y is the CPU path's
- * shift turned into a factor: x2 at gl_overbright 0, where it shifted by 7. */
+ * (a cvar, r_lightclusters), then bind the layers and tell the world programs
+ * which mode their lightmap is in -- through the world frame record, which
+ * every world draw copies into WorldFrag (#450 W2).  u_lmstyles.y is the CPU
+ * path's shift turned into a factor: x2 at gl_overbright 0, where it shifted
+ * by 7. */
 void R_LightStyles_FrameSetup (void)
 {
-	const glprogram_t	*progs[3] = { &gl_shader_world, &gl_shader_world_opaque, &gl_shader_world_oit };
 	qboolean	want;
 	int		i;
 
@@ -4542,14 +4563,7 @@ void R_LightStyles_FrameSetup (void)
 		for (i = 0; i < 3; i++)
 			R_BindTextureSlot (LMSTYLE_TMU + i, lm_style_layers[i]);
 	}
-	for (i = 0; i < 3; i++)
-	{
-		if (!progs[i]->program || progs[i]->u_lmstyles < 0)
-			continue;
-		R_UseProgram (progs[i]->program);
-		glUniform2f_fp (progs[i]->u_lmstyles, lm_gpu_styles ? 1.0f : 0.0f,
-				gl_overbright.integer ? 1.0f : 2.0f);
-	}
+	R_SetWorldLMStyles (lm_gpu_styles ? 1.0f : 0.0f, gl_overbright.integer ? 1.0f : 2.0f);
 }
 
 /*

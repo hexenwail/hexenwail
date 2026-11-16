@@ -113,9 +113,10 @@ int main(void) {
 
 
 def main():
-    shader = (ROOT / "engine/h2shared/gl_shader.c").read_text()
-    multiply = shader.index('"    vec4 color = tex * lm * v_color;\\n"')
-    discard = shader.index('"    if (color.a < u_alpha_threshold) discard;\\n"', multiply)
+    # sworld_frag is engine/shaders/sworld_frag.glsl since #450 W2.
+    shader = (ROOT / "engine/shaders/sworld_frag.glsl").read_text()
+    multiply = shader.index("    vec4 color = tex * lm * v_color;\n")
+    discard = shader.index("    if (color.a < u_alpha_threshold) discard;\n", multiply)
     assert multiply < discard
     render_brush = function("engine/hexen2/gl_rsurf.c", "void R_RenderBrushPoly")
     assert "render_state = R_BrushEntityRenderState(e, surface_kind, default_alpha);" in render_brush

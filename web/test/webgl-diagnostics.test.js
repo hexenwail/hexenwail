@@ -164,13 +164,18 @@ test('every engine shader family carries an ES-tier header', async () => {
 
 test('post-process palette stays inside the WebGL2 fragment uniform budget', async () => {
   const postprocess = await readFile(new URL('../../engine/h2shared/gl_postprocess.c', import.meta.url), 'utf8');
+  // The post-process fragment shader is engine/shaders/spp_frag.glsl since #450.
+  const ppFrag = await readFile(new URL('../../engine/shaders/spp_frag.glsl', import.meta.url), 'utf8');
 
   // A vec3[256] is 256 uniform vectors on its own, over the 224 a WebGL2
   // implementation is only required to offer a fragment shader -- the whole
   // post-process program can fail to link.  The palette LUT carries resolved
   // colour instead.  d2c46f078.
-  assert.doesNotMatch(postprocess, /uniform vec3 palette\[/);
-  assert.match(postprocess, /texelFetch\(paletteLUT, idx, 0\)\.rgb/);
+  assert.doesNotMatch(postprocess + ppFrag, /uniform vec3 palette\[/);
+  assert.match(ppFrag, /texelFetch\(paletteLUT, idx, 0\)\.rgb/);
+  // The ES 3.00 tier has no bitfieldReverse: the file carries the polyfill,
+  // selected by the compiler's own GL_ES (#112 item 4, #450).
+  assert.match(ppFrag, /#ifdef GL_ES\n(?:[^#]*\n)?uint bitfieldReverse\(uint v\)/);
   // RGBA8, not RGB8: the compute LUT builder writes into this same texture
   // through glBindImageTexture, and rgb8 is not an image-storable format.
   // `feat(renderer): r_softemu_metric and a GPU palette LUT with three colour
@@ -193,12 +198,26 @@ test('headless smoke gate compiles the actual engine WebGL shader sources', asyn
   assert.deepEqual(programs.map(({ name }) => name), [
     '2d', 'flat', 'world', 'world_opaque', 'alias', 'particle',
     'sky_layers', 'sky_boxside', 'sky_cubemap',
-    'postprocess', 'bloom_bright', 'bloom_down', 'bloom_up',
+    'postprocess', 'bloom_bright', 'bloom_down', 'bloom_up', 'oit_resolve',
   ]);
-  // Spot-check that macro expansion actually happened rather than silently
-  // emitting the macro name -- these live behind GLSL_BICUBIC_LM_FN etc.
+  // The bloom and OIT-resolve stages are engine/shaders files since #450:
+  // their bodies must arrive with the ES PP_*_HEADER in front and the block
+  // aliases inlined, not as the old C arrays.
+  assert.match(byName.bloom_bright.fragment, /^#version 300 es\n/);
+  assert.match(byName.bloom_bright.fragment, /uniform BloomParams/);
+  assert.match(byName.oit_resolve.fragment, /uniform OitParams/);
+  assert.doesNotMatch(byName.oit_resolve.fragment, /sampler2DMS/);
+  // Spot-check that include expansion actually happened rather than silently
+  // emitting the directive -- these live in bicubic_lm.inc and caustics.inc
+  // since the world fragment stages became files (#450 W2), and the ES arm
+  // must reach the driver with the WorldFrag block, the bitfieldReverse
+  // fallback, and no early-Z.
   assert.match(byName.world.fragment, /vec4 BicubicLightmap/);
   assert.match(byName.world.fragment, /float Caustics/);
+  assert.match(byName.world.fragment, /uniform WorldFrag/);
+  assert.match(byName.world_opaque.fragment, /uniform WorldFrag/);
+  assert.match(byName.world_opaque.fragment, /uint bitfieldReverse/);
+  assert.doesNotMatch(byName.world.fragment, /#include/);
   assert.match(byName.postprocess.fragment, /vec4 fxaa/);
   assert.match(byName.postprocess.fragment, /HDR tonemapping/);
   for (const program of programs) {

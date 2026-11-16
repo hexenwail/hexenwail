@@ -12,9 +12,7 @@
 #define GL_SHADER_H
 
 /* Shader compilation helpers */
-GLuint	GL_CompileShader (GLenum type, const char *source);
 GLuint	GL_LinkProgram (GLuint vert, GLuint frag);
-GLuint	GL_LoadProgram (const char *vert_src, const char *frag_src);
 /* Compute program from a two-part source: `header` carries the #version line
  * and any #defines, `body` the shader itself, so one body can be compiled as
  * several variants without splicing strings.  `name` only labels the log.
@@ -27,79 +25,29 @@ GLuint	GL_LoadProgramHeaders (const char *vert_header, const char *vert_src,
 /* Shader programs */
 typedef struct glprogram_s {
 	GLuint	program;
-	GLint	u_mvp;
+	/* No u_mvp / u_modelview: sworld_vert, the last stage declaring them
+	 * loose, reads them from VertParams since #450 W1, so every draw writes
+	 * them with R_SetMVP / R_SetModelView and flushes. */
 	GLint	u_texture0;
 	GLint	u_texture1;
 	GLint	u_texture2;	/* fullbright mask sampler for world (uhexen2-sjvf) */
 	GLint	u_texture3;	/* normal-map sampler for world (uhexen2-mfql) */
 	GLint	u_texture4;	/* gloss-map sampler for world (uhexen2-mfql) */
-	GLint	u_material;	/* world FS: vec3(normalmap intensity, gloss intensity, gloss exponent).  x and y both 0 disables the whole path. */
-	GLint	u_color;
-	GLint	u_fog_density;
-	GLint	u_fog_color;
-	GLint	u_alpha_threshold;
-	GLint	u_modelview;
-	GLint	u_time;
-	GLint	u_skyfog;
-	GLint	u_eyepos;
-	GLint	u_wind;		/* sky shader: per-skybox wind UV offset (uhexen2-typa) */
-	GLint	u_wind3;	/* sky cubemap: the same wind as a direction offset (uhexen2-ctk9) */
-	GLint	u_skyrot;	/* sky cubemap: r_skybox_speed as a yaw angle (uhexen2-ctk9) */
-	GLint	u_caustics;	/* world shader: vec2(intensity, time) for underwater caustics (uhexen2-6bfm) */
-	GLint	u_overbright;	/* world shader: lightmap multiplier (1.0 = off, 2.0 = on); Ironwail parity (uhexen2-f29y) */
-	GLint	u_lightmap_bicubic; /* world shader: 0.0 = hardware bilinear, 1.0 = 4-tap B-spline bicubic lightmap fetch (uhexen2-b2f0) */
-	GLint	u_lmstyles;	/* world shader: x 1 = GPU lightstyles, y the CPU shift as a factor (#439) */
-	GLint	u_lmlayer1, u_lmlayer2, u_lmlayer3;	/* lightstyle layer atlases, units LMSTYLE_TMU.. */
-	GLint	u_lightdebug;	/* world shader: vec2(r_fullbright, r_lightmap).  x > 0.5 replaces the lightmap sample with white, y > 0.5 replaces the diffuse sample with white.  Both zero in normal rendering.  uhexen2-isq7. */
-	GLint	u_oit_mode;		/* OIT programs: 0 WBOIT, 1 MBOIT moments, 2 MBOIT composite (#87) */
-	GLint	u_mboit_ms;		/* moment targets multisampled */
+	GLint	u_lmlayer1, u_lmlayer2, u_lmlayer3;	/* lightstyle layer atlases, units LMSTYLE_TMU.. (#439) */
+	/* MBOIT moment-target samplers, OIT programs only (#87); the mode
+	 * switches beside them are OitFrag members since #450 W3. */
 	GLint	u_mboit_b0, u_mboit_mom, u_mboit_b0_ms, u_mboit_mom_ms;
-	GLint	u_spans;	/* world shader: 0 = perspective-correct, else the 1997 span cell width in pixels (r_softemu_spans, #176) */
-	GLint	u_softemu;	/* world shader: vec4(texture dither, lightmap banding, screen dither, any stage live).  All zero unless r_softemu is on.  uhexen2-a5nn.3. */
-	/* Clustered GPU dynamic lighting, world programs only; -1 everywhere
-	 * else and on the ES tier, which has neither compute nor SSBOs and so
-	 * never sees this half of the shader at all.  uhexen2-26bm. */
-	GLint	u_dlight_scale;	/* blocklight units -> lightmap units; 0 switches the whole froxel path off */
-	GLint	u_lightview;	/* world -> eye, WITHOUT the entity transform u_modelview carries, so world-space light origins land in the same space as v_eyepos */
-	GLint	u_lightgrid_xy;	/* vec4(viewport x, viewport y, froxel columns per pixel, froxel rows per pixel) */
-	GLint	u_lightgrid_z;	/* vec2(zlogscale, zlogbias) -- the depth-slice mapping, which must match gl_lightcluster.c exactly */
-	GLint	u_lightgrid;	/* usampler3D of per-froxel light bitmasks, texture unit LIGHT_GRID_TMU */
-	/* The alias family's half of the same grid (uhexen2-waum).  Per-BATCH,
-	 * unlike the world uniforms above, and named apart from u_dlight_scale
-	 * for the reason u_alias_caustics is named apart from u_caustics: this
-	 * program is also the sprite / particle / warp-poly / unlit-brush-poly
-	 * program, and those batches must not inherit a model's value. */
-	GLint	u_alias_dlight;	/* alias VS: blocklight -> vertex-colour scale; 0 disables.  The FS reads it off the v_dlightscale varying, which the instanced path fills per instance. */
-	GLint	u_force_opaque_alpha; /* alias/world FS: when > 0.5, fragColor.a is forced to 1.0 regardless of color.a.  Set to 1 by C for confirmed-opaque draws, to 0 for ENTALPHA / DRF_TRANSLUCENT / OIT translucent paths that need color.a preserved for blend.  uhexen2-khsa r13. */
-	/* Alias caustics (uhexen2-0gn3).  Deliberately NOT named u_caustics:
-	 * gl_shader_alias is the generic textured+vertex-color program and is
-	 * also used for sprites, warp polys and unlit brush polys, so its
-	 * caustics value is per-batch state pushed by GL_ImmEnd.  A shared name
-	 * would make GL_ImmEnd clobber the per-frame world u_caustics that
-	 * R_SetupFrame uploads. */
-	GLint	u_alias_caustics;   /* alias FS: vec2(intensity, time); x=0 disables */
-	/* Material maps on model skins (uhexen2-4kcb).  Named apart from the
-	 * world's u_material for the same reason u_alias_caustics is named apart
-	 * from u_caustics: this program is shared with sprites, particles, warp
-	 * polys and unlit brush polys, so the value is per-batch state pushed by
-	 * GL_ImmEnd rather than the per-frame world value R_SetupFrame uploads. */
-	GLint	u_alias_material;   /* alias FS: vec3(normalmap intensity, gloss intensity, gloss exponent); xy both 0 disables */
-	GLint	u_alias_lightdir;   /* alias FS: model light direction, in v_matpos's frame (eye space on this program) */
-	GLint	u_turb;            /* alias FS: vec2(warp amplitude in texture units, time); x=0 disables (uhexen2-9o7u) */
-	GLint	u_alias_model;	    /* alias VS: model-only matrix (no view), needed because u_modelview is view*model and caustics must be sampled in world XY */
-	/* Soft particles (uhexen2-mf9u).  Same per-batch-state reasoning as
-	 * u_alias_caustics: gl_shader_alias is shared by sprites, warp polys,
-	 * unlit brush polys and alias models, and only the sprite path wants
-	 * the fade, so the enable lives in the uniform rather than the program. */
-	GLint	u_soft_depth;	    /* alias FS: opaque-scene depth snapshot, texture unit 1 */
-	GLint	u_soft_params;	    /* alias FS: vec3(1/fade_distance, zparam_a, zparam_b); x=0 disables */
-	/* Skeletal (PV_IQM) VS only — -1 on every other program.  uhexen2-7ok0.3. */
-	GLint	u_pose_base;	    /* current pose's first bone index (pose * numbones) */
-	GLint	u_pose_base2;	    /* pose being blended away from, same scaling */
-	GLint	u_skel_blend;	    /* 0 = fully pose_base2, 1 = fully pose_base */
-	GLint	u_shadevector;	    /* model-space light direction for the shadedots expression */
-	GLint	u_lightcolor;	    /* vec4(light rgb with tint+scale folded in, entity alpha) */
-	GLint	u_fullbright;	    /* 1.0 during the additive fullbright re-draw */
+	GLint	u_lightgrid;	/* usampler3D of per-froxel light bitmasks, texture unit LIGHT_GRID_TMU; world programs, desktop only (uhexen2-26bm) */
+	/* The per-draw values of both families -- fog, the alpha pair,
+	 * overbright, bicubic, caustics, the debug views, material, warp, span
+	 * cell, software emulation, lightstyle mode, the froxel lookup and dlight
+	 * scale, and the alias family's own -- have no field here: since #450
+	 * every stage that reads them takes them from VertParams / FragParams /
+	 * AliasFrag / WorldFrag (GL_ImmPushBlocks, R_SetWorldFrag), and no live
+	 * shader declares those names loose.  tools/test_alias_no_loose.py keeps
+	 * it that way.  Only samplers keep a location: the OIT mode switches are
+	 * OitFrag members since #450 W3 (R_SetOITMode). */
+	GLint	u_soft_depth;	    /* alias FS: opaque-scene depth snapshot, texture unit 1 (uhexen2-mf9u) */
 	/* Indices of the two SHARED uniform blocks (gl_uniforms.h), for the
 	 * shaders that have moved out of C string literals into engine/shaders/.
 	 * Those declare their non-opaque uniforms inside a block, because Vulkan
@@ -111,6 +59,9 @@ typedef struct glprogram_s {
 	 * uniforms, and on any stage that declares no block at all. */
 	GLint	ub_vert;	    /* VertParams, at UBO_BINDING_VERT */
 	GLint	ub_frag;	    /* FragParams, at UBO_BINDING_FRAG */
+	GLint	ub_afrag;	    /* AliasFrag, at UBO_BINDING_ALIAS_FRAG: the ten programs linking salias_frag (#450) */
+	GLint	ub_wfrag;	    /* WorldFrag, at UBO_BINDING_WORLD_FRAG: the three world programs (#450 W2) */
+	GLint	ub_ofrag;	    /* OitFrag, at UBO_BINDING_OIT_FRAG: the six OIT twins (#450 W3) */
 } glprogram_t;
 
 /* Texture units of the MBOIT moment targets during the composite pass (#87);
@@ -121,16 +72,12 @@ typedef struct glprogram_s {
 #define MBOIT_TMU_MOM		13
 #define MBOIT_TMU_B0_MS		14
 #define MBOIT_TMU_MOM_MS	15
-void GL_SetOITMode (int mode, qboolean ms);
 
 /* Extended program for GPU particle SSBO rendering */
 typedef struct {
-	glprogram_t base;       /* standard uniforms (u_mvp, u_modelview, u_fog_density, u_fog_color) */
-	GLint   u_pup;          /* r_pup billboard-up vector */
-	GLint   u_pright;       /* r_pright billboard-right vector */
-	GLint   u_vpn;          /* view forward vector (for distance-based scale) */
-	GLint   u_origin;       /* camera origin (for distance-based scale) */
-	GLint   u_ctime;        /* current cl.time (for dead particle culling) */
+	glprogram_t base;       /* program, texture location and block indices */
+	/* No basis / camera / time locations: spart_gpu_vert reads them from
+	 * VertParams (R_SetParticleBasis). */
 } gl_particle_gpu_prog_t;
 
 extern glprogram_t	gl_shader_world;	/* textured + lightmap, fog (cutout: has discard) */
@@ -166,30 +113,19 @@ extern glprogram_t	gl_shader_particle_oit;
 typedef struct {
 	GLuint	program;	/* shader program handle */
 	GLuint	ubo_shadedots;	/* SSBO handle for shadedots table */
-	GLint	u_fog_density;	/* fragment fog uniforms */
-	GLint	u_fog_color;
-	GLint	u_alpha_threshold;
-	GLint	u_viewproj;	/* view-projection matrix (uhexen2-8pc2) */
-	GLint	u_inst_base;	/* base instance index for gl_InstanceID offset */
-	GLint	u_eyepos;	/* camera position for fog distance */
-	GLint	u_poseverttype;	/* vertex format: 0=PV_QUAKE1, 1=PV_MD3 */
-	GLint	u_force_opaque_alpha; /* uhexen2-khsa r13 */
-	GLint	u_alias_caustics; /* uhexen2-0gn3 — vec2(intensity, time); no model matrix needed, the instance world matrix already yields world space */
-	/* uhexen2-4kcb.  Same two names and meanings as on glprogram_t, except
-	 * that u_alias_lightdir is uploaded in WORLD space here because this
-	 * program's v_matpos is world space.  Duplicated for the same reason the
-	 * clustered-lighting four are: separate struct, separate location table. */
-	GLint	u_alias_material;
-	GLint	u_alias_lightdir;
-	/* Clustered dynamic lighting (uhexen2-waum).  Same four names and the
-	 * same meanings as on glprogram_t; duplicated because this program is a
-	 * separate struct with its own location table, and a program that misses
-	 * one of them draws its models next to identical ones lit differently. */
-	GLint	u_alias_dlight;	/* blocklight -> vertex-colour scale; 0 disables */
-	GLint	u_lightview;	/* world -> eye; this path has no u_modelview to derive it from */
-	GLint	u_lightgrid_xy;
-	GLint	u_lightgrid_z;
-	GLint	u_lightgrid;
+	/* Both stages are files since #450 (salias_inst_vert.glsl in slice S3,
+	 * salias_frag.glsl in S2) and read every non-opaque value from a block,
+	 * so the only location left is the sampler's.  R_DrawAliasInstanced
+	 * writes the vertex stage's view-projection, eye position, instance base,
+	 * pose vertex type and dlight scale into VertParams, and
+	 * R_LightCluster_BindForAlias its world -> eye matrix into AliasVert. */
+	GLint	u_lightgrid;	/* usampler3D, texture unit LIGHT_GRID_TMU */
+	/* Block indices, as on glprogram_t: VertParams from the vertex stage,
+	 * FragParams and AliasFrag from salias_frag.  AliasVert is bound but its
+	 * index is not kept, as on glprogram_t. */
+	GLint	ub_vert;
+	GLint	ub_frag;
+	GLint	ub_afrag;
 } gl_alias_inst_prog_t;
 
 extern gl_alias_inst_prog_t gl_shader_alias_inst;
@@ -203,9 +139,12 @@ void	GL_ParticleGPU_SetUniforms (const gl_particle_gpu_prog_t *prog,
 				     const float *vpn, const float *origin,
 				     float ctime);
 
-/* InstanceData.ShadedotRow carries two things, because widening the record
- * would change the 80-byte layout salias_inst_vert and R_CollectAliasInstance
- * both hardcode.  The low bits are the quantized-yaw row into the shadedots
+/* InstanceData.ShadedotRow carries four things, because widening the record
+ * would change the 80-byte layout engine/shaders/salias_inst_vert.glsl and
+ * R_CollectAliasInstance both hardcode.  The shader gets these through
+ * its header chunk (GLSL_ALIAS_INST_VERT_HEADER in gl_shader.c); its #ifndef
+ * copies are for the offline SPIR-V compile and are pinned to these by
+ * tools/test_alias_inst_vert_block.py.  The low bits are the quantized-yaw row into the shadedots
  * table (0..15); bit 8 says this entity's CPU lighting came from the arm of
  * R_DrawAliasModel's branch chain that accumulates dynamic light, and so may
  * take it per-pixel from the froxel grid.  MLS_ABSLIGHT, model-lightstyle and
@@ -213,6 +152,15 @@ void	GL_ParticleGPU_SetUniforms (const gl_particle_gpu_prog_t *prog,
  * they never took dlights on the CPU either.  uhexen2-waum. */
 #define ALIAS_INST_SHADEDOT_ROW_MASK	255
 #define ALIAS_INST_DLIGHT_BIT		256
+/* Bit 9 marks the gl_fullbrights glow redraw's records: the shader draws them
+ * flat white, unshaded, as GL_DrawAliasFrame's model_fullbright_pass does.  A
+ * glow is emissive, so the shadedot (or MD3 1 + d) term that the base pass
+ * takes must not scale it.  GitHub #491. */
+#define ALIAS_INST_FULLBRIGHT_BIT	512
+/* Bits 16..31 hold the entity yaw in 1/65536 turns, for the MD3 arm, which
+ * shades by a real normal against R_DrawAliasModel's unquantized shadevector
+ * and so cannot use the 16-step row.  GitHub #492. */
+#define ALIAS_INST_YAW_SHIFT		16
 
 /* Vertex attribute locations (fixed, shared across all programs).  The
  * file-backed shaders in engine/shaders/ repeat these as layout(location=)
@@ -225,7 +173,10 @@ void	GL_ParticleGPU_SetUniforms (const gl_particle_gpu_prog_t *prog,
 
 /* GL_UNIFORM_BUFFER binding points.  One global index space per context,
  * shared with the compute pipeline -- 0 is gl_worldcull.c's Hi-Z HizParams
- * and 4 is its CullParams, so the graphics blocks start at 1.  Keyed by stage rather than by program:
+ * and 4 is its CullParams, 3 is gl_ssao.c's SsaoParams, 5 is
+ * gl_lightcluster.c's LcParams, 6 is gl_postprocess.c's BloomParams, 7
+ * is its OitParams, 8 its PpVert and 9 is its PpParams, so the graphics
+ * blocks start at 1 and the alias, world and OIT families' own pick up at 10.  Keyed by stage rather than by program:
  * only one program is bound at a time, so each program's own vertex-stage
  * block is pinned to the same point rather than every program claiming a new
  * one.  A driver need only guarantee a handful of these.
@@ -236,6 +187,17 @@ void	GL_ParticleGPU_SetUniforms (const gl_particle_gpu_prog_t *prog,
  * defines are the only place the two sides meet. */
 #define UBO_BINDING_VERT	1
 #define UBO_BINDING_FRAG	2
+/* The alias family's own blocks (engine/shaders/alias.inc, #450): 11 is
+ * salias_frag's AliasFrag, 10 the vertex stages' AliasVert. */
+#define UBO_BINDING_ALIAS_VERT	10
+#define UBO_BINDING_ALIAS_FRAG	11
+/* The world family's (engine/shaders/world.inc, #450 W2): sworld_frag's and
+ * sworld_opaque_frag's WorldFrag. */
+#define UBO_BINDING_WORLD_FRAG	12
+/* The OIT twins' (engine/shaders/oit.inc, #450 W3): OitFrag, the pass's
+ * output mode.  Desktop only in practice -- no ES program declares it -- but
+ * still under ES 3.00's 24 binding points. */
+#define UBO_BINDING_OIT_FRAG	13
 
 void	GL_Shaders_Init (void);
 void	GL_Shaders_Shutdown (void);

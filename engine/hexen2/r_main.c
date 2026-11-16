@@ -21,6 +21,7 @@
 #include "quakedef.h"
 #include "r_local.h"
 #include "d_local.h"
+#include "r_dlightvis.h"
 
 //#define	PASSAGES
 
@@ -267,6 +268,7 @@ void R_Init (void)
 
 	Cmd_AddCommand ("timerefresh", R_TimeRefresh_f);
 	Cmd_AddCommand ("pointfile", R_ReadPointFile_f);
+	R_DlightVis_Init ();	/* GitHub #97 */
 
 	Cvar_RegisterVariable (&r_draworder);
 	Cvar_RegisterVariable (&r_speeds);
@@ -428,6 +430,8 @@ void R_NewMap (void)
 #ifdef PASSAGES
 	CreatePassages ();
 #endif
+
+	R_DlightVis_NewMap ();	/* GitHub #97 */
 }
 
 
@@ -687,14 +691,16 @@ static void R_PrepareAlias (void)
 					{
 						add = cl_dlights[lnum].radius - VectorLengthFast(dist);
 
-						if (add > 0)
+						if (add > 0 && !(r_dlight_occlusion.integer >= 1 &&
+						    !R_DlightVis_Entity (lnum, currententity)))
 							lighting.ambientlight += add;
 					}
 					else
 					{
 						add = VectorLengthFast(dist) + cl_dlights[lnum].radius;
 
-						if (add < 0)
+						if (add < 0 && !(r_dlight_occlusion.integer >= 1 &&
+						    !R_DlightVis_Entity (lnum, currententity)))
 							lighting.ambientlight += add;
 					}
 				}
@@ -1117,12 +1123,17 @@ static void R_DrawBEntitiesOnList (void)
 					{
 						for (k = 0; k < MAX_DLIGHTS; k++)
 						{
+							dlight_t	local;
+
 							if ((cl_dlights[k].die < cl.time) || (!cl_dlights[k].radius))
 							{
 								continue;
 							}
 
-							R_MarkLights (&cl_dlights[k], k, clmodel->nodes + clmodel->hulls[0].firstclipnode);
+							/* model space, as gl_rsurf.c's twin (GitHub #495) */
+							local = cl_dlights[k];
+							R_DlightModelOrigin (currententity, cl_dlights[k].origin, local.origin);
+							R_MarkLights (&local, k, clmodel->nodes + clmodel->hulls[0].firstclipnode, currententity);
 						}
 					}
 				}

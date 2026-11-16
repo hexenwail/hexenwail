@@ -1,9 +1,13 @@
 /* Standalone check of the bind-pose block md5mesh.c now keeps for r_showskel.
  * Loads engine/tests/md5/chain.{md5mesh,md5anim} and recomputes joint world
  * positions with the exact composition R_ShowSkel_JointPos uses, then compares
- * against the values gen3.py's geometry forces. */
+ * against the values gen3.py's geometry forces.
+ *
+ * Then the skin: MD5_LoadSkin's texture and its _glow / _luma sidecar, through
+ * stubbed image loaders (GitHub #492). */
 #include "quakedef.h"
 #include "gl_model.h"
+#include "img_load.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -36,12 +40,34 @@ byte *FS_LoadMallocFile (const char *path, unsigned int *path_id)
 	return buf;
 }
 
+/* The skin stubs answer from these switches, so one run can load the mesh
+ * with no skin, with a skin, and with a skin plus its glow sidecar.  Texture
+ * numbers: 1 is the white sentinel, 2 a loaded skin, 3 a loaded glow. */
+static int	stub_have_skin, stub_have_glow;
+static char	stub_glow_asked[256];
+
 byte *IMG_LoadExternalTexture (const char *name, int *w, int *h, qboolean *a)
-{ (void)name; (void)w; (void)h; (void)a; return NULL; }
+{
+	(void)name;
+	if (!stub_have_skin) return NULL;
+	*w = *h = 1; *a = false;
+	return (byte *) calloc(1, 4);
+}
+
+qboolean IMG_LoadReplacementGlow (const char *name, const char *modelname, imgreplace_t *out)
+{
+	(void)modelname;
+	q_strlcpy(stub_glow_asked, name, sizeof(stub_glow_asked));
+	memset(out, 0, sizeof(*out));
+	return stub_have_glow ? true : false;
+}
+void IMG_FreeReplacement (imgreplace_t *r) { (void)r; }
 
 GLuint gl_solid_white_texture = 1;
 GLuint GL_LoadTexture (const char *id, byte *data, int w, int h, int flags)
-{ (void)id; (void)data; (void)w; (void)h; (void)flags; return 1; }
+{ (void)id; (void)data; (void)w; (void)h; (void)flags; return 2; }
+GLuint GL_LoadReplacement (const char *id, const struct imgreplace_s *r, int flags)
+{ (void)id; (void)r; (void)flags; return 3; }
 
 /* --- the composition under test ---------------------------------------- */
 static void ConcatRowMajor3x4 (const float a[12], const float b[12], float out[12])
@@ -57,6 +83,12 @@ static void ConcatRowMajor3x4 (const float a[12], const float b[12], float out[1
 }
 
 static int fails = 0;
+
+static void check_i (const char *what, int got, int want)
+{
+	printf("  %-26s %d  expect %d  %s\n", what, got, want, got == want ? "ok" : "FAIL");
+	if (got != want) fails++;
+}
 
 static void check (const char *what, const float got[3], float x, float y, float z)
 {
@@ -117,6 +149,35 @@ int main (int argc, char **argv)
 		}
 	}
 
-	printf(fails ? "\nFAILED (%d)\n" : "\nall joint positions match\n", fails);
+	/* Skins.  The load above had no skin image: white sentinel, no glow.
+	 * An MD5 skin is RGBA, so its glow can only come from the _glow / _luma
+	 * sidecar of the skin path that resolved -- the shader name with any
+	 * extension stripped -- and must reach all four animation slots, which
+	 * R_DrawAliasModel's fullbright pass indexes.  GitHub #492. */
+	printf("skins\n");
+	check_i("no skin: texture", (int)hdr->gl_texturenum[0][0], 1);
+	check_i("no skin: glow", (int)hdr->gl_fb_texturenum[0][0], 0);
+
+	stub_have_skin = 1; stub_have_glow = 0; stub_glow_asked[0] = 0;
+	hdr = MD5_LoadMesh("models/test/chain.md5mesh", mesh, 1024*1024, mins, maxs);
+	if (!hdr) { fprintf(stderr, "MD5_LoadMesh failed\n"); return 1; }
+	check_i("skin: texture", (int)hdr->gl_texturenum[0][0], 2);
+	check_i("skin, no sidecar: glow", (int)hdr->gl_fb_texturenum[0][0], 0);
+
+	stub_have_glow = 1; stub_glow_asked[0] = 0;
+	hdr = MD5_LoadMesh("models/test/chain.md5mesh", mesh, 1024*1024, mins, maxs);
+	if (!hdr) { fprintf(stderr, "MD5_LoadMesh failed\n"); return 1; }
+	check_i("glow slot 0", (int)hdr->gl_fb_texturenum[0][0], 3);
+	check_i("glow slot 3", (int)hdr->gl_fb_texturenum[0][3], 3);
+	check_i("skin under the glow", (int)hdr->gl_texturenum[0][3], 2);
+	printf("  %-26s \"%s\"\n", "glow sidecar of", stub_glow_asked);
+	if (strcmp(stub_glow_asked, "models/test/chain"))
+	{
+		printf("  FAIL: expected \"models/test/chain\"\n");
+		fails++;
+	}
+	stub_have_skin = stub_have_glow = 0;
+
+	printf(fails ? "\nFAILED (%d)\n" : "\nall joint positions and skins match\n", fails);
 	return fails ? 1 : 0;
 }

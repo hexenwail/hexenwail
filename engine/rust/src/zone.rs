@@ -103,7 +103,6 @@ extern "C" {
     fn strlen(s: *const c_char) -> usize;
     fn memset(dst: *mut c_void, c: c_int, n: usize) -> *mut c_void;
     fn memcpy(dst: *mut c_void, src: *const c_void, n: usize) -> *mut c_void;
-    fn memmove(dst: *mut c_void, src: *const c_void, n: usize) -> *mut c_void;
 }
 
 /// `_PRINT_NORMAL` / `_PRINT_DEVEL` from engine/h2shared/printsys.h.
@@ -119,7 +118,7 @@ const Z_MAINZONE: c_int = 1 << 0;
 const Z_SECZONE: c_int = 1 << 1;
 
 /// The two per-zone magics.  They are what ties a memblock back to its zone:
-/// Z_Free and Z_Realloc find the zone by matching `block->magic` against each
+/// Z_Free finds the zone by matching `block->magic` against each
 /// `zonelist_t.magic`.
 const ZMAGIC: c_int = 0x1d4a11;
 const ZMAGIC2: c_int = 0xf382da;
@@ -603,83 +602,6 @@ pub unsafe extern "C" fn Z_Malloc(size: c_int, zone_id: c_int) -> *mut c_void {
     memset(buf, 0, size as usize);
 
     buf
-}
-
-/// `Z_Realloc` -- the C is free-plus-realloc, not realloc: it frees the old
-/// pointer, allocates fresh, and moves what fits.  The returned pointer is not
-/// required to be the same one.
-#[no_mangle]
-pub unsafe extern "C" fn Z_Realloc(ptr: *mut c_void, size: c_int, zone_id: c_int) -> *mut c_void {
-    if ptr.is_null() {
-        return Z_Malloc(size, zone_id);
-    }
-
-    let block = (ptr as *mut u8).wrapping_sub(core::mem::size_of::<MemBlockC>())
-        .cast::<MemBlockC>();
-    if (*block).tag == 0 {
-        Sys_Error(
-            c"%s: realloced a freed pointer".as_ptr(),
-            c"Z_Realloc".as_ptr(),
-        );
-    }
-
-    let mut z = ZONELIST;
-    while !z.is_null() {
-        if (*z).magic == (*block).magic {
-            break;
-        }
-        z = (*z).next;
-    }
-    if z.is_null() {
-        Sys_Error(
-            c"%s: realloced a pointer without ZMAGIC".as_ptr(),
-            c"Z_Realloc".as_ptr(),
-        );
-    }
-
-    /* see Z_TagMalloc(): the usable size is the block size less the header
-     * and the trash tester */
-    let old_size = (*block).size - (4 + core::mem::size_of::<MemBlockC>() as c_int);
-    let old_ptr = ptr;
-
-    Z_Free(ptr);
-
-    let mut z = ZONELIST;
-    while !z.is_null() {
-        if (*z).id & zone_id != 0 {
-            break;
-        }
-        z = (*z).next;
-    }
-    if z.is_null() {
-        Sys_Error(
-            c"%s: Bad zone id %i".as_ptr(),
-            c"Z_Realloc".as_ptr(),
-            zone_id,
-        );
-    }
-
-    let ptr = z_tag_malloc(z, size, 1);
-    if ptr.is_null() {
-        Sys_Error(
-            c"%s: failed on allocation of %i bytes".as_ptr(),
-            c"Z_Realloc".as_ptr(),
-            size,
-        );
-    }
-
-    if ptr != old_ptr {
-        memmove(ptr, old_ptr, core::cmp::min(old_size, size) as usize);
-    }
-    if old_size < size {
-        memset(
-            (ptr as *mut u8).wrapping_offset(old_size as isize).cast::<c_void>(),
-            0,
-            (size - old_size) as usize,
-        );
-    }
-
-    ptr
 }
 
 /// `Z_Strdup`

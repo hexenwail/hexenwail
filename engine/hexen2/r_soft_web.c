@@ -39,6 +39,9 @@ cvar_t	gl_missile_glows = {"gl_missile_glows", "1", CVAR_ARCHIVE};
 cvar_t	gl_torch_dlight = {"gl_torch_dlight", "1", CVAR_ARCHIVE};
 cvar_t	gl_flashintensity = {"gl_flashintensity", "1", CVAR_ARCHIVE};
 cvar_t	gl_extra_dynamic_lights = {"gl_extra_dynamic_lights", "1", CVAR_NONE};
+/* Real here too: r_surf.c and r_light.c make the same one-sided test as the
+ * GL renderer (GitHub #97).  Default and flags match gl_rmain.c's. */
+cvar_t	r_dlight_occlusion = {"r_dlight_occlusion", "1", CVAR_ARCHIVE};
 
 /* --- GPU-only knobs: present for linkage, hidden in the menu -------
  *
@@ -117,6 +120,7 @@ void R_SoftWebInitCvars (void)
 	Cvar_RegisterVariable (&gl_torch_dlight);
 	Cvar_RegisterVariable (&gl_flashintensity);
 	Cvar_RegisterVariable (&gl_extra_dynamic_lights);
+	Cvar_RegisterVariable (&r_dlight_occlusion);
 
 	Cvar_RegisterVariable (&r_scale);
 	Cvar_RegisterVariable (&r_softemu);

@@ -1,6 +1,7 @@
 # EmbedShaders.cmake -- turn engine/shaders/*.glsl into a C header of string
 # literals, resolving #include "..." along the way, and drop a copy of each
-# expanded source where CompileSpirv.cmake can reach it.
+# expanded source (plus an OIT twin of each stage that has an OIT arm) where
+# CompileSpirv.cmake can reach it.
 #
 # Run in script mode:
 #   cmake -DSHADER_DIR=<dir> -DOUT_FILE=<header> [-DVK_DIR=<dir>] \
@@ -69,8 +70,13 @@ foreach(shader ${SHADER_FILES})
     file(READ "${shader}" body)
 
     # Resolve includes.  Bounded rather than while(TRUE) so a cyclic include
-    # fails the build instead of hanging it.
-    foreach(pass RANGE 8)
+    # fails the build instead of hanging it.  Each pass resolves one distinct
+    # include name (every occurrence of it), so the bound is the most distinct
+    # includes one stage may pull in, transitively.  It was 9 (RANGE 8); the
+    # alias family's planned split of salias_frag needs about that many on its
+    # own (#450).  scripts/webgl-engine-shader-smoke.mjs mirrors this bound and
+    # tools/test_embed_include_bound.py keeps the two equal.
+    foreach(pass RANGE 31)
         if(NOT body MATCHES "#include \"([^\"]+)\"")
             break()
         endif()
@@ -89,6 +95,15 @@ foreach(shader ${SHADER_FILES})
         if(name MATCHES "^(.+)_(vert|frag|comp)$")
             write_if_changed("${VK_DIR}/${CMAKE_MATCH_1}.${CMAKE_MATCH_2}"
                              "${VK_VERSION_LINE}${body}")
+            # A stage with an `#ifdef OIT` arm is also linked as an OIT twin,
+            # with "#define OIT 1" after its header (GL_InitOITProgramSplit).
+            # That arm is a separate shader as far as the offline gates go,
+            # so give it its own copy, or CompileSpirv never sees oit.inc.
+            string(FIND "${body}" "#ifdef OIT\n" oit_arm)
+            if(NOT oit_arm EQUAL -1)
+                write_if_changed("${VK_DIR}/${CMAKE_MATCH_1}_oit.${CMAKE_MATCH_2}"
+                                 "${VK_VERSION_LINE}#define OIT 1\n${body}")
+            endif()
         else()
             message(FATAL_ERROR
                 "EmbedShaders: ${name} does not end in _vert, _frag or _comp")

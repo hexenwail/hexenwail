@@ -157,6 +157,9 @@ typedef struct msurface_s
 // lighting info
 	int		dlightframe;
 	unsigned int		dlightbits[4];	/* one bit per dlight, MAX_DLIGHTS bits; see DLIGHTBIT_* in client.h. uhexen2-liqz */
+	const struct entity_s	*dlightent;	/* whose model space dlightbits' lights are measured in, NULL
+					 * for the world: set by R_MarkLights with them, read by
+					 * R_AddDynamicLights.  GitHub #495 */
 
 	unsigned int	lightmaptexturenum;
 	byte		styles[MAXLIGHTMAPS];
@@ -541,7 +544,7 @@ typedef struct {
 	int	pose0;		/* current pose * poseverts */
 	int	pose1;		/* previous pose * poseverts */
 	float	blend;		/* pose interpolation (1=pose0, 0=pose1) */
-	int	shadedot_row;	/* index into shadedots table (0-15) */
+	int	shadedot_row;	/* shadedots row (0-15) | ALIAS_INST_* bits | yaw << 16 */
 } alias_instance_t;		/* 80 bytes */
 
 /* alias_inst_header_t removed in uhexen2-8pc2: the view-projection

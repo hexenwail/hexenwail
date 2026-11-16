@@ -82,6 +82,47 @@ typedef struct
 #define	DLIGHTBIT_TEST(b,i)	((b)[(i) >> 5] & (1u << ((i) & 31)))
 #define	DLIGHTBIT_SET(b,i)	((b)[(i) >> 5] |= (1u << ((i) & 31)))
 #define	DLIGHTBITS_CLEAR(b)	memset ((b), 0, sizeof(unsigned int) * DLIGHTBITS_WORDS)
+
+/* How far behind a face's front plane a dynamic light may sit and still light
+ * it, under r_dlight_occlusion (GitHub #97).  Not 0: a wall torch's origin can
+ * sit a unit or two inside its own wall, and a light's own face must not go
+ * dark for that.  One value for every tier -- R_AddDynamicLights and
+ * R_MarkLights in both the GL and software renderers, and ClusteredDlight,
+ * which gets it through WorldFrag.  tools/bsp_dlight_leak.py --eps measures
+ * what it keeps on the retail maps. */
+#define	DLIGHT_PLANE_EPSILON	2.0f
+
+/* A dynamic light's origin in a brush entity's model space, which is the space
+ * its BSP planes are in (GitHub #495).  R_MarkLights descends the entity's own
+ * node tree and R_AddDynamicLights measures against its surfaces' planes, so
+ * both must be given the light where the MODEL sees it: the inverse of the
+ * entity's translation and rotation, the same transform R_DrawBrushModel gives
+ * modelorg (software: R_RotateBmodel's entity_rotation, whose rows are these
+ * three vectors).  Quake measured the world-space origin there, which once a
+ * door had opened or a plat lowered lit it from the wrong place, and would put
+ * the light behind the face for the one-sided test (#97).  e is NULL for the
+ * world, whose model space is world space. */
+static inline void R_DlightModelOrigin (const struct entity_s *e, const vec3_t world, vec3_t out)
+{
+	vec3_t	d, forward, right, up;
+
+	if (!e)
+	{
+		VectorCopy (world, out);
+		return;
+	}
+	VectorSubtract (world, e->origin, d);
+	if (!(e->angles[0] || e->angles[1] || e->angles[2]))
+	{
+		VectorCopy (d, out);
+		return;
+	}
+	AngleVectors ((float *) e->angles, forward, right, up);
+	out[0] = DotProduct (d, forward);
+	out[1] = -DotProduct (d, right);
+	out[2] = DotProduct (d, up);
+}
+
 typedef struct
 {
 	vec3_t		origin;

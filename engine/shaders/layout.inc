@@ -34,6 +34,9 @@
  * program did.
  */
 
+#ifndef LAYOUT_INC
+#define LAYOUT_INC
+
 #ifdef VULKAN
   #define TEXBIND(b)        layout(set = 0, binding = b)
   #define IMGBIND(b, fmt)   layout(set = 1, binding = b, fmt)
@@ -46,6 +49,36 @@
   #define TEXBIND(b)        layout(binding = b)
   #define IMGBIND(b, fmt)   layout(binding = b, fmt)
   #define UBO(b)            layout(std140)
+#endif
+
+/* Compute resources whose GL binding point and SDL_GPU slot differ.
+ *
+ * TEXBIND/IMGBIND/UBO above take one number because their callers so far
+ * happen to use the same index on both sides.  GL binding points are global
+ * and fixed by the C side (glBindBufferBase, glActiveTexture), while SDL_GPU
+ * renumbers each compute pipeline's resources from 0 within each set: set 0
+ * holds sampled textures, then read-only storage textures, then read-only
+ * storage buffers; set 1 holds read-write storage textures, then read-write
+ * storage buffers.  So a shader with eight SSBOs at GL points 0-7 and a
+ * sampler on unit 1 (gl_worldcull.c's cull_mark) needs both numbers spelled.
+ *
+ *   TEXBIND2(gl, vk)  sampled texture; vk is its index in set 0
+ *   SSBO_RO(gl, vk)   readonly storage buffer; vk follows set 0's textures
+ *   SSBO_RW(gl, vk)   storage buffer that is written (read-write or
+ *                     writeonly -- SDL_GPU has no write-only kind); set 1
+ *
+ * The GL arms use `gl` only, so the driver sees exactly the qualifiers it
+ * would from a hand-written layout(std430, binding = gl).  Storage blocks
+ * take layout(binding=) wherever compute exists (GL 4.3 / ES 3.1), unlike
+ * uniform blocks, so no arm needs C-side binding for them. */
+#ifdef VULKAN
+  #define TEXBIND2(gl, vk)  layout(set = 0, binding = vk)
+  #define SSBO_RO(gl, vk)   layout(std430, set = 0, binding = vk)
+  #define SSBO_RW(gl, vk)   layout(std430, set = 1, binding = vk)
+#else
+  #define TEXBIND2(gl, vk)  layout(binding = gl)
+  #define SSBO_RO(gl, vk)   layout(std430, binding = gl)
+  #define SSBO_RW(gl, vk)   layout(std430, binding = gl)
 #endif
 
 /* ------------------------------------------------------------------------
@@ -83,6 +116,18 @@
  *                    TEXBIND.  Empty in the plain arm; the C side assigns the
  *                    texture unit with glUniform1i, as it always has.
  *   uniform block    same three-way split as UBO above.
+ *   storage buffer   FRAG_SSBO(gl, vk): `gl` the GL binding point, which the
+ *                    plain arm spells because desktop GL 4.3 allows
+ *                    layout(binding=) on a storage block; `vk` its index in
+ *                    set 2, after the stage's sampled textures, which is
+ *                    where SDL_GPU puts a fragment stage's read-only storage
+ *                    buffers.  Storage blocks do not exist in ES 3.00 at all,
+ *                    so a caller keeps them under #ifndef GL_ES.
+ *                    VERT_SSBO(gl, vk) is the vertex-stage twin: set 0,
+ *                    after that stage's sampled textures (#450, the instanced
+ *                    alias stage, which has none, so its four buffers are
+ *                    0..3 in both numberings).  Desktop-only for the same
+ *                    reason.
  * ------------------------------------------------------------------------ */
 
 #ifdef VULKAN
@@ -93,6 +138,8 @@
   #define FRAG_OUT(loc)     layout(location = loc)
   #define FRAG_TEX(b)       layout(set = 2, binding = b)
   #define FRAG_UBO(b)       layout(std140, set = 3, binding = b)
+  #define FRAG_SSBO(gl, vk) layout(std430, set = 2, binding = vk)
+  #define VERT_SSBO(gl, vk) layout(std430, set = 0, binding = vk)
 #elif defined(GL_SPIRV)
   #define VERT_IN(loc)      layout(location = loc)
   #define VERT_OUT(loc)     layout(location = loc)
@@ -101,6 +148,8 @@
   #define FRAG_OUT(loc)     layout(location = loc)
   #define FRAG_TEX(b)       layout(binding = b)
   #define FRAG_UBO(b)       layout(std140, binding = b)
+  #define FRAG_SSBO(gl, vk) layout(std430, binding = gl)
+  #define VERT_SSBO(gl, vk) layout(std430, binding = gl)
 #else
   #define VERT_IN(loc)      layout(location = loc)
   #define VERT_OUT(loc)
@@ -109,4 +158,8 @@
   #define FRAG_OUT(loc)     layout(location = loc)
   #define FRAG_TEX(b)
   #define FRAG_UBO(b)       layout(std140)
+  #define FRAG_SSBO(gl, vk) layout(std430, binding = gl)
+  #define VERT_SSBO(gl, vk) layout(std430, binding = gl)
 #endif
+
+#endif /* LAYOUT_INC */

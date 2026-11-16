@@ -438,7 +438,7 @@ static void MD3_LoadSkin (aliashdr_t *hdr, const char *modelname, const char *sh
 	byte		*rgba = NULL;
 	int		w = 0, h = 0, i;
 	qboolean	has_alpha = false;
-	GLuint		tex;
+	GLuint		tex, fbtex = 0;
 
 	if (shader && shader[0])
 	{
@@ -459,6 +459,25 @@ static void MD3_LoadSkin (aliashdr_t *hdr, const char *modelname, const char *sh
 		tex = GL_LoadTexture (path, rgba, w, h,
 				      TEX_MIPMAP | TEX_RGBA | (has_alpha ? TEX_ALPHA : 0));
 		free (rgba);
+
+		/* An .md3 skin is RGBA, so there are no palette fullbrights to
+		 * mask out of it: the glow layer comes from the same <skin>_glow /
+		 * <skin>_luma sidecar a replaced .mdl skin takes, or not at all.
+		 * Loaded whatever gl_fullbrights says, because the draw passes
+		 * gate on it each frame and nothing reloads an .md3's skins when
+		 * it is toggled. */
+		{
+			imgreplace_t	glow;
+
+			if (IMG_LoadReplacementGlow (path, NULL, &glow))
+			{
+				char	fbname[MAX_QPATH];
+
+				q_snprintf (fbname, sizeof(fbname), "%s_fb", path);
+				fbtex = GL_LoadReplacement (fbname, &glow, TEX_MIPMAP | TEX_ALPHA);
+				IMG_FreeReplacement (&glow);
+			}
+		}
 	}
 	else
 	{
@@ -480,5 +499,8 @@ static void MD3_LoadSkin (aliashdr_t *hdr, const char *modelname, const char *sh
 	 * 1..3 at zero would strobe the model untextured three frames in four. */
 	hdr->numskins = 1;
 	for (i = 0; i < 4; i++)
+	{
 		hdr->gl_texturenum[0][i] = tex;
+		hdr->gl_fb_texturenum[0][i] = fbtex;
+	}
 }

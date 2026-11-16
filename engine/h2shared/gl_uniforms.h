@@ -51,8 +51,10 @@ typedef struct {
 	float	pright[4];	/* 288  xyz particle billboard right */
 	float	vpn[4];		/* 304  xyz view forward */
 	float	porigin[4];	/* 320  xyz camera origin, w particle time */
-	int	posei[4];	/* 336  x pose base, y instance base, z pose vertex type */
-} r_vertparams_t;		/* 352 */
+	int	posei[4];	/* 336  x pose base, y instance base, z pose vertex type,
+				 *      w skeletal blend-from pose base */
+	float	alias[4];	/* 352  x alias dynamic-light scale (#450), y skeletal pose blend */
+} r_vertparams_t;		/* 368 */
 
 typedef struct {
 	float	scene[4];	/*   0  xyz eye position, w cl.time */
@@ -66,6 +68,118 @@ typedef struct {
 	float	debug[4];	/* 112  x r_fullbright, y r_lightmap */
 	float	skydir[4];	/* 128  xyz cubemap wind direction, w cubemap yaw */
 } r_fragparams_t;		/* 144 */
+
+/* AliasFrag (engine/shaders/alias.inc), salias_frag's own block, at
+ * UBO_BINDING_ALIAS_FRAG (#450, alias slice S2).  A block member is GLOBAL,
+ * where the loose uniforms these replaced were per-program state, so every
+ * path that draws with an alias-family program writes what it reads first:
+ *
+ *   lightview, grid  R_LightCluster_BindForAlias, once a frame, before any
+ *                    alias draw.  Read only where v_dlightscale > 0, which
+ *                    needs R_LightCluster_AliasActive -- the same gate the
+ *                    write is behind.
+ *   warp xy (turb)   GL_ImmEnd from imm_turb; the skeletal and instanced
+ *                    draws write 0.
+ *   warp z (spans)   R_SetSpanCell around the brush-poly and liquid batches,
+ *                    back to 0 after each; the skeletal and instanced draws
+ *                    write 0.
+ *   material,        GL_ImmEnd from imm_alias_material / imm_alias_lightdir;
+ *   lightdir         the skeletal draw passes the same pair through; the
+ *                    instanced draw writes them per batch (world-space light),
+ *                    and 0 material for its fullbright pass.
+ *
+ * Seeded with material and lightdir (0,0,1), imm_*'s resting values. */
+typedef struct {
+	float	lightview[16];	/*   0  world -> eye, no entity transform */
+	float	grid[4];	/*  64  xy viewport origin, zw froxels per pixel */
+	float	gridz[4];	/*  80  xy zlogscale, zlogbias */
+	float	warp[4];	/*  96  xy liquid warp (amplitude, time), z span cell */
+	float	material[4];	/* 112  xyz normal-map, gloss intensity, gloss exponent */
+	float	lightdir[4];	/* 128  xyz model light direction */
+} r_aliasfrag_t;		/* 144 */
+
+/* AliasVert (engine/shaders/alias.inc), the alias vertex stages' own block, at
+ * UBO_BINDING_ALIAS_VERT (#450, alias slices S3 and S4):
+ *
+ *   lightview    salias_inst_vert's.  R_LightCluster_BindForAlias through
+ *                R_SetAliasLightGrid, once a frame, the same lc_view as
+ *                AliasFrag's copy.  The stage reads it on every vertex to
+ *                build v_eyepos; only the fragment stage's use of that
+ *                varying is gated on v_dlightscale > 0.
+ *   shade, light sskeletal_vert's.  GL_DrawAliasSkeletal through
+ *                R_SetSkelLight, every skeletal draw, before its flush.
+ *
+ * Seeded with an identity lightview and zero lighting.  The loose lightview it
+ * replaced started at GL's zeros; either value only reaches v_eyepos, which
+ * the fragment stage ignores while the scale is 0, and the scale is 0
+ * whenever the grid is not live.  The lighting seed is never read: no
+ * skeletal draw reaches its flush without writing both. */
+typedef struct {
+	float	lightview[16];	/*   0  world -> eye, no entity transform */
+	float	shade[4];	/*  64  xyz model-space shade vector, w fullbright pass */
+	float	light[4];	/*  80  rgb light (tint and scale folded in), a entity alpha */
+} r_aliasvert_t;		/* 96 */
+
+/* WorldFrag (engine/shaders/world.inc), the world fragment stages' own block,
+ * at UBO_BINDING_WORLD_FRAG (#450, world slice W2).  sworld_frag and
+ * sworld_opaque_frag also read FragParams' fog, alpha pair, overbright,
+ * bicubic, world caustics and debug views.  A block member is GLOBAL, where
+ * the loose uniforms these replaced were each program's own, so EVERY path
+ * that draws with a world program writes all of it, every draw, through one
+ * R_SetWorldFrag call, then flushes, then draws.  The per-draw arguments, by
+ * path (the overbright is R_WorldOverbright on every one, 1 under
+ * r_fullbright, so no path draws brighter than another; GitHub #489):
+ *
+ *   path                          fog        alpha        force  warp
+ *   GL_ImmPushBlocks              r_fog_*    imm_* (-1->0) imm   imm_turb
+ *   DrawTextureChains_FlushBatch  bind-time  0.01         1      0
+ *   DrawTextureChains_DrawDeferred r_fog_*   0.666 / 0.01 1      0
+ *   R_DrawBrushModel              r_fog_*    0.01         1      0
+ *   R_DispatchBrushInstancedPass  r_fog_*    0.01 / 0.666 1      0
+ *   R_DrawWorldCulled             r_fog_*    0.01         1      0
+ *
+ * Everything else comes from the frame
+ * record the R_SetWorldFrame* setters below fill, once a frame, from where the
+ * values are decided: R_SetupFrame (caustics, bicubic, debug views, material,
+ * softemu, span cell), R_LightCluster_BindForWorld (the froxel lookup, dlight
+ * scale and one-sided tolerance) and R_LightStyles_FrameSetup (the lightstyle
+ * mode).  Two frame values are overridden mid-frame, both by lit water around
+ * its batches: the span cell, through R_SetSpanCell, exactly as it did the
+ * loose u_spans, and the one-sided tolerance, through R_SetWorldLiquid, which
+ * turns it off because a liquid is seen, and lit, from both sides (#97).
+ *
+ * Seeded like the loose uniforms started: all zero (every effect off), with an
+ * identity lightview. */
+typedef struct {
+	float	lightview[16];	/*   0  world -> eye, no entity transform */
+	float	grid[4];	/*  64  xy viewport origin, zw froxels per pixel */
+	float	gridz[4];	/*  80  xy zlogscale, zlogbias; z dynamic-light scale;
+				 *      w one-sided tolerance, 0 = both sides (#97) */
+	float	warp[4];	/*  96  xy liquid warp (amplitude, time), z span cell */
+	float	material[4];	/* 112  xyz normal-map, gloss intensity, gloss exponent */
+	float	softemu[4];	/* 128  texture dither, banding, screen dither, any live */
+	float	lmstyles[4];	/* 144  x 1 = GPU lightstyles, y the CPU shift as a factor */
+} r_worldfrag_t;		/* 160 */
+
+/* OitFrag (engine/shaders/oit.inc), the OIT twins' own block, at
+ * UBO_BINDING_OIT_FRAG (#450 W3): what the six OIT programs' fragment stages
+ * output this pass.  Unlike every other block here it is not written per draw,
+ * and need not be.  It is per-PASS state with exactly one writer,
+ * R_SetOITMode, called at each OIT pass transition in gl_postprocess.c
+ * (OIT_BeginTranslucency, OIT_NextPass, OIT_EndTranslucency) before any draw of
+ * that pass, so every OIT draw's own flush carries it.  The loose u_oit_mode /
+ * u_mboit_ms it replaced were per-program, but GL_SetOITMode wrote all six
+ * programs the same value at the same moments, so one global copy holds
+ * exactly what each of them did.  No other program declares the block, so a
+ * stale value can only ever be the previous pass's, and no OIT program draws
+ * outside a pass.
+ *
+ * Seeded with mode 0, single-sampled: what GL_InitOITProgramSplit seeded the
+ * loose pair with. */
+typedef struct {
+	int	mode[4];	/*   0  x mode (0 WBOIT, 1 MBOIT moments, 2 MBOIT
+				 *      composite), y moment targets multisampled */
+} r_oitfrag_t;			/* 16 */
 
 void	R_Uniforms_Init (void);
 void	R_Uniforms_Shutdown (void);
@@ -81,6 +195,23 @@ void	R_Uniforms_Shutdown (void);
  * the only place the two sides meet. */
 void	R_BindProgramBlocks (GLuint program, GLint *out_vert, GLint *out_frag);
 
+/* The same for AliasFrag: its block index in `program`, pinned to
+ * UBO_BINDING_ALIAS_FRAG, or -1 if the program declares no such block, which
+ * is every program but the ten that link salias_frag. */
+GLint	R_BindAliasFragBlock (GLuint program);
+
+/* The same for AliasVert, at UBO_BINDING_ALIAS_VERT; -1 for every program but
+ * the two instanced ones (#450 S3) and the four skeletal ones (S4). */
+GLint	R_BindAliasVertBlock (GLuint program);
+
+/* The same for WorldFrag, at UBO_BINDING_WORLD_FRAG; -1 for every program but
+ * the three world ones (#450 W2). */
+GLint	R_BindWorldFragBlock (GLuint program);
+
+/* The same for OitFrag, at UBO_BINDING_OIT_FRAG; -1 for every program but the
+ * six OIT twins (#450 W3). */
+GLint	R_BindOITFragBlock (GLuint program);
+
 /* Setters.  Each writes the CPU shadow and marks its block dirty only when the
  * value actually changed; nothing reaches the GPU until R_FlushUniforms. */
 
@@ -91,9 +222,15 @@ void	R_SetModelMatrix (const float *m16);
 void	R_SetViewProj (const float *m16);
 void	R_SetParticleBasis (const float *pup, const float *pright,
 			    const float *vpn, const float *origin, float ptime);
-void	R_SetPoseBase (int v);
+/* sskeletal_vert's pose selection (#450 S4): the current and blend-from pose
+ * bases, both already multiplied by numbones, and the 0..1 blend from the
+ * latter to the former.  One setter for all three, for the reason
+ * R_SetAlphaMask is one: a skeletal draw that set the pair without the blend
+ * would inherit the previous skeletal entity's. */
+void	R_SetSkelPose (int base, int base2, float blend);
 void	R_SetInstBase (int v);
 void	R_SetPoseVertType (int v);
+void	R_SetAliasDlight (float scale);	/* u_alias_dlight, salias_vert (#450) */
 
 /* Both blocks -- see the header comment on why these two are duplicated. */
 void	R_SetEyePos (const float *xyz);
@@ -121,11 +258,55 @@ void	R_SetSkyWind (float u, float v);
 void	R_SetSkyCubeWind (const float *dir3, float yaw);
 void	R_SetLightDebug (float fullbright, float lightmapdbg);
 
+/* AliasFrag; R_SetAliasLightGrid writes AliasVert's copy of the view too */
+void	R_SetAliasLightGrid (const float *view16, const float *grid4,
+			     float zlogscale, float zlogbias);
+void	R_SetAliasTurb (float amplitude, float time);
+void	R_SetAliasSpans (float cell);
+void	R_SetAliasMaterialU (float normal, float gloss, float glossexp);
+void	R_SetAliasLightDirU (const float *dir3);
+
+/* AliasVert: sskeletal_vert's lighting (#450 S4).  shadevec3 is the model-
+ * space shade vector, light4 the rgb light with tint and scale folded in plus
+ * the entity alpha, fullbright 1 during the additive fullbright redraw.  One
+ * call writes the whole set, so none of it can be inherited from the last
+ * skeletal draw. */
+void	R_SetSkelLight (const float *shadevec3, const float *light4, float fullbright);
+
+/* The world frame record (#450 W2).  These write no block and dirty nothing:
+ * they fill the record R_SetWorldFrag copies into FragParams and WorldFrag on
+ * every world draw.  See r_worldfrag_t for who calls which, and when. */
+void	R_SetWorldFrame (float caustics_intensity, float caustics_time, float bicubic,
+			 float fullbright, float lightmapdbg,
+			 const float *material3, const float *softemu4);
+void	R_SetWorldSpans (float cell);
+void	R_SetWorldDlight (float scale, const float *view16, const float *grid4,
+			  float zlogscale, float zlogbias, float onesided);
+/* Lit water's bracket: true before its batches, false after.  true writes a
+ * one-sided tolerance of 0 (light both sides) into the record, false puts the
+ * frame's back. */
+void	R_SetWorldLiquid (qboolean liquid);
+void	R_SetWorldLMStyles (float on, float shift);
+
+/* Everything the world fragment stages read, for the draw about to be made:
+ * the per-draw values given here, and the frame record's.  The only writer of
+ * WorldFrag, and every world draw path calls it before its flush, as ONE call,
+ * for the reason R_SetAlphaMask is one: a path that set some of these and not
+ * the rest would draw with whatever the last alias, sprite or sky batch left. */
+void	R_SetWorldFrag (float fog_density, const float *fog_rgb,
+			float alpha_threshold, float force_opaque, float overbright,
+			float turb_amplitude, float turb_time);
+
+/* OitFrag: the output the OIT programs write this pass, 0 WBOIT, 1 MBOIT
+ * moments, 2 MBOIT composite, and whether the moment targets the composite
+ * reads are multisampled.  The block's only writer; see r_oitfrag_t. */
+void	R_SetOITMode (int mode, qboolean ms);
+
 /* Upload whichever blocks changed.  One push per dirty block, whole block,
  * immediately before the draw that reads it. */
 void	R_FlushUniforms (void);
 
-/* Force the next flush to re-upload both blocks and re-assert their bindings.
+/* Force the next flush to re-upload every block and re-assert its binding.
  * For context loss and for anything that may have moved the indexed uniform
  * bindings out from under us. */
 void	R_InvalidateUniforms (void);

@@ -25,6 +25,7 @@
 #include "gl_pipeline.h"
 #include "gl_vbo.h"
 #include "gl_lightcluster.h"
+#include "r_dlightvis.h"
 
 static int	r_dlightframecount;
 
@@ -258,7 +259,7 @@ R_MarkLights
  * overflow the array silently.  uhexen2-liqz */
 COMPILE_TIME_ASSERT(dlightbits, DLIGHTBITS_WORDS <= 4);
 
-void R_MarkLights (dlight_t *light, int lnum, mnode_t *node)
+void R_MarkLights (dlight_t *light, int lnum, mnode_t *node, const entity_t *ent)
 {
 	mplane_t	*splitplane;
 	float		dist;
@@ -273,12 +274,12 @@ void R_MarkLights (dlight_t *light, int lnum, mnode_t *node)
 
 	if (dist > light->radius)
 	{
-		R_MarkLights (light, lnum, node->children[0]);
+		R_MarkLights (light, lnum, node->children[0], ent);
 		return;
 	}
 	if (dist < -light->radius)
 	{
-		R_MarkLights (light, lnum, node->children[1]);
+		R_MarkLights (light, lnum, node->children[1], ent);
 		return;
 	}
 
@@ -292,13 +293,14 @@ void R_MarkLights (dlight_t *light, int lnum, mnode_t *node)
 			surf->dlightframe = r_dlightframecount;
 		}
 		DLIGHTBIT_SET (surf->dlightbits, lnum);
+		surf->dlightent = ent;
 	}
 
-	R_MarkLights (light, lnum, node->children[0]);
-	R_MarkLights (light, lnum, node->children[1]);
+	R_MarkLights (light, lnum, node->children[0], ent);
+	R_MarkLights (light, lnum, node->children[1], ent);
 }
 #else	/* the major speedup version by Lord Havoc */
-void R_MarkLights (dlight_t *light, int lnum, mnode_t *node)
+void R_MarkLights (dlight_t *light, int lnum, mnode_t *node, const entity_t *ent)
 {
 	mplane_t	*splitplane;
 	float		l, dist, maxdist;
@@ -334,6 +336,13 @@ loc0:
 	for (i = 0; i < node->numsurfaces; i++, surf++)
 	{	// eliminates marking of surfaces too far away from light,
 		// thus preventing unnecessary renders and uploads
+		/* ...and behind it (GitHub #97).  dist is to the node's plane,
+		 * which is every one of its surfaces' plane; a SURF_PLANEBACK
+		 * surface faces the other way.  The descent below is unchanged:
+		 * only whether THIS surface takes the light is. */
+		if (r_dlight_occlusion.integer >= 1 && !(surf->flags & SURF_DRAWTURB) &&
+		    ((surf->flags & SURF_PLANEBACK) ? -dist : dist) < -DLIGHT_PLANE_EPSILON)
+			continue;
 		for (j = 0; j < 3; j++)
 			impact[j] = light->origin[j] - surf->plane->normal[j]*dist;
 
@@ -356,6 +365,11 @@ loc0:
 		// compare to minimum light
 		if ((s*s + t*t + dist*dist) < maxdist)
 		{
+			/* ...and that it can see (GitHub #97 P2, r_dlightvis.c).
+			 * World surfaces only: see there for why. */
+			if (!ent && r_dlight_occlusion.integer >= 1 &&
+			    !R_DlightVis_Surface (lnum, surf))
+				continue;
 			if (surf->dlightframe != r_dlightframecount)
 			{	// not dynamic until now
 				DLIGHTBITS_CLEAR (surf->dlightbits);
@@ -364,13 +378,14 @@ loc0:
 			}
 			else	// already dynamic
 				DLIGHTBIT_SET (surf->dlightbits, lnum);
+			surf->dlightent = ent;
 		}
 	}
 
 	if (node->children[0]->contents >= 0)
-		R_MarkLights (light, lnum, node->children[0]);
+		R_MarkLights (light, lnum, node->children[0], ent);
 	if (node->children[1]->contents >= 0)
-		R_MarkLights (light, lnum, node->children[1]);
+		R_MarkLights (light, lnum, node->children[1], ent);
 }
 #endif	/* end of 2 R_MarkLights versions */
 
@@ -386,6 +401,9 @@ void R_PushDlights (void)
 	dlight_t	*l;
 	vec3_t		eye, pn, right, up;
 	mplane_t	cull[4];
+
+	/* Before either return: the CPU alias loops ask r_dlightvis.c too. */
+	R_DlightVis_BeginFrame ();
 
 	if (gl_flashblend.integer)
 		return;
@@ -475,7 +493,7 @@ void R_PushDlights (void)
 		}
 		if (culled)
 			continue;
-		R_MarkLights (l, i, cl.worldmodel->nodes );
+		R_MarkLights (l, i, cl.worldmodel->nodes, NULL);
 	}
 }
 

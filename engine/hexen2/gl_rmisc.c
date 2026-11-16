@@ -25,6 +25,7 @@
 #include "hashindex.h"
 #include "img_load.h"
 #include "gl_sky.h"
+#include "r_dlightvis.h"
 
 /* gl_fog.c */
 void Fog_Init (void);
@@ -260,6 +261,7 @@ void R_Init (void)
 	Cmd_AddCommand ("timerefresh", R_TimeRefresh_f);
 	Cmd_AddCommand ("pointfile", R_ReadPointFile_f);
 	Cmd_AddCommand ("r_aliasinfo", R_AliasInfo_f);	/* uhexen2-khsa diagnostic */
+	R_DlightVis_Init ();	/* GitHub #97 */
 
 	Cvar_RegisterVariable (&r_norefresh);
 	Cvar_RegisterVariable (&r_lightmap);
@@ -362,6 +364,7 @@ void R_Init (void)
 	Cvar_RegisterVariable (&gl_waterripple);
 	Cvar_RegisterVariable (&gl_subdivide_size);
 	Cvar_RegisterVariable (&r_dlight_model_list);	/* uhexen2-vdmz */
+	Cvar_RegisterVariable (&r_dlight_occlusion);	/* GitHub #97 */
 	Cvar_RegisterVariable (&r_water_pixel_warp);	/* uhexen2-9o7u */
 	Cvar_RegisterVariable (&gl_waterwarp_speed);
 	Cvar_RegisterVariable (&gl_waterwarp_amount);
@@ -603,6 +606,7 @@ void R_NewMap (void)
 	skytexturenum = -1;
 	Sky_NewMap ();
 	Fog_NewMap ();
+	R_DlightVis_NewMap ();	/* GitHub #97 */
 	mirrortexturenum = -1;
 	for (i = 0; i < cl.worldmodel->numtextures; i++)
 	{

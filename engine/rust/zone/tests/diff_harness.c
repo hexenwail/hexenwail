@@ -67,7 +67,6 @@
 	extern void P##Memory_Init (void *buf, int size); \
 	extern void P##Z_Free (void *ptr); \
 	extern void *P##Z_Malloc (int size, int zone_id); \
-	extern void *P##Z_Realloc (void *ptr, int size, int zone_id); \
 	extern char *P##Z_Strdup (const char *s); \
 	extern void *P##Hunk_Alloc (int size); \
 	extern void *P##Hunk_AllocName (int size, const char *name); \
@@ -118,7 +117,6 @@ typedef struct zone_impl_s {
 	void (*Memory_Init)(void *, int);
 	void (*Z_Free)(void *);
 	void *(*Z_Malloc)(int, int);
-	void *(*Z_Realloc)(void *, int, int);
 	char *(*Z_Strdup)(const char *);
 	void *(*Hunk_Alloc)(int);
 	void *(*Hunk_AllocName)(int, const char *);
@@ -144,7 +142,7 @@ enum { IMPL_C = 0, IMPL_RUST = 1, IMPL_COUNT = 2 };
 static const zone_impl_t impls[IMPL_COUNT] = {
 	{
 		"C",
-		c_Memory_Init, c_Z_Free, c_Z_Malloc, c_Z_Realloc, c_Z_Strdup,
+		c_Memory_Init, c_Z_Free, c_Z_Malloc, c_Z_Strdup,
 		c_Hunk_Alloc, c_Hunk_AllocName, c_Hunk_HighAllocName,
 		c_Hunk_Strdup, c_Hunk_TempAlloc, c_Hunk_LowMark,
 		c_Hunk_FreeToLowMark, c_Hunk_HighMark, c_Hunk_FreeToHighMark,
@@ -156,7 +154,7 @@ static const zone_impl_t impls[IMPL_COUNT] = {
 	},
 	{
 		"Rust",
-		Memory_Init, Z_Free, Z_Malloc, Z_Realloc, Z_Strdup,
+		Memory_Init, Z_Free, Z_Malloc, Z_Strdup,
 		Hunk_Alloc, Hunk_AllocName, Hunk_HighAllocName,
 		Hunk_Strdup, Hunk_TempAlloc, Hunk_LowMark,
 		Hunk_FreeToLowMark, Hunk_HighMark, Hunk_FreeToHighMark,
@@ -659,51 +657,9 @@ static void scenario_zalloc(void)
 		(void)cur->Z_Malloc(1048576, Z_MAINZONE));
 }
 
-static void scenario_zrealloc(void)
+static void scenario_zstrdup(void)
 {
-	char *p;
-
-	init_zone("small zone for realloc cases", "64", 0);
-
-	call("Z_Realloc(NULL) behaves as Z_Malloc");
-	rec_int(buf_off(cur->Z_Realloc(NULL, 32, Z_MAINZONE)));
-	rec_state();
-
-	p = (char *)cur->Z_Malloc(32, Z_MAINZONE);
-	memset(p, 'x', 32);
-
-	call("grow, keeping the payload");
-	{
-		char *q = (char *)cur->Z_Realloc(p, 128, Z_MAINZONE);
-		rec_int(buf_off(q));
-		rec_int(q ? (unsigned char)q[0] : -1);
-		rec_int(q ? (unsigned char)q[31] : -1);
-		rec_int(q ? (unsigned char)q[127] : -1);
-		rec_state();
-		p = q;
-	}
-
-	call("shrink, keeping the payload");
-	{
-		char *q = (char *)cur->Z_Realloc(p, 16, Z_MAINZONE);
-		rec_int(buf_off(q));
-		rec_int(q ? (unsigned char)q[0] : -1);
-		rec_int(q ? (unsigned char)q[15] : -1);
-		rec_state();
-		p = q;
-	}
-
-	call("realloc to the same size");
-	rec_int(buf_off(cur->Z_Realloc(p, 16, Z_MAINZONE)));
-	rec_state();
-
-	{
-		void *q = cur->Z_Malloc(16, Z_MAINZONE);
-		cur->Z_Free(q);
-		EXPECT_ERROR("Z_Realloc on a freed pointer",
-			"Z_Realloc: realloced a freed pointer",
-			(void)cur->Z_Realloc(q, 32, Z_MAINZONE));
-	}
+	init_zone("small zone for Z_Strdup", "64", 0);
 
 	call("Z_Strdup");
 	rec_str(cur->Z_Strdup("a zone string"));
@@ -1110,7 +1066,7 @@ static double now_seconds(void)
 }
 
 /* The same operation mix for both implementations: a small string allocation
- * and free, a realloc, a hunk allocation released to a mark, and a temp
+ * and free, a hunk allocation released to a mark, and a temp
  * allocation.  These are the calls the engine makes constantly. */
 static void bench_mix(const zone_impl_t *impl, long iters)
 {
@@ -1125,7 +1081,6 @@ static void bench_mix(const zone_impl_t *impl, long iters)
 	for (i = 0; i < iters; i++) {
 		char *p = (char *)impl->Z_Malloc(64, Z_MAINZONE);
 		p[0] = (char)i;
-		p = (char *)impl->Z_Realloc(p, 96, Z_MAINZONE);
 		impl->Z_Free(p);
 
 		mark = impl->Hunk_LowMark();
@@ -1149,7 +1104,7 @@ static int bench_main(void)
 	bench_mix(&impls[IMPL_RUST], iters);
 	tr = now_seconds() - t0;
 
-	printf("benchmark: %ld iterations of Z_Malloc/Z_Realloc/Z_Free + "
+	printf("benchmark: %ld iterations of Z_Malloc/Z_Free + "
 		"Hunk_AllocName/Hunk_FreeToLowMark + Hunk_TempAlloc\n", iters);
 	printf("  C    : %8.3f s  (%6.1f ns/iteration)\n", tc,
 		tc * 1e9 / (double)iters);
@@ -1182,7 +1137,7 @@ int main(int argc, char **argv)
 	run_case("target configuration", scenario_target_config);
 	run_case("initialization paths", scenario_init_paths);
 	run_case("zone allocation", scenario_zalloc);
-	run_case("zone realloc", scenario_zrealloc);
+	run_case("zone strdup", scenario_zstrdup);
 	run_case("hunk low", scenario_hunk_low);
 	run_case("hunk high", scenario_hunk_high);
 #if !defined(SERVERONLY)

@@ -18,9 +18,13 @@
 #include "gl_postprocess.h"
 #include "gl_matrix.h"
 #include "gl_shader.h"
+#include "gl_uniforms.h"	/* R_SetOITMode, the OIT twins' OitFrag (#450 W3) */
 #include "gl_pipeline.h"
 #include "gl_vbo.h"
 #include "draw.h"
+
+/* sbloom_*[] -- the bloom family, engine/shaders/sbloom_*.glsl (#450) */
+#include "shaders_gen.h"
 
 /* GL defines that may be missing on some platforms (MinGW, ES3) */
 #ifndef GL_RGBA16F
@@ -74,21 +78,13 @@
 #define PP_ES_PRECISION	"precision highp float;\nprecision highp int;\nprecision highp sampler3D;\n"
 #define PP_VERT_HEADER	"#version 300 es\n" PP_ES_PRECISION
 #define PP_FRAG_HEADER	"#version 300 es\n" PP_ES_PRECISION
-/* bitfieldReverse is GLSL 4.00 / ES 3.10.  Only bayer16 uses it, and only on
- * a value whose meaningful bits are the low 16, but a full 32-bit reversal is
- * what the desktop builtin does and what the following ">> 24" expects. */
-#define PP_BITFIELD_REVERSE \
-	"uint bitfieldReverse(uint v) {\n" \
-	"    v = ((v & 0x55555555u) << 1) | ((v >> 1) & 0x55555555u);\n" \
-	"    v = ((v & 0x33333333u) << 2) | ((v >> 2) & 0x33333333u);\n" \
-	"    v = ((v & 0x0F0F0F0Fu) << 4) | ((v >> 4) & 0x0F0F0F0Fu);\n" \
-	"    v = ((v & 0x00FF00FFu) << 8) | ((v >> 8) & 0x00FF00FFu);\n" \
-	"    return (v << 16) | (v >> 16);\n" \
-	"}\n"
+/* bitfieldReverse (GLSL 4.00 / ES 3.10) used to be spliced in here for the
+ * ES tier as PP_BITFIELD_REVERSE.  Since #450 the polyfill lives in
+ * engine/shaders/spp_frag.glsl under #ifdef GL_ES, which the ES compiler
+ * predefines, so the tier choice no longer needs C. */
 #else
 #define PP_VERT_HEADER	"#version 430 core\n"
 #define PP_FRAG_HEADER	"#version 430 core\n"
-#define PP_BITFIELD_REVERSE	""
 #endif
 
 /* FBO state — scaled 3D scene */
@@ -137,16 +133,55 @@ static GLuint	bloom_down_prog;	/* downsample 4-tap box */
 static GLuint	bloom_up_prog;		/* upsample 3x3 tent + additive blend */
 
 /* Bloom shader uniform locations */
-static GLint	bloom_bright_loc_scene, bloom_bright_loc_threshold, bloom_bright_loc_rcpframe;
-static GLint	bloom_down_loc_scene, bloom_down_loc_rcpframe;
-static GLint	bloom_up_loc_scene, bloom_up_loc_prev, bloom_up_loc_rcpframe;
+static GLint	bloom_bright_loc_scene, bloom_down_loc_scene, bloom_up_loc_scene;
+
+/* The bloom passes' one uniform block (engine/shaders/bloom.inc), replacing
+ * the loose u_rcpframe / u_threshold the inline programs took (#450).  GL
+ * binding point 6: 0 Hi-Z, 1/2 the shared vert/frag blocks, 3 SsaoParams,
+ * 4 CullParams, 5 LcParams.  Assigned from C with glUniformBlockBinding,
+ * since ES 3.00 cannot name a block binding in the shader. */
+#define BLOOM_PARAMS_UBO_BINDING	6
+
+typedef struct {
+	float	p[4];	/* xy reciprocal source size, z bright-pass threshold */
+} bloom_params_t;
+
+COMPILE_TIME_ASSERT(bloomparams_size, sizeof(bloom_params_t) == 16);
 static GLuint	bloom_dummy_vao;		/* dummy VAO required for glDrawArrays in GL 4.3 core */
 
 /* Shader state */
 static GLuint	pp_program;
 static GLint	pp_loc_scene;
-static GLint	pp_loc_gamma;
-static GLint	pp_loc_contrast;
+
+/* The post-process program's parameters (#450).  They were sixteen loose
+ * uniforms; now u_mvp is the PpVert block and the rest PpParams, in
+ * engine/shaders/spp_{vert,frag}.glsl.  GL binding points 8 and 9 (0 Hi-Z,
+ * 1/2 the shared blocks, 3 SsaoParams, 4 CullParams, 5 LcParams,
+ * 6 BloomParams, 7 OitParams).
+ *
+ * pp_params is a SHADOW, written field by field where the glUniform calls
+ * used to be and uploaded whole before each draw.  It persists between draws
+ * on purpose: loose uniforms kept their last value per program, and the
+ * native-resolution pass relies on that -- it never sets lutmax or the bloom
+ * strength and inherits whatever the previous final pass left.  Two own
+ * buffers rather than the GL_Upload ring, because this runs on the ES tier,
+ * where GL_Upload is a stub (see PP_PushBloomParams). */
+#define PP_VERT_UBO_BINDING	8
+#define PP_FRAG_UBO_BINDING	9
+
+typedef struct {
+	float	p0[4];	/* gamma, contrast, dither, lutmax */
+	float	p1[4];	/* scale, waterwarp, time, fxaa_on */
+	float	p2[4];	/* rcpFrame.xy, viewdelta.xy */
+	float	p3[4];	/* motionblur, hdr_exposure, u_bloom_strength, unused */
+	GLint	i0[4];	/* softemu */
+} pp_params_t;		/* 80 bytes, std140 */
+
+COMPILE_TIME_ASSERT(ppparams_size, sizeof(pp_params_t) == 80);
+
+static pp_params_t	pp_params;
+static float		pp_vert_mvp[16];
+static GLuint		pp_vert_ubo, pp_frag_ubo;
 
 /* The contrast the shader applies: v_contrast clamped to Ironwail's 1..2
  * (gl_rmain.c: q_min(2.0f, q_max(1.0f, vid_contrast.value))).  Below 1 it
@@ -158,21 +193,8 @@ static float PP_Contrast (void)
 	if (c > 2.0f) c = 2.0f;
 	return c;
 }
-static GLint	pp_loc_mvp;
-static GLint	pp_loc_softemu;
-static GLint	pp_loc_dither;
 static GLint	pp_loc_paletteLUT;
-static GLint	pp_loc_lutmax;
-static GLint	pp_loc_scale;
-static GLint	pp_loc_waterwarp;
-static GLint	pp_loc_time;
-static GLint	pp_loc_fxaa;
-static GLint	pp_loc_rcpframe;
-static GLint	pp_loc_motionblur;
-static GLint	pp_loc_viewdelta;
-static GLint	pp_loc_hdr_exposure;
 static GLint	pp_loc_bloom_tex;
-static GLint	pp_loc_bloom_strength;
 
 /* Palette LUT state.  LUT_DIM^3 grid, RGBA8 -- see PP_UploadLUT for why the
  * colour is baked rather than looked up from a palette uniform, and why RGBA
@@ -392,8 +414,6 @@ static GLint	oit_resolve_loc_accum;
 static GLint	oit_resolve_loc_reveal;
 static GLint	oit_resolve_msaa_loc_accum;
 static GLint	oit_resolve_msaa_loc_reveal;
-static GLint	oit_resolve_loc_mboit;
-static GLint	oit_resolve_msaa_loc_mboit;
 static int	oit_samples;		/* >1 when accum/revealage are multisampled */
 static int	oit_width, oit_height;
 static qboolean	oit_available;		/* true if FBO + shader created OK */
@@ -409,125 +429,36 @@ static GLuint	mboit_fbo;
 static qboolean	mboit_available;
 static int	mboit_pass;		/* 0 none, 1 moments, 2 composite */
 
-/* OIT resolve shaders */
-static const char oit_resolve_vert[] =
-	PP_VERT_HEADER
-	"void main() {\n"
-	"    ivec2 v = ivec2(gl_VertexID & 1, gl_VertexID >> 1);\n"
-	"    gl_Position = vec4(vec2(v) * 4.0 - 1.0, 0.0, 1.0);\n"
-	"}\n";
-
-/* No stencil gate, no early_fragment_tests. WBOIT handles empty pixels
- * via math: accum=0, revealage=1 → alpha=0 → transparent → scene unchanged. */
-static const char oit_resolve_frag[] =
-	PP_FRAG_HEADER
-	"uniform sampler2D TexAccum;\n"
-	"uniform sampler2D TexReveal;\n"
-	"uniform int u_mboit;\n"	/* TexReveal holds MBOIT's b0 (#87) */
-	"layout(location=0) out vec4 out_fragcolor;\n"
-	"float max3(vec3 v) { return max(max(v.x, v.y), v.z); }\n"
-	"void main() {\n"
-	"    ivec2 coords = ivec2(gl_FragCoord.xy);\n"
-	"    float revealage = texelFetch(TexReveal, coords, 0).r;\n"
-	/* MBOIT: the scene shows through what the absorbance b0 leaves */
-	"    if (u_mboit != 0) revealage = exp(-max(revealage, 0.0));\n"
-	"    vec4 accumulation = texelFetch(TexAccum, coords, 0);\n"
-	"    if (isinf(max3(abs(accumulation.rgb))))\n"
-	"        accumulation.rgb = vec3(accumulation.a);\n"
-	"    vec3 average_color = accumulation.rgb / max(accumulation.a, 1e-5);\n"
-	"    out_fragcolor = vec4(average_color, 1.0 - revealage);\n"
-	"}\n";
-
-/* MSAA variant: per-sample resolve via sampler2DMS + gl_SampleID, used when
- * the OIT accum/revealage targets are GL_TEXTURE_2D_MULTISAMPLE.
+/* OIT resolve shaders: engine/shaders/soit_resolve_vert.glsl,
+ * soit_resolve_frag.glsl and the desktop-only soit_resolve_msaa_frag.glsl,
+ * via shaders_gen.h (#450).  The MSAA variant uses sampler2DMS and
+ * gl_SampleID, which are GLSL ES 3.10, and glTexImage2DMultisample_fp is a
+ * no-op on the ES tier, so oit_samples never exceeds 1 there and that program
+ * is never built on ES (OIT_InitShader).
  *
- * Absent on the ES tier: sampler2DMS and gl_SampleID are GLSL ES 3.10, and
- * glTexImage2DMultisample_fp is a no-op there, so oit_samples never exceeds 1
- * and this program could never be selected.  It used to be compiled anyway on
- * the theory that a failed build was harmless; it is not -- a driver handed a
- * shader it just rejected is a driver in a state nothing tests. */
-#ifndef USE_GLES
-static const char oit_resolve_frag_msaa[] =
-	PP_FRAG_HEADER
-	"uniform sampler2DMS TexAccum;\n"
-	"uniform sampler2DMS TexReveal;\n"
-	"uniform int u_mboit;\n"
-	"layout(location=0) out vec4 out_fragcolor;\n"
-	"float max3(vec3 v) { return max(max(v.x, v.y), v.z); }\n"
-	"void main() {\n"
-	"    ivec2 coords = ivec2(gl_FragCoord.xy);\n"
-	"    float revealage = texelFetch(TexReveal, coords, gl_SampleID).r;\n"
-	"    if (u_mboit != 0) revealage = exp(-max(revealage, 0.0));\n"
-	"    vec4 accumulation = texelFetch(TexAccum, coords, gl_SampleID);\n"
-	"    if (isinf(max3(abs(accumulation.rgb))))\n"
-	"        accumulation.rgb = vec3(accumulation.a);\n"
-	"    vec3 average_color = accumulation.rgb / max(accumulation.a, 1e-5);\n"
-	"    out_fragcolor = vec4(average_color, 1.0 - revealage);\n"
-	"}\n";
-#endif /* !USE_GLES */
+ * u_mboit, the loose int that said whether TexReveal holds MBOIT's b0 (#87),
+ * is now the OitParams block (oit_resolve.inc), GL binding point 7: 0 Hi-Z,
+ * 1/2 the shared blocks, 3 SsaoParams, 4 CullParams, 5 LcParams,
+ * 6 BloomParams.  Like BloomParams it lives in its own buffer, not the
+ * GL_Upload ring, because the resolve runs on the ES tier, where GL_Upload is
+ * a stub. */
+#define OIT_PARAMS_UBO_BINDING	7
+
+typedef struct {
+	GLint	p[4];	/* x: MBOIT (1) or WBOIT (0) */
+} oit_params_t;
+
+COMPILE_TIME_ASSERT(oitparams_size, sizeof(oit_params_t) == 16);
+
+static GLuint	oit_ubo;
 
 /* ------------------------------------------------------------------ */
 /* Bloom post-process shaders                                          */
 /* ------------------------------------------------------------------ */
 
-static const char bloom_vert_src[] =
-	PP_VERT_HEADER
-	"out vec2 v_uv;\n"
-	"void main() {\n"
-	"    ivec2 v = ivec2(gl_VertexID & 1, gl_VertexID >> 1);\n"
-	"    vec2 pos = vec2(v) * 4.0 - 1.0;\n"
-	"    v_uv = pos * 0.5 + 0.5;\n"
-	"    gl_Position = vec4(pos, 0.0, 1.0);\n"
-	"}\n";
-
-static const char bloom_bright_frag_src[] =
-	PP_FRAG_HEADER
-	"uniform sampler2D u_scene;\n"
-	"uniform float u_threshold;\n"
-	"uniform vec2 u_rcpframe;\n"
-	"in vec2 v_uv;\n"
-	"layout(location=0) out vec4 fragColor;\n"
-	"void main() {\n"
-	"    vec3 c = texture(u_scene, v_uv).rgb;\n"
-	"    float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));\n"
-	"    float w = max(0.0, lum - u_threshold);\n"
-	"    fragColor = vec4(c * (w / max(lum, 0.001)), 1.0);\n"
-	"}\n";
-
-static const char bloom_down_frag_src[] =
-	PP_FRAG_HEADER
-	"uniform sampler2D u_scene;\n"
-	"uniform vec2 u_rcpframe;\n"
-	"in vec2 v_uv;\n"
-	"layout(location=0) out vec4 fragColor;\n"
-	"void main() {\n"
-	"    vec2 h = u_rcpframe * 0.5;\n"
-	"    vec4 s = texture(u_scene, v_uv + vec2(-h.x,-h.y))\n"
-	"           + texture(u_scene, v_uv + vec2( h.x,-h.y))\n"
-	"           + texture(u_scene, v_uv + vec2(-h.x, h.y))\n"
-	"           + texture(u_scene, v_uv + vec2( h.x, h.y));\n"
-	"    fragColor = s * 0.25;\n"
-	"}\n";
-
-static const char bloom_up_frag_src[] =
-	PP_FRAG_HEADER
-	"uniform sampler2D u_scene;\n"
-	"uniform vec2 u_rcpframe;\n"
-	"in vec2 v_uv;\n"
-	"layout(location=0) out vec4 fragColor;\n"
-	"void main() {\n"
-	"    vec2 h = u_rcpframe;\n"
-	"    vec4 s = texture(u_scene, v_uv + vec2(-h.x, 0)) * 2.0\n"
-	"           + texture(u_scene, v_uv + vec2( h.x, 0)) * 2.0\n"
-	"           + texture(u_scene, v_uv + vec2(0, -h.y)) * 2.0\n"
-	"           + texture(u_scene, v_uv + vec2(0,  h.y)) * 2.0\n"
-	"           + texture(u_scene, v_uv + vec2(-h.x,-h.y))\n"
-	"           + texture(u_scene, v_uv + vec2( h.x,-h.y))\n"
-	"           + texture(u_scene, v_uv + vec2(-h.x, h.y))\n"
-	"           + texture(u_scene, v_uv + vec2( h.x, h.y));\n"
-	"    s /= 12.0;\n"
-	"    fragColor = s;\n"
-	"}\n";
+/* engine/shaders/sbloom_vert.glsl and sbloom_{bright,down,up}_frag.glsl, via
+ * shaders_gen.h (#450).  They carry no #version: PP_VERT_HEADER /
+ * PP_FRAG_HEADER go in as a separate chunk, so one file serves both tiers. */
 
 /* ------------------------------------------------------------------ */
 
@@ -872,124 +803,9 @@ static qboolean PP_CreateFBO (int width, int height)
 /* Shader                                                              */
 /* ------------------------------------------------------------------ */
 
-static const char pp_vert_src[] =
-	PP_VERT_HEADER
-	"layout(location = 0) in vec3 a_position;\n"
-	"layout(location = 1) in vec2 a_texcoord;\n"
-	"out vec2 v_texcoord;\n"
-	"uniform mat4 u_mvp;\n"
-	"void main() {\n"
-	"    v_texcoord = a_texcoord;\n"
-	"    gl_Position = u_mvp * vec4(a_position, 1.0);\n"
-	"}\n";
-
-static const char pp_frag_src[] =
-	PP_FRAG_HEADER
-	"uniform sampler2D scene;\n"
-	"uniform float gamma;\n"
-	"uniform float contrast;\n"
-	"uniform int softemu;\n"
-	"uniform float dither;\n"
-	"uniform sampler3D paletteLUT;\n"
-	"uniform float lutmax;\n"	/* grid size - 1 of the bound LUT (#80) */
-	"uniform float scale;\n"
-	"uniform float waterwarp;\n"
-	"uniform float time;\n"
-	"uniform float fxaa_on;\n"
-	"uniform vec2 rcpFrame;\n"
-	"uniform float motionblur;\n"
-	"uniform float hdr_exposure;\n"
-	"uniform vec2 viewdelta;\n"
-	"uniform sampler2D u_bloom;\n"
-	"uniform float u_bloom_strength;\n"
-	"in vec2 v_texcoord;\n"
-	"out vec4 fragColor;\n"
-	"\n"
-	"vec4 fxaa(sampler2D tex, vec2 uv, vec2 rcp) {\n"
-	"    #define LM(c) ((c).g)\n"
-	"    vec3 rN=texture(tex,uv+vec2(0,-1)*rcp).rgb,rS=texture(tex,uv+vec2(0,1)*rcp).rgb;\n"
-	"    vec3 rE=texture(tex,uv+vec2(1,0)*rcp).rgb,rW=texture(tex,uv+vec2(-1,0)*rcp).rgb;\n"
-	"    vec3 rM=texture(tex,uv).rgb;\n"
-	"    float lN=LM(rN),lS=LM(rS),lE=LM(rE),lW=LM(rW),lM=LM(rM);\n"
-	"    float mn=min(lM,min(min(lN,lS),min(lW,lE)));\n"
-	"    float mx=max(lM,max(max(lN,lS),max(lW,lE)));\n"
-	"    float rng=mx-mn;\n"
-	"    if(rng<max(0.0625,mx*0.166)) return vec4(rM,1.0);\n"
-	"    float lNW=LM(texture(tex,uv+vec2(-1,-1)*rcp).rgb);\n"
-	"    float lNE=LM(texture(tex,uv+vec2(1,-1)*rcp).rgb);\n"
-	"    float lSW=LM(texture(tex,uv+vec2(-1,1)*rcp).rgb);\n"
-	"    float lSE=LM(texture(tex,uv+vec2(1,1)*rcp).rgb);\n"
-	"    float eH=abs(lNW+lNE-2.0*lN)+abs(lW+lE-2.0*lM)*2.0+abs(lSW+lSE-2.0*lS);\n"
-	"    float eV=abs(lNW+lSW-2.0*lW)+abs(lN+lS-2.0*lM)*2.0+abs(lNE+lSE-2.0*lE);\n"
-	"    bool hz=(eH>=eV);\n"
-	"    float l1=hz?lS:lE,l2=hz?lN:lW;\n"
-	"    float st=hz?rcp.y:rcp.x;\n"
-	"    if(abs(l1-lM)<abs(l2-lM))st=-st;\n"
-	"    float avg=(lN+lS+lE+lW)*0.25;\n"
-	"    float sp=clamp(abs(avg-lM)/rng,0.0,0.75);\n"
-	"    vec2 p=uv;if(hz)p.y+=st*0.5;else p.x+=st*0.5;\n"
-	"    return vec4(mix(texture(tex,p).rgb,rM,1.0-sp),1.0);\n"
-	"    #undef LM\n"
-	"}\n"
-	"\n"
-	PP_BITFIELD_REVERSE
-	"float bayer16(ivec2 c) {\n"
-	"    c &= 15;\n"
-	"    c.y ^= c.x;\n"
-	"    uint v = uint(c.y | (c.x << 8));\n"
-	"    v = (v ^ (v << 2)) & 0x3333u;\n"
-	"    v = (v ^ (v << 1)) & 0x5555u;\n"
-	"    v |= v >> 7;\n"
-	"    v = bitfieldReverse(v) >> 24;\n"
-	"    return float(v) / 256.0 - 0.5;\n"
-	"}\n"
-	"\n"
-	"void main() {\n"
-	"    vec2 uv = v_texcoord;\n"
-	"    if (waterwarp > 0.0) {\n"
-	"        uv.x += sin(uv.y * 10.0 + time * 1.5) * 0.015 * waterwarp;\n"
-	"        uv.y += sin(uv.x * 10.0 + time * 2.0) * 0.015 * waterwarp;\n"
-	"    }\n"
-	"    vec4 color = (fxaa_on > 0.0) ? fxaa(scene, uv, rcpFrame) : texture(scene, uv);\n"
-	"    if (motionblur > 0.0) {\n"
-	"        vec2 vel = viewdelta * motionblur;\n"
-	"        color.rgb = color.rgb * 0.4;\n"
-	"        color.rgb += texture(scene, uv + vel * 0.25).rgb * 0.2;\n"
-	"        color.rgb += texture(scene, uv + vel * 0.50).rgb * 0.15;\n"
-	"        color.rgb += texture(scene, uv + vel * 0.75).rgb * 0.125;\n"
-	"        color.rgb += texture(scene, uv + vel * 1.00).rgb * 0.125;\n"
-	"    }\n"
-	"    if (u_bloom_strength > 0.0) {\n"
-	"        color.rgb += texture(u_bloom, uv).rgb * u_bloom_strength;\n"
-	"    }\n"
-	"    /* HDR tonemapping (ACES filmic) */\n"
-	"    if (hdr_exposure > 0.0) {\n"
-	"        color.rgb *= hdr_exposure;\n"
-	"        vec3 x = color.rgb;\n"
-	"        color.rgb = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);\n"
-	"    }\n"
-	/* Ironwail's (and QuakeSpasm's, MarkV's) contrast: a multiplier, 1..2,
-	 * that brightens.  This was a stretch about mid-grey, which a dark
-	 * scene -- most of Hexen II -- read as darkening: contrast 1.5 took
-	 * demo1's mean from 0.107 to 0.018.  PP_Contrast clamps.  GitHub #112
-	 * follow-up. */
-	"    color.rgb *= contrast;\n"
-	"    if (gamma != 1.0)\n"
-	"        color.rgb = pow(max(color.rgb, vec3(0.0)), vec3(gamma));\n"
-	"    color.rgb = clamp(color.rgb, 0.0, 1.0);\n"
-	"\n"
-	"    if (softemu > 0) {\n"
-	"        vec3 c = color.rgb;\n"
-	"        if (softemu == 1) {\n"
-	"            float d = bayer16(ivec2(gl_FragCoord.xy * scale));\n"
-	"            c += d * dither / 16.0;\n"
-	"        }\n"
-	"        ivec3 idx = ivec3(clamp(c, 0.0, 1.0) * lutmax + 0.5);\n"
-	"        color.rgb = texelFetch(paletteLUT, idx, 0).rgb;\n"
-	"    }\n"
-	"\n"
-	"    fragColor = color;\n"
-	"}\n";
+/* The post-process program is engine/shaders/spp_vert.glsl and spp_frag.glsl
+ * (#450), via shaders_gen.h; PP_InitShader compiles them with the
+ * PP_*_HEADER chunk. */
 
 /* These helpers are already in gl_vidsdl.c but static.  We re-declare
  * local copies here to stay self-contained. */
@@ -1011,6 +827,98 @@ static GLuint PP_CompileShader (GLenum type, const char *source)
 		return 0;
 	}
 	return shader;
+}
+
+/* PP_CompileShader for a body from engine/shaders: the tier header (#version
+ * and, on ES, the precision lines) goes first as its own glShaderSource
+ * chunk, which is how GL_LoadComputeProgram and GL_InitProgramSplit feed the
+ * other file-backed shaders. */
+static GLuint PP_CompileShaderSplit (GLenum type, const char *header, const char *body)
+{
+	GLuint shader;
+	GLint status;
+	char log[512];
+	const char *sources[2];
+
+	sources[0] = header;
+	sources[1] = body;
+	shader = glCreateShader_fp(type);
+	glShaderSource_fp(shader, 2, sources, NULL);
+	glCompileShader_fp(shader);
+	glGetShaderiv_fp(shader, GL_COMPILE_STATUS, &status);
+	if (!status)
+	{
+		glGetShaderInfoLog_fp(shader, sizeof(log), NULL, log);
+		Con_Printf("PostProcess shader compile error: %s\n", log);
+		glDeleteShader_fp(shader);
+		return 0;
+	}
+	return shader;
+}
+
+/* Pin a program's uniform block to its binding point, checking the driver's
+ * layout against the C mirror's size (the RU_CheckBlockSize practice).  The
+ * binding dies with the program, so vid_restart is covered.  Used by the
+ * bloom (BloomParams) and OIT-resolve (OitParams) programs. */
+static void PP_BindUniformBlock (GLuint prog, const char *block, GLuint binding, size_t mirror)
+{
+	GLuint	blk;
+	GLint	size = 0;
+
+	if (!prog || !glGetUniformBlockIndex_fp || !glUniformBlockBinding_fp)
+		return;
+	blk = glGetUniformBlockIndex_fp(prog, block);
+	if (blk == GL_INVALID_INDEX)
+		return;
+	if (glGetActiveUniformBlockiv_fp)
+	{
+		glGetActiveUniformBlockiv_fp(prog, blk, GL_UNIFORM_BLOCK_DATA_SIZE, &size);
+		if (size != (GLint)mirror)
+			Con_Printf("WARNING: uniform block %s is %d bytes on this driver, "
+				   "C mirror is %d -- its uniforms will be wrong\n",
+				   block, (int)size, (int)mirror);
+	}
+	glUniformBlockBinding_fp(prog, blk, binding);
+}
+
+/* Write one bloom pass's parameters into bloom_ubo and bind it.
+ *
+ * NOT the GL_Upload frame ring that gl_worldcull.c and gl_lightcluster.c use:
+ * on the ES tier GL_Upload is a stub that hands back buffer 0 (gl_buffer.c,
+ * the USE_GLES arm), and bloom runs on both tiers.  Through the ring, the ES
+ * build read BloomParams as zeros -- threshold 0 and a zero step -- and
+ * bloomed every pixel, while the desktop build stayed pixel-identical.  So
+ * the bloom passes own one 16-byte buffer, the way gl_ssao.c owns ss_ubo.  A
+ * glBufferSubData between draws is ordered against the earlier draws by GL
+ * itself, so seven of them a frame are correct on every driver. */
+static GLuint	bloom_ubo;
+
+static void PP_PushBloomParams (float rcp_w, float rcp_h, float threshold)
+{
+	bloom_params_t	bp;
+
+	bp.p[0] = rcp_w;
+	bp.p[1] = rcp_h;
+	bp.p[2] = threshold;
+	bp.p[3] = 0.0f;
+	GL_BindBuffer(GL_UNIFORM_BUFFER, bloom_ubo);
+	glBufferSubData_fp(GL_UNIFORM_BUFFER, 0, sizeof(bp), &bp);
+	GL_BindBuffer(GL_UNIFORM_BUFFER, 0);
+	GL_BindBufferBase(GL_UNIFORM_BUFFER, BLOOM_PARAMS_UBO_BINDING, bloom_ubo);
+}
+
+/* Upload the post-process shadow (u_mvp from the current matrices) into its
+ * two blocks and bind them.  Called right before each pp_program draw. */
+static void PP_PushParams (void)
+{
+	GL_GetMVP(pp_vert_mvp);
+	GL_BindBuffer(GL_UNIFORM_BUFFER, pp_vert_ubo);
+	glBufferSubData_fp(GL_UNIFORM_BUFFER, 0, sizeof(pp_vert_mvp), pp_vert_mvp);
+	GL_BindBuffer(GL_UNIFORM_BUFFER, pp_frag_ubo);
+	glBufferSubData_fp(GL_UNIFORM_BUFFER, 0, sizeof(pp_params), &pp_params);
+	GL_BindBuffer(GL_UNIFORM_BUFFER, 0);
+	GL_BindBufferBase(GL_UNIFORM_BUFFER, PP_VERT_UBO_BINDING, pp_vert_ubo);
+	GL_BindBufferBase(GL_UNIFORM_BUFFER, PP_FRAG_UBO_BINDING, pp_frag_ubo);
 }
 
 static GLuint PP_LinkProgram (GLuint vert, GLuint frag)
@@ -1039,9 +947,9 @@ static qboolean PP_InitShader (void)
 	GLuint vs, fs;
 	GLint loc;
 
-	vs = PP_CompileShader(GL_VERTEX_SHADER, pp_vert_src);
+	vs = PP_CompileShaderSplit(GL_VERTEX_SHADER, PP_VERT_HEADER, spp_vert);
 	if (!vs) return false;
-	fs = PP_CompileShader(GL_FRAGMENT_SHADER, pp_frag_src);
+	fs = PP_CompileShaderSplit(GL_FRAGMENT_SHADER, PP_FRAG_HEADER, spp_frag);
 	if (!fs) { glDeleteShader_fp(vs); return false; }
 
 	pp_program = PP_LinkProgram(vs, fs);
@@ -1050,21 +958,22 @@ static qboolean PP_InitShader (void)
 	if (!pp_program) return false;
 
 	pp_loc_scene = glGetUniformLocation_fp(pp_program, "scene");
-	pp_loc_gamma = glGetUniformLocation_fp(pp_program, "gamma");
-	pp_loc_contrast = glGetUniformLocation_fp(pp_program, "contrast");
-	pp_loc_mvp = glGetUniformLocation_fp(pp_program, "u_mvp");
-	pp_loc_softemu = glGetUniformLocation_fp(pp_program, "softemu");
-	pp_loc_dither = glGetUniformLocation_fp(pp_program, "dither");
 	pp_loc_paletteLUT = glGetUniformLocation_fp(pp_program, "paletteLUT");
-	pp_loc_lutmax = glGetUniformLocation_fp(pp_program, "lutmax");
-	pp_loc_scale = glGetUniformLocation_fp(pp_program, "scale");
-	pp_loc_waterwarp = glGetUniformLocation_fp(pp_program, "waterwarp");
-	pp_loc_time = glGetUniformLocation_fp(pp_program, "time");
-	pp_loc_fxaa = glGetUniformLocation_fp(pp_program, "fxaa_on");
-	pp_loc_rcpframe = glGetUniformLocation_fp(pp_program, "rcpFrame");
-	pp_loc_motionblur = glGetUniformLocation_fp(pp_program, "motionblur");
-	pp_loc_viewdelta = glGetUniformLocation_fp(pp_program, "viewdelta");
-	pp_loc_hdr_exposure = glGetUniformLocation_fp(pp_program, "hdr_exposure");
+	PP_BindUniformBlock(pp_program, "PpVert", PP_VERT_UBO_BINDING, sizeof(pp_vert_mvp));
+	PP_BindUniformBlock(pp_program, "PpParams", PP_FRAG_UBO_BINDING, sizeof(pp_params_t));
+	/* A fresh program starts with every loose uniform at zero; so does the
+	 * shadow that replaced them. */
+	memset(&pp_params, 0, sizeof(pp_params));
+	if (!pp_vert_ubo)
+	{
+		glGenBuffers_fp(1, &pp_vert_ubo);
+		GL_BindBuffer(GL_UNIFORM_BUFFER, pp_vert_ubo);
+		glBufferData_fp(GL_UNIFORM_BUFFER, sizeof(pp_vert_mvp), NULL, GL_DYNAMIC_DRAW);
+		glGenBuffers_fp(1, &pp_frag_ubo);
+		GL_BindBuffer(GL_UNIFORM_BUFFER, pp_frag_ubo);
+		glBufferData_fp(GL_UNIFORM_BUFFER, sizeof(pp_params_t), NULL, GL_DYNAMIC_DRAW);
+		GL_BindBuffer(GL_UNIFORM_BUFFER, 0);
+	}
 
 	/* bind samplers once */
 	R_UseProgram (pp_program);
@@ -1073,15 +982,14 @@ static qboolean PP_InitShader (void)
 	loc = pp_loc_paletteLUT;
 	if (loc >= 0) glUniform1i_fp(loc, 1);	/* texture unit 1 */
 	pp_loc_bloom_tex = glGetUniformLocation_fp(pp_program, "u_bloom");
-	pp_loc_bloom_strength = glGetUniformLocation_fp(pp_program, "u_bloom_strength");
 	if (pp_loc_bloom_tex >= 0) glUniform1i_fp(pp_loc_bloom_tex, 2);	/* texture unit 2 */
 	R_UseProgram (0);
 
 	/* Bloom shaders */
-	vs = PP_CompileShader(GL_VERTEX_SHADER, bloom_vert_src);
+	vs = PP_CompileShaderSplit(GL_VERTEX_SHADER, PP_VERT_HEADER, sbloom_vert);
 	if (!vs) return true;	/* bloom optional */
 
-	fs = PP_CompileShader(GL_FRAGMENT_SHADER, bloom_bright_frag_src);
+	fs = PP_CompileShaderSplit(GL_FRAGMENT_SHADER, PP_FRAG_HEADER, sbloom_bright_frag);
 	if (!fs) { glDeleteShader_fp(vs); return true; }
 	bloom_bright_prog = PP_LinkProgram(vs, fs);
 	glDeleteShader_fp(vs);
@@ -1089,12 +997,11 @@ static qboolean PP_InitShader (void)
 	if (!bloom_bright_prog) return true;
 
 	bloom_bright_loc_scene = glGetUniformLocation_fp(bloom_bright_prog, "u_scene");
-	bloom_bright_loc_threshold = glGetUniformLocation_fp(bloom_bright_prog, "u_threshold");
-	bloom_bright_loc_rcpframe = glGetUniformLocation_fp(bloom_bright_prog, "u_rcpframe");
+	PP_BindUniformBlock(bloom_bright_prog, "BloomParams", BLOOM_PARAMS_UBO_BINDING, sizeof(bloom_params_t));
 
-	vs = PP_CompileShader(GL_VERTEX_SHADER, bloom_vert_src);
+	vs = PP_CompileShaderSplit(GL_VERTEX_SHADER, PP_VERT_HEADER, sbloom_vert);
 	if (!vs) return true;
-	fs = PP_CompileShader(GL_FRAGMENT_SHADER, bloom_down_frag_src);
+	fs = PP_CompileShaderSplit(GL_FRAGMENT_SHADER, PP_FRAG_HEADER, sbloom_down_frag);
 	if (!fs) { glDeleteShader_fp(vs); return true; }
 	bloom_down_prog = PP_LinkProgram(vs, fs);
 	glDeleteShader_fp(vs);
@@ -1102,11 +1009,11 @@ static qboolean PP_InitShader (void)
 	if (!bloom_down_prog) return true;
 
 	bloom_down_loc_scene = glGetUniformLocation_fp(bloom_down_prog, "u_scene");
-	bloom_down_loc_rcpframe = glGetUniformLocation_fp(bloom_down_prog, "u_rcpframe");
+	PP_BindUniformBlock(bloom_down_prog, "BloomParams", BLOOM_PARAMS_UBO_BINDING, sizeof(bloom_params_t));
 
-	vs = PP_CompileShader(GL_VERTEX_SHADER, bloom_vert_src);
+	vs = PP_CompileShaderSplit(GL_VERTEX_SHADER, PP_VERT_HEADER, sbloom_vert);
 	if (!vs) return true;
-	fs = PP_CompileShader(GL_FRAGMENT_SHADER, bloom_up_frag_src);
+	fs = PP_CompileShaderSplit(GL_FRAGMENT_SHADER, PP_FRAG_HEADER, sbloom_up_frag);
 	if (!fs) { glDeleteShader_fp(vs); return true; }
 	bloom_up_prog = PP_LinkProgram(vs, fs);
 	glDeleteShader_fp(vs);
@@ -1114,11 +1021,16 @@ static qboolean PP_InitShader (void)
 	if (!bloom_up_prog) return true;
 
 	bloom_up_loc_scene = glGetUniformLocation_fp(bloom_up_prog, "u_scene");
-	bloom_up_loc_prev = glGetUniformLocation_fp(bloom_up_prog, "u_prev");
-	bloom_up_loc_rcpframe = glGetUniformLocation_fp(bloom_up_prog, "u_rcpframe");
+	PP_BindUniformBlock(bloom_up_prog, "BloomParams", BLOOM_PARAMS_UBO_BINDING, sizeof(bloom_params_t));
 
 	/* GL 4.3 core profile requires a VAO bound for any draw call. */
 	glGenVertexArrays_fp(1, &bloom_dummy_vao);
+
+	/* BloomParams storage; same lifetime as the programs and VAO above. */
+	glGenBuffers_fp(1, &bloom_ubo);
+	GL_BindBuffer(GL_UNIFORM_BUFFER, bloom_ubo);
+	glBufferData_fp(GL_UNIFORM_BUFFER, sizeof(bloom_params_t), NULL, GL_DYNAMIC_DRAW);
+	GL_BindBuffer(GL_UNIFORM_BUFFER, 0);
 
 	return true;
 }
@@ -1702,116 +1614,14 @@ static qboolean	pp_lut_gpu_built;	/* whether the live table came from the GPU */
 #ifndef USE_GLES
 
 static GLuint	pp_palette_init_prog[SOFTEMU_METRIC_COUNT];
-static GLint	pp_palette_init_loc_palette[SOFTEMU_METRIC_COUNT];
-static GLint	pp_palette_init_loc_dim[SOFTEMU_METRIC_COUNT];
 static GLuint	pp_palette_tex;		/* 256x1 RGBA8, index -> colour */
 static qboolean	pp_lut_gpu_failed;	/* compile failed once; do not keep trying */
 
-/* Transliterated from Ironwail's palette_init_compute_shader
- * (Quake/gl_shaders.h).  Differences, all of them ours and all deliberate:
- *
- *  - the palette arrives as a 256x1 texture rather than an SSBO, which drops a
- *    capability this pass would otherwise need for 1 KB of data;
- *  - the search skips index 255, Hexen II's transparency key, exactly as
- *    PP_BuildPaletteLUT_CPU does and for the same reason;
- *  - it stores resolved colour, not the index, because our post-process
- *    fragment shader has no palette to resolve one with (see PP_UploadLUT);
- *  - the grid coordinate is mapped to 8 bits with integer arithmetic, matching
- *    PP_GRID_TO_8BIT, rather than upstream's bit-twiddled 128-step version. */
-static const char pp_palette_init_body[] =
-	"layout(local_size_x = 8, local_size_y = 8, local_size_z = 4) in;\n"
-	"\n"
-	"layout(rgba8, binding = 0) uniform writeonly image3D u_lut;\n"
-	"uniform sampler2D u_palette;\n"
-	"uniform int u_dim;\n"
-	"\n"
-	"vec3 sRGBToLinearRGB(vec3 v)\n"
-	"{\n"
-	"    return mix(v / 12.92, pow((v + 0.055) / 1.055, vec3(2.4)), greaterThan(v, vec3(0.04045)));\n"
-	"}\n"
-	"\n"
-	"// A perceptual color space for image processing - Bjorn Ottosson\n"
-	"// https://bottosson.github.io/posts/oklab/\n"
-	"vec3 LinearRGBToOKLab(vec3 c)\n"
-	"{\n"
-	"    float l = 0.4122214708 * c.r + 0.5363325363 * c.g + 0.0514459929 * c.b;\n"
-	"    float m = 0.2119034982 * c.r + 0.6806995451 * c.g + 0.1073969566 * c.b;\n"
-	"    float s = 0.0883024619 * c.r + 0.2817188376 * c.g + 0.6299787005 * c.b;\n"
-	"\n"
-	"    float l_ = pow(l, 1./3.);\n"
-	"    float m_ = pow(m, 1./3.);\n"
-	"    float s_ = pow(s, 1./3.);\n"
-	"\n"
-	"    return vec3(\n"
-	"        0.2104542553*l_ + 0.7936177850*m_ - 0.0040720468*s_,\n"
-	"        1.9779984951*l_ - 2.4285922050*m_ + 0.4505937099*s_,\n"
-	"        0.0259040371*l_ + 0.7827717662*m_ - 0.8086757660*s_\n"
-	"    );\n"
-	"}\n"
-	"\n"
-	"vec3 NormalizeColor(vec3 clr)\n"
-	"{\n"
-	"#if MODE >= 1\n"
-	"    clr = sRGBToLinearRGB(clr);\n"
-	"    #if MODE >= 2\n"
-	"        clr = LinearRGBToOKLab(clr);\n"
-	"    #endif\n"
-	"#endif\n"
-	"    return clr;\n"
-	"}\n"
-	"\n"
-	"float ColorDistanceSquared(vec3 c0, vec3 c1)\n"
-	"{\n"
-	"    vec3 delta = c1 - c0;\n"
-	"#if MODE == 1\n"
-	"    // Colour metric - Thiadmer Riemersma\n"
-	"    // https://www.compuphase.com/cmetric.htm\n"
-	"    float rmean = (c0.r + c1.r) * 0.5;\n"
-	"    return dot(delta * delta, vec3(2. + rmean, 4., 3. - rmean));\n"
-	"#elif MODE == 2\n"
-	"    delta.x *= 1.25; // lightness\n"
-	"    delta.z *= 1.5;  // blue-yellow\n"
-	"#endif\n"
-	"    return dot(delta, delta);\n"
-	"}\n"
-	"\n"
-	"shared vec3 palsrgb[256];\n"
-	"shared vec3 palmetric[256];\n"
-	"\n"
-	"void main()\n"
-	"{\n"
-	"    uint groupsize = gl_WorkGroupSize.x * gl_WorkGroupSize.y * gl_WorkGroupSize.z;\n"
-	"    uint i, ofs;\n"
-	"    for (ofs = 0u; ofs < 256u; ofs += groupsize)\n"
-	"    {\n"
-	"        uint idx = gl_LocalInvocationIndex + ofs;\n"
-	"        if (idx < 256u)\n"
-	"        {\n"
-	"            vec3 c = texelFetch(u_palette, ivec2(int(idx), 0), 0).rgb;\n"
-	"            palsrgb[idx] = c;\n"
-	"            palmetric[idx] = NormalizeColor(c);\n"
-	"        }\n"
-	"    }\n"
-	"    memoryBarrierShared();\n"
-	"    barrier();\n"
-	"\n"
-	"    ivec3 gid = ivec3(gl_GlobalInvocationID);\n"
-	"    ivec3 t8 = (gid * 255) / (u_dim - 1);\n"
-	"    vec3 target = NormalizeColor(vec3(t8) * (1. / 255.));\n"
-	"\n"
-	"    uint bestidx = 0u;\n"
-	"    float bestdist = 1e+30;\n"
-	"    for (i = 0u; i < 255u; i++)\n"
-	"    {\n"
-	"        float dist = ColorDistanceSquared(target, palmetric[i]);\n"
-	"        if (dist < bestdist)\n"
-	"        {\n"
-	"            bestidx = i;\n"
-	"            bestdist = dist;\n"
-	"        }\n"
-	"    }\n"
-	"    imageStore(u_lut, gid, vec4(palsrgb[bestidx], 1.));\n"
-	"}\n";
+/* The pass is engine/shaders/softemu_lut_comp.glsl (#450), reaching us as
+ * softemu_lut_comp[] via shaders_gen.h; its header comment carries the notes
+ * on how it departs from Ironwail's palette_init.  The header chunk below
+ * supplies #version, MODE (the metric) and LUT_DIM, which replaced the loose
+ * `uniform int u_dim` -- it was always PP_LUT_DIM. */
 
 /* d_8to24table as a 256x1 texture, so the compute pass can read it without an
  * SSBO.  Built once; the table is fixed after VID_InitPalette. */
@@ -1846,7 +1656,7 @@ static GLuint PP_CreatePaletteTexture (void)
 
 static qboolean PP_BuildPaletteLUT_GPU (softemu_metric_t metric)
 {
-	char	header[64];
+	char	header[128];	/* #version + MODE + LUT_DIM is ~55 bytes */
 
 	pp_lut_gpu_built = false;
 
@@ -1857,9 +1667,10 @@ static qboolean PP_BuildPaletteLUT_GPU (softemu_metric_t metric)
 
 	if (!pp_palette_init_prog[metric])
 	{
-		q_snprintf(header, sizeof(header), "#version 430 core\n#define MODE %d\n", (int)metric);
+		q_snprintf(header, sizeof(header), "#version 430 core\n#define MODE %d\n#define LUT_DIM %d\n",
+			   (int)metric, PP_LUT_DIM);
 		pp_palette_init_prog[metric] =
-			GL_LoadComputeProgram(header, pp_palette_init_body, "palette init");
+			GL_LoadComputeProgram(header, softemu_lut_comp, "palette init");
 		if (!pp_palette_init_prog[metric])
 		{
 			/* One failure means the driver rejects the pass, not this
@@ -1867,10 +1678,6 @@ static qboolean PP_BuildPaletteLUT_GPU (softemu_metric_t metric)
 			pp_lut_gpu_failed = true;
 			return false;
 		}
-		pp_palette_init_loc_palette[metric] =
-			glGetUniformLocation_fp(pp_palette_init_prog[metric], "u_palette");
-		pp_palette_init_loc_dim[metric] =
-			glGetUniformLocation_fp(pp_palette_init_prog[metric], "u_dim");
 	}
 
 	if (!pp_palette_tex)
@@ -1890,10 +1697,8 @@ static qboolean PP_BuildPaletteLUT_GPU (softemu_metric_t metric)
 	R_UseProgram (pp_palette_init_prog[metric]);
 	glActiveTexture_fp(GL_TEXTURE0);
 	glBindTexture_fp(GL_TEXTURE_2D, pp_palette_tex);
-	if (pp_palette_init_loc_palette[metric] >= 0)
-		glUniform1i_fp(pp_palette_init_loc_palette[metric], 0);
-	if (pp_palette_init_loc_dim[metric] >= 0)
-		glUniform1i_fp(pp_palette_init_loc_dim[metric], PP_LUT_DIM);
+	/* u_palette is pinned to unit 0 in the shader (TEXBIND(0)); LUT_DIM is
+	 * compiled in.  Nothing to upload. */
 
 	glBindImageTexture_fp(0, pp_palette_lut, 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_RGBA8);
 	glDispatchCompute_fp(PP_LUT_DIM / 8, PP_LUT_DIM / 8, PP_LUT_DIM / 4);
@@ -2159,9 +1964,9 @@ static qboolean OIT_InitShader (void)
 	GLuint vs, fs, prog;
 	GLint linked;
 
-	vs = GL_CompileShader(GL_VERTEX_SHADER, oit_resolve_vert);
+	vs = PP_CompileShaderSplit(GL_VERTEX_SHADER, PP_VERT_HEADER, soit_resolve_vert);
 	if (!vs) return false;
-	fs = GL_CompileShader(GL_FRAGMENT_SHADER, oit_resolve_frag);
+	fs = PP_CompileShaderSplit(GL_FRAGMENT_SHADER, PP_FRAG_HEADER, soit_resolve_frag);
 	if (!fs) { glDeleteShader_fp(vs); return false; }
 
 	prog = glCreateProgram_fp();
@@ -2184,14 +1989,21 @@ static qboolean OIT_InitShader (void)
 	oit_resolve_prog = prog;
 	oit_resolve_loc_accum = glGetUniformLocation_fp(prog, "TexAccum");
 	oit_resolve_loc_reveal = glGetUniformLocation_fp(prog, "TexReveal");
-	oit_resolve_loc_mboit = glGetUniformLocation_fp(prog, "u_mboit");
+	PP_BindUniformBlock(prog, "OitParams", OIT_PARAMS_UBO_BINDING, sizeof(oit_params_t));
+	if (!oit_ubo)
+	{
+		glGenBuffers_fp(1, &oit_ubo);
+		GL_BindBuffer(GL_UNIFORM_BUFFER, oit_ubo);
+		glBufferData_fp(GL_UNIFORM_BUFFER, sizeof(oit_params_t), NULL, GL_DYNAMIC_DRAW);
+		GL_BindBuffer(GL_UNIFORM_BUFFER, 0);
+	}
 
 #ifndef USE_GLES
 	/* MSAA per-sample resolve variant — best-effort. If it fails to build
 	 * the MSAA OIT path is simply never selected, since oit_samples stays 0
 	 * then.  Not built at all on the ES tier — see oit_resolve_frag_msaa. */
-	vs = GL_CompileShader(GL_VERTEX_SHADER, oit_resolve_vert);
-	fs = vs ? GL_CompileShader(GL_FRAGMENT_SHADER, oit_resolve_frag_msaa) : 0;
+	vs = PP_CompileShaderSplit(GL_VERTEX_SHADER, PP_VERT_HEADER, soit_resolve_vert);
+	fs = vs ? PP_CompileShaderSplit(GL_FRAGMENT_SHADER, PP_FRAG_HEADER, soit_resolve_msaa_frag) : 0;
 	if (vs && fs)
 	{
 		prog = glCreateProgram_fp();
@@ -2204,7 +2016,7 @@ static qboolean OIT_InitShader (void)
 			oit_resolve_prog_msaa = prog;
 			oit_resolve_msaa_loc_accum = glGetUniformLocation_fp(prog, "TexAccum");
 			oit_resolve_msaa_loc_reveal = glGetUniformLocation_fp(prog, "TexReveal");
-			oit_resolve_msaa_loc_mboit = glGetUniformLocation_fp(prog, "u_mboit");
+			PP_BindUniformBlock(prog, "OitParams", OIT_PARAMS_UBO_BINDING, sizeof(oit_params_t));
 		}
 		else
 			glDeleteProgram_fp(prog);
@@ -2242,12 +2054,12 @@ void OIT_BeginTranslucency (void)
 		R_SetBlendFuncIndexed (0, GL_ONE, GL_ONE);
 		R_SetBlendFuncIndexed (1, GL_ONE, GL_ONE);
 		R_SetDepthMask (false);
-		GL_SetOITMode (1, oit_samples > 1);
+		R_SetOITMode (1, oit_samples > 1);
 		return;
 	}
 
 	mboit_pass = 0;
-	GL_SetOITMode (0, false);
+	R_SetOITMode (0, false);
 	glBindFramebuffer_fp(GL_FRAMEBUFFER, oit_fbo);
 	glClearBufferfv_fp(GL_COLOR, 0, zeroes);
 	glClearBufferfv_fp(GL_COLOR, 1, ones);
@@ -2289,7 +2101,7 @@ qboolean OIT_NextPass (void)
 	glBindTexture_fp(textarget, mboit_mom_tex);
 	glActiveTexture_fp(GL_TEXTURE0);
 
-	GL_SetOITMode (2, oit_samples > 1);
+	R_SetOITMode (2, oit_samples > 1);
 	return true;
 }
 
@@ -2335,7 +2147,7 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 		glActiveTexture_fp(GL_TEXTURE0 + ((oit_samples > 1) ? MBOIT_TMU_MOM_MS : MBOIT_TMU_MOM));
 		glBindTexture_fp(mt, 0);
 		glActiveTexture_fp(GL_TEXTURE0);
-		GL_SetOITMode (0, false);
+		R_SetOITMode (0, false);
 		mboit_pass = 0;
 	}
 
@@ -2359,8 +2171,12 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 	if (loc_accum >= 0) glUniform1i_fp(loc_accum, 0);
 	if (loc_reveal >= 0) glUniform1i_fp(loc_reveal, 1);
 	{
-		GLint	loc = (oit_samples > 1) ? oit_resolve_msaa_loc_mboit : oit_resolve_loc_mboit;
-		if (loc >= 0) glUniform1i_fp(loc, mboit ? 1 : 0);
+		oit_params_t	op = {{ mboit ? 1 : 0, 0, 0, 0 }};
+
+		GL_BindBuffer(GL_UNIFORM_BUFFER, oit_ubo);
+		glBufferSubData_fp(GL_UNIFORM_BUFFER, 0, sizeof(op), &op);
+		GL_BindBuffer(GL_UNIFORM_BUFFER, 0);
+		GL_BindBufferBase(GL_UNIFORM_BUFFER, OIT_PARAMS_UBO_BINDING, oit_ubo);
 	}
 
 	/* Full-buffer for the resolve triangle, but SAVED and put back below.
@@ -2620,6 +2436,13 @@ void GL_PostProcess_Init (void)
 	soft_depth_w = soft_depth_h = 0;
 	soft_depth_fmt = 0;
 	soft_depth_valid = false;
+	/* The post-process uniform buffers (#450) are names in the same dead
+	 * context; their creation paths test for 0 (oit_ubo, pp_*_ubo) or
+	 * regenerate unconditionally (bloom_ubo). */
+	oit_ubo = 0;
+	bloom_ubo = 0;
+	pp_vert_ubo = 0;
+	pp_frag_ubo = 0;
 
 	/* GL 4.3: shaders always available */
 
@@ -2652,8 +2475,6 @@ void GL_PostProcess_Init (void)
 
 	/* GL functions loaded at runtime */
 	glTexImage3D_fp = (glTexImage3D_f) SDL_GL_GetProcAddress("glTexImage3D");
-	if (!glUniform2f_fp)
-		glUniform2f_fp = (glUniform2f_f) SDL_GL_GetProcAddress("glUniform2f");
 #endif /* !USE_GLES */
 
 	if (!PP_InitShader())
@@ -2679,6 +2500,10 @@ void GL_PostProcess_Shutdown (void)
 	OIT_DeleteFBO();
 	if (oit_resolve_prog) { glDeleteProgram_fp(oit_resolve_prog); oit_resolve_prog = 0; }
 	if (oit_resolve_prog_msaa) { glDeleteProgram_fp(oit_resolve_prog_msaa); oit_resolve_prog_msaa = 0; }
+	if (oit_ubo) { GL_ForgetBuffer(oit_ubo); glDeleteBuffers_fp(1, &oit_ubo); oit_ubo = 0; }
+	if (bloom_ubo) { GL_ForgetBuffer(bloom_ubo); glDeleteBuffers_fp(1, &bloom_ubo); bloom_ubo = 0; }
+	if (pp_vert_ubo) { GL_ForgetBuffer(pp_vert_ubo); glDeleteBuffers_fp(1, &pp_vert_ubo); pp_vert_ubo = 0; }
+	if (pp_frag_ubo) { GL_ForgetBuffer(pp_frag_ubo); glDeleteBuffers_fp(1, &pp_frag_ubo); pp_frag_ubo = 0; }
 	PP_DeleteFBO();
 	PP_DeleteNativeFBO();
 	PP_DeleteSoftDepth();
@@ -2855,24 +2680,26 @@ static void PP_BlitWith3DEffects (GLuint src_tex, int w, int h, float warp, floa
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
 	R_UseProgram (pp_program);
-	if (pp_loc_mvp >= 0)
-	{
-		float mvp[16];
-		GL_GetMVP(mvp);
-		glUniformMatrix4fv_fp(pp_loc_mvp, 1, GL_FALSE, mvp);
-	}
-	if (pp_loc_gamma >= 0)     glUniform1f_fp(pp_loc_gamma,    1.0f);
-	if (pp_loc_contrast >= 0)  glUniform1f_fp(pp_loc_contrast, 1.0f);
-	if (pp_loc_hdr_exposure >= 0) glUniform1f_fp(pp_loc_hdr_exposure, 0.0f);
-	if (pp_loc_softemu >= 0)   glUniform1i_fp(pp_loc_softemu,  0);
-	if (pp_loc_dither >= 0)    glUniform1f_fp(pp_loc_dither,   0.0f);
-	if (pp_loc_fxaa >= 0)      glUniform1f_fp(pp_loc_fxaa,     0.0f);
-	if (pp_loc_scale >= 0)     glUniform1f_fp(pp_loc_scale,    scale);
-	if (pp_loc_waterwarp >= 0) glUniform1f_fp(pp_loc_waterwarp, warp);
-	if (pp_loc_time >= 0)      glUniform1f_fp(pp_loc_time,     (float)realtime);
-	if (pp_loc_rcpframe >= 0 && glUniform2f_fp)
-		glUniform2f_fp(pp_loc_rcpframe, 1.0f / w, 1.0f / h);
-	if (pp_loc_motionblur >= 0)
+	/* the PpVert MVP is taken from the current matrices in PP_PushParams */
+	pp_params.p0[0] = 1.0f;			/* gamma */
+	pp_params.p0[1] = 1.0f;			/* contrast */
+	pp_params.p3[1] = 0.0f;			/* hdr_exposure */
+	pp_params.i0[0] = 0;			/* softemu */
+	pp_params.p0[2] = 0.0f;			/* dither */
+	pp_params.p1[3] = 0.0f;			/* fxaa_on */
+	pp_params.p1[0] = scale;		/* scale */
+	pp_params.p1[1] = warp;			/* waterwarp */
+	pp_params.p1[2] = (float)realtime;	/* time */
+	pp_params.p2[0] = 1.0f / w;		/* rcpFrame */
+	pp_params.p2[1] = 1.0f / h;		/* rcpFrame.y */
+	/* No bloom here.  This pass (the 3D effects: motion blur, and water warp
+	 * when underwater) runs before EndFrame builds this frame's bloom.  It
+	 * never set the strength, so it inherited the previous frame's -- in the
+	 * shadow, as in the loose uniform before it -- and sampled whatever was
+	 * still on unit 2, the previous frame's bloom_tex[0].  So with r_bloom on
+	 * it composited LAST frame's bloom into the image this frame's bloom is
+	 * then extracted from and added to again: a second, stale bloom. */
+	pp_params.p3[2] = 0.0f;			/* u_bloom_strength */
 	{
 		float yaw   = cl.viewangles[1];
 		float pitch = cl.viewangles[0];
@@ -2893,12 +2720,13 @@ static void PP_BlitWith3DEffects (GLuint src_tex, int w, int h, float warp, floa
 
 		if (dy >  0.03f) dy =  0.03f; else if (dy < -0.03f) dy = -0.03f;
 		if (dp >  0.03f) dp =  0.03f; else if (dp < -0.03f) dp = -0.03f;
-		glUniform1f_fp(pp_loc_motionblur, blur);
-		if (pp_loc_viewdelta >= 0 && glUniform2f_fp)
-			glUniform2f_fp(pp_loc_viewdelta, dy, dp);
+		pp_params.p3[0] = blur;		/* motionblur */
+		pp_params.p2[2] = dy;		/* viewdelta */
+		pp_params.p2[3] = dp;		/* viewdelta.y */
 		pp_prev_yaw   = yaw;
 		pp_prev_pitch = pitch;
 	}
+	PP_PushParams();
 
 	GL_ImmBegin();
 	GL_ImmColor4f(1, 1, 1, 1);
@@ -3139,8 +2967,7 @@ void GL_PostProcess_EndFrame (void)
 		glActiveTexture_fp(GL_TEXTURE0);
 		glBindTexture_fp(GL_TEXTURE_2D, bloom_src);
 		if (bloom_bright_loc_scene >= 0) glUniform1i_fp(bloom_bright_loc_scene, 0);
-		if (bloom_bright_loc_threshold >= 0) glUniform1f_fp(bloom_bright_loc_threshold, r_bloom_threshold.value);
-		if (bloom_bright_loc_rcpframe >= 0) glUniform2f_fp(bloom_bright_loc_rcpframe, 1.0f / bloom_src_w, 1.0f / bloom_src_h);
+		PP_PushBloomParams(1.0f / bloom_src_w, 1.0f / bloom_src_h, r_bloom_threshold.value);
 		glDrawArrays_fp(GL_TRIANGLES, 0, 3);
 
 		/* Downsample chain: level 0 → 1 → 2 → 3 */
@@ -3152,7 +2979,7 @@ void GL_PostProcess_EndFrame (void)
 			glActiveTexture_fp(GL_TEXTURE0);
 			glBindTexture_fp(GL_TEXTURE_2D, bloom_tex[i-1]);
 			if (bloom_down_loc_scene >= 0) glUniform1i_fp(bloom_down_loc_scene, 0);
-			if (bloom_down_loc_rcpframe >= 0) glUniform2f_fp(bloom_down_loc_rcpframe, 1.0f / bloom_w[i-1], 1.0f / bloom_h[i-1]);
+			PP_PushBloomParams(1.0f / bloom_w[i-1], 1.0f / bloom_h[i-1], 0.0f);
 			glDrawArrays_fp(GL_TRIANGLES, 0, 3);
 		}
 
@@ -3172,7 +2999,7 @@ void GL_PostProcess_EndFrame (void)
 			glActiveTexture_fp(GL_TEXTURE0);
 			glBindTexture_fp(GL_TEXTURE_2D, bloom_tex[i + 1]);
 			if (bloom_up_loc_scene >= 0) glUniform1i_fp(bloom_up_loc_scene, 0);
-			if (bloom_up_loc_rcpframe >= 0) glUniform2f_fp(bloom_up_loc_rcpframe, 1.0f / bloom_w[i+1], 1.0f / bloom_h[i+1]);
+			PP_PushBloomParams(1.0f / bloom_w[i+1], 1.0f / bloom_h[i+1], 0.0f);
 			glDrawArrays_fp(GL_TRIANGLES, 0, 3);
 		}
 		R_SetBlend (false);
@@ -3230,25 +3057,14 @@ apply_shader:
 
 	/* activate shader and set all uniforms before drawing */
 	R_UseProgram (pp_program);
-	if (pp_loc_mvp >= 0)
-	{
-		float mvp[16];
-		GL_GetMVP(mvp);
-		glUniformMatrix4fv_fp(pp_loc_mvp, 1, GL_FALSE, mvp);
-	}
-	if (pp_loc_gamma >= 0)
-		glUniform1f_fp(pp_loc_gamma, v_gamma.value);
-	if (pp_loc_contrast >= 0)
-		glUniform1f_fp(pp_loc_contrast, PP_Contrast ());
-	if (pp_loc_hdr_exposure >= 0)
-		glUniform1f_fp(pp_loc_hdr_exposure, PP_HDRActive() ? r_hdr_exposure.value : 0.0f);
+	/* the PpVert MVP is taken from the current matrices in PP_PushParams */
+	pp_params.p0[0] = v_gamma.value;	/* gamma */
+	pp_params.p0[1] = PP_Contrast ();	/* contrast */
+	pp_params.p3[1] = PP_HDRActive() ? r_hdr_exposure.value : 0.0f;	/* hdr_exposure */
 
 	/* softemu uniforms */
-	if (pp_loc_softemu >= 0)
-		glUniform1i_fp(pp_loc_softemu, (int)r_softemu.value);
-	if (pp_loc_lutmax >= 0)
-		glUniform1f_fp(pp_loc_lutmax, lutmax);
-	if (pp_loc_dither >= 0)
+	pp_params.i0[0] = (int)r_softemu.value;	/* softemu */
+	pp_params.p0[3] = lutmax;		/* lutmax */
 	{
 		/* r_softemu_dither_screen scales the master strength, which is what
 		 * upstream does with the same pair (Quake/gl_rmain.c: NOISESCALE *
@@ -3259,19 +3075,17 @@ apply_shader:
 		float d = r_dither.value * r_softemu_dither_screen.value;
 		if (d < 0.0f)
 			d = 0.0f;
-		glUniform1f_fp(pp_loc_dither, d);
+		pp_params.p0[2] = d;		/* dither */
 	}
-	if (pp_loc_scale >= 0)
 	{
 		float scale = r_scale.value;
 		if (scale < 0.25f) scale = 0.25f;
 		if (scale > 1.0f) scale = 1.0f;
-		glUniform1f_fp(pp_loc_scale, scale);
+		pp_params.p1[0] = scale;	/* scale */
 	}
 
 	/* Warp and blur: already baked into pp_native_color_tex when pp_native_active.
 	 * Apply here only for the copyback fallback path (pp_native_active=false). */
-	if (pp_loc_waterwarp >= 0)
 	{
 		float warp = 0;
 		if (!pp_native_active)
@@ -3283,15 +3097,12 @@ apply_shader:
 			else if (cl.time < pp_waterwarp_preview_end)
 				warp = r_waterwarp.value;	/* show preview even if not in water */
 		}
-		glUniform1f_fp(pp_loc_waterwarp, warp);
+		pp_params.p1[1] = warp;		/* waterwarp */
 	}
-	if (pp_loc_time >= 0)
-		glUniform1f_fp(pp_loc_time, (float)realtime);
-	if (pp_loc_fxaa >= 0)
-		glUniform1f_fp(pp_loc_fxaa, Cvar_VariableValue("gl_fxaa"));
-	if (pp_loc_rcpframe >= 0 && glUniform2f_fp)
-		glUniform2f_fp(pp_loc_rcpframe, 1.0f / glwidth, 1.0f / glheight);
-	if (pp_loc_motionblur >= 0)
+	pp_params.p1[2] = (float)realtime;			/* time */
+	pp_params.p1[3] = Cvar_VariableValue("gl_fxaa");	/* fxaa_on */
+	pp_params.p2[0] = 1.0f / glwidth;			/* rcpFrame */
+	pp_params.p2[1] = 1.0f / glheight;			/* rcpFrame.y */
 	{
 		float blur = 0, dy = 0, dp = 0;
 		if (!pp_native_active)
@@ -3319,9 +3130,9 @@ apply_shader:
 			pp_prev_yaw   = yaw;
 			pp_prev_pitch = pitch;
 		}
-		glUniform1f_fp(pp_loc_motionblur, blur);
-		if (pp_loc_viewdelta >= 0 && glUniform2f_fp)
-			glUniform2f_fp(pp_loc_viewdelta, dy, dp);
+		pp_params.p3[0] = blur;		/* motionblur */
+		pp_params.p2[2] = dy;		/* viewdelta */
+		pp_params.p2[3] = dp;		/* viewdelta.y */
 	}
 
 	/* bloom composite texture */
@@ -3332,8 +3143,8 @@ apply_shader:
 		glUniform1i_fp(pp_loc_bloom_tex, 2);
 		glActiveTexture_fp(GL_TEXTURE0);
 	}
-	if (pp_loc_bloom_strength >= 0)
-		glUniform1f_fp(pp_loc_bloom_strength, r_bloom.integer ? r_bloom_intensity.value : 0.0f);
+	pp_params.p3[2] = r_bloom.integer ? r_bloom_intensity.value : 0.0f;	/* u_bloom_strength */
+	PP_PushParams();
 
 	/* draw full-screen quad using streaming VBO (shader already active) */
 	GL_ImmBegin();

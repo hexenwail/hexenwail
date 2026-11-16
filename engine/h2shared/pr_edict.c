@@ -3621,8 +3621,7 @@ void PR_LoadProgs (void)
 	pr_numknownstrings = 0;
 	pr_maxknownstrings = 0;
 	pr_stringssize = progs->numstrings;
-	if (pr_knownstrings)
-		Z_Free ((void *)pr_knownstrings);
+	free ((void *)pr_knownstrings);
 	pr_knownstrings = NULL;
 	PR_SetEngineString(pr_null_string);
 
@@ -3958,11 +3957,19 @@ int NUM_FOR_EDICT(edict_t *e)
 
 #define	PR_STRING_ALLOCSLOTS	256
 
+/* libc realloc, not Z_Realloc: Z_Realloc frees first, and the block
+ * Z_TagMalloc hands back can start earlier and get its split header written
+ * into old slots before they are copied (GitHub #488, QuakeSpasm e1c94a0).
+ * The new slots must be zeroed by hand: PR_AllocString hunts for NULLs. */
 static void PR_AllocStringSlots (void)
 {
+	const int old_maxknownstrings = pr_maxknownstrings;
 	pr_maxknownstrings += PR_STRING_ALLOCSLOTS;
 	Sys_DPrintf("%s: realloc'ing for %d slots\n", __thisfunc__, pr_maxknownstrings);
-	pr_knownstrings = (const char **) Z_Realloc ((void *)pr_knownstrings, pr_maxknownstrings * sizeof(char *), Z_MAINZONE);
+	pr_knownstrings = (const char **) realloc ((void *)pr_knownstrings, pr_maxknownstrings * sizeof(char *));
+	if (!pr_knownstrings)
+		Sys_Error ("%s: failed for %d slots", __thisfunc__, pr_maxknownstrings);
+	memset ((void *)(pr_knownstrings + old_maxknownstrings), 0, PR_STRING_ALLOCSLOTS * sizeof(char *));
 }
 
 const char *PR_GetString (int num)

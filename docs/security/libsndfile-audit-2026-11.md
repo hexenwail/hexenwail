@@ -88,7 +88,7 @@ rather than carrying the filing-time claims forward).
 | Linux zip / AppImage (`packages.linux-fhs`, `appimage`) | **No** — removed by #428 | `fluidsynthPortable` (`flake.nix:863-880`) builds fluidsynth with `-Denable-libsndfile=off` + `patches/fluidsynth-sf3-vorbisfile.patch` (SF3 decoded by libvorbisfile, bit-identical output on 124 samples); the build fails if `libsndfile.so*` reappears (`flake.nix:953-960` guard) |
 | NixOS package (`packages.nixos`, `flake.nix:288`) | **Yes** — stock nixpkgs fluidsynth | `buildInputs` at `flake.nix:243-255` lists `fluidsynth`, `libsndfile`, `flac` (transitive pkg-config deps); links `libfluidsynth.so.3` → `libsndfile.so.1` |
 | Dev shell (`devShells.default`, `flake.nix:1805+`) | **Yes** | Same stock `fluidsynth` / `libsndfile` / `flac` in buildInputs (`flake.nix:1812-1813`) |
-| Flatpak (`flatpak/io.github.hexenwail.hexenwail.yml:65`) | **No, but SF3 is broken there** | FluidSynth module has `-Denable-libsndfile=off` but does **not** apply `patches/fluidsynth-sf3-vorbisfile.patch`, so SF3 soundfonts cannot decode in the Flatpak (bundled default is SF2 TimGM6mb/FluidR3, so default MIDI is unaffected; a user-supplied SF3 would fail). The Oct 17 comment already notes the patch "would apply… if wanted" |
+| Flatpak (`flatpak/io.github.hexenwail.hexenwail.yml`, fluidsynth module) | **No; SF3 decodes** (verified outside the SDK; CI's flatpak job is the end-to-end check) | FluidSynth module has `-Denable-libsndfile=off` **and**, since 2026-11-14, applies `patches/fluidsynth-sf3-vorbisfile.patch` with `-DHEXENWAIL_VORBISFILE` and the vorbisfile libraries, like the Linux zip/AppImage. Before that, SF3 soundfonts were refused outright ("compiled without support for (v3.x)"). FluidSynth v2.4.6, built with the module's flags against nixpkgs libraries rather than the freedesktop 25.08 SDK, renders FluidSynth's SF3 test font byte-identically to a libsndfile build. No flatpak-builder run has happened on a dev box. A post-install check fails the build if `libfluidsynth.so.3` loses libvorbisfile or regains libsndfile, and `tools/test_flatpak_sf3.py` (lint) checks that the manifest still carries all of it |
 | Windows (`packages.windows`, `flake.nix:966-1138`) | **No — correction to the Oct 17 comment** | The comment says Windows is "still on libsndfile (distribution fluidsynth)", but the current tree shows no fluidsynth anywhere on Windows: MIDI is the native midiStream driver (`engine/CMakeLists.txt:779`, `midi_win.c`), `oslibs/windows/codecs/` contains only ogg/vorbis, and the Windows installPhase bundles SDL3/ogg/vorbis/opusfile/libxmp DLLs only. No fluidsynth DLL, no libsndfile, and no `fluidsynth`/`libsndfile` hits anywhere in `flake.nix:966-1500`. Treat as "no evidence of exposure in the current tree" — worth one confirming line from the maintainer (or an `ldd`-style check of the shipped Windows binaries) rather than a code change |
 
 Untrusted-input path confirmed still live for the NixOS/dev-shell builds:
@@ -116,8 +116,8 @@ scan re-runs on the lock PR). That clears 2 of 5. The issue stays open until:
 3. the Windows non-exposure correction is confirmed by the maintainer (§4).
 
 Out of scope for this audit patch, flagged for the maintainer: applying
-`fluidsynth-sf3-vorbisfile.patch` to the Flatpak module (restores SF3 in the
-Flatpak; unverifiable here, no flatpak build), and backporting `7ff854d1`
+`fluidsynth-sf3-vorbisfile.patch` to the Flatpak module (done 2026-11-14,
+see the Flatpak row in §4), and backporting `7ff854d1`
 into the project's fluidsynth override (changes shipped code paths — needs
 the maintainer's call; the issue carries the `decision` label for exactly
 this).

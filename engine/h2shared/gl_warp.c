@@ -23,6 +23,7 @@
 #include "gl_pipeline.h"
 #include "gl_vbo.h"
 #include "gl_postprocess.h"
+#include "gl_uniforms.h"	/* R_SetWorldLiquid */
 
 int		skytexturenum;
 
@@ -384,6 +385,10 @@ void EmitWaterPolys (msurface_t *fa)
 
 	GL_SetTurb (pixelwarp ? warpamt * 8.0f : 0.0f, wtime);
 	R_SetSpanCell (prog, R_SpanCell (true));	/* Turbulent8's 16 (#176) */
+	/* A liquid is seen, and lit, from both sides: the one-sided dynamic
+	 * light test is off for these batches (GitHub #97).  Only the world
+	 * program reads it, so the unlit path's bracket is a no-op. */
+	R_SetWorldLiquid (true);
 
 	/* Batch all polygons as triangles in one draw call */
 	GL_ImmBegin ();
@@ -443,19 +448,15 @@ void EmitWaterPolys (msurface_t *fa)
 	 * models, sprites and brush polys, and a hot u_turb would warp their
 	 * texture lookups too.  uhexen2-9o7u
 	 *
-	 * The world program needs more than the CPU-side reset: the opaque world
-	 * paths upload their uniforms by hand and never push a u_turb, so leaving
-	 * one hot there would warp the map itself.  GL_ClearTurb zeroes it on the
-	 * program now.  Only worth doing when there is something to clear, which
-	 * is why it is gated on the warp actually having been armed.
-	 * uhexen2-a5nn.2. */
-	if (lit && pixelwarp)
-		GL_ClearTurb (prog);
-	else
-		GL_SetTurb (0.0f, 0.0f);
+	 * The world program used to need more than this, a clear on the program
+	 * itself (uhexen2-a5nn.2), because the opaque world paths uploaded their
+	 * uniforms by hand and never pushed a u_turb.  Since #450 W2 every one of
+	 * them writes the warp as 0 in its own R_SetWorldFrag. */
+	GL_SetTurb (0.0f, 0.0f);
 	/* Same reason for the span cell (#176): the world program goes back to
 	 * the world's, the shared alias program to none. */
 	R_SetSpanCell (prog, lit ? R_SpanCell (false) : 0.0f);
+	R_SetWorldLiquid (false);
 
 	if (lit)
 		R_LitWaterReleaseTextures ();
@@ -857,6 +858,33 @@ static void Sky_FastColor (void)
 
 /*
 =============
+Sky_LayerFogAlpha / Sky_LayerFogColor
+
+The two-pass scrolling sky (r_skyalpha < 1) draws with the boxside program,
+which has no fog term because skybox faces share it and fog in their own flat
+pass.  So the two-pass layers get that flat pass too: Sky_DrawSkyBox's
+condition and alpha, blended over the front layer.  Blending the fog colour at
+alpha a is mix(dst, fog, a), the same blend the single-pass ssky_layers shader
+does with u_skyfog, which Fog_SetupFrame fills with these values.  GitHub #486.
+=============
+*/
+extern float	skyfog;
+
+static float Sky_LayerFogAlpha (void)
+{
+	if (Fog_GetDensity() > 0 && skyfog > 0)
+		return CLAMP(0.0f, skyfog, 1.0f);
+	return 0.0f;
+}
+
+static void Sky_LayerFogColor (float a)
+{
+	float *c = Fog_GetColor();
+	GL_ImmColor4f (c[0], c[1], c[2], a);
+}
+
+/*
+=============
 EmitSkyPolysFast
 
 r_fastsky fill for one surface's poly chain (brush-model sky).
@@ -895,6 +923,7 @@ static void EmitSkyPolysMulti (msurface_t *fa)
 	float		alpha = CLAMP(0.0f, r_skyalpha.value, 1.0f);
 	float		bspeed = r_skyspeed_back.value;
 	float		fspeed = r_skyspeed_front.value;
+	float		fogalpha;
 
 	/* No alpha-threshold save/restore any more.  The sky used to be one
 	 * program branching on that engine-global uniform, so this function had to
@@ -1003,6 +1032,19 @@ static void EmitSkyPolysMulti (msurface_t *fa)
 			GL_ImmEnd (GL_POLYGON, &gl_shader_sky_boxside);
 		}
 
+		/* pass 3: sky fog, blended over both layers */
+		if ((fogalpha = Sky_LayerFogAlpha ()) > 0)
+		{
+			for (p = fa->polys ; p ; p = p->next)
+			{
+				GL_ImmBegin ();
+				Sky_LayerFogColor (fogalpha);
+				for (i = 0, v = p->verts[0]; i < p->numverts; i++, v += VERTEXSIZE)
+					GL_ImmVertex3f (v[0], v[1], v[2]);
+				GL_ImmEnd (GL_POLYGON, &gl_shader_flat);
+			}
+		}
+
 		R_SetBlend (false);
 	}
 }
@@ -1109,7 +1151,8 @@ on driver state validation alone).
 
 For r_skyalpha >= 1: single multitexture pass (back+front blended
 in shader).  For r_skyalpha < 1 (default 0.67): two passes — solid
-back layer then alpha-blended front layer.  Both modes batch the
+back layer then alpha-blended front layer, then a flat sky fog pass
+when fog and skyfog are on (Sky_LayerFogAlpha).  Both modes batch the
 whole chain into 1 (or 2 with overflow) GL_TRIANGLES draws per
 pass.
 =================
@@ -1123,6 +1166,7 @@ void R_DrawSkyChain (msurface_t *s)
 	float		alpha = CLAMP(0.0f, r_skyalpha.value, 1.0f);
 	float		bspeed = r_skyspeed_back.value;
 	float		fspeed = r_skyspeed_front.value;
+	float		fogalpha;
 
 	/* Per-surface bbox cull: skip surfaces fully outside the view. */
 #define EMIT_LOOP(PROG, VERT_MACRO, COLOR_SETUP) \
@@ -1203,6 +1247,11 @@ void R_DrawSkyChain (msurface_t *s)
 		R_SetBlend (true);
 		EMIT_LOOP (&gl_shader_sky_boxside, SKYWARP_VERT_FRONT,
 			   GL_ImmColor4f(1.0f, 1.0f, 1.0f, alpha));
+
+		/* pass 3: sky fog, blended over both layers */
+		if ((fogalpha = Sky_LayerFogAlpha ()) > 0)
+			EMIT_LOOP (&gl_shader_flat, SKYWARP_VERT_FAST,
+				   Sky_LayerFogColor (fogalpha));
 		R_SetBlend (false);
 	}
 

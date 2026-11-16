@@ -381,11 +381,6 @@ GL_FUNCTION_OPT(void, glGetProgramiv, (GLuint, GLenum, GLint *))
 GL_FUNCTION_OPT(void, glGetProgramInfoLog, (GLuint, GLsizei, GLsizei *, char *))
 GL_FUNCTION_OPT(GLint, glGetUniformLocation, (GLuint, const char *))
 GL_FUNCTION_OPT(void, glUniform1i, (GLint, GLint))
-GL_FUNCTION_OPT(void, glUniform1f, (GLint, GLfloat))
-GL_FUNCTION_OPT(void, glUniform2f, (GLint, GLfloat, GLfloat))
-GL_FUNCTION_OPT(void, glUniform3f, (GLint, GLfloat, GLfloat, GLfloat))
-GL_FUNCTION_OPT(void, glUniform4f, (GLint, GLfloat, GLfloat, GLfloat, GLfloat))
-GL_FUNCTION_OPT(void, glUniformMatrix4fv, (GLint, GLsizei, GLboolean, const GLfloat *))
 GL_FUNCTION_OPT(void, glBindAttribLocation, (GLuint, GLuint, const char *))
 
 /* VBO/VAO functions (OpenGL 2.0+ / 3.0+) */
@@ -435,7 +430,6 @@ GL_FUNCTION_OPT(void, glBindImageTexture, (GLuint, GLuint, GLint, GLboolean, GLi
 GL_FUNCTION_OPT(void, glTexStorage2D, (GLenum, GLsizei, GLenum, GLsizei, GLsizei))
 
 /* Integer uniform setters used by Hi-Z compute shaders */
-GL_FUNCTION_OPT(void, glUniform2i, (GLint, GLint, GLint))
 
 /* GL_ARB_buffer_storage (core 4.4) — persistent-mapped buffers.
  * gl_buffer_storage_able is set true at init when the entry point is
@@ -490,7 +484,6 @@ GL_FUNCTION_OPT(void, glDrawElementsIndirect, (GLenum, GLenum, const void *))
 GL_FUNCTION_OPT(void, glTexImage3D, (GLenum, GLint, GLint, GLsizei, GLsizei, GLsizei, GLint, GLenum, GLenum, const void *))
 
 /* Additional uniform functions */
-GL_FUNCTION_OPT(void, glUniform4fv, (GLint, GLsizei, const GLfloat *))
 
 #undef GL_FUNCTION_OPT
 
@@ -527,11 +520,6 @@ GL_FUNCTION_OPT(void, glUniform4fv, (GLint, GLsizei, const GLfloat *))
 #define glGetProgramInfoLog_fp		glGetProgramInfoLog
 #define glGetUniformLocation_fp		glGetUniformLocation
 #define glUniform1i_fp			glUniform1i
-#define glUniform1f_fp			glUniform1f
-#define glUniform2f_fp			glUniform2f
-#define glUniform3f_fp			glUniform3f
-#define glUniform4f_fp			glUniform4f
-#define glUniformMatrix4fv_fp		glUniformMatrix4fv
 #define glBindAttribLocation_fp		glBindAttribLocation
 #define glGenBuffers_fp			glGenBuffers
 #define glDeleteBuffers_fp		glDeleteBuffers
@@ -559,7 +547,6 @@ GL_FUNCTION_OPT(void, glUniform4fv, (GLint, GLsizei, const GLfloat *))
 #define glMemoryBarrier_fp(b)		((void)0)
 #define glBindImageTexture_fp(u,t,l,la,la2,a,f)	((void)0)
 #define glTexStorage2D_fp(t,le,fmt,w,h)		((void)0)
-#define glUniform2i_fp(l,x,y)			((void)0)
 #define glGenQueries_fp(n,ids)		((void)0)
 #define glDeleteQueries_fp(n,ids)	((void)0)
 #define glQueryCounter_fp(id,t)		((void)0)
@@ -580,7 +567,6 @@ GL_FUNCTION_OPT(void, glUniform4fv, (GLint, GLsizei, const GLfloat *))
 #define glGetActiveUniformBlockiv_fp	glGetActiveUniformBlockiv
 #define glBindBufferRange_fp		glBindBufferRange
 #define glTexImage3D_fp			glTexImage3D
-#define glUniform4fv_fp			glUniform4fv
 /* GL 4.3+ buffer streaming: not in WebGL2.  The streaming ring
  * (gl_buffer.c) is compiled out under USE_GLES — these stubs
  * exist so call sites still link. */

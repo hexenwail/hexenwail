@@ -25,7 +25,6 @@
  */
 
 int	GL_ImmCount (void);
-void	GL_ImmResetState (void);
 void	GL_ImmInvalidateState (void);	/* drop cached uniform state (after vid_restart, etc) */
 void	GL_ImmBegin (void);
 void	GL_ImmVertex3f (float x, float y, float z);
@@ -66,12 +65,10 @@ void	GL_SetAliasCaustics (float intensity, float time);
  * way, since gl_shader_alias is also the sprite / particle / warp-poly /
  * unlit-brush-poly program. */
 void	GL_SetAliasDlight (float scale);
+/* 0 amplitude is the resting state every batch but a liquid's must see.  The
+ * world draw paths that bypass GL_ImmEnd pass 0 to R_SetWorldFrag themselves,
+ * so lit water needs no program-side clear any more (#450 W2). */
 void	GL_SetTurb (float amplitude, float time);	/* uhexen2-9o7u */
-/* Zero the warp on ONE program immediately, and force the next batch to push
- * its own value.  Needed because gl_shader_world carries a u_turb for lit
- * water but is drawn by paths that upload their uniforms by hand.
- * uhexen2-a5nn.2. */
-void	GL_ClearTurb (const struct glprogram_s *shader);
 void	GL_SetAliasModelMatrix (const float *m);	/* 16 floats, column-major */
 /* Read back the current values, for draw paths that bypass GL_ImmEnd and must
  * apply the identical state by hand (the PV_IQM skeletal path, uhexen2-7ok0.3). */

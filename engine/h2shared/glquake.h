@@ -452,6 +452,7 @@ extern	cvar_t	r_lerp_complete;
 extern	cvar_t	r_nolerp_list;
 extern	cvar_t	r_noshadow_list;	/* per-model r_shadows exclusion, uhexen2-a5nn.11 */
 extern	cvar_t	r_dlight_model_list;	/* uhexen2-vdmz */
+extern	cvar_t	r_dlight_occlusion;	/* GitHub #97 */
 extern	cvar_t	r_water_pixel_warp;	/* uhexen2-9o7u */
 extern	cvar_t	r_lerp_autodetect;
 extern	cvar_t	r_lerp_autodetect_threshold;
@@ -485,8 +486,7 @@ extern	cvar_t	r_gloss_exponent;
  * map by R_NewMap.  Gates the world shader's material path so a map without
  * them never enters it.  uhexen2-mfql. */
 extern	qboolean gl_materialmaps_present;
-struct glprogram_s;
-void	GL_MaterialUniform (const struct glprogram_s *prog);
+void	GL_MaterialParams (float *out);	/* the world material vec3, #450 W2 */
 
 #if defined(H2W)
 extern	cvar_t	r_netgraph;
@@ -520,6 +520,7 @@ extern	cvar_t	gl_particles;
 extern	cvar_t	gl_fullbrights;
 extern	cvar_t	gl_overbright_models;
 extern	cvar_t	gl_overbright;
+float R_WorldOverbright (void);	/* the world fragment stages' overbright (GitHub #489) */
 extern	cvar_t	r_lightmap_bicubic;
 extern	cvar_t	gl_fxaa;
 extern	cvar_t	gl_lmatlas;
@@ -679,7 +680,7 @@ int R_GetPimpFlags (entity_t *e, float **gsettings_out);
 int R_GetEntityModelFlags (entity_t *e);
 
 void R_RenderDlights (void);
-void R_MarkLights (dlight_t *light, int lnum, mnode_t *node);
+void R_MarkLights (dlight_t *light, int lnum, mnode_t *node, const entity_t *ent);
 /* Side planes for an arbitrary camera, into the caller's array rather than
  * frustum[].  R_PushDlights needs them before R_SetFrustum runs.  uhexen2-137k */
 void R_BuildFrustum (const vec3_t origin, const vec3_t pn, const vec3_t right,

@@ -24,6 +24,17 @@
 #
 # Requires Chrome or Chromium and python3.
 #
+# BROWSER=firefox runs the same page in Firefox instead (GitHub #112: the ES
+# tier had only ever been checked in Chromium).  Headless Firefox finds no GL
+# driver on a box without a GPU-backed EGL ("Exhausted GL driver options"), so
+# it runs non-headless on a private Xvfb display, where GLX gives it llvmpipe.
+# Needs firefox and Xvfb on PATH, e.g.
+#   nix shell nixpkgs#firefox nixpkgs#xorg-server nixpkgs#python3 --command \
+#     env BROWSER=firefox ./scripts/wasm-boot-smoke.sh BIN_DIR [DATA_DIR]
+# The page is identical.  Only the launch differs, and the log format:
+# Firefox prints page console calls to stdout as `console.log: "..."` (with a
+# profile pref) and WebGL errors to stderr as `WebGL warning: <call>: ...`.
+#
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 set -euo pipefail
@@ -43,22 +54,37 @@ for f in hexenwail.js hexenwail.wasm; do
 	[ -f "$bin_dir/$f" ] || { echo "error: $bin_dir/$f not found" >&2; exit 2; }
 done
 
+browser_kind=${BROWSER:-chrome}
 browser=""
-for candidate in "${CHROME_BIN:-}" google-chrome-stable google-chrome chromium chromium-browser; do
-	if [ -n "$candidate" ] && command -v "$candidate" >/dev/null 2>&1; then
-		browser="$(command -v "$candidate")"
-		break
-	fi
-done
-[ -n "$browser" ] || { echo "wasm boot smoke test requires Chrome or Chromium" >&2; exit 2; }
+case "$browser_kind" in
+	chrome)
+		for candidate in "${CHROME_BIN:-}" google-chrome-stable google-chrome chromium chromium-browser; do
+			if [ -n "$candidate" ] && command -v "$candidate" >/dev/null 2>&1; then
+				browser="$(command -v "$candidate")"
+				break
+			fi
+		done
+		[ -n "$browser" ] || { echo "wasm boot smoke test requires Chrome or Chromium" >&2; exit 2; }
+		;;
+	firefox)
+		browser=$(command -v firefox) || { echo "BROWSER=firefox requires firefox on PATH" >&2; exit 2; }
+		command -v Xvfb >/dev/null || { echo "BROWSER=firefox requires Xvfb on PATH" >&2; exit 2; }
+		;;
+	*) echo "BROWSER must be chrome or firefox, not '$browser_kind'" >&2; exit 2 ;;
+esac
 command -v python3 >/dev/null || { echo "wasm boot smoke test requires python3" >&2; exit 2; }
 
 site=$(mktemp -d)
 server_pid=""
 chrome_pid=""
+xvfb_pid=""
 cleanup() {
 	if [ -n "$chrome_pid" ]; then kill "$chrome_pid" 2>/dev/null || true; fi
 	if [ -n "$server_pid" ]; then kill "$server_pid" 2>/dev/null || true; fi
+	if [ -n "$xvfb_pid" ]; then kill "$xvfb_pid" 2>/dev/null || true; fi
+	# SMOKE_LOG=<path> keeps the raw browser log, which is otherwise deleted
+	# with the site; it is the only place filtered WebGL lines can be audited.
+	if [ -n "${SMOKE_LOG:-}" ] && [ -f "$site/chrome.log" ]; then cp "$site/chrome.log" "$SMOKE_LOG" || true; fi
 	# Chrome's helper processes can still be writing the profile when the
 	# main pid is gone; a cleanup hiccup must not overturn the verdict.
 	rm -rf "$site" 2>/dev/null || true
@@ -89,6 +115,12 @@ else
 	expect='FATAL ERROR: Unable to find a proper Hexen II installation'
 fi
 expect_json=$(python3 -c 'import json, sys; print(json.dumps(sys.argv[1]))' "$expect")
+# SMOKE_ARGS: extra engine arguments for the map run, split on whitespace and
+# placed before +map, e.g. "+r_softemu 1 +r_dither 1 +r_bloom 1" to compile and
+# run the post-process programs a plain load never builds.
+extra_json=$(python3 -c 'import json, sys; print(json.dumps(sys.argv[1].split()))' "${SMOKE_ARGS:-}")
+screenshot_flag=false
+[ "${SMOKE_SCREENSHOT:-0}" = 1 ] && screenshot_flag=true
 
 # The page reports through the console, one line per event, because the
 # engine's main loop never goes idle once a map is running: Chrome's
@@ -105,6 +137,7 @@ cat >"$site/index.html" <<EOF
 <canvas id="canvas" width="640" height="480"></canvas>
 <script>
 const MODE = "$mode";
+const EXTRA_ARGS = $extra_json;
 const FILES = $files_json;
 const EXPECT = $expect_json;
 const engineLines = [];
@@ -118,12 +151,17 @@ function finish(ok, why) {
 // A wasm trap is what a Rust/C layout or linkage mismatch looks like at run
 // time, so it fails either mode as soon as it shows up.
 const TRAP = /RuntimeError|memory access out of bounds|unreachable|\[abort\]/;
+// A shader the browser's GLSL ES validator rejects is an ES-tier bug even
+// when the engine carries on without it (post-processing just switches off),
+// which is how #112's bugs hid.  Every compile/link failure the engine prints.
+const SHADER_FAIL = /COMPILE ERROR|LINK ERROR|shader compile error|shader link error|link failed/;
 function engine(s) {
   s = String(s);
   engineLines.push(s);
   note(s);
   if (TRAP.test(s)) finish(false, 'runtime trap: ' + s);
   else if (MODE === 'nodata' && s.includes(EXPECT)) finish(true, 'engine reached the FS_Init data gate');
+  else if (SHADER_FAIL.test(s)) finish(false, 'shader rejected: ' + s);
   else if (MODE === 'map' && /FATAL ERROR/.test(s)) finish(false, 'engine fatal: ' + s);
 }
 window.onerror = (m) => { engine('[window.onerror] ' + m); };
@@ -143,7 +181,7 @@ window.Module = {
         FS.writeFile('/persistent/' + path, bytes);
       }
       const args = ['-basedir', '/persistent'];
-      if (MODE === 'map') args.push('+map', 'demo1');
+      if (MODE === 'map') args.push(...EXTRA_ARGS, '+map', 'demo1');
       note('[smoke] callMain ' + args.join(' '));
       Module.callMain(args);
     } catch (e) {
@@ -156,13 +194,61 @@ window.Module = {
 // Map mode: the engine has to have loaded the level and kept rendering it
 // for a while with no fatal and no trap.  EXPECT is matched against engine
 // output only, never this harness's own notes.
+// SMOKE_SCREENSHOT=1 adds #112's screenshot check: press F12 (bound to
+// "screenshot" in Raven's default.cfg) through the exported touch-key hook,
+// find the PNG the engine wrote into its filesystem, and decode it with the
+// browser's own decoder.  A shot read back after the frame was presented
+// comes out black in a browser, which is the bug #405 fixed.
+const SCREENSHOT = $screenshot_flag;
+const K_F12 = 146;
+function findShots(dir, out) {
+  const FS = Module.FS || window.FS;
+  for (const name of FS.readdir(dir)) {
+    if (name === '.' || name === '..') continue;
+    const path = (dir === '/' ? '' : dir) + '/' + name;
+    if (dir === '/' && (name === 'dev' || name === 'proc' || name === 'tmp')) continue;
+    let st; try { st = FS.stat(path); } catch (e) { continue; }
+    if (FS.isDir(st.mode)) findShots(path, out);
+    else if (/\.png$/i.test(name)) out.push(path);
+  }
+  return out;
+}
+async function checkScreenshot() {
+  const FS = Module.FS || window.FS;
+  const before = new Set(findShots('/', []));
+  Module._Hexenwail_TouchKey(K_F12, 1);
+  await new Promise(r => setTimeout(r, 200));
+  Module._Hexenwail_TouchKey(K_F12, 0);
+  await new Promise(r => setTimeout(r, 3000));
+  const shots = findShots('/', []).filter(p => !before.has(p));
+  if (!shots.length) return [false, 'F12 wrote no .png'];
+  const bytes = FS.readFile(shots[0]);
+  const bmp = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
+  const c = document.createElement('canvas');
+  c.width = bmp.width; c.height = bmp.height;
+  const ctx = c.getContext('2d');
+  ctx.drawImage(bmp, 0, 0);
+  const px = ctx.getImageData(0, 0, c.width, c.height).data;
+  let lit = 0;
+  for (let i = 0; i < px.length; i += 4)
+    if (px[i] > 16 || px[i + 1] > 16 || px[i + 2] > 16) lit++;
+  const frac = lit / (px.length / 4);
+  const what = shots[0] + ' ' + bmp.width + 'x' + bmp.height + ', ' +
+    (100 * frac).toFixed(1) + '% of pixels non-black';
+  return [frac > 0.5, what];
+}
 if (MODE === 'map') {
-  setTimeout(() => {
+  setTimeout(async () => {
     const text = engineLines.join('\n');
-    finish(text.includes(EXPECT), text.includes(EXPECT)
-      ? 'demo1 loaded, the client spawned, no fatal or trap'
-      : 'the local client never spawned in demo1');
-  }, 15000);
+    if (!text.includes(EXPECT)) return finish(false, 'the local client never spawned in demo1');
+    if (SCREENSHOT) {
+      let ok, why;
+      try { [ok, why] = await checkScreenshot(); } catch (e) { ok = false; why = 'screenshot check threw: ' + e; }
+      if (!ok) return finish(false, 'screenshot: ' + why);
+      return finish(true, 'demo1 loaded, the client spawned, screenshot ' + why);
+    }
+    finish(true, 'demo1 loaded, the client spawned, no fatal or trap');
+  }, SCREENSHOT ? 10000 : 15000);
 }
 </script>
 <script src="hexenwail.js"></script>
@@ -178,17 +264,42 @@ for _ in $(seq 50); do
 done
 
 console="$site/chrome.log"
-"$browser" \
-	--headless=new \
-	--no-sandbox \
-	--disable-dev-shm-usage \
-	--use-gl=angle \
-	--use-angle=swiftshader \
-	--enable-unsafe-swiftshader \
-	--enable-logging=stderr --v=0 \
-	--user-data-dir="$site/profile" \
-	"http://127.0.0.1:$port/index.html" >/dev/null 2>"$console" &
-chrome_pid=$!
+if [ "$browser_kind" = firefox ]; then
+	mkdir -p "$site/profile"
+	# stdout.content puts page console calls on stdout; the rest keeps a
+	# fresh profile from opening first-run pages over the test.
+	cat >"$site/profile/user.js" <<'PREFS'
+user_pref("devtools.console.stdout.content", true);
+user_pref("webgl.force-enabled", true);
+user_pref("browser.shell.checkDefaultBrowser", false);
+user_pref("browser.startup.homepage_override.mstone", "ignore");
+user_pref("datareporting.policy.dataSubmissionEnabled", false);
+user_pref("toolkit.telemetry.reportingpolicy.firstRun", false);
+user_pref("browser.newtabpage.activity-stream.feeds.topsites", false);
+PREFS
+	# -displayfd: Xvfb picks a free display and reports it, so concurrent
+	# runs never share one.
+	exec 9<> <(:)
+	Xvfb -displayfd 9 -screen 0 1024x768x24 -nolisten tcp >/dev/null 2>&1 &
+	xvfb_pid=$!
+	read -r -t 20 display_n <&9 || { echo "error: Xvfb did not start" >&2; exit 2; }
+	exec 9<&-
+	DISPLAY=":$display_n" "$browser" --no-remote --profile "$site/profile" \
+		"http://127.0.0.1:$port/index.html" >"$console" 2>&1 &
+	chrome_pid=$!
+else
+	"$browser" \
+		--headless=new \
+		--no-sandbox \
+		--disable-dev-shm-usage \
+		--use-gl=angle \
+		--use-angle=swiftshader \
+		--enable-unsafe-swiftshader \
+		--enable-logging=stderr --v=0 \
+		--user-data-dir="$site/profile" \
+		"http://127.0.0.1:$port/index.html" >/dev/null 2>"$console" &
+	chrome_pid=$!
+fi
 
 verdict=""
 for _ in $(seq $((BROWSER_TIMEOUT * 2))); do
@@ -197,29 +308,48 @@ for _ in $(seq $((BROWSER_TIMEOUT * 2))); do
 	kill -0 "$chrome_pid" 2>/dev/null || break
 	sleep 0.5
 done
+# SMOKE_SHOT=<file.png>, Firefox only: grab the Xvfb screen while the page is
+# still up, i.e. the frame as the browser composited it, not the engine's own
+# readback.  Needs ImageMagick's `import`.
+if [ -n "${SMOKE_SHOT:-}" ] && [ "$browser_kind" = firefox ]; then
+	if command -v import >/dev/null; then
+		import -display ":$display_n" -window root "$SMOKE_SHOT" 2>/dev/null ||
+			echo "warning: SMOKE_SHOT capture failed" >&2
+	else
+		echo "warning: SMOKE_SHOT needs ImageMagick's import on PATH" >&2
+	fi
+fi
 kill "$chrome_pid" 2>/dev/null || true
 wait "$chrome_pid" 2>/dev/null || true
 
 echo "---- engine output ----"
-# Chrome escapes the message as a JS string literal: \" and \\ at most.
-sed -n 's/.*"HWLOG \(.*\)", source: .*/\1/p' "$console" | sed 's/\\"/"/g; s/\\\\/\\/g'
+# Both browsers escape the message as a JS string literal: \" and \\ at most.
+# Chrome: ... "HWLOG <msg>", source: ...   Firefox: console.log: "HWLOG <msg>"
+sed -n -e 's/.*"HWLOG \(.*\)", source: .*/\1/p' \
+       -e 's/^console\.log: "HWLOG \(.*\)"$/\1/p' "$console" | sed 's/\\"/"/g; s/\\\\/\\/g'
 echo "-----------------------"
 # A WebGL error is a failure, not noise.  These lines were once read as
 # SwiftShader chatter; they were the engine: texture swizzle WebGL2 dropped
 # (254 per demo1 load), and multisample OIT targets the ES tier cannot create
 # (GitHub #112).  Chrome reports each as "WebGL: INVALID_..."; the engine's ES
-# error poll as "GL error ... detected at end of frame".
-gl_errors=$(grep -acE 'WebGL: (INVALID|OUT_OF_MEMORY|CONTEXT_LOST)|GL error GL_' "$console" || true)
+# error poll as "GL error ... detected at end of frame".  Firefox reports a
+# failed call as "WebGL warning: <call>: <why>" on stderr; it uses the same
+# prefix for a few performance notes, which are not errors and are listed
+# in FF_WEBGL_NOTES rather than counted.
+FF_WEBGL_NOTES='lazy initialization|Tex image .* is incurring|is deprecated|Alpha-premult|performance'
+gl_errors=$(grep -aE 'WebGL: (INVALID|OUT_OF_MEMORY|CONTEXT_LOST)|GL error GL_|WebGL warning: ' "$console" |
+	grep -avcE "$FF_WEBGL_NOTES" || true)
 if [ "$gl_errors" -gt 0 ] && [ "${verdict%% *}" = pass ]; then
 	echo "GL errors in the browser's log:"
-	grep -aoE 'WebGL: [A-Z_]+: [^"]*|GL error GL_[^"]*' "$console" | sort | uniq -c | head -20
+	grep -aoE 'WebGL: [A-Z_]+: [^"]*|GL error GL_[^"]*|WebGL warning: [^"]*' "$console" |
+		grep -avE "$FF_WEBGL_NOTES" | sort | uniq -c | head -20
 	verdict="fail $gl_errors WebGL/GL error line(s)"
 fi
 case "$verdict" in
 	pass\ *) echo "result: $verdict"; echo "PASS: hexenwail.wasm boot smoke ($mode)" ;;
 	fail\ *) echo "result: $verdict"; echo "FAIL: hexenwail.wasm boot smoke ($mode)"; exit 1 ;;
 	*)
-		echo "FAIL: no verdict within ${BROWSER_TIMEOUT}s; Chrome's log follows"
+		echo "FAIL: no verdict within ${BROWSER_TIMEOUT}s; the browser's log follows"
 		grep -v HWLOG "$console" | tail -40
 		exit 1
 		;;

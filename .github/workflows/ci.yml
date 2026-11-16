@@ -323,6 +323,23 @@ jobs:
             engine/tests/hw_particle_map_test.c
           ./hw_particle_map_test
 
+      # The .md3 and .md5mesh loaders, linked against stubs per each test's
+      # README: vertex order and normals for MD3, bind-pose joints for MD5,
+      # and for both the skin and its _glow / _luma sidecar in every slot.
+      # -w as in the READMEs: the loaders pull in the whole engine header set.
+      - name: Unit test MD3 and MD5 loaders
+        run: |
+          set -euo pipefail
+          for k in md3 md5; do
+            nix develop --command sh -c "cc -o ${k}check \
+              engine/tests/$k/${k}check.c engine/h2shared/${k}mesh.c \
+              common/strlcpy.c common/qsnprint.c \
+              -Iengine/hexen2 -Iengine/h2shared -Icommon \
+              -DGLQUAKE -DSDLQUAKE -DGL_DLSYM -D_GNU_SOURCE=1 -D_REENTRANT \
+              \$(pkg-config --cflags sdl3) -w -lm"
+            ./${k}check engine/tests/$k
+          done
+
   # The Rust gate and the Windows/tools/gamecode loop share nothing with the
   # steps in `build` -- check-rust.sh builds its own tree under mktemp and
   # every target in the loop is its own derivation; neither reads ./result --

@@ -36,7 +36,7 @@ const PROGRAM_SPECS = [
   ['2d', 'shader', 's2d_vert', 's2d_frag'],
   ['flat', 'shader', 'sflat_vert', 'sflat_frag'],
   ['world', 'shader', 'sworld_vert', 'sworld_frag'],
-  ['world_opaque', 'shader', 'sworld_vert', 'sworld_frag_opaque'],
+  ['world_opaque', 'shader', 'sworld_vert', 'sworld_opaque_frag'],
   ['alias', 'shader', 'salias_vert', 'salias_frag'],
   ['particle', 'shader', 'spart_vert', 'spart_frag'],
   // Two programs since uhexen2-a5nn.4 split the one that branched on
@@ -44,10 +44,16 @@ const PROGRAM_SPECS = [
   ['sky_layers', 'shader', 'ssky_layers_vert', 'ssky_layers_frag'],
   ['sky_boxside', 'shader', 'ssky_side_vert', 'ssky_side_frag'],
   ['sky_cubemap', 'shader', 'ssky_cube_vert', 'ssky_cube_frag'],
-  ['postprocess', 'postprocess', 'pp_vert_src', 'pp_frag_src'],
-  ['bloom_bright', 'postprocess', 'bloom_vert_src', 'bloom_bright_frag_src'],
-  ['bloom_down', 'postprocess', 'bloom_vert_src', 'bloom_down_frag_src'],
-  ['bloom_up', 'postprocess', 'bloom_vert_src', 'bloom_up_frag_src'],
+  ['postprocess', 'postprocess', 'spp_vert', 'spp_frag'],
+  // The bloom and OIT-resolve stages are engine/shaders files since #450;
+  // gl_postprocess.c compiles them with PP_CompileShaderSplit.
+  ['bloom_bright', 'postprocess', 'sbloom_vert', 'sbloom_bright_frag'],
+  ['bloom_down', 'postprocess', 'sbloom_vert', 'sbloom_down_frag'],
+  ['bloom_up', 'postprocess', 'sbloom_vert', 'sbloom_up_frag'],
+  // The single-sample resolve runs on the ES tier whenever OIT does.  Its MSAA
+  // twin (soit_resolve_msaa_frag) is desktop-only -- sampler2DMS is ES 3.10 --
+  // and deliberately not listed.
+  ['oit_resolve', 'postprocess', 'soit_resolve_vert', 'soit_resolve_frag'],
 ];
 
 function tokenize(expression) {
@@ -272,7 +278,7 @@ export function expandShaderExpression(expression, source, sourceName = 'test so
 // (GLSL has no #include of its own: ARB_shading_language_include is not core
 // and does not exist in GLSL ES at all, which is why the expansion is offline.)
 async function expandShaderIncludes(name, body) {
-  for (let pass = 0; pass <= 8; pass += 1) {
+  for (let pass = 0; pass <= 31; pass += 1) {
     const match = /#include "([^"]+)"/.exec(body);
     if (!match) break;
     let included;
@@ -327,8 +333,14 @@ function splitHeaderFor(ctx, symbol) {
     if (args[3] === symbol) return args[2];
     if (args[5] === symbol) return args[4];
   }
+  // gl_postprocess.c's per-stage form: PP_CompileShaderSplit(type, header, body),
+  // which states the header just as explicitly.
+  const stageCall = /PP_CompileShaderSplit\s*\(\s*GL_\w+_SHADER\s*,\s*(\w+)\s*,\s*(\w+)\s*\)/g;
+  for (let match = stageCall.exec(ctx.source); match; match = stageCall.exec(ctx.source)) {
+    if (match[2] === symbol) return match[1];
+  }
   throw new Error(
-    `engine/shaders/${symbol}.glsl exists but no GL_InitProgramSplit() call in `
+    `engine/shaders/${symbol}.glsl exists but no GL_InitProgramSplit() or PP_CompileShaderSplit() call in `
     + `${ctx.name} names ${symbol}, so there is no way to know which #version `
     + 'header the engine compiles it with');
 }
@@ -351,23 +363,19 @@ export async function extractEngineWebGLPrograms() {
   // ones -- those with both a USE_GLES arm and a desktop arm, where this
   // extractor has to say which spelling it wants.  Everything else is found on
   // demand by resolveMacro(), so a new GLSL helper needs no edit to this file.
-  // Clustered dynamic lighting (uhexen2-26bm world, uhexen2-waum alias) is
-  // desktop-only -- it needs a compute shader and an SSBO, and the ES tier has
-  // neither -- so every one of its macros has an empty ES arm and has to be
-  // named here.  The alias ones include the varying declarations, because an
-  // `in` with no matching `out` is a link error and the ES tier has nothing to
-  // fill them with.
-  for (const name of ['GLSL_VERT_HEADER', 'GLSL_FRAG_HEADER', 'GLSL_EARLY_Z', 'GLSL_EARLY_Z_OPAQUE',
-                      'GLSL_BITFIELD_REVERSE',
-                      'GLSL_DLIGHT_DECL', 'GLSL_DLIGHT_FN', 'GLSL_DLIGHT_APPLY',
-                      'GLSL_LMSTYLES_DECL', 'GLSL_LMSTYLES_FN', 'GLSL_LMSTYLES_APPLY',
-                      'GLSL_ALIAS_DLIGHT_DECL', 'GLSL_ALIAS_DLIGHT_FN', 'GLSL_ALIAS_DLIGHT_APPLY',
-                      'GLSL_ALIAS_DLIGHT_VS_OUT', 'GLSL_ALIAS_DLIGHT_FS_IN',
-                      'GLSL_ALIAS_DLIGHT_VS_CALC']) {
+  // Clustered dynamic lighting (uhexen2-26bm world, uhexen2-waum alias) and
+  // GPU lightstyles (#439) are desktop-only -- they need a compute shader and
+  // an SSBO, and the ES tier has neither -- so the one macro they still need,
+  // the froxel-grid sizes the file-backed alias and world fragment stages take
+  // in their header chunks (GLSL_ALIAS_FRAG_HEADER, GLSL_WORLD_FRAG_HEADER,
+  // #450), has an empty ES arm and has to be named here.  Every alias and
+  // world stage is a file now and keeps its desktop-only half under
+  // #ifndef GL_ES, as it keeps its early-Z and its bitfieldReverse fallback.
+  for (const name of ['GLSL_VERT_HEADER', 'GLSL_FRAG_HEADER', 'GLSL_LIGHTGRID_CONSTS']) {
     macros.set(name, readDefine(glesBranchDefining(shaderSource, name), name, macros, shaderCtx));
   }
   // gl_postprocess.c keeps its own headers; PP_ES_PRECISION feeds the other two.
-  for (const name of ['PP_VERT_HEADER', 'PP_FRAG_HEADER', 'PP_BITFIELD_REVERSE']) {
+  for (const name of ['PP_VERT_HEADER', 'PP_FRAG_HEADER']) {
     macros.set(name, readDefine(glesBranchDefining(postprocessSource, name), name, macros, postprocessCtx));
   }
 

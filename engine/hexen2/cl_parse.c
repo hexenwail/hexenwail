@@ -804,9 +804,12 @@ static void CL_ParseUpdate (int bits)
 
 	*set_ent = *ref_ent;
 
-	if (ent->msgtime != cl.mtime[1])
-		forcelink = true;	// no previous frame to lerp from
-	else	forcelink = false;
+	/* No previous frame to lerp from only when the client holds no copy:
+	 * a fresh or U_CLEAR_ENT slot (no model), or one CL_RelinkEntities
+	 * dropped (forcelink).  Not msgtime != cl.mtime[1] as in Quake: the
+	 * server skips an unchanged entity, so missing from the last message
+	 * means held there, and its msg_origins[0] is where it stood (#494). */
+	forcelink = (ent->model == NULL || ent->forcelink);
 
 	ent->msgtime = cl.mtime[0];
 
@@ -836,6 +839,7 @@ static void CL_ParseUpdate (int bits)
 		if (num > 0 && num <= cl.maxclients)
 			R_TranslatePlayerSkin (num - 1);
 #endif
+		ent->lerpflags |= LERP_RESETANIM;	// no pose lerp across models
 	}
 
 	if (bits & U_FRAME)
@@ -1537,6 +1541,7 @@ void CL_ParseServerMessage (void)
 	static		double lasttime;
 	static		qboolean packet_loss = false;
 	entity_t	*ent;
+	qmodel_t	*model;
 	int		sc1, sc2, sc3 = 0;
 	byte		test;
 	float		compangles[2][3];
@@ -2093,7 +2098,12 @@ void CL_ParseServerMessage (void)
 			for (i = 0; i < cl.frames[0].count; i++)
 			{
 				ent = CL_EntityNum (cl.frames[0].states[i].index);
-				ent->model = cl.model_precache[cl.frames[0].states[i].modelindex];
+				model = cl.model_precache[cl.frames[0].states[i].modelindex];
+				/* Now that a held entity's lerp survives, it must not
+				 * carry pose indices from another model into this one. */
+				if (ent->model != model)
+					ent->lerpflags |= LERP_RESETANIM;
+				ent->model = model;
 				ent->baseline.flags |= BE_ON;
 			}
 		  }	break;
@@ -2111,6 +2121,9 @@ void CL_ParseServerMessage (void)
 					Host_Error("%s: Entity %d exceeds MAX_EDICTS (%d)", __thisfunc__, k, MAX_EDICTS);
 				ent = CL_EntityNum (k);
 				ent->baseline.flags &= ~BE_ON;
+				/* Removed on the wire: whatever comes back is new, even
+				 * if it is re-sent before a relink gets to drop it. */
+				ent->forcelink = true;
 			}
 			break;
 

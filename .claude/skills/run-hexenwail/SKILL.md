@@ -155,7 +155,38 @@ Success is `PASS: hexenwail.wasm boot smoke (nodata)` / `(map)`.  Any
 detected at end of frame`, now FAILS the run.  Those lines used to be waved
 off as SwiftShader noise; they were real WebGL2 bugs (GitHub #112: texture
 swizzle WebGL2 dropped, multisample OIT targets).  If one appears, it is the
-engine.
+engine.  So does any shader compile or link error the engine prints: a
+program the browser's GLSL ES validator rejects is an ES-tier bug even when
+the engine carries on without it.
+
+Three environment knobs:
+
+- `BROWSER=firefox` runs the same page in Firefox. It runs **non-headless on a
+  private Xvfb display**, because headless Firefox finds no GL driver here
+  ("Exhausted GL driver options"); under Xvfb it gets llvmpipe through GLX.
+  Firefox's failed WebGL calls (`WebGL warning: <call>: ...`) count as errors
+  the same way.
+  ```bash
+  nix shell nixpkgs#firefox nixpkgs#xorg-server nixpkgs#python3 --command \
+    env BROWSER=firefox ./scripts/wasm-boot-smoke.sh engine/build/bin \
+    "$(nix build .#demodata --no-link --print-out-paths)/share/hexenwail"
+  ```
+- `SMOKE_ARGS="..."` adds engine arguments before `+map demo1`. A plain load
+  never builds the optional post-process programs. To compile and run them:
+  `SMOKE_ARGS="+gamma 0.6 +contrast 1.5 +gl_fxaa 1 +r_bloom 1 +r_softemu 1 +r_dither 1 -fsaa 0"`
+  (`-fsaa 0` because OIT stands down under MSAA on this tier).
+- `SMOKE_LOG=<path>` keeps the raw browser log, which is otherwise deleted. It
+  is the only way to audit what the error filter saw.
+- `SMOKE_SHOT=<file.png>` (Firefox only; add `nixpkgs#imagemagick` to the shell)
+  grabs the Xvfb screen at verdict time: the frame as the browser composited
+  it, not the engine's own readback. Run once plain and once with
+  `SMOKE_ARGS="-fsaa 0 +gamma 0.6 +contrast 1.5 +r_softemu 1 +r_dither 1"`, and
+  the post-process chain shows as a brighter, posterized frame.
+- `SMOKE_SCREENSHOT=1` (map mode, either browser) presses F12 through the
+  exported `Hexenwail_TouchKey`, then decodes the PNG the engine wrote with the
+  browser's own decoder. It fails unless more than half the pixels are
+  non-black. A shot read back after the frame was presented comes out black in
+  a browser; that was the bug #405 fixed.
 
 ## Run: the GUI lane (screenshots)
 
