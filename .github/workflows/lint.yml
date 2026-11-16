@@ -503,3 +503,9 @@ jobs:
       # writer and lit water's bracket pinned, and the cvar (#97).
       - name: Dynamic lights stop at the wall
         run: python3 tools/test_dlight_onesided.py
+      # ...and at any wall, on the CPU light path: r_dlightvis.c compiled whole
+      # and run on a synthetic BSP against bsp_dlight_leak.py's segments and
+      # samples, and R_MarkLights' and the alias loops' hooks lifted and run
+      # (#97 P2).
+      - name: Dynamic lights do not see through walls
+        run: python3 tools/test_dlight_vis.py

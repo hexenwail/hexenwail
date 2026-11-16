@@ -23,6 +23,7 @@
 #include "gl_shader.h"
 #include "gl_uniforms.h"
 #include "gl_lightcluster.h"
+#include "r_dlightvis.h"
 #include "gl_ssao.h"
 #include "gl_pipeline.h"
 #include "gl_vbo.h"
@@ -2677,6 +2678,14 @@ static void R_DrawAliasModel (entity_t *e)
 			{
 				VectorSubtract (e->origin, cl_dlights[lnum].origin, dist);
 				add = cl_dlights[lnum].radius - VectorLengthFast(dist);
+				/* not through a wall (GitHub #97 P2, r_dlightvis.c).  Not
+				 * while the GPU grid lights the world (r_lightclusters 1
+				 * with r_lightclusters_models 0): it still lights through
+				 * walls until P4, and a model must not disagree with it */
+				if (add > 0 && r_dlight_occlusion.integer >= 1 &&
+				    !R_LightCluster_ShadesWorld () &&
+				    !R_DlightVis_Entity (lnum, e))
+					add = 0;
 				if (add > 0)
 				{
 					if (cl_dlights[lnum].dark)
@@ -4015,6 +4024,14 @@ static qboolean R_CollectAliasInstance (entity_t *e)
 			{
 				VectorSubtract(e->origin, cl_dlights[lnum].origin, dist);
 				add = cl_dlights[lnum].radius - VectorLengthFast(dist);
+				/* not through a wall (GitHub #97 P2, r_dlightvis.c).  Not
+				 * while the GPU grid lights the world (r_lightclusters 1
+				 * with r_lightclusters_models 0): it still lights through
+				 * walls until P4, and a model must not disagree with it */
+				if (add > 0 && r_dlight_occlusion.integer >= 1 &&
+				    !R_LightCluster_ShadesWorld () &&
+				    !R_DlightVis_Entity (lnum, e))
+					add = 0;
 				if (add > 0)
 				{
 					if (cl_dlights[lnum].dark)

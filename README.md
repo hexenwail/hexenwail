@@ -73,7 +73,7 @@ Planned:
 - Lightmap atlas, batched world draws, hardware-instanced alias models
 - Unified-shader brush entity batched dispatch (`r_brush_inst`, default on) — same compiled program as world surfaces so within-shader `invariant gl_Position` covers coplanar joins
 - MSAA, FXAA, anisotropic filtering
-- Dynamic lights stop at the wall they stand against (`r_dlight_occlusion`, default 1; 0 is vanilla, which lit both sides of every face): a light behind a face's plane no longer lights it, on every renderer
+- Dynamic lights stop at the wall they stand against (`r_dlight_occlusion`, default 1; 0 is vanilla, which lit both sides of every face): a light behind a face's plane no longer lights it, on every renderer. On the CPU light path (GLES/WebGL2, the software renderer, `r_lightclusters 0`) a light also no longer lights a face or a model it cannot see past a wall (`r_dlightvis_dump` shows what each light sees)
 - Entity contact occlusion (`r_ssao` 1-3, off by default): vkQuake's XeGTAO port, darkening the world only where a monster, item or door stands on it, since the world's own corners are already in its lightmaps
 - Render scale (25–100%), retro dithering mode
 - Display presets: Faithful / Crunchy / Retro / Clean / Modern / Ultra

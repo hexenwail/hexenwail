@@ -21,6 +21,7 @@
 
 #include "quakedef.h"
 #include "r_local.h"
+#include "r_dlightvis.h"
 
 int	r_dlightframecount;
 
@@ -126,6 +127,10 @@ void R_MarkLights (dlight_t *light, int lnum, mnode_t *node, const entity_t *ent
 		if (r_dlight_occlusion.integer >= 1 && !(surf->flags & SURF_DRAWTURB) &&
 		    ((surf->flags & SURF_PLANEBACK) ? -dist : dist) < -DLIGHT_PLANE_EPSILON)
 			continue;
+		/* ...nor one it cannot see (#97 P2); see gl_rlight.c's twin. */
+		if (!ent && r_dlight_occlusion.integer >= 1 &&
+		    !R_DlightVis_Surface (lnum, surf))
+			continue;
 		if (surf->dlightframe != r_dlightframecount)
 		{
 			DLIGHTBITS_CLEAR (surf->dlightbits);
@@ -149,6 +154,8 @@ void R_PushDlights (void)
 {
 	int		i;
 	dlight_t	*l;
+
+	R_DlightVis_BeginFrame ();
 
 	if (!r_dynamic.integer)
 		return;

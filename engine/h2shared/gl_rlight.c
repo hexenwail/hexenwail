@@ -25,6 +25,7 @@
 #include "gl_pipeline.h"
 #include "gl_vbo.h"
 #include "gl_lightcluster.h"
+#include "r_dlightvis.h"
 
 static int	r_dlightframecount;
 
@@ -364,6 +365,11 @@ loc0:
 		// compare to minimum light
 		if ((s*s + t*t + dist*dist) < maxdist)
 		{
+			/* ...and that it can see (GitHub #97 P2, r_dlightvis.c).
+			 * World surfaces only: see there for why. */
+			if (!ent && r_dlight_occlusion.integer >= 1 &&
+			    !R_DlightVis_Surface (lnum, surf))
+				continue;
 			if (surf->dlightframe != r_dlightframecount)
 			{	// not dynamic until now
 				DLIGHTBITS_CLEAR (surf->dlightbits);
@@ -395,6 +401,9 @@ void R_PushDlights (void)
 	dlight_t	*l;
 	vec3_t		eye, pn, right, up;
 	mplane_t	cull[4];
+
+	/* Before either return: the CPU alias loops ask r_dlightvis.c too. */
+	R_DlightVis_BeginFrame ();
 
 	if (gl_flashblend.integer)
 		return;

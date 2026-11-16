@@ -30,11 +30,25 @@
 #   3      -798 930 304   a back face in the light's PVS          repro == control
 #                         (face 4981, a pillar at y=960)
 #   lit    170 312 80     the torch's own wall                    repro > control
+#   alias  -758 482 192   an alias model (an obj_barrel the .ent   repro == control
+#                         adds at -818 462 136) in a door recess
+#                         the torch's wall hides from it
 #
 # Face numbers are tools/bsp_dlight_leak.py's (--map demo2 --scenes N); every
 # box was placed by projecting its face and checked on the frames.  Scene 2 is
 # the case the one-sided test (P1) cannot fix: the face does face the light.
-# It stays FAIL until the visibility work (P2 onward) lands.
+# The CPU path passes it since P2 (r_dlightvis.c); the GPU clustered path
+# (r_lightclusters 1) fails it until the shadow maps (P4) land.
+#
+# The alias scene is P2's too: the CPU alias loops (R_DrawAliasModel, the
+# instanced twin, the software R_PrepareAlias) took every light in
+# range, through any wall.  It photographs scene 2's spot, with a barrel added
+# to BOTH .ents -- so it has a control and a repro run of its own, and scene 2's
+# frames do not change -- and the box is the barrel.  A third run takes the
+# same view without the barrel, and the scene FAILs unless the box differs
+# from it by PRESENT: a barrel that did not spawn would leave a wall P2
+# already fixes, and the scene would pass without testing a model.  On r_lightclusters 1 the
+# GPU shades alias models (ClusteredAliasDlight) and it FAILs until P4.
 #
 # Why scene 1 is not the torch at 170 312 80 that the design pass picked: the
 # server sends the client only the entities in its PVS, and from in front of
@@ -54,9 +68,12 @@
 # Environment:
 #   ENGINE  engine binary            (default ./result/bin/hexenwail)
 #   EXTRA   extra engine args, e.g. "+r_lightclusters 0 +r_dlight_occlusion 0"
-#   SCENES  which scenes             (default "1 2 3 lit")
+#   SCENES  which scenes             (default "1 2 3 lit alias")
 #   OUT     keep the PNGs and logs here (default: a temp dir, removed)
 #   TOL, LITMIN, WAITS (frames after the map loads, default 150)
+#   PRESENT  how far (mean per-pixel luminance) the alias scene's box must
+#            differ from the same view without the barrel (a third, "bare" run)
+#            for the barrel to count as there, default 2.0
 #
 # Runs offscreen; on a box without a GPU set SDL_VIDEODRIVER=x11 under Xvfb.
 #
@@ -67,9 +84,10 @@ set -euo pipefail
 BASEDIR=${1:-$HOME/hexen2}
 ENGINE=${ENGINE:-./result/bin/hexenwail}
 EXTRA=${EXTRA:-}
-SCENES=${SCENES:-1 2 3 lit}
+SCENES=${SCENES:-1 2 3 lit alias}
 TOL=${TOL:-1.0}
 LITMIN=${LITMIN:-4.0}
+PRESENT=${PRESENT:-2.0}
 WAITS=${WAITS:-150}
 MAP=demo2
 
@@ -87,19 +105,26 @@ fi
 
 # scene -> torch origin | camera (setpos x y z pitch yaw roll) | box (fractions
 # of the frame: x0 y0 x1 y1) | kind
-declare -A TORCH CAM BOX KIND
+declare -A TORCH CAM BOX KIND ADD
 TORCH[1]="-720 -88 224";  CAM[1]="-830 32 150 0 -90 0";   BOX[1]="0.36 0.25 0.55 0.50"; KIND[1]=dark
 TORCH[2]="-758 482 192";  CAM[2]="-801 608 184 17 -90 0"; BOX[2]="0.475 0.25 0.515 0.55"; KIND[2]=dark
 TORCH[3]="-798 930 304";  CAM[3]="-811 1088 247 17 -90 0"; BOX[3]="0.49 0.25 0.515 0.52"; KIND[3]=dark
 TORCH[lit]="170 312 80";  CAM[lit]="210 200 99 0 90 0";   BOX[lit]="0.55 0.40 0.75 0.60"; KIND[lit]=lit
+TORCH[alias]="-758 482 192"; CAM[alias]="-801 608 184 17 -90 0"; BOX[alias]="0.52 0.60 0.58 0.73"; KIND[alias]=dark
+ADD[alias]='{
+"classname" "obj_barrel"
+"origin" "-818 462 136"
+}'
 
 for s in $SCENES; do
-	[ -n "${TORCH[$s]:-}" ] || { echo "unknown scene '$s' (have: 1 2 3 lit)" >&2; exit 2; }
+	[ -n "${TORCH[$s]:-}" ] || { echo "unknown scene '$s' (have: 1 2 3 lit alias)" >&2; exit 2; }
 done
 
 # The entity lump (BSP29: lump 0, right after the version) out of the pak, as
 # control.ent, and one repro .ent per distinct torch.
 torches=$(for s in $SCENES; do echo "${TORCH[$s]}"; done | sort -u | tr ' ' _ | tr '\n' ' ')
+plain=(); added=()
+for s in $SCENES; do if [ -n "${ADD[$s]:-}" ]; then added+=("$s"); else plain+=("$s"); fi; done
 python3 - "$BASEDIR/data1" "$MAP" "$work" $torches <<'PY'
 import os, re, struct, sys
 data1, mapname, work, torches = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4:]
@@ -164,44 +189,50 @@ run () {
 }
 
 # Mean luminance (Rec. 601, 0..255) of a box given as frame fractions.
+# With a third argument, a second PNG: the mean per-pixel |difference| instead.
 lum () {
-	python3 - "$1" $2 <<'PY'
+	python3 - "$1" $2 ${3:-} <<'PY'
 import struct, sys, zlib
 path, x0, y0, x1, y1 = sys.argv[1], *map(float, sys.argv[2:6])
-d = open(path, 'rb').read()
-assert d[:8] == b'\x89PNG\r\n\x1a\n', 'not a PNG'
-i, idat = 8, b''
-while i < len(d):
-    n, typ = struct.unpack('>I4s', d[i:i + 8])
-    body = d[i + 8:i + 8 + n]
-    if typ == b'IHDR':
-        w, h, depth, ctype = struct.unpack('>IIBB', body[:10])
-    elif typ == b'IDAT':
-        idat += body
-    i += 12 + n
-assert depth == 8 and ctype in (2, 6), 'unsupported PNG (depth %d type %d)' % (depth, ctype)
-bpp = 3 if ctype == 2 else 4
-raw = zlib.decompress(idat)
-stride = w * bpp
-rows, prev, p = [], bytearray(stride), 0
-for _ in range(h):
-    f = raw[p]; line = bytearray(raw[p + 1:p + 1 + stride]); p += 1 + stride
-    for k in range(stride):
-        a = line[k - bpp] if k >= bpp else 0
-        b = prev[k]; c = prev[k - bpp] if k >= bpp else 0
-        if f == 1: line[k] = (line[k] + a) & 255
-        elif f == 2: line[k] = (line[k] + b) & 255
-        elif f == 3: line[k] = (line[k] + ((a + b) >> 1)) & 255
-        elif f == 4:
-            pa, pb, pc = abs(b - c), abs(a - c), abs(a + b - 2 * c)
-            line[k] = (line[k] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 255
-    rows.append(line); prev = line
+other = sys.argv[6] if len(sys.argv) > 6 else None
+def load(path):
+    d = open(path, 'rb').read()
+    assert d[:8] == b'\x89PNG\r\n\x1a\n', 'not a PNG'
+    i, idat = 8, b''
+    while i < len(d):
+        n, typ = struct.unpack('>I4s', d[i:i + 8])
+        body = d[i + 8:i + 8 + n]
+        if typ == b'IHDR':
+            w, h, depth, ctype = struct.unpack('>IIBB', body[:10])
+        elif typ == b'IDAT':
+            idat += body
+        i += 12 + n
+    assert depth == 8 and ctype in (2, 6), 'unsupported PNG (depth %d type %d)' % (depth, ctype)
+    bpp = 3 if ctype == 2 else 4
+    raw = zlib.decompress(idat)
+    stride = w * bpp
+    rows, prev, p = [], bytearray(stride), 0
+    for _ in range(h):
+        f = raw[p]; line = bytearray(raw[p + 1:p + 1 + stride]); p += 1 + stride
+        for k in range(stride):
+            a = line[k - bpp] if k >= bpp else 0
+            b = prev[k]; c = prev[k - bpp] if k >= bpp else 0
+            if f == 1: line[k] = (line[k] + a) & 255
+            elif f == 2: line[k] = (line[k] + b) & 255
+            elif f == 3: line[k] = (line[k] + ((a + b) >> 1)) & 255
+            elif f == 4:
+                pa, pb, pc = abs(b - c), abs(a - c), abs(a + b - 2 * c)
+                line[k] = (line[k] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 255
+        rows.append(line); prev = line
+    return w, h, bpp, rows
+w, h, bpp, A = load(path)
+B = load(other)[3] if other else None
+lum = lambda r, q: 0.299 * r[q] + 0.587 * r[q + 1] + 0.114 * r[q + 2]
 tot = cnt = 0
 for y in range(int(y0 * h), int(y1 * h)):
-    r = rows[y]
     for x in range(int(x0 * w), int(x1 * w)):
         q = x * bpp
-        tot += 0.299 * r[q] + 0.587 * r[q + 1] + 0.114 * r[q + 2]; cnt += 1
+        tot += abs(lum(A[y], q) - lum(B[y], q)) if B else lum(A[y], q); cnt += 1
 print('%.3f' % (tot / cnt))
 PY
 }
@@ -216,17 +247,26 @@ has_dlight () {
 		index($0, shot) { printf "%s", buf; exit }' "$1" | grep -qF "$o" && echo yes || echo no
 }
 
-run control "$work/control.ent" $SCENES
+[ ${#plain[@]} -gt 0 ] && run control "$work/control.ent" ${plain[@]+"${plain[@]}"}
 for t in $torches; do
-	scn=(); for s in $SCENES; do [ "${TORCH[$s]// /_}" = "$t" ] && scn+=("$s"); done
-	run "repro_$t" "$work/repro_$t.ent" "${scn[@]}"
+	scn=(); for s in ${plain[@]+"${plain[@]}"}; do [ "${TORCH[$s]// /_}" = "$t" ] && scn+=("$s"); done
+	[ ${#scn[@]} -gt 0 ] && run "repro_$t" "$work/repro_$t.ent" "${scn[@]}"
+done
+# a scene that adds an entity gets a control and a repro of its own, both with it
+for s in ${added[@]+"${added[@]}"}; do
+	t=${TORCH[$s]// /_}
+	run "bare_$s" "$work/control.ent" "$s"	# the same view without the entity
+	{ cat "$work/control.ent"; printf '%s\n' "${ADD[$s]}"; } >"$work/control_$s.ent"
+	{ cat "$work/repro_$t.ent"; printf '%s\n' "${ADD[$s]}"; } >"$work/repro_${t}_$s.ent"
+	run "control_$s" "$work/control_$s.ent" "$s"
+	run "repro_${t}_$s" "$work/repro_${t}_$s.ent" "$s"
 done
 
 fail=0; failed=()
-ctl="$work/control"
-[ -f "$ctl/qconsole.log" ] || { echo "control run left no qconsole.log; see $ctl/stdout" >&2; exit 2; }
 for s in $SCENES; do
-	t=${TORCH[$s]// /_}; rep="$work/repro_$t"
+	t=${TORCH[$s]// /_}; ctl="$work/control"; rep="$work/repro_$t"
+	if [ -n "${ADD[$s]:-}" ]; then ctl="$work/control_$s"; rep="$work/repro_${t}_$s"; fi
+	[ -f "$ctl/qconsole.log" ] || { echo "control run left no qconsole.log; see $ctl/stdout" >&2; exit 2; }
 	c="$ctl/data1/shots/$s.png"; r="$rep/data1/shots/$s.png"
 	if [ ! -f "$c" ] || [ ! -f "$r" ]; then
 		echo "scene $s: FAIL (no screenshot; see $ctl/stdout, $rep/stdout)"; fail=1; failed+=("$s"); continue
@@ -235,8 +275,15 @@ for s in $SCENES; do
 	rd=$(has_dlight "$rep/qconsole.log" "$s" "${TORCH[$s]}")
 	lc=$(lum "$c" "${BOX[$s]}"); lr=$(lum "$r" "${BOX[$s]}")
 	delta=$(python3 -c "print('%.3f' % ($lr - $lc))")
+	present=yes
+	if [ -n "${ADD[$s]:-}" ]; then
+		pd=$(lum "$c" "${BOX[$s]}" "$work/bare_$s/data1/shots/$s.png" 2>/dev/null || echo 0)
+		python3 -c "import sys; sys.exit(0 if $pd >= $PRESENT else 1)" || present="no (box differs from the bare view by $pd)"
+	fi
 	if [ "$cd_" != no ] || [ "$rd" != yes ]; then
 		verdict="FAIL (torch dlight: control $cd_, repro $rd -- the run proves nothing)"
+	elif [ "$present" != yes ]; then
+		verdict="FAIL (the added entity is not in the box: $present -- the run proves nothing)"
 	elif [ "${KIND[$s]}" = lit ]; then
 		python3 -c "import sys; sys.exit(0 if $delta >= $LITMIN else 1)" \
 			&& verdict="PASS (the torch lights its own wall)" \

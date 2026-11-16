@@ -30,10 +30,13 @@ split into fully occluded (every sample blocked: what one-sided misses) and
 partly occluded (some blocked, some not).
 
     python3 tools/bsp_dlight_leak.py [--basedir ~/hexen2] [--map demo2] \\
-        [--radius 200] [--eps 2] [--scenes N] [--out report.json] [paks...]
+        [--radius 200] [--eps 2] [--scenes N] [--out report.json [--faces]] [paks...]
 
 With no paks it reads <basedir>/data1/pak0.pak and pak1.pak.  --scenes N lists
-up to N candidate repro scenes per map and category.  Nothing is written except
+up to N candidate repro scenes per map and category.  --faces adds, per light,
+every reachable face to the JSON report: [face, behind, in PVS, blocked
+samples, samples].  The engine's r_dlightvis_dump (r_dlightvis.c, P2) takes the
+same samples, so the two can be compared face by face.  Nothing is written except
 the JSON report --out names.  Standard library only; BSP29 and BSP2.
 """
 import argparse
@@ -309,7 +312,7 @@ def lights_of(bsp):
     return out
 
 
-def analyse(bsp, radius, eps, nscenes):
+def analyse(bsp, radius, eps, nscenes, want_faces=False):
     lights = lights_of(bsp)
     faces = []
     for fi in range(bsp.world_firstface, bsp.world_firstface + bsp.world_numfaces):
@@ -327,10 +330,15 @@ def analyse(bsp, radius, eps, nscenes):
               by_either=0, front_reachable=0, front_full=0, front_partial=0,
               eps_band=0, eps_band_seen=0)
     scenes = {'behind_wall': [], 'front_occluded': [], 'backface_in_pvs': []}
+    per_light = []
     for cn, org in lights:
         lo = (org[0], org[1], org[2] + 8.0)
         leaf = bsp.point_leaf(lo)
         vis = bsp.pvs(leaf)
+        rows = []
+        if want_faces:
+            per_light.append(dict(light=cn, origin=list(lo), leaf=leaf,
+                                  contents=bsp.leafs[leaf][0], faces=rows))
         for fi, pts, n, d, smp, cen in faces:
             if poly_distance(lo, pts, n, d) >= radius:
                 continue
@@ -339,6 +347,9 @@ def analyse(bsp, radius, eps, nscenes):
             behind = sd < -eps
             nblock = sum(1 for s in smp if bsp.blocked(lo, s))
             full = nblock == len(smp)
+            if want_faces:
+                rows.append([fi, bool(behind),
+                             any(l in vis for l in bsp.face_leafs.get(fi, ())), nblock, len(smp)])
             if -eps <= sd < 0:
                 # behind the plane, but by no more than the tolerance: a
                 # light mounted a unit or two inside its own wall
@@ -365,6 +376,8 @@ def analyse(bsp, radius, eps, nscenes):
                                         centroid=[round(c, 1) for c in cen],
                                         normal=[round(c, 3) for c in n],
                                         texture=bsp.face_texname(fi)))
+    if want_faces:
+        st['per_light'] = per_light
     return st, scenes
 
 
@@ -381,6 +394,9 @@ def main(argv):
     ap.add_argument('--eps', type=float, default=2.0, help='one-sided tolerance, units')
     ap.add_argument('--scenes', type=int, default=0, help='list N candidate scenes per category')
     ap.add_argument('--out', help='write the full report as JSON here')
+    ap.add_argument('--faces', action='store_true',
+                    help='with --out: per light, every reachable face as [face, behind, in PVS, '
+                         'blocked samples, samples] (what r_dlightvis_dump faces prints)')
     a = ap.parse_args(argv)
 
     paks = a.paks or [os.path.join(a.basedir, 'data1', p) for p in ('pak0.pak', 'pak1.pak')]
@@ -413,7 +429,7 @@ def main(argv):
         except Exception as e:                    # a foreign or truncated file
             print('%-12s ERROR %s' % (name, e))
             continue
-        st, scenes = analyse(bsp, a.radius, a.eps, a.scenes)
+        st, scenes = analyse(bsp, a.radius, a.eps, a.scenes, a.faces)
         report['maps'][name] = dict(st, scenes=scenes)
         for k in tot:
             tot[k] += st[k]

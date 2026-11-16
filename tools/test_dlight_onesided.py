@@ -221,6 +221,9 @@ static mplane_t plane = {{0, 0, 1}, 0, 2};
 static mtexinfo_t texinfo = {{{1, 0, 0, 0}, {0, 1, 0, 0}}};
 static msurface_t surfs[1];
 static mnode_t nodes[1];
+/* r_dlightvis.c's visibility cascade (P2) is tools/test_dlight_vis.py's: here
+ * every light sees every face, so only the one-sided test decides */
+static int R_DlightVis_Surface (int lnum, msurface_t *surf) { (void)lnum; (void)surf; return 1; }
 typedef struct { mnode_t *nodes; struct { int firstclipnode; } hulls[1]; msurface_t *surfaces; } qmodel_t;
 static qmodel_t world = {nodes, {{0}}, surfs};
 static struct { qmodel_t *worldmodel; double time; } cl = {&world, 10.0};
