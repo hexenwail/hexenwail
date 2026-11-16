@@ -52,7 +52,8 @@
  * term is scaled by DlShadowFactor, its cube shadow map's answer for this pixel
  * (dlshadow.inc), so a torch no longer lights a monster through the wall
  * between them -- per pixel, so a model half round a corner is half lit.  The
- * maps hold the world and brush entities; models cast nothing yet (P6).  A
+ * maps hold the world and brush entities, and under r_shadow_casters 2 the
+ * alias models too (P6), so one model can stand in another's shadow.  A
  * light with no map, and every light under r_dlight_occlusion 0 and 1, takes
  * the term untouched.
  */

@@ -2,7 +2,7 @@
 """A dynamic light behind a face does not light it, on every tier (GitHub #97).
 
 Every renderer lit both sides of a face's plane, so a torch lit the far side
-of the wall it stood against.  r_dlight_occlusion 1 (the default) adds a
+of the wall it stood against.  r_dlight_occlusion 1 (2, the desktop default, too) adds a
 one-sided test with a tolerance of DLIGHT_PLANE_EPSILON (2 units, client.h):
 
   * the CPU twins, gl_rsurf.c / r_surf.c R_AddDynamicLights, which decide
@@ -572,10 +572,15 @@ def check_gpu():
 
 # ------------------------------------------------------------------ the cvar
 def check_cvar():
-    for rel in ("engine/hexen2/gl_rmain.c", "engine/hexen2/r_soft_web.c"):
-        if not re.search(r'^cvar_t\s+r_dlight_occlusion = \{"r_dlight_occlusion", "1", CVAR_ARCHIVE\};',
-                         read(rel), re.M):
-            errors.append('%s must define r_dlight_occlusion as "1", CVAR_ARCHIVE' % rel)
+    if not re.search(r'^cvar_t\s+r_dlight_occlusion = \{"r_dlight_occlusion", "1", CVAR_ARCHIVE\};',
+                     read("engine/hexen2/r_soft_web.c"), re.M):
+        errors.append('r_soft_web.c must define r_dlight_occlusion as "1", CVAR_ARCHIVE')
+    # Desktop GL defaults to 2 (the shadow maps, #97 P5); the ES tier, which has
+    # none, to 1, the value the software build shares with it.
+    if not re.search(r'#ifdef USE_GLES\n(?:[^#\n][^\n]*\n)*?cvar_t\s+r_dlight_occlusion = \{"r_dlight_occlusion", "1", CVAR_ARCHIVE\};\n'
+                     r'(?:[^#\n][^\n]*\n)*?#else\n(?:[^#\n][^\n]*\n)*?cvar_t\s+r_dlight_occlusion = \{"r_dlight_occlusion", "2", CVAR_ARCHIVE\};\n(?:[^#\n][^\n]*\n)*?#endif',
+                     read("engine/hexen2/gl_rmain.c")):
+        errors.append('gl_rmain.c must define r_dlight_occlusion as "1" under USE_GLES and "2" otherwise, CVAR_ARCHIVE')
     if "Cvar_RegisterVariable (&r_dlight_occlusion);" not in read("engine/hexen2/gl_rmisc.c"):
         errors.append("gl_rmisc.c must register r_dlight_occlusion")
     sw = body_of(strip_comments(read("engine/hexen2/r_soft_web.c")), r"void R_SoftWebInitCvars \(void\)\s*\{") or ""

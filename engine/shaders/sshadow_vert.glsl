@@ -1,12 +1,15 @@
 /* sshadow_vert -- one face of a dynamic light's cube shadow map (GitHub #97,
  * P3).  gl_shadow.c draws the world and the brush entities within the light's
- * radius six times, once per face, with this and sshadow_frag.  No #version:
+ * radius six times, once per face, with this and sshadow_frag (and, under
+ * r_shadow_casters 2, the alias models with sshadow_alias_vert).  No #version:
  * gl_shadow.c supplies the desktop one.  Desktop GL 4.3 only, like the maps.
  *
  * ShadowPass is the pass's one block, vertex stage only: the fragment stage
  * reads nothing but the varying.  GL binding point 14 (UBO_BINDING_SHADOW_PASS),
  * assigned from C; the C mirror is r_shadowpass_t in gl_shadow.c, and
- * tools/test_dlshadow_block.py keeps the two equal.  Every member mat4 or vec4.
+ * tools/test_dlshadow_block.py keeps the two equal.  Every member mat4, vec4 or
+ * ivec4.  sshadow_alias_vert declares the same block; this stage reads none of
+ * the members it adds.
  *
  * LIGHT-RELATIVE, not world space: u_shadowmodel is the entity's transform
  * (identity for the world) with the light origin subtracted, so u_shadowvp is
@@ -18,8 +21,10 @@
 VERT_UBO(0) uniform ShadowPass {
     highp mat4 u_shadowvp;      /*   0  light-relative position -> this face's clip space */
     highp mat4 u_shadowmodel;   /*  64  model -> world, minus the light origin */
-    highp vec4 u_shadowlight;   /* 128  x 1 / the radius the map is drawn with */
-};                              /* 144 bytes */
+    highp vec4 u_shadowlight;   /* 128  x 1 / the radius the map is drawn with;
+                                 *      yzw the alias casters' (sshadow_alias_vert) */
+    highp ivec4 u_shadowpose;   /* 144  the alias casters' pose selection */
+};                              /* 160 bytes */
 
 VERT_IN(0) in vec3 a_position;
 

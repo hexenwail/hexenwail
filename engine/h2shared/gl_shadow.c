@@ -9,7 +9,7 @@
  */
 
 /*
- * Phases P3 and P4 of #97, desktop GL 4.3 with r_lightclusters 1, under
+ * Phases P3, P4 and P6 of #97, desktop GL 4.3 with r_lightclusters 1, under
  * r_dlight_occlusion 2.  Ironwail has nothing here; this is ours.
  *
  * WHAT IT FIXES.  P1's one-sided test drops a light behind a face, and P2's CPU
@@ -35,10 +35,28 @@
  * contiguous index runs and drawn with one glMultiDrawElements per face.  Then
  * the opaque brush entities whose box the sphere touches, each with its own
  * transform.  Not casters: sky and liquids (not in the world VBO), fences and
- * translucent brush entities (light gets through them), and alias models --
- * P6.  Liquids and fences are receivers as before.  The brush entities are
- * cl_visedicts' at R_SetupGL time, so ones the server does not send (outside
- * the view's PVS) and static ones (added later, by R_DrawWorld) cast nothing.
+ * translucent brush entities (light gets through them).  Liquids and fences
+ * are receivers as before.  The brush entities are cl_visedicts' at R_SetupGL
+ * time, so ones the server does not send (outside the view's PVS) and static
+ * ones (added later, by R_DrawWorld) cast nothing.
+ *
+ * ALIAS CASTERS (P6), under r_shadow_casters 2: the alias models of
+ * cl_visedicts the view draws opaque (SH_AliasEligible -- the same
+ * translucency and r_entdist tests, no frustum cull, never the viewmodel),
+ * each posed by R_AliasShadowCaster (gl_rmain.c) with the matrix and pose pair
+ * its draw will use, and drawn from its own GPU mesh by sshadow_alias_vert:
+ * Quake MDL and MD3 from their pose buffers, MD5 meshes skinned from their bone
+ * buffer -- all three formats, whichever path (instanced, legacy, skeletal)
+ * draws them in the view.  A light never takes a shadow from its own model
+ * (SH_AliasCasts): not from the entity it is keyed to, which is how the torch
+ * artifact (keyed to the player), a missile and a torch flame are lit, nor from
+ * any model whose box holds it.  The faces culled are the world's, so a model
+ * stores its far side too; but an alias receiver has no one-sided test to
+ * spare that far side from comparing against itself, so the alias pass pushes
+ * every vertex SH_ALIAS_PUSH units plus one texel's width further along its
+ * ray from the light (sshadow_alias_vert says why that moves no texel).  A
+ * wall closer than that behind a model gets no shadow from it there.  Static
+ * entities are not in cl_visedicts, as for brush entities.
  *
  * WHICH LIGHTS.  Every light of R_LightCluster_GatherLights, in its order (the
  * order the shader indexes), minus those whose origin is in a solid or sky leaf
@@ -50,7 +68,18 @@
  * cl_dlights[] slot and key) has moved less than SH_SLOP units, its radius sits
  * inside the band the map was drawn for, and the brush entities inside that
  * radius have not moved (a hash of their transforms -- a door opening redraws
- * the map).  A torch therefore costs six passes once.  Redraws are budgeted at
+ * the map).  A torch therefore costs six passes once.  Under r_shadow_casters
+ * 2 the hash also holds every alias caster in range, by its model matrix and
+ * pose pair: a monster that walks or animates near a light redraws that light's
+ * map every frame it does, within the budget below, and over budget the map is
+ * a frame or more behind the monster -- its shadow lags, it does not vanish.
+ * A model standing still in a single pose costs nothing after its first map,
+ * and neither does one that only turns or bobs on the clock (a pickup's
+ * EF_ROTATE): it is keyed by origin, so its shadow keeps the angle it was
+ * drawn at.  A model the view does not draw this frame (behind the camera)
+ * still casts, but its lerp state is not advanced, so its shadow steps from
+ * pose to pose.  The pass keeps far sides, so an open, one-sided mesh casts
+ * only from the side whose faces turn away from the light.  Redraws are budgeted at
  * r_shadow_updates a frame, most important light first; a light over budget
  * keeps its stale map if it has one -- read from the origin it was drawn from,
  * so it is late, not wrong (dlshadow.inc) -- and goes unshadowed for a frame
@@ -90,10 +119,12 @@ cvar_t	r_shadow_updates = {"r_shadow_updates", "2", CVAR_ARCHIVE};
 cvar_t	r_shadow_bias = {"r_shadow_bias", "1", CVAR_ARCHIVE};
 cvar_t	r_shadow_cache = {"r_shadow_cache", "1", CVAR_NONE};	/* 0: redraw every frame (profiling) */
 cvar_t	r_shadow_debug = {"r_shadow_debug", "0", CVAR_NONE};
+/* 1: the world and the opaque brush entities cast; 2: the alias models too (P6). */
+cvar_t	r_shadow_casters = {"r_shadow_casters", "1", CVAR_ARCHIVE};
 
 #ifndef USE_GLES
 
-#include "shaders_gen.h"	/* sshadow_vert[], sshadow_frag[], sshadowdbg_vert[], sshadowdbg_frag[] */
+#include "shaders_gen.h"	/* sshadow_vert[], sshadow_alias_vert[], sshadow_frag[], sshadowdbg_vert[], sshadowdbg_frag[] */
 
 #ifndef GL_TEXTURE_CUBE_MAP_ARRAY
 #define GL_TEXTURE_CUBE_MAP_ARRAY	0x9009
@@ -148,6 +179,9 @@ cvar_t	r_shadow_debug = {"r_shadow_debug", "0", CVAR_NONE};
 #define SH_STALE	32.0f
 /* Constant part of the receiver bias, in units (dlshadow.inc). */
 #define SH_BIAS		1.0f
+/* Constant part of an alias caster's push along the light ray, in units
+ * (sshadow_alias_vert); its per-distance part is the receivers' one. */
+#define SH_ALIAS_PUSH	2.0f
 
 /* GL's cube-map face selection (the GL 4.6 core spec, table 8.19): for a
  * direction d, the face whose major axis ma is largest, and within it
@@ -180,13 +214,15 @@ static const signed char sh_faceaxes[6][3][3] = {
  * which reversed-Z leaves set) for everything more than a unit from the light. */
 #define SH_ZNEAR_W	1.0f
 
-/* Mirrors the std140 ShadowPass block in engine/shaders/sshadow_vert.glsl. */
+/* Mirrors the std140 ShadowPass block in engine/shaders/sshadow_vert.glsl and
+ * sshadow_alias_vert.glsl, one block declared twice. */
 typedef struct {
 	float	vp[16];		/* light-relative -> clip, one cube face */
 	float	model[16];	/* model -> world, minus the light origin */
-	float	light[4];	/* x 1 / radius */
-} r_shadowpass_t;		/* 144 bytes */
-COMPILE_TIME_ASSERT(shadowpass_size, sizeof(r_shadowpass_t) == 144);
+	float	light[4];	/* x 1 / radius; alias: y push, z push per unit, w pose 0 weight */
+	int	pose[4];	/* alias: x pose 0 base, y pose 1 base, z PV_* format */
+} r_shadowpass_t;		/* 160 bytes */
+COMPILE_TIME_ASSERT(shadowpass_size, sizeof(r_shadowpass_t) == 160);
 
 /* Mirrors the std140 DlShadow block in engine/shaders/dlshadow.inc. */
 typedef struct {
@@ -205,6 +241,7 @@ typedef struct {
 	float		radius;		/* drawn with */
 	unsigned int	enthash;	/* brush entities in range, then */
 	int		frame;		/* r_framecount it was last assigned */
+	int		acasts;		/* alias models drawn into it (r_shadowinfo) */
 } shslot_t;
 
 typedef struct {
@@ -215,6 +252,7 @@ typedef struct {
 } shcand_t;
 
 static GLuint		sh_prog, sh_dbgprog, sh_dbgvao;
+static GLuint		sh_aprog;		/* alias casters; 0 if it failed to build */
 static GLuint		sh_tex, sh_ubo;
 /* One framebuffer per layer-face, attached once at allocation, so a face is a
  * bind rather than an attachment change.  (Measured the same as re-pointing
@@ -226,7 +264,7 @@ static qboolean		sh_failed;		/* programs or FBO failed; never retry */
 static shslot_t		sh_slots[SHADOW_MAX_MAPS];
 static float		sh_facevp[6][16];
 static r_dlshadow_t	sh_block;
-static int		sh_frame_updates, sh_frame_maps;	/* r_shadowinfo */
+static int		sh_frame_updates, sh_frame_maps, sh_frame_acasts;	/* r_shadowinfo */
 
 /* The map's surface table: per world-model surface, its box (6 floats), and
  * the scratch the caster lists are built in.  sh_counts / sh_offsets hold the
@@ -254,6 +292,7 @@ typedef struct {
 	float	radius;
 	int	wfirst[6], wcount[6];	/* each face's world runs, in sh_counts / sh_offsets */
 	int	efirst, ecount;		/* brush entities, in sh_ents */
+	int	afirst, acount;		/* alias casters, in sh_acasts */
 } shdraw_t;
 typedef struct {
 	float	model[16];		/* entity -> world */
@@ -267,6 +306,33 @@ static int		sh_nents;
 static GLsizei		sh_ecounts[SH_ENT_RUNS];
 static const void	*sh_eoffsets[SH_ENT_RUNS];
 static int		sh_neruns;
+
+/* The alias models that may cast this frame (r_shadow_casters 2): those of
+ * cl_visedicts the view would draw opaque whose bounding sphere reaches a
+ * chosen light, posed on first use, once a frame -- R_AliasShadowCaster's
+ * matrix and pose pair, and a hash of both for the cache.  One past the cap
+ * leaves every map drawn this frame incomplete, never quietly short. */
+#define SH_MAX_ALIAS	2048	/* ~400 KB; one past it leaves every map of the frame incomplete */
+#define SH_MAX_ACASTS	4096
+typedef struct {
+	entity_t	*ent;
+	int		num;		/* cl_entities index, -1 if not one: matched against a light's key */
+	vec3_t		mins, maxs;	/* the view's cull box, scaled: a light inside it is the model's own */
+	vec3_t		center;
+	float		radius;		/* bounding sphere, any rotation */
+	qboolean	posed, ok;
+	unsigned int	hash;
+	r_aliascaster_t	c;
+} shalias_t;
+typedef struct {
+	int	alias;			/* in sh_alias */
+	int	faces;
+} shacast_t;
+static shalias_t	sh_alias[SH_MAX_ALIAS];
+static int		sh_nalias;
+static qboolean		sh_alias_full;
+static shacast_t	sh_acasts[SH_MAX_ACASTS];
+static int		sh_nacasts;
 
 extern GLuint		world_vao;
 
@@ -309,6 +375,7 @@ static qboolean SH_Fail (void)
 	R_PipelineForgetProgram ();
 	if (sh_prog) { glDeleteProgram_fp (sh_prog); sh_prog = 0; }
 	if (sh_dbgprog) { glDeleteProgram_fp (sh_dbgprog); sh_dbgprog = 0; }
+	if (sh_aprog) { glDeleteProgram_fp (sh_aprog); sh_aprog = 0; }
 	sh_failed = true;
 	return false;
 }
@@ -345,6 +412,27 @@ static qboolean SH_BuildPrograms (void)
 			    "C mirror is %d -- shadow maps will be wrong\n",
 			    (int)size, (int)sizeof(r_shadowpass_t));
 	glUniformBlockBinding_fp (sh_prog, blk, UBO_BINDING_SHADOW_PASS);
+
+	/* The alias casters' program is an extra, not a requirement: without it
+	 * the maps still hold the world, and r_shadow_casters 2 reads as 1. */
+	sh_aprog = SH_LinkProgram (sshadow_alias_vert, sshadow_frag, "alias shadow");
+	if (sh_aprog)
+	{
+		blk = glGetUniformBlockIndex_fp (sh_aprog, "ShadowPass");
+		size = 0;
+		if (blk != GL_INVALID_INDEX)
+			glGetActiveUniformBlockiv_fp (sh_aprog, blk, GL_UNIFORM_BLOCK_DATA_SIZE, &size);
+		if (blk == GL_INVALID_INDEX || size != (GLint)sizeof(r_shadowpass_t))
+		{
+			Con_Printf ("Shadow maps: alias casters disabled, their ShadowPass block "
+				    "is %d bytes here, C mirror is %d\n", (int)size, (int)sizeof(r_shadowpass_t));
+			R_PipelineForgetProgram ();
+			glDeleteProgram_fp (sh_aprog);
+			sh_aprog = 0;
+		}
+		else
+			glUniformBlockBinding_fp (sh_aprog, blk, UBO_BINDING_SHADOW_PASS);
+	}
 
 	R_UseProgram (sh_dbgprog);
 	loc = glGetUniformLocation_fp (sh_dbgprog, "u_shadowdbg");
@@ -731,9 +819,173 @@ static qboolean SH_EntityCasts (entity_t *e, const vec3_t org, float radius, vec
 	return SH_SphereBox (org, radius, mins, maxs);
 }
 
+/* ------------------------------------------------------------------ */
+/* Alias models (P6, r_shadow_casters 2)                               */
+/* ------------------------------------------------------------------ */
+
+static float SH_MapRadius (float radius);
+
+static unsigned int SH_Fnv (unsigned int h, const void *p, size_t n)
+{
+	const byte	*b = (const byte *)p;
+	size_t		i;
+
+	for (i = 0; i < n; i++)
+		h = (h ^ b[i]) * 16777619u;
+	return h;
+}
+
+static qboolean SH_AliasOn (void)
+{
+	return r_shadow_casters.integer >= 2 && sh_aprog && r_drawentities.integer;
+}
+
+/* An alias entity the view draws opaque, which is what can cast: the tests
+ * R_DrawEntitiesOnList and R_CollectAliasInstance make before drawing one --
+ * not translucent, inside r_entdist -- minus the frustum cull, since a model
+ * behind the camera still shadows what is in front of it.  Never the
+ * viewmodel: it is drawn in its own depth range, with FOV compensation, at a
+ * place that is not where it would block anything.  (The player's own model is
+ * not in cl_visedicts outside chase view, so it casts only there.) */
+static qboolean SH_AliasEligible (const entity_t *e)
+{
+	const qmodel_t	*m = e->model;
+
+	if (!m || m->type != mod_alias || e == &cl.viewent)
+		return false;
+	/* a Shadows of Chaos menu panel is UI, pinned in front of the eye */
+	if (R_IsMenuPanel ((entity_t *)e))
+		return false;
+	if ((e->drawflags & DRF_TRANSLUCENT) ||
+	    (m->flags & (EF_TRANSPARENT | EF_HOLEY | EF_SPECIAL_TRANS)) ||
+	    (e->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(e->alpha)))
+		return false;
+	if (r_entdist.value > 0 && e != &cl_entities[cl.viewentity])
+	{
+		vec3_t	d;
+		VectorSubtract (e->origin, r_origin, d);
+		if (DotProduct (d, d) > r_entdist.value * r_entdist.value)
+			return false;
+	}
+	return true;
+}
+
+/* Does alias caster a cast into a map of the light (key) at org?  Its sphere
+ * reaches the light's, and it is not the light's own model: not the entity
+ * the light is keyed to (the torch artifact's light is keyed to the player, a
+ * missile's to the missile, a torch flame's to the flame), nor any model whose
+ * box holds the light -- an effect's light keyed 0 at its model's origin.  A
+ * light inside its own model would shadow its whole radius. */
+static qboolean SH_AliasCasts (const shalias_t *a, const vec3_t org, float radius, int key)
+{
+	vec3_t	d;
+	float	r = radius + a->radius;
+
+	if (key > 0 && a->num == key)
+		return false;
+	if (org[0] >= a->mins[0] && org[0] <= a->maxs[0] &&
+	    org[1] >= a->mins[1] && org[1] <= a->maxs[1] &&
+	    org[2] >= a->mins[2] && org[2] <= a->maxs[2])
+		return false;
+	VectorSubtract (a->center, org, d);
+	return DotProduct (d, d) <= r * r;
+}
+
+/* Posed on first use: R_AliasShadowCaster is the cost, so a model no map
+ * reaches is never posed. */
+static qboolean SH_AliasPosed (shalias_t *a)
+{
+	if (!a->posed)
+	{
+		a->posed = true;
+		a->ok = R_AliasShadowCaster (a->ent, &a->c);
+		if (a->ok)
+		{
+			unsigned int h = 2166136261u;
+			h = SH_Fnv (h, &a->c.gm, sizeof(a->c.gm));
+			/* A pickup turning on the clock would redraw its light's map
+			 * every frame for as long as it lies there, and take the budget
+			 * from lights that moved; its shadow keeps the angle it was drawn
+			 * at until something else redraws the map. */
+			if (a->c.spins)
+				h = SH_Fnv (h, a->ent->origin, sizeof(vec3_t));
+			else
+				h = SH_Fnv (h, a->c.model, sizeof(a->c.model));
+			h = SH_Fnv (h, &a->c.pose0, sizeof(a->c.pose0));
+			h = SH_Fnv (h, &a->c.pose1, sizeof(a->c.pose1));
+			h = SH_Fnv (h, &a->c.blend, sizeof(a->c.blend));
+			a->hash = h;
+		}
+	}
+	return a->ok;
+}
+
+/* This frame's candidates: every eligible alias entity whose sphere comes
+ * within reach of one of the `n` lights.  The reach is padded by everything
+ * the cache lets a map differ from its light by -- SH_SLOP of movement,
+ * SH_RBAND of radius -- so SH_EntityHash about a map's drawn origin and radius
+ * sees the same set the collection did. */
+static void SH_GatherAlias (const shcand_t *cand, int n)
+{
+	int	i, j, c;
+
+	sh_nalias = 0;
+	sh_alias_full = false;
+	if (!SH_AliasOn ())
+		return;
+	for (i = 0; i < cl_numvisedicts; i++)
+	{
+		entity_t	*e = cl_visedicts[i];
+		shalias_t	*a;
+		float		s, r2 = 0.0f;
+		vec3_t		lo, hi;
+
+		if (!SH_AliasEligible (e))
+			continue;
+		s = (e->scale > 100) ? e->scale / 100.0f : 1.0f;
+		for (c = 0; c < 3; c++)
+		{
+			float m = q_max (fabsf (e->model->mins[c]), fabsf (e->model->maxs[c])) * s;
+			r2 += m * m;
+			lo[c] = e->origin[c] + e->model->mins[c] * s;
+			hi[c] = e->origin[c] + e->model->maxs[c] * s;
+		}
+		for (j = 0; j < n; j++)
+		{
+			float	org[3], radius, reach;
+			int	dl;
+			vec3_t	d;
+
+			R_LightCluster_GetLight (cand[j].light, org, &radius, &dl);
+			reach = SH_MapRadius (radius) + SH_RBAND + SH_SLOP + sqrtf (r2) + 8.0f;
+			VectorSubtract (e->origin, org, d);
+			if (DotProduct (d, d) <= reach * reach)
+				break;
+		}
+		if (j == n)
+			continue;
+		if (sh_nalias >= SH_MAX_ALIAS)
+		{
+			sh_alias_full = true;
+			break;
+		}
+		a = &sh_alias[sh_nalias++];
+		memset (a, 0, sizeof(*a));
+		a->ent = e;
+		a->num = (e >= cl_entities && e < cl_entities + MAX_EDICTS) ? (int)(e - cl_entities) : -1;
+		VectorCopy (lo, a->mins);
+		VectorCopy (hi, a->maxs);
+		VectorCopy (e->origin, a->center);
+		/* + the bob R_AliasModelTransform gives a floating model */
+		a->radius = sqrtf (r2) + 8.0f;
+	}
+}
+
 /* What a map depends on beyond the world: which brush entities are in range
- * and where they stand. */
-static unsigned int SH_EntityHash (const vec3_t org, float radius)
+ * and where they stand, and under r_shadow_casters 2 which alias models and
+ * in what pose -- a monster walking or animating in range redraws the map, a
+ * barrel standing still does not. */
+static unsigned int SH_EntityHash (const vec3_t org, float radius, int key)
 {
 	unsigned int	h = 2166136261u;
 	int		i, k;
@@ -754,6 +1006,16 @@ static unsigned int SH_EntityHash (const vec3_t org, float radius)
 		}
 		for (k = 0; k < 7; k++)
 			h = (h ^ w[k]) * 16777619u;
+	}
+	if (SH_AliasOn ())
+	{
+		h = (h ^ 0xa11a5u) * 16777619u;	/* r_shadow_casters 1 -> 2 redraws */
+		for (i = 0; i < sh_nalias; i++)
+		{
+			shalias_t *a = &sh_alias[i];
+			if (SH_AliasCasts (a, org, radius, key) && SH_AliasPosed (a))
+				h = (h ^ a->hash) * 16777619u;
+		}
 	}
 	return h;
 }
@@ -788,10 +1050,11 @@ static void SH_Pass (const r_shadowpass_t *pass)
 	GL_BindBufferRange (GL_UNIFORM_BUFFER, UBO_BINDING_SHADOW_PASS, buf, ofs, sizeof(*pass));
 }
 
-/* Collect map `slot`'s casters for a light at org: the world's runs and each
- * brush entity's, appended to this frame's lists.  False if there was no room;
- * *complete false if a brush entity in range was left out. */
-static qboolean SH_CollectMap (int slot, const vec3_t org, float radius, qboolean *complete)
+/* Collect map `slot`'s casters for a light at org (keyed `key`): the world's
+ * runs, each brush entity's, and under r_shadow_casters 2 each alias model's,
+ * appended to this frame's lists.  False if there was no room; *complete false
+ * if a caster in range was left out. */
+static qboolean SH_CollectMap (int slot, const vec3_t org, float radius, int key, qboolean *complete)
 {
 	shdraw_t	*d;
 	int		i, f, base;
@@ -883,7 +1146,84 @@ static qboolean SH_CollectMap (int slot, const vec3_t org, float radius, qboolea
 		sh_nents++;
 	}
 	d->ecount = sh_nents - d->efirst;
+
+	/* The alias models'. */
+	d->afirst = sh_nacasts;
+	if (sh_alias_full)
+		*complete = false;
+	for (i = 0; i < sh_nalias; i++)
+	{
+		shalias_t	*a = &sh_alias[i];
+		vec3_t		lo, hi;
+		int		faces, c;
+
+		if (!SH_AliasCasts (a, org, radius, key) || !SH_AliasPosed (a))
+			continue;
+		for (c = 0; c < 3; c++)
+		{
+			lo[c] = a->center[c] - a->radius;
+			hi[c] = a->center[c] + a->radius;
+		}
+		faces = SH_FaceMask (org, lo, hi);
+		if (!faces)
+			continue;
+		if (sh_nacasts >= SH_MAX_ACASTS)
+		{
+			*complete = false;
+			break;
+		}
+		sh_acasts[sh_nacasts].alias = i;
+		sh_acasts[sh_nacasts].faces = faces;
+		sh_nacasts++;
+	}
+	d->acount = sh_nacasts - d->afirst;
 	return true;
+}
+
+/* Face f's alias casters of map d, with the alias program, then the world
+ * program and VAO back for the next face. */
+static void SH_DrawAliasFace (const shdraw_t *d, int f, r_shadowpass_t *pass)
+{
+	float		t[16];
+	int		i, drawn = 0;
+	const float	*org = d->org;
+
+	for (i = d->afirst; i < d->afirst + d->acount; i++)
+	{
+		const shalias_t		*a = &sh_alias[sh_acasts[i].alias];
+		const r_aliascaster_t	*c = &a->c;
+
+		if (!(sh_acasts[i].faces & (1 << f)))
+			continue;
+		if (!drawn++)
+			R_UseProgram (sh_aprog);
+		Mat4_Identity (t);
+		Mat4_ApplyTranslation (t, -org[0], -org[1], -org[2]);
+		Mat4_Multiply (t, c->model, pass->model);
+		pass->light[1] = SH_ALIAS_PUSH;
+		pass->light[2] = r_shadow_bias.value * 2.0f / (float)sh_res;
+		pass->light[3] = c->blend;
+		pass->pose[0] = c->pose0;
+		pass->pose[1] = c->pose1;
+		pass->pose[2] = c->format;
+		SH_Pass (pass);
+		if (c->format == PV_IQM)
+			GL_BindBufferBase (GL_SHADER_STORAGE_BUFFER, 4, c->gm->ssbo_bones);
+		else if (c->format == PV_MD3)
+			GL_BindBufferBase (GL_SHADER_STORAGE_BUFFER, 3, c->gm->ssbo_pose_md3);
+		else
+			GL_BindBufferBase (GL_SHADER_STORAGE_BUFFER, 1, c->gm->ssbo_pose);
+		glBindVertexArray_fp (c->gm->vao);
+		glDrawElements_fp (GL_TRIANGLES, c->gm->num_indices, GL_UNSIGNED_SHORT, NULL);
+		sh_frame_acasts++;
+	}
+	pass->light[1] = pass->light[2] = pass->light[3] = 0.0f;
+	pass->pose[0] = pass->pose[1] = pass->pose[2] = 0;
+	if (drawn)
+	{
+		R_UseProgram (sh_prog);
+		glBindVertexArray_fp (world_vao);
+	}
 }
 
 /* Draw one collected map: six faces, the world's runs then each entity's. */
@@ -920,6 +1260,8 @@ static void SH_DrawMap (const shdraw_t *d)
 			glMultiDrawElements_fp (GL_TRIANGLES, &sh_ecounts[sh_ents[i].first], GL_UNSIGNED_INT,
 						&sh_eoffsets[sh_ents[i].first], sh_ents[i].runs);
 		}
+		if (d->acount > 0)
+			SH_DrawAliasFace (d, f, &pass);
 	}
 }
 
@@ -1022,7 +1364,8 @@ static void SH_Select (void)
 	qboolean	nocache, complete;
 	int		n = 0, nl, i, s, take, budget;
 
-	sh_ndraws = sh_nents = sh_neruns = 0;
+	sh_ndraws = sh_nents = sh_neruns = sh_nacasts = 0;
+	sh_nalias = 0;
 	nl = R_LightCluster_NumLights ();
 	for (i = 0; i < nl; i++)
 	{
@@ -1072,6 +1415,8 @@ static void SH_Select (void)
 		}
 	}
 
+	SH_GatherAlias (cand, take);
+
 	nocache = !r_shadow_cache.integer;
 	budget = r_shadow_updates.integer > 0 ? r_shadow_updates.integer : MAX_DLIGHTS;
 	for (i = 0; i < take; i++)
@@ -1088,7 +1433,7 @@ static void SH_Select (void)
 			vec3_t	moved;
 
 			sl = &sh_slots[cand[i].slot];
-			hash = SH_EntityHash (sl->origin, sl->radius);
+			hash = SH_EntityHash (sl->origin, sl->radius, sl->key);
 			if (!nocache && SH_Fresh (sl, org, radius, hash))
 				continue;
 			VectorSubtract (org, sl->origin, moved);
@@ -1115,14 +1460,15 @@ static void SH_Select (void)
 			cand[i].slot = best;
 		}
 		sl = &sh_slots[cand[i].slot];
-		hash = SH_EntityHash (org, mapr);
-		if (!SH_CollectMap (cand[i].slot, org, mapr, &complete))
+		hash = SH_EntityHash (org, mapr, cl_dlights[cand[i].dlight].key);
+		if (!SH_CollectMap (cand[i].slot, org, mapr, cl_dlights[cand[i].dlight].key, &complete))
 		{
 			cand[i].slot = -1;	/* out of list memory: unshadowed this frame */
 			sl->valid = false;
 			continue;
 		}
 		sl->valid = true;
+		sl->acasts = sh_draws[sh_ndraws - 1].acount;
 		sl->dlight = cand[i].dlight;
 		sl->key = cl_dlights[cand[i].dlight].key;
 		VectorCopy (org, sl->origin);
@@ -1168,7 +1514,7 @@ static void SH_Select (void)
 void R_Shadow_Prepare (void)
 {
 	memset (&sh_block, 0, sizeof(sh_block));
-	sh_frame_updates = sh_frame_maps = 0;
+	sh_frame_updates = sh_frame_maps = sh_frame_acasts = 0;
 	sh_ndraws = 0;
 
 	if (!sh_ubo)
@@ -1198,6 +1544,13 @@ void R_Shadow_Draw (void)
 		SH_PassState ();
 		for (i = 0; i < sh_ndraws; i++)
 			SH_DrawMap (&sh_draws[i]);
+		if (sh_frame_acasts > 0)
+		{
+			/* as GL_DrawAliasSkeletal and the instanced path leave them */
+			GL_BindBufferBase (GL_SHADER_STORAGE_BUFFER, 1, 0);
+			GL_BindBufferBase (GL_SHADER_STORAGE_BUFFER, 3, 0);
+			GL_BindBufferBase (GL_SHADER_STORAGE_BUFFER, 4, 0);
+		}
 		SH_RestoreState (&saved);
 		sh_ndraws = 0;
 	}
@@ -1280,17 +1633,18 @@ static void R_ShadowInfo_f (void)
 	int s;
 
 	Con_Printf ("--- r_shadowinfo (r_dlight_occlusion %d, %d cubes of %d, "
-		    "this frame %d mapped, %d drawn) ---\n",
-		    r_dlight_occlusion.integer, sh_maps, sh_res, sh_frame_maps, sh_frame_updates);
+		    "this frame %d mapped, %d drawn, %d alias casts) ---\n",
+		    r_dlight_occlusion.integer, sh_maps, sh_res, sh_frame_maps, sh_frame_updates,
+		    sh_frame_acasts);
 	for (s = 0; s < sh_maps; s++)
 	{
 		const shslot_t *sl = &sh_slots[s];
 		if (!sl->valid)
 			continue;
 		Con_Printf ("slot %d: dlight %d key %d from=(%.0f,%.0f,%.0f) "
-			    "radius %.0f age %d%s\n", s, sl->dlight, sl->key,
+			    "radius %.0f age %d alias %d%s\n", s, sl->dlight, sl->key,
 			    sl->origin[0], sl->origin[1], sl->origin[2], sl->radius,
-			    r_framecount - sl->frame,
+			    r_framecount - sl->frame, sl->acasts,
 			    (sh_block.origin[s][3] > 0.0f) ? " in use" : "");
 	}
 }
@@ -1306,6 +1660,7 @@ void R_Shadow_Shutdown (void)
 	R_PipelineForgetProgram ();	/* GL reuses program names */
 	if (sh_prog) { glDeleteProgram_fp (sh_prog); sh_prog = 0; }
 	if (sh_dbgprog) { glDeleteProgram_fp (sh_dbgprog); sh_dbgprog = 0; }
+	if (sh_aprog) { glDeleteProgram_fp (sh_aprog); sh_aprog = 0; }
 	if (sh_dbgvao) { glDeleteVertexArrays_fp (1, &sh_dbgvao); sh_dbgvao = 0; }
 	if (sh_ubo) { GL_ForgetBuffer (sh_ubo); glDeleteBuffers_fp (1, &sh_ubo); sh_ubo = 0; }
 	SH_FreeTexture ();
@@ -1332,6 +1687,7 @@ void R_Shadow_Init (void)
 	Cvar_RegisterVariable (&r_shadow_bias);
 	Cvar_RegisterVariable (&r_shadow_cache);
 	Cvar_RegisterVariable (&r_shadow_debug);
+	Cvar_RegisterVariable (&r_shadow_casters);
 #ifndef USE_GLES
 	Cmd_AddCommand ("r_shadowinfo", R_ShadowInfo_f);
 #endif

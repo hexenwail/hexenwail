@@ -33,6 +33,9 @@
 #   alias  -758 482 192   an alias model (an obj_barrel the .ent   repro == control
 #                         adds at -838 434 136) in a door recess
 #                         the torch's wall hides from it
+#   cast   120 250 32     the torch's wall behind an obj_barrel   see below
+#          (added)        at 120 288 0, between it and the light
+#                         (SHADOWS=1 only)
 #
 # Face numbers are tools/bsp_dlight_leak.py's (--map demo2 --scenes N); every
 # box was placed by projecting its face and checked on the frames.  Scene 2 is
@@ -64,6 +67,25 @@
 # the box is clear of solid, and the camera sees its front; the frame box
 # moved with it.
 #
+# The cast scene is the other way round (#97, P6): it checks that a model DOES
+# block a light, under r_shadow_casters 2, and does not under 1.  The map's
+# torches are all on walls, 88 units up, and a barrel on the floor is too
+# short to come between one and anything it lights much; so the scene adds its
+# own light, a light_torch_castle with a targetname (CASTLIGHT) standing free
+# at 120 250 32, 70 units in front of lit's wall (y = 320), and a barrel
+# (CASTER) on the floor between them, which puts a shadow some 30 units high
+# and 100 wide on the wall.  The box is that wall, above the barrel as the
+# camera sees it -- not the barrel.  Every run takes control.ent plus
+# CASTLIGHT; "cast2" and "cast1" add the barrel, at r_shadow_casters 2 and 1,
+# and "castbare" does not.  It PASSes when cast1 matches castbare within TOL
+# (the barrel casts nothing at 1, and is not in the box) and cast2 is at least
+# SHADOWMIN darker than castbare (it does at 2), and only when the added
+# light's dlight is in all three frames, cast2's r_shadowinfo shows its map
+# in use with an alias model drawn into it, and the box BARREL (the barrel
+# itself) differs from the bare view by PRESENT -- so a barrel that never
+# spawned, or a map that never drew it, cannot pass.  Only under SHADOWS=1,
+# which adds it to the default scenes.
+#
 # SHADOWS=1 is that configuration, checked as such: it adds
 # "+r_lightclusters 1 +r_dlight_occlusion 2" to the engine's arguments and
 # dumps r_shadowinfo with every frame, and a dark scene FAILs as proving nothing
@@ -91,12 +113,14 @@
 #   ENGINE  engine binary            (default ./result/bin/hexenwail)
 #   EXTRA   extra engine args, e.g. "+r_lightclusters 0 +r_dlight_occlusion 0"
 #   SHADOWS 1 = the shadow-map configuration (see above), default 0
-#   SCENES  which scenes             (default "1 2 3 lit alias")
+#   SCENES  which scenes             (default "1 2 3 lit alias", and "cast" under SHADOWS=1)
 #   OUT     keep the PNGs and logs here (default: a temp dir, removed)
 #   TOL, LITMIN, WAITS (frames after the map loads, default 150)
 #   PRESENT  how far (mean per-pixel luminance) the alias scene's box must
 #            differ from the same view without the barrel (a third, "bare" run)
 #            for the barrel to count as there, default 2.0
+#   SHADOWMIN  how much darker the cast scene's box must be with the barrel
+#            casting than without the barrel, default 2.0
 #
 # Runs offscreen; on a box without a GPU set SDL_VIDEODRIVER=x11 under Xvfb.
 #
@@ -107,12 +131,13 @@ set -euo pipefail
 BASEDIR=${1:-$HOME/hexen2}
 ENGINE=${ENGINE:-./result/bin/hexenwail}
 EXTRA=${EXTRA:-}
-SCENES=${SCENES:-1 2 3 lit alias}
+SHADOWS=${SHADOWS:-0}
+if [ "$SHADOWS" = 1 ]; then SCENES=${SCENES:-1 2 3 lit alias cast}; else SCENES=${SCENES:-1 2 3 lit alias}; fi
 TOL=${TOL:-1.0}
 LITMIN=${LITMIN:-4.0}
 PRESENT=${PRESENT:-2.0}
+SHADOWMIN=${SHADOWMIN:-2.0}
 WAITS=${WAITS:-150}
-SHADOWS=${SHADOWS:-0}
 MAP=demo2
 [ "$SHADOWS" = 1 ] && EXTRA="+r_lightclusters 1 +r_dlight_occlusion 2 $EXTRA"
 
@@ -140,16 +165,33 @@ ADD[alias]='{
 "classname" "obj_barrel"
 "origin" "-838 434 136"
 }'
+# the cast scene: TORCH is the light it adds (CASTLIGHT), ADD the barrel;
+# BARREL is where the barrel itself is in the frame, for PRESENT
+TORCH[cast]="120 250 32"; CAM[cast]="120 150 100 25 90 0"; BOX[cast]="0.47 0.597 0.535 0.635"; KIND[cast]=cast
+BARREL="0.48 0.68 0.52 0.76"
+CASTLIGHT='{
+"classname" "light_torch_castle"
+"origin" "120 250 32"
+"targetname" "leakcast"
+}'
+ADD[cast]='{
+"classname" "obj_barrel"
+"origin" "120 288 0"
+}'
 
 for s in $SCENES; do
-	[ -n "${TORCH[$s]:-}" ] || { echo "unknown scene '$s' (have: 1 2 3 lit alias)" >&2; exit 2; }
+	[ -n "${TORCH[$s]:-}" ] || { echo "unknown scene '$s' (have: 1 2 3 lit alias cast)" >&2; exit 2; }
+	[ "$s" != cast ] || [ "$SHADOWS" = 1 ] || { echo "the cast scene needs SHADOWS=1 (alias casters are a shadow-map feature)" >&2; exit 2; }
 done
 
 # The entity lump (BSP29: lump 0, right after the version) out of the pak, as
 # control.ent, and one repro .ent per distinct torch.
-torches=$(for s in $SCENES; do echo "${TORCH[$s]}"; done | sort -u | tr ' ' _ | tr '\n' ' ')
-plain=(); added=()
-for s in $SCENES; do if [ -n "${ADD[$s]:-}" ]; then added+=("$s"); else plain+=("$s"); fi; done
+torches=$(for s in $SCENES; do [ "${KIND[$s]}" = cast ] || echo "${TORCH[$s]}"; done | sort -u | tr ' ' _ | tr '\n' ' ')
+plain=(); added=(); casts=()
+for s in $SCENES; do
+	if [ "${KIND[$s]}" = cast ]; then casts+=("$s")
+	elif [ -n "${ADD[$s]:-}" ]; then added+=("$s"); else plain+=("$s"); fi
+done
 python3 - "$BASEDIR/data1" "$MAP" "$work" $torches <<'PY'
 import os, re, struct, sys
 data1, mapname, work, torches = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4:]
@@ -207,7 +249,7 @@ run () {
 		timeout -k 5 180 "$ENGINE" -condebug -basedir "$BASEDIR" -userdir "$ud" \
 		-width 640 -height 480 -window \
 		+r_flatlightstyles 1 +cl_bob 0 +cl_rollangle 0 +r_drawviewmodel 0 +crosshair 0 \
-		+viewsize 120 +con_notifytime 0 +scr_centertime 0 $EXTRA \
+		+viewsize 120 +con_notifytime 0 +scr_centertime 0 $EXTRA ${RUNEXTRA:-} \
 		+map "$MAP" +exec leakcheck.cfg >"$ud/stdout" 2>&1 || true
 	local log; log=$(find "$ud" -name qconsole.log | head -1)
 	if [ -n "$log" ] && [ "$log" != "$ud/qconsole.log" ]; then cp "$log" "$ud/qconsole.log"; fi
@@ -273,6 +315,15 @@ has_dlight () {
 		index($0, shot) { printf "%s", buf; exit }' "$1" | grep -qF "$o" && echo yes || echo no
 }
 
+# $1 log, $2 scene, $3 torch origin: the torch's map in use for the shot, and
+# drawn with at least one alias model in it (r_shadowinfo's "alias N").
+has_alias_map () {
+	local o x y z; read -r x y z <<<"$3"; o="from=($x,$y,$((z + 8)))"
+	awk -v shot="Wrote shots/$2.png" '/^--- r_shadowinfo/ { buf = "" } { buf = buf $0 "\n" }
+		index($0, shot) { printf "%s", buf; exit }' "$1" | grep -F "$o" | grep -F "in use" \
+		| grep -qE " alias [1-9][0-9]* " && echo yes || echo no
+}
+
 # $1 log, $2 scene, $3 torch origin: under SHADOWS=1, did the frame have a
 # shadow map in use drawn from the torch's light?  r_shadowinfo's dump just
 # before the shot, as has_dlight reads r_dlightinfo's.
@@ -296,10 +347,46 @@ for s in ${added[@]+"${added[@]}"}; do
 	run "control_$s" "$work/control_$s.ent" "$s"
 	run "repro_${t}_$s" "$work/repro_${t}_$s.ent" "$s"
 done
+# the cast scene: its light on in all three, the barrel casting, not, and absent
+for s in ${casts[@]+"${casts[@]}"}; do
+	{ cat "$work/control.ent"; printf '%s\n' "$CASTLIGHT"; } >"$work/castbare_$s.ent"
+	{ cat "$work/castbare_$s.ent"; printf '%s\n' "${ADD[$s]}"; } >"$work/cast_$s.ent"
+	RUNEXTRA="+r_shadow_casters 2" run "cast2_$s" "$work/cast_$s.ent" "$s"
+	RUNEXTRA="+r_shadow_casters 1" run "cast1_$s" "$work/cast_$s.ent" "$s"
+	RUNEXTRA="+r_shadow_casters 2" run "castbare_$s" "$work/castbare_$s.ent" "$s"
+done
 
 fail=0; failed=()
 for s in $SCENES; do
-	t=${TORCH[$s]// /_}; ctl="$work/control"; rep="$work/repro_$t"
+	t=${TORCH[$s]// /_}
+	if [ "${KIND[$s]}" = cast ]; then
+		c2="$work/cast2_$s"; c1="$work/cast1_$s"; cb="$work/castbare_$s"
+		if [ ! -f "$c2/data1/shots/$s.png" ] || [ ! -f "$c1/data1/shots/$s.png" ] || [ ! -f "$cb/data1/shots/$s.png" ]; then
+			echo "scene $s: FAIL (no screenshot; see $c2/stdout, $c1/stdout, $cb/stdout)"; fail=1; failed+=("$s"); continue
+		fi
+		l2=$(lum "$c2/data1/shots/$s.png" "${BOX[$s]}"); l1=$(lum "$c1/data1/shots/$s.png" "${BOX[$s]}")
+		lb=$(lum "$cb/data1/shots/$s.png" "${BOX[$s]}")
+		pd=$(lum "$c2/data1/shots/$s.png" "$BARREL" "$cb/data1/shots/$s.png")
+		d2=$(python3 -c "print('%.3f' % ($l2 - $lb))"); d1=$(python3 -c "print('%.3f' % ($l1 - $lb))")
+		dl="$(has_dlight "$c2/qconsole.log" "$s" "${TORCH[$s]}")$(has_dlight "$c1/qconsole.log" "$s" "${TORCH[$s]}")$(has_dlight "$cb/qconsole.log" "$s" "${TORCH[$s]}")"
+		if [ "$dl" != yesyesyes ]; then
+			verdict="FAIL (the added light's dlight in cast2/cast1/bare: $dl -- the run proves nothing)"
+		elif [ "$(has_alias_map "$c2/qconsole.log" "$s" "${TORCH[$s]}")" != yes ]; then
+			verdict="FAIL (no map of the added light in use with an alias model drawn into it -- the run proves nothing)"
+		elif ! python3 -c "import sys; sys.exit(0 if $pd >= $PRESENT else 1)"; then
+			verdict="FAIL (the barrel is not in the frame: it differs from the bare view by $pd -- the run proves nothing)"
+		elif ! python3 -c "import sys; sys.exit(0 if abs($d1) <= $TOL else 1)"; then
+			verdict="FAIL (r_shadow_casters 1 changed the wall by $d1: the barrel casts, or is in the box)"
+		elif ! python3 -c "import sys; sys.exit(0 if -($d2) >= $SHADOWMIN else 1)"; then
+			verdict="FAIL (r_shadow_casters 2: the wall behind the barrel is only $d2 darker than without it)"
+		else
+			verdict="PASS (the barrel shadows the wall at 2, not at 1)"
+		fi
+		printf 'scene %-3s bare %7s  casters1 %7s (%+.3f)  casters2 %7s (%+.3f)  %s\n' "$s" "$lb" "$l1" "$d1" "$l2" "$d2" "$verdict"
+		case $verdict in FAIL*) fail=1; failed+=("$s");; esac
+		continue
+	fi
+	ctl="$work/control"; rep="$work/repro_$t"
 	if [ -n "${ADD[$s]:-}" ]; then ctl="$work/control_$s"; rep="$work/repro_${t}_$s"; fi
 	[ -f "$ctl/qconsole.log" ] || { echo "control run left no qconsole.log; see $ctl/stdout" >&2; exit 2; }
 	c="$ctl/data1/shots/$s.png"; r="$rep/data1/shots/$s.png"

@@ -11,7 +11,7 @@
 #ifndef __GL_SHADOW_H
 #define __GL_SHADOW_H
 
-/* Phases P3 (the maps) and P4 (the receivers) of #97, under
+/* Phases P3 (the maps), P4 (the receivers) and P6 (alias casters) of #97, under
  * r_dlight_occlusion 2.  Desktop GL 4.3 with the clustered path
  * (r_lightclusters 1) only: the receivers are ClusteredDlight and
  * ClusteredAliasDlight, which exist nowhere else.  The ES/WebGL2 tier and
@@ -50,5 +50,23 @@ void	R_Shadow_InitProgram (GLuint program);
 
 /* r_shadow_debug: map slot 0 unwrapped into the corner of the view. */
 void	R_Shadow_DrawDebug (void);
+
+/* An alias model as a shadow caster (P6, r_shadow_casters 2): what
+ * sshadow_alias_vert needs to pose it the way the draw will this frame. */
+typedef struct {
+	const alias_gpu_mesh_t	*gm;	/* its VAO, IBO and pose (or bone) buffer */
+	float	model[16];		/* model -> world, column-major */
+	int	pose0, pose1;		/* buffer bases: current and previous pose x poseverts
+					 * (x numbones for a skeletal mesh) */
+	float	blend;			/* weight of pose0, 0..1 */
+	int	format;			/* PV_QUAKE1, PV_MD3 or PV_IQM */
+	qboolean spins;			/* its matrix runs on the clock or the camera (EF_ROTATE,
+					 * EF_FACE_VIEW, a pimp's EF_SPIN / EF_FLOAT): the cache
+					 * keys it by origin, not by matrix */
+} r_aliascaster_t;
+
+/* Defined in gl_rmain.c, beside the transform and lerp it reuses.  False for a
+ * model the maps cannot pose (no GPU mesh, or no pose buffer for its format). */
+qboolean R_AliasShadowCaster (entity_t *e, r_aliascaster_t *out);
 
 #endif	/* __GL_SHADOW_H */

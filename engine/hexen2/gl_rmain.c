@@ -321,8 +321,19 @@ cvar_t	r_dlight_model_list = {"r_dlight_model_list", "", CVAR_ARCHIVE};
  * (ClusteredDlight), and run the CPU path's visibility (r_dlightvis.c).  2 adds
  * the cube shadow maps on desktop with r_lightclusters 1 (gl_shadow.c), which
  * every other tier treats as 1.
- * Liquids are exempt: they are seen, and lit, from both sides.  The software renderer's copy is in r_soft_web.c. */
+ * Liquids are exempt: they are seen, and lit, from both sides.  The software renderer's copy is in r_soft_web.c.
+ *
+ * The default is 2 on desktop since P5: the maps measured 0.06 ms GPU a frame
+ * redrawing two of them on the Tesla P4, and nothing for a cached one, inside
+ * the 0.5 ms the plan allowed the retro presets.  The ES tier keeps 1, the
+ * most it can do, so its menu and config say what it renders; the two web
+ * builds agree on it (tools/test_soft_cvar_defaults.py).  0 is still vanilla
+ * on every tier. */
+#ifdef USE_GLES
 cvar_t	r_dlight_occlusion = {"r_dlight_occlusion", "1", CVAR_ARCHIVE};
+#else
+cvar_t	r_dlight_occlusion = {"r_dlight_occlusion", "2", CVAR_ARCHIVE};
+#endif
 
 /* Evaluate the liquid warp per pixel in the fragment shader instead of per
  * vertex on the CPU (uhexen2-9o7u).  Default 0 = the legacy per-vertex path.
@@ -2575,6 +2586,90 @@ static void R_AliasModelTransform (entity_t *e, aliashdr_t *paliashdr,
 			mdl_t[0] += cl_gun_z.value * paliashdr->scale[2];
 		}
 	}
+}
+
+/*
+=================
+R_AliasShadowCaster
+
+Entity e posed for a dynamic light's cube shadow map (GitHub #97, P6): its GPU
+mesh, R_DrawAliasModel's model matrix -- R_RotateForEntity2, then
+R_AliasModelTransform's translate and scale, on an identity base, the chain
+the caustics matrix replays -- and the pose pair and blend R_AliasResolveLerp
+gives the draw.  All three formats draw through that one function, so the
+shadow is the model the view shows, whichever path draws it.
+
+On a copy of the entity: the lerp advances the entity's own state, and that
+belongs to the draw later this frame.  Run before it, at R_SetupGL time, the
+copy sees exactly what the draw will.  The matrix is built from the entity
+itself (its misc_modelpimp flags are looked up by its place in cl_entities),
+with the chase-camera pitch the draw loops apply to the player (FrikaC's 0.3)
+put on for it and taken off again.
+=================
+*/
+qboolean R_AliasShadowCaster (entity_t *e, r_aliascaster_t *out)
+{
+	static entity_t		tmp;
+	static float		tmatrix[3][4];	/* its own; see R_DrawAliasModel */
+	aliashdr_t		*hdr;
+	alias_gpu_mesh_t	*gm;
+	float			mdl_t[3], mdl_s[3], blend, pitch;
+	int			pose, prevpose, scale;
+
+	if (!e->model || e->model->type != mod_alias)
+		return false;
+	/* Resident only, not Mod_Extradata: this runs inside R_SetupGL, and a
+	 * load from here would be a load, with its console and screen updates,
+	 * in the middle of a frame.  An evicted model casts once the draw has
+	 * brought it back. */
+	hdr = (aliashdr_t *) (e->model->cache_is_hunk ? e->model->cache.data
+						      : Cache_Check (&e->model->cache));
+	if (!hdr || hdr->numposes < 1)
+		return false;
+	gm = GL_GetAliasGPUMesh (hdr);
+	if (!gm || !gm->valid || !gm->num_indices || !gm->vao)
+		return false;
+	switch (gm->poseverttype)
+	{
+	case PV_QUAKE1:	if (!gm->ssbo_pose) return false;	scale = gm->poseverts;	break;
+	case PV_MD3:	if (!gm->ssbo_pose_md3) return false;	scale = gm->poseverts;	break;
+	case PV_IQM:	if (!gm->ssbo_bones) return false;	scale = gm->numbones;	break;
+	default:	return false;
+	}
+
+	tmp = *e;
+	R_AliasResolveLerp (&tmp, hdr, &prevpose, &pose, &blend);
+	/* the clamp GL_DrawAliasSkeletal and R_CollectAliasInstance apply: the
+	 * indices become raw buffer offsets */
+	if (pose     < 0 || pose     >= gm->numposes) pose     = 0;
+	if (prevpose < 0 || prevpose >= gm->numposes) prevpose = pose;
+
+	GL_MatrixMode (GL_MAT_MODELVIEW);
+	GL_PushMatrix ();
+	GL_LoadIdentity ();
+	/* The transform from the entity itself, not the copy: R_GetPimpFlags
+	 * finds a misc_modelpimp's EF_SPIN / EF_FLOAT by the entity's index in
+	 * cl_entities, which a copy does not have.  The chase pitch is put on
+	 * and taken off again. */
+	pitch = e->angles[0];
+	if (e == &cl_entities[cl.viewentity])
+		e->angles[0] *= 0.3;
+	R_RotateForEntity2 (e);
+	R_AliasModelTransform (e, hdr, tmatrix, mdl_t, mdl_s);
+	e->angles[0] = pitch;
+	GL_Translatef (mdl_t[0], mdl_t[1], mdl_t[2]);
+	GL_Scalef (mdl_s[0], mdl_s[1], mdl_s[2]);
+	GL_GetModelview (out->model);
+	GL_PopMatrix ();
+
+	out->gm = gm;
+	out->pose0 = pose * scale;
+	out->pose1 = prevpose * scale;
+	out->blend = (pose == prevpose) ? 1.0f : blend;
+	out->format = gm->poseverttype;
+	out->spins = (e->model->flags & (EF_ROTATE | EF_FACE_VIEW)) ||
+		     (R_GetPimpFlags (e, NULL) & (EF_SPIN | EF_FLOAT));
+	return true;
 }
 
 

@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """The dynamic-light shadow maps' two uniform blocks match their C mirrors, are
-bound and uploaded, and stay off the ES tier (GitHub #97, P3/P4).
+bound and uploaded, and stay off the ES tier (GitHub #97, P3/P4); the alias
+models cast as their draw poses them, and never into their own light (P6).
 
-  * ShadowPass (engine/shaders/sshadow_vert.glsl) and r_shadowpass_t, DlShadow
+  * ShadowPass (engine/shaders/sshadow_vert.glsl and sshadow_alias_vert.glsl,
+    one block declared twice) and r_shadowpass_t, DlShadow
     (engine/shaders/dlshadow.inc) and r_dlshadow_t (engine/h2shared/gl_shadow.c):
     same members in the same order, every one vec4 / ivec4 / mat4 (arrays of
     them included), std140 offsets equal to the C offsets, sizes pinned by
@@ -29,6 +31,20 @@ bound and uploaded, and stay off the ES tier (GitHub #97, P3/P4).
   * The frame: R_SetupGL runs R_Shadow_Prepare then R_Shadow_Draw after the
     cluster binds and not in the mirror pass, the Draw between the r_speeds 2
     RPROF_SHADOW pair.
+  * The alias casters (r_shadow_casters 2): sshadow_alias_vert reads the pose
+    buffers at the GL bindings and with the vertex slots the stages it mirrors
+    use (salias_inst_vert 1 and 3, sskeletal_vert 4 and attributes 0, 3, 4),
+    blends pose 0 by the weight the C side gives the current pose, and pushes
+    every vertex along its ray from the light by the per-pass amount the C side
+    uploads (zero again for the world's pass); its program pins ShadowPass and
+    checks its size, and failing to build turns off the casters, not the maps.
+    R_AliasShadowCaster poses a COPY of the entity (the lerp advances state the
+    draw owns) with R_DrawAliasModel's transform and lerp.  The exclusions --
+    SH_AliasCasts compiled and run: not into the light keyed to the model's
+    entity, not into a light inside the model's box, nothing beyond reach --
+    and SH_AliasEligible's: never the viewmodel, never a translucent model, the
+    view's r_entdist.  The cache hash and the collection ask the same question
+    with the same key, and a capped list leaves the map incomplete.
 """
 from pathlib import Path
 import random
@@ -72,6 +88,7 @@ shader_c = strip(read("engine/h2shared/gl_shader.c"))
 rmain = strip(read("engine/hexen2/gl_rmain.c"))
 dls = strip(read("engine/shaders/dlshadow.inc"))
 svert = strip(read("engine/shaders/sshadow_vert.glsl"))
+avert = strip(read("engine/shaders/sshadow_alias_vert.glsl"))
 
 SIZES = {"vec4": 16, "ivec4": 16, "mat4": 64}
 CSIZES = {"float": 4, "int": 4}
@@ -121,7 +138,7 @@ def c_struct(text, name):
 
 # Which C field mirrors which block member: equal sizes in a different order
 # would pass every offset check and still swap two values.
-NAMES = {"u_shadowvp": "vp", "u_shadowmodel": "model", "u_shadowlight": "light",
+NAMES = {"u_shadowvp": "vp", "u_shadowmodel": "model", "u_shadowlight": "light", "u_shadowpose": "pose",
          "u_dlsmask": "mask", "u_dlslayers": "layers", "u_dlsparams": "params", "u_dlsorigin": "origin"}
 
 
@@ -147,7 +164,8 @@ def check_pair(gname, gtext, cname, csize):
         errors.append(f"gl_shadow.c must COMPILE_TIME_ASSERT sizeof({cname}) == {csize}")
 
 
-check_pair("ShadowPass", svert, "r_shadowpass_t", 144)
+check_pair("ShadowPass", svert, "r_shadowpass_t", 160)
+check_pair("ShadowPass", avert, "r_shadowpass_t", 160)
 check_pair("DlShadow", dls, "r_dlshadow_t", 304)
 if DEF.get("DLSHADOW_MAX_MAPS") != DEF.get("SHADOW_MAX_MAPS"):
     errors.append(f"DLSHADOW_MAX_MAPS {DEF.get('DLSHADOW_MAX_MAPS')} != SHADOW_MAX_MAPS {DEF.get('SHADOW_MAX_MAPS')}")
@@ -155,8 +173,9 @@ if not DEF.get("SHADOW_MAX_MAPS") or DEF["SHADOW_MAX_MAPS"] > 16:
     errors.append("SHADOW_MAX_MAPS must be 1..16: a layer is four bits of u_dlslayers")
 if "if (maps > SHADOW_MAX_MAPS)\n\t\tmaps = SHADOW_MAX_MAPS;" not in read("engine/h2shared/gl_shadow.c"):
     errors.append("SH_EnsureTexture must clamp r_shadow_maxlights to SHADOW_MAX_MAPS")
-if not re.search(r"VERT_UBO\(0\)\s+uniform\s+ShadowPass\b", svert):
-    errors.append("ShadowPass must be the vertex stage's VERT_UBO(0)")
+for name, text in (("sshadow_vert", svert), ("sshadow_alias_vert", avert)):
+    if not re.search(r"VERT_UBO\(0\)\s+uniform\s+ShadowPass\b", text):
+        errors.append(f"ShadowPass must be {name}'s VERT_UBO(0)")
 if re.search(r"\buniform\s+ShadowPass\b", strip(read("engine/shaders/sshadow_frag.glsl"))):
     errors.append("sshadow_frag declares ShadowPass; the fragment stage reads only the varying")
 if not re.search(r"FRAG_UBO\(DLSHADOW_SET3_SLOT\)\s+uniform\s+DlShadow\b", dls) \
@@ -247,7 +266,7 @@ if not re.search(r"if \(sh_failed\)\s*return false;\s*if \(sh_prog\)\s*return tr
         or bp2.count("return SH_Fail ();") < 3 or "!sh_failed && R_LightCluster_Available ()" not in pr:
     errors.append("SH_BuildPrograms must check sh_failed first and fail through SH_Fail; R_Shadow_Prepare must stop on it")
 if "if (budget <= 0 && DotProduct (moved, moved) > SH_STALE * SH_STALE)\n\t\t\t\tcand[i].slot = -1;" not in sel \
-        or "hash = SH_EntityHash (sl->origin, sl->radius);" not in sel:
+        or "hash = SH_EntityHash (sl->origin, sl->radius, sl->key);" not in sel:
     errors.append("SH_Select must drop a stale map drawn more than SH_STALE away, and hash about the drawn origin")
 if "sl->enthash = complete ? hash : ~hash;" not in sel:
     errors.append("SH_Select must keep a map that left a caster out from passing for fresh")
@@ -403,6 +422,193 @@ for name, f in (("ClusteredDlight", fn), ("ClusteredAliasDlight", fa)):
 if "return transpose(mat3(u_lightview)) * (p - u_lightview[3].xyz);" not in dls:
     errors.append("DlShadowWorldPos must invert the rigid u_lightview (transpose of its rotation)")
 
+# ------------------------------------------------------------ the alias casters (P6)
+inst = strip(read("engine/shaders/salias_inst_vert.glsl"))
+skel = strip(read("engine/shaders/sskeletal_vert.glsl"))
+
+
+def ssbo(text, block):
+    m = re.search(r"VERT_SSBO\((\d+),\s*(\d+)\)\s+restrict readonly buffer " + block + r"\s*\{\s*(\w+)\s+(\w+)\[\]", text)
+    return (int(m.group(1)), m.group(3)) if m else None
+
+
+for block, other, oname in (("PoseBuffer", inst, "salias_inst_vert"), ("MD3PoseBuffer", inst, "salias_inst_vert"),
+                            ("BoneBuffer", skel, "sskeletal_vert")):
+    a, o = ssbo(avert, block), ssbo(other, block)
+    if not a or a != o:
+        errors.append(f"sshadow_alias_vert's {block} is {a}, {oname}'s {o}: same GL binding and element type")
+for name in ("a_position", "a_weights", "a_indices"):
+    a = re.search(r"VERT_IN\((\d+)\) in (\w+) " + name + ";", avert)
+    o = re.search(r"VERT_IN\((\d+)\) in (\w+) " + name + ";", skel)
+    if not a or not o or a.groups() != o.groups():
+        errors.append(f"sshadow_alias_vert's {name} must be sskeletal_vert's slot and type (the IQM VAO's)")
+for s in ("local = mix(v1, v0, u_shadowlight.w);",
+          "MD3_Position(md3_pose_data[u_shadowpose.y + gl_VertexID]),\n                    "
+          "MD3_Position(md3_pose_data[u_shadowpose.x + gl_VertexID]), u_shadowlight.w);",
+          "return bones[u_shadowpose.x + int(i)] * u_shadowlight.w +\n           "
+          "bones[u_shadowpose.y + int(i)] * (1.0 - u_shadowlight.w);",
+          "if (u_shadowpose.z == 2) {", "} else if (u_shadowpose.z == 1) {",
+          "rel *= 1.0 + (u_shadowlight.y + u_shadowlight.z * len) / len;",
+          "v_lrel = rel * u_shadowlight.x;", "gl_Position = u_shadowvp * vec4(rel, 1.0);"):
+    if s not in avert:
+        errors.append(f"sshadow_alias_vert no longer says `{s.splitlines()[0]}...`")
+if avert.find("rel *= 1.0 +") > avert.find("v_lrel = rel"):
+    errors.append("sshadow_alias_vert must push the vertex before writing v_lrel and gl_Position")
+if not re.search(r"PV_QUAKE1 = 0,.*?PV_MD3 = 1,.*?PV_IQM = 2,", strip(read("engine/h2shared/gl_model.h")), re.S):
+    errors.append("u_shadowpose.z is gm->poseverttype: PV_QUAKE1 0, PV_MD3 1, PV_IQM 2")
+
+af = body_of(shadow_c, r"static void SH_DrawAliasFace \([^)]*\)\s*\{") or ""
+for s in ("R_UseProgram (sh_aprog);", "Mat4_Multiply (t, c->model, pass->model);",
+          "pass->light[1] = SH_ALIAS_PUSH;", "pass->light[2] = r_shadow_bias.value * 2.0f / (float)sh_res;",
+          "pass->light[3] = c->blend;", "pass->pose[0] = c->pose0;", "pass->pose[1] = c->pose1;",
+          "pass->pose[2] = c->format;",
+          "glBindVertexArray_fp (c->gm->vao);",
+          "glDrawElements_fp (GL_TRIANGLES, c->gm->num_indices, GL_UNSIGNED_SHORT, NULL);",
+          "pass->light[1] = pass->light[2] = pass->light[3] = 0.0f;",
+          "pass->pose[0] = pass->pose[1] = pass->pose[2] = 0;",
+          "R_UseProgram (sh_prog);", "glBindVertexArray_fp (world_vao);"):
+    if s not in af:
+        errors.append(f"SH_DrawAliasFace no longer does `{s}`")
+if af.find("SH_Pass (pass);") < 0 or af.find("SH_Pass (pass);") > af.find("glDrawElements_fp"):
+    errors.append("SH_DrawAliasFace must upload ShadowPass before each alias draw")
+if not re.search(r"if \(c->format == PV_IQM\)\s*GL_BindBufferBase \(GL_SHADER_STORAGE_BUFFER, 4, c->gm->ssbo_bones\);\s*"
+                 r"else if \(c->format == PV_MD3\)\s*GL_BindBufferBase \(GL_SHADER_STORAGE_BUFFER, 3, c->gm->ssbo_pose_md3\);\s*"
+                 r"else\s*GL_BindBufferBase \(GL_SHADER_STORAGE_BUFFER, 1, c->gm->ssbo_pose\);", af):
+    errors.append("SH_DrawAliasFace binds each format's buffer at the binding its shader block names (1, 3, 4)")
+dm2 = body_of(shadow_c, r"static void SH_DrawMap \([^)]*\)\s*\{") or ""
+if "if (d->acount > 0)\n\t\t\tSH_DrawAliasFace (d, f, &pass);" not in dm2:
+    errors.append("SH_DrawMap must draw each face's alias casters after its world and brush entities")
+bp3 = body_of(shadow_c, r"static qboolean SH_BuildPrograms \(void\)\s*\{") or ""
+for s in ('sh_aprog = SH_LinkProgram (sshadow_alias_vert, sshadow_frag, "alias shadow");',
+          'glGetUniformBlockIndex_fp (sh_aprog, "ShadowPass");',
+          "glUniformBlockBinding_fp (sh_aprog, blk, UBO_BINDING_SHADOW_PASS);",
+          "size != (GLint)sizeof(r_shadowpass_t)"):
+    if s not in bp3:
+        errors.append(f"SH_BuildPrograms must build and pin the alias program: `{s}`")
+if re.search(r"if \(!sh_aprog[^)]*\)\s*return SH_Fail", bp3) or "!sh_prog || !sh_dbgprog)" not in bp3:
+    errors.append("a failed alias program must turn off the alias casters, not the maps")
+if "if (sh_aprog) { glDeleteProgram_fp (sh_aprog); sh_aprog = 0; }" not in \
+        (body_of(shadow_c, r"\nvoid R_Shadow_Shutdown \(void\)\s*\{") or ""):
+    errors.append("R_Shadow_Shutdown must delete the alias program")
+if "if (sh_aprog) { glDeleteProgram_fp (sh_aprog); sh_aprog = 0; }" not in \
+        (body_of(shadow_c, r"static qboolean SH_Fail \(void\)\s*\{") or ""):
+    errors.append("SH_Fail must delete the alias program")
+dr = body_of(shadow_c, r"\nvoid R_Shadow_Draw \(void\)\s*\{") or ""
+for b in (1, 3, 4):
+    if f"GL_BindBufferBase (GL_SHADER_STORAGE_BUFFER, {b}, 0);" not in dr:
+        errors.append(f"R_Shadow_Draw must leave storage binding {b} at 0 after alias draws, as the alias paths do")
+
+on = body_of(shadow_c, r"static qboolean SH_AliasOn \(void\)\s*\{") or ""
+if "r_shadow_casters.integer >= 2 && sh_aprog && r_drawentities.integer" not in on:
+    errors.append("SH_AliasOn: r_shadow_casters >= 2, a built program, and r_drawentities")
+el = body_of(shadow_c, r"static qboolean SH_AliasEligible \(const entity_t \*e\)\s*\{") or ""
+if not re.search(r"if \(!m \|\| m->type != mod_alias \|\| e == &cl\.viewent\)\s*return false;", el):
+    errors.append("SH_AliasEligible must refuse the viewmodel (cl.viewent) and anything not an alias model")
+coll = body_of(rmain, r"static qboolean R_CollectAliasInstance \(entity_t \*e\)\s*\{") or ""
+for s in ("(e->drawflags & DRF_TRANSLUCENT)", "(EF_TRANSPARENT | EF_HOLEY | EF_SPECIAL_TRANS)",
+          "(e->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(e->alpha))"):
+    if s not in el or s not in coll:
+        errors.append(f"SH_AliasEligible and R_CollectAliasInstance must both refuse `{s}`")
+if "r_entdist.value > 0 && e != &cl_entities[cl.viewentity]" not in el:
+    errors.append("SH_AliasEligible must apply the view's r_entdist")
+eh = body_of(shadow_c, r"static unsigned int SH_EntityHash \(const vec3_t org, float radius, int key\)\s*\{") or ""
+cm = body_of(shadow_c, r"static qboolean SH_CollectMap \([^)]*\)\s*\{") or ""
+if "if (SH_AliasCasts (a, org, radius, key) && SH_AliasPosed (a))" not in eh or "if (SH_AliasOn ())" not in eh:
+    errors.append("SH_EntityHash must hash every alias caster SH_AliasCasts admits, under SH_AliasOn")
+if "if (!SH_AliasCasts (a, org, radius, key) || !SH_AliasPosed (a))" not in cm:
+    errors.append("SH_CollectMap must draw exactly the alias casters SH_AliasCasts admits")
+if "if (sh_alias_full)\n\t\t*complete = false;" not in cm \
+        or not re.search(r"if \(sh_nacasts >= SH_MAX_ACASTS\)\s*\{\s*\*complete = false;", cm):
+    errors.append("SH_CollectMap: a capped alias list leaves the map incomplete")
+sel2 = body_of(shadow_c, r"static void SH_Select \(void\)\s*\{") or ""
+for s in ("hash = SH_EntityHash (sl->origin, sl->radius, sl->key);",
+          "hash = SH_EntityHash (org, mapr, cl_dlights[cand[i].dlight].key);",
+          "SH_CollectMap (cand[i].slot, org, mapr, cl_dlights[cand[i].dlight].key, &complete)",
+          "SH_GatherAlias (cand, take);"):
+    if s not in sel2:
+        errors.append(f"SH_Select must key both questions to the light: `{s}`")
+if sel2.find("SH_GatherAlias (cand, take);") > sel2.find("hash = SH_EntityHash (sl->origin"):
+    errors.append("SH_Select must gather the alias casters before the first hash")
+ps = body_of(shadow_c, r"static qboolean SH_AliasPosed \(shalias_t \*a\)\s*\{") or ""
+for f in ("&a->c.gm", "&a->c.pose0", "&a->c.pose1", "&a->c.blend"):
+    if f"SH_Fnv (h, {f}," not in ps:
+        errors.append(f"SH_AliasPosed's hash must cover {f}: a pose change has to redraw the map")
+rc = body_of(rmain, r"qboolean R_AliasShadowCaster \(entity_t \*e, r_aliascaster_t \*out\)\s*\{") or ""
+for s in ("tmp = *e;", "R_AliasResolveLerp (&tmp, hdr, &prevpose, &pose, &blend);",
+          "pitch = e->angles[0];\n\tif (e == &cl_entities[cl.viewentity])\n\t\te->angles[0] *= 0.3;\n"
+          "\tR_RotateForEntity2 (e);\n\tR_AliasModelTransform (e, hdr, tmatrix, mdl_t, mdl_s);\n\te->angles[0] = pitch;",
+          "GL_Translatef (mdl_t[0], mdl_t[1], mdl_t[2]);",
+          "GL_Scalef (mdl_s[0], mdl_s[1], mdl_s[2]);", "out->pose0 = pose * scale;", "out->pose1 = prevpose * scale;",
+          "out->spins = (e->model->flags & (EF_ROTATE | EF_FACE_VIEW)) ||\n\t\t     (R_GetPimpFlags (e, NULL) & (EF_SPIN | EF_FLOAT));"):
+    if s not in rc:
+        errors.append(f"R_AliasShadowCaster must pose as the draw does: `{s.splitlines()[0]}`")
+# the lerp on a copy (it advances state the draw owns); the matrix from the
+# entity itself (R_GetPimpFlags finds its misc_modelpimp by its cl_entities index)
+if re.search(r"R_AliasResolveLerp \(e\b|R_RotateForEntity2 \(&tmp\b|R_AliasModelTransform \(&tmp\b", rc):
+    errors.append("R_AliasShadowCaster: the lerp on the copy, the transform on the entity")
+if not re.search(r"if \(R_IsMenuPanel \(\(entity_t \*\)e\)\)\s*return false;", el):
+    errors.append("SH_AliasEligible must refuse a menu panel (UI pinned in front of the eye)")
+if not re.search(r"if \(a->c\.spins\)\s*h = SH_Fnv \(h, a->ent->origin, sizeof\(vec3_t\)\);\s*else\s*"
+                 r"h = SH_Fnv \(h, a->c\.model, sizeof\(a->c\.model\)\);", ps):
+    errors.append("SH_AliasPosed must key a clock-driven model by origin, every other by its matrix")
+if "Mod_Extradata" in rc or "Cache_Check (&e->model->cache)" not in rc:
+    errors.append("R_AliasShadowCaster must take the resident header (Cache_Check), never load a model mid-frame")
+
+# SH_AliasCasts, lifted out of gl_shadow.c, compiled and run
+casts_fn = re.search(r"static qboolean SH_AliasCasts \(const shalias_t \*a, const vec3_t org, float radius, int key\)\s*\{.*?\n\}",
+                     shadow_c, re.S)
+struct = re.search(r"typedef struct \{[^{}]*\} shalias_t;", shadow_c)
+if not casts_fn or not struct:
+    errors.append("cannot lift SH_AliasCasts and shalias_t out of gl_shadow.c")
+else:
+    import os
+    import subprocess
+    import tempfile
+    prog = r"""
+#include <stdio.h>
+#include <string.h>
+typedef float vec3_t[3]; typedef int qboolean; enum { false, true };
+typedef struct entity_s entity_t; typedef struct { int dummy; } r_aliascaster_t;
+#define DotProduct(a,b) ((a)[0]*(b)[0]+(a)[1]*(b)[1]+(a)[2]*(b)[2])
+#define VectorSubtract(a,b,c) ((c)[0]=(a)[0]-(b)[0],(c)[1]=(a)[1]-(b)[1],(c)[2]=(a)[2]-(b)[2])
+%s
+%s
+static shalias_t mk (int num, float x, float y, float z) {
+	shalias_t a; memset (&a, 0, sizeof(a)); a.num = num;
+	a.center[0] = x; a.center[1] = y; a.center[2] = z; a.radius = 20;
+	a.mins[0] = x - 13; a.mins[1] = y - 19; a.mins[2] = z + 2;
+	a.maxs[0] = x + 13; a.maxs[1] = y + 19; a.maxs[2] = z + 36;
+	return a;
+}
+int main (void) {
+	vec3_t L = {0, 0, 100}, in = {5, 5, 20};
+	shalias_t near = mk (7, 0, 60, 0), far = mk (8, 0, 400, 0), holds = mk (9, 0, 0, 0);
+	printf ("%%d %%d %%d %%d %%d %%d %%d %%d\n",
+		SH_AliasCasts (&near, L, 150, 0),	/* in reach, no owner: 1 */
+		SH_AliasCasts (&near, L, 150, 7),	/* keyed to it: 0 */
+		SH_AliasCasts (&near, L, 150, 8),	/* keyed to another: 1 */
+		SH_AliasCasts (&far, L, 150, 0),	/* beyond reach: 0 */
+		SH_AliasCasts (&holds, in, 150, 0),	/* light inside its box: 0 */
+		SH_AliasCasts (&holds, L, 150, 0),	/* the same model, light above its box: 1 */
+		SH_AliasCasts (&near, L, 30, -1),	/* 116.6 apart, 30 + 20 reach: 0 */
+		SH_AliasCasts (&far, L, 400, 0));	/* 412 apart, 420 reach: 1 */
+	return 0;
+}
+""" % (struct.group(0), casts_fn.group(0))
+    with tempfile.TemporaryDirectory() as td:
+        c, exe = Path(td) / "casts.c", Path(td) / "casts"
+        c.write_text(prog)
+        r = subprocess.run([os.environ.get("CC", "cc"), "-std=gnu99", "-w", "-o", str(exe), str(c)],
+                           capture_output=True, text=True)
+        if r.returncode:
+            errors.append("SH_AliasCasts harness failed to compile: " + r.stderr.strip()[:300])
+        else:
+            out = subprocess.run([str(exe)], capture_output=True, text=True).stdout.split()
+            want = ["1", "0", "1", "0", "0", "1", "0", "1"]
+            if out != want:
+                errors.append(f"SH_AliasCasts answers {out}, want {want} (in reach / keyed to it / keyed "
+                              "elsewhere / beyond / light in its box / light above it / just out / far, big radius)")
+
 # ------------------------------------------------------------ the frame
 setup = body_of(rmain, r"static void R_SetupGL \(void\)\s*\{") or ""
 i_alias = setup.find("R_LightCluster_BindForAlias ();")
@@ -424,5 +630,6 @@ if errors:
     for e in errors:
         print("  " + e)
     sys.exit(1)
-print("ok: ShadowPass and DlShadow match their C mirrors, are bound and uploaded, decode as packed, "
+print("ok: ShadowPass and DlShadow match their C mirrors, are bound and uploaded, decode as packed, the alias "
+      "casters pose as drawn and skip their own light, "
       "and stay off the ES tier")

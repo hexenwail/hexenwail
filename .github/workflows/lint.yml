@@ -512,8 +512,13 @@ jobs:
       # ...and on the GPU clustered path, the cube shadow maps: the six face
       # matrices against GL's cube-map table and the cull face that keeps the
       # walls' far sides, and the ShadowPass / DlShadow blocks against their C
-      # mirrors, binds, packing and an ES arm without them (#97 P3/P4).
+      # mirrors, binds, packing and an ES arm without them (#97 P3/P4); the
+      # alias casters' pose, push and exclusions (#97 P6).
       - name: Shadow-map faces are GL's cube faces
         run: python3 tools/test_shadow_cube_faces.py
       - name: Shadow-map blocks match their mirrors
         run: python3 tools/test_dlshadow_block.py
+      # The Display presets' shadow-map tiers, each preset detected as itself
+      # after applying it, and the DLight Occlusion row (#97 P5).
+      - name: Presets carry their shadow-map tier
+        run: python3 tools/test_shadow_presets.py
