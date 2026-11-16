@@ -514,6 +514,10 @@ jobs:
       # whole with both tiers' mark and add loops, run on two copies (#496).
       - name: Shared submodels keep their own lights
         run: python3 tools/test_dlight_shared_submodel.py
+      # Both brush-entity dlight mark loops (R_DrawBrushModel and its
+      # instanced twin) stand down under gl_flashblend and the GPU path.
+      - name: Brush dlight mark loops share their gates
+        run: python3 tools/test_brush_dlight_gates.py
       # ...and on the GPU clustered path, the cube shadow maps: the six face
       # matrices against GL's cube-map table and the cull face that keeps the
       # walls' far sides, and the ShadowPass / DlShadow blocks against their C

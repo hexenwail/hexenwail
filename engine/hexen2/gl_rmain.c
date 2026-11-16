@@ -3667,8 +3667,10 @@ void R_CollectBrushInstances (void)
 		 * a dlight is actually live this frame.  Skipped entirely when
 		 * the froxel grid is shading the world programs these surfaces
 		 * draw through; see the twin of this loop in gl_rsurf.c's
-		 * R_DrawBrushModel.  uhexen2-26bm. */
-		if (clmodel->firstmodelsurface != 0 && !R_LightCluster_ShadesWorld ())
+		 * R_DrawBrushModel.  uhexen2-26bm.  gl_flashblend draws dlights as
+		 * blobs instead, so it marks nothing here either, as the twin does. */
+		if (clmodel->firstmodelsurface != 0 && !gl_flashblend.integer &&
+		    !R_LightCluster_ShadesWorld ())
 		{
 			for (k = 0; k < MAX_DLIGHTS; k++)
 			{
