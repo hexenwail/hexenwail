@@ -1,0 +1,76 @@
+# engine/shaders/variants.txt -- every #define the engine prepends to a stage
+# at program-build time, so the offline gates compile what GL compiles.
+#
+# GL builds some programs from one file several times, each with a different
+# header chunk: "#define NOPERSP 1" for the affine (r_softemu) twins,
+# "#define QUALITY %d" for the three SSAO evaluate programs, "#define MODE %d"
+# for the softemu palette LUT.  The GL driver compiles each at run time.
+# SDL_GPU cannot compile GLSL at run time, so it needs a blob per variant, and
+# EmbedShaders.cmake writes one offline copy per `variant` line below:
+#
+#   variant <stage> <name> <NAME=value ...>
+#
+# becomes <base>_<name>.<stage> in the Vulkan staging dir, with
+# "#define NAME value" lines after its #version, the way the OIT twins carry
+# "#define OIT 1".  shaders_spirv compiles it with both frontends,
+# shaders_cross cross-compiles it, test_sdlgpu_bindings.py checks its layout.
+#
+#   const <NAME> <value>
+#
+# is a C constant the engine prepends on every build of the stages that read
+# it (froxel-grid sizes, the instanced-alias record layout, the LUT size).  It
+# gets no copy of its own: each stage that reads it carries an #ifndef default
+# with the same value, so the plain offline compile already is the program GL
+# builds.  tools/test_shader_variants.py checks that, and that the C still
+# passes this value.
+#
+# The OIT twin of a stage with an `#ifdef OIT` arm (#define OIT 1) is written
+# by EmbedShaders on its own and is not listed here; combinations with OIT,
+# such as the affine OIT twin, are.
+#
+# tools/test_shader_variants.py reads the C that builds the header chunks and
+# fails on any stage + define set the C can request that this file does not
+# enumerate, and on any line here the C cannot request.  Desktop GL only: the
+# GLES/WebGL2 tier never runs SDL_GPU.  GitHub #340 (P-1b).
+
+# Affine texture mapping (r_softemu, uhexen2-ktjv): alias_np, skeletal_np and
+# alias_instanced_np, each in salias_frag; alias_np_oit and skeletal_np_oit
+# are the OIT twins of the first two.  gl_shader.c.
+variant salias.vert        np      NOPERSP=1
+variant salias.frag        np      NOPERSP=1
+variant salias.frag        np_oit  NOPERSP=1 OIT=1
+variant sskeletal.vert     np      NOPERSP=1
+variant salias_inst.vert   np      NOPERSP=1
+
+# r_ssao, clamped to 1-3, indexes ss_eval_prog[quality - 1]; all three are
+# built together in SS_BuildPrograms.  gl_ssao.c.
+variant ssao_evaluate.comp q1      QUALITY=1
+variant ssao_evaluate.comp q2      QUALITY=2
+variant ssao_evaluate.comp q3      QUALITY=3
+
+# r_softemu_metric, clamped by PP_SelectMetric: one palette-LUT program per
+# softemu_metric_t, built on first use.  gl_postprocess.c,
+# PP_BuildPaletteLUT_GPU.
+variant softemu_lut.comp   mode0   MODE=0
+variant softemu_lut.comp   mode1   MODE=1
+variant softemu_lut.comp   mode2   MODE=2
+
+# Froxel grid: gl_lightcluster.h, and MAX_DLIGHTS / MAX_LIGHTSTYLES from
+# engine/hexen2.  Every GL client build compiles engine/hexen2/quakedef.h, so
+# MAX_LIGHTSTYLES is 256; HexenWorld's 64 belongs to hwsv, which has no
+# renderer.  Compile-time constants, not hardware- or resolution-dependent.
+const LIGHT_TILES_X        32
+const LIGHT_TILES_Y        16
+const LIGHT_TILES_Z        32
+const MAX_LIGHTS           128
+const MAX_LIGHTSTYLES      256
+const LIGHT_SSBO_BINDING   8
+
+# Instanced alias record layout, gl_shader.h.
+const ALIAS_INST_SHADEDOT_ROW_MASK 255
+const ALIAS_INST_DLIGHT_BIT        256
+const ALIAS_INST_FULLBRIGHT_BIT    512
+const ALIAS_INST_YAW_SHIFT         16
+
+# Softemu palette LUT edge, PP_LUT_DIM in gl_postprocess.c.
+const LUT_DIM              128
