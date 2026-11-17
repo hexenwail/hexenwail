@@ -200,6 +200,10 @@ got = ""
 if len(mains) == 1:
     mb = body_of(vcode, r"\bvoid\s+main\s*\(")
     got = " ".join(re.findall(TOK, vcode[mains[0].start():vcode.index("{", mains[0].start()) + len(mb)]))
+    # layout.inc's VK_FLIP_Y() is empty outside the Vulkan arm, so GL sees no
+    # token; tools/test_vk_flip_y.py owns that call (#340).
+    if got.endswith(" VK_FLIP_Y ( ) }"):
+        got = got[:-len(" VK_FLIP_Y ( ) }")] + " }"
 if got != GOLDEN:
     errors.append(f"sworld_vert.glsl's main differs from the pinned body ({len(mains)} definitions); "
                   f"a deliberate change updates GOLDEN with it.\n    got:  {got}\n    want: {GOLDEN}")

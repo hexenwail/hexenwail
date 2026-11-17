@@ -344,6 +344,10 @@ for head, want in GOLDEN.items():
     if body:
         start = hm[0].start()
         got = " ".join(re.findall(TOK, vcode[start:vcode.index("{", start) + len(body)]))
+        # layout.inc's VK_FLIP_Y() is empty outside the Vulkan arm, so GL sees
+        # no token; tools/test_vk_flip_y.py owns that call (#340).
+        if got.endswith(" VK_FLIP_Y ( ) }"):
+            got = got[:-len(" VK_FLIP_Y ( ) }")] + " }"
     if got != want:
         errors.append(f"sskeletal_vert.glsl's {want.split(' ( ')[0]} differs from the pinned body "
                       f"(found {len(hm)} definitions); a deliberate change updates GOLDEN with it.\n"

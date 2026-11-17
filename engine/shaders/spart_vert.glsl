@@ -29,4 +29,5 @@ void main() {
     vec4 eyepos = u_modelview * vec4(a_position, 1.0);
     v_fogdist = length(eyepos.xyz);
     gl_Position = u_mvp * vec4(a_position, 1.0);
+    VK_FLIP_Y()
 }

@@ -232,4 +232,5 @@ void main() {
     v_dlightscale = ((inst.ShadedotRow & ALIAS_INST_DLIGHT_BIT) != 0)
                   ? u_alias_dlight : 0.0;
     gl_Position = u_viewproj * vec4(world_pos, 1.0);
+    VK_FLIP_Y()
 }

@@ -453,6 +453,13 @@ jobs:
       - name: Shader variants manifest covers the runtime header defines
         run: python3 tools/test_shader_variants.py
 
+      # Every engine/shaders vertex stage ends main(), and precedes each
+      # early return, with layout.inc's VK_FLIP_Y(): gl_Position.y negated
+      # in the Vulkan arm only, nothing at all in the GL arms.  The compiled
+      # half runs in shaders-spirv.yml (#340, Y flip).
+      - name: Vertex stages flip Y for SDL_GPU only
+        run: python3 tools/test_vk_flip_y.py
+
       # salias_vert reads VertParams: the C mirror matches the block member
       # for member (sizes AND int/float kinds), all four alias builds compile
       # the file, GL_ImmPushBlocks feeds it, MSL targets 2.1 (#450 S1).

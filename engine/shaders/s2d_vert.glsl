@@ -26,4 +26,5 @@ void main() {
     v_texcoord = a_texcoord;
     v_color = a_color;
     gl_Position = u_mvp * vec4(a_position, 1.0);
+    VK_FLIP_Y()
 }
