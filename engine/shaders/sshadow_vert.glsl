@@ -38,4 +38,5 @@ void main() {
     highp vec3 rel = (u_shadowmodel * vec4(a_position, 1.0)).xyz;
     v_lrel = rel * u_shadowlight.x;
     gl_Position = u_shadowvp * vec4(rel, 1.0);
+    VK_FLIP_Y()
 }

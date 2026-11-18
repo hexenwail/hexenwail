@@ -6,8 +6,8 @@
 #include "ssao.inc"
 
 layout (local_size_x = 8, local_size_y = 8) in;
-TEXBIND(8) uniform sampler2D source;
-TEXBIND(9) uniform sampler2D edges;
+TEXBIND2(8, 0) uniform sampler2D source;
+TEXBIND2(9, 1) uniform sampler2D edges;
 IMGBIND(0, r8) uniform writeonly image2D output_texture;
 
 // Precision boundaries follow XeGTAO_Denoise and its helpers (see gtao.inc).

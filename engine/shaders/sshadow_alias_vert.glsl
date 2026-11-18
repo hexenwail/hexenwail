@@ -109,4 +109,5 @@ void main() {
         rel *= 1.0 + (u_shadowlight.y + u_shadowlight.z * len) / len;
     v_lrel = rel * u_shadowlight.x;
     gl_Position = u_shadowvp * vec4(rel, 1.0);
+    VK_FLIP_Y()
 }

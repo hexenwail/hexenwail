@@ -283,7 +283,7 @@ set(SHADER_SRC_DIR ${ENGINE_TOP}/shaders)
 set(SHADERS_GEN_H ${CMAKE_CURRENT_BINARY_DIR}/generated/shaders_gen.h)
 set(SHADERS_VK_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated/vk)
 file(GLOB SHADER_SOURCES ${SHADER_SRC_DIR}/*.glsl ${SHADER_SRC_DIR}/*.inc
-                         ${SHADER_SRC_DIR}/glonly/*.glsl)
+                         ${SHADER_SRC_DIR}/glonly/*.glsl ${SHADER_SRC_DIR}/variants.txt)
 
 add_custom_command(
     OUTPUT ${SHADERS_GEN_H}

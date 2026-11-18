@@ -75,4 +75,5 @@ void main() {
     v_dlightscale = u_alias_dlight;
 #endif
     gl_Position = u_mvp * vec4(a_position, 1.0);
+    VK_FLIP_Y()
 }

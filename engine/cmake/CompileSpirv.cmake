@@ -52,6 +52,25 @@ foreach(src ${VK_SOURCES})
     endforeach()
 endforeach()
 
+# A .spv whose source EmbedShaders.cmake removed (a variant dropped from
+# engine/shaders/variants.txt) would stay in a reused build dir and still be
+# cross-compiled and binding-checked, both of which glob *.vk.spv.
+set(spv_bases "")
+foreach(src ${VK_SOURCES})
+    get_filename_component(base "${src}" NAME)
+    list(APPEND spv_bases "${base}")
+endforeach()
+file(GLOB spv_present "${SPV_DIR}/*.spv")
+foreach(spv ${spv_present})
+    get_filename_component(spv_name "${spv}" NAME)
+    string(REGEX REPLACE "\\.(vk|gl)\\.spv$" "" spv_base "${spv_name}")
+    list(FIND spv_bases "${spv_base}" seen)
+    if(seen EQUAL -1)
+        file(REMOVE "${spv}")
+        message(STATUS "CompileSpirv: removed stale ${spv_name}")
+    endif()
+endforeach()
+
 if(failed EQUAL 0)
     message(STATUS "CompileSpirv: ${total} compiles -> SPIR-V")
 else()

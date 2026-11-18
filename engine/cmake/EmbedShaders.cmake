@@ -1,8 +1,9 @@
 # EmbedShaders.cmake -- turn engine/shaders/*.glsl into a C header of string
 # literals, resolving #include "..." along the way, and drop a copy of each
-# expanded source (plus an OIT twin of each stage that has an OIT arm) where
-# CompileSpirv.cmake can reach it.  engine/shaders/glonly/*.glsl is embedded
-# too, as macros, and kept away from CompileSpirv (see below).
+# expanded source (plus an OIT twin of each stage that has an OIT arm, and one
+# copy per engine/shaders/variants.txt variant) where CompileSpirv.cmake can
+# reach it.  engine/shaders/glonly/*.glsl is embedded too, as macros, and kept
+# away from CompileSpirv (see below).
 #
 # Run in script mode:
 #   cmake -DSHADER_DIR=<dir> -DOUT_FILE=<header> [-DVK_DIR=<dir>] \
@@ -88,6 +89,97 @@ if(VK_DIR)
     file(MAKE_DIRECTORY "${VK_DIR}")
 endif()
 
+# engine/shaders/variants.txt: the header #defines the engine prepends at
+# program-build time (see that file).  Each `variant` line becomes one more
+# offline copy of its stage, so SDL_GPU, which cannot compile GLSL at run
+# time, has a blob per program GL builds.  `const` lines are for
+# tools/test_shader_variants.py and produce nothing here.  Parsed on every
+# run, VK_DIR or not, so a malformed manifest fails every toolchain alike.
+set(VARIANTS_FILE "${SHADER_DIR}/variants.txt")
+if(NOT EXISTS "${VARIANTS_FILE}")
+    message(FATAL_ERROR "EmbedShaders: ${VARIANTS_FILE} is missing")
+endif()
+file(READ "${VARIANTS_FILE}" variants_text)
+string(REPLACE "\r" "" variants_text "${variants_text}")
+# Comments go first, so they may say anything; line numbers survive because
+# the newlines stay.
+string(REGEX REPLACE "#[^\n]*" "" variants_text "${variants_text}")
+if(variants_text MATCHES ";")
+    # CMake would split the line into list items at it.
+    message(FATAL_ERROR "EmbedShaders: variants.txt may not contain a ';' outside a comment")
+endif()
+string(REPLACE "\n" ";" variants_lines "${variants_text}")
+set(VARIANT_COUNT 0)
+set(lineno 0)
+foreach(line IN LISTS variants_lines)
+    math(EXPR lineno "${lineno} + 1")
+    string(STRIP "${line}" line)
+    if(line STREQUAL "")
+        continue()
+    endif()
+    string(FIND "${line}" "\\" backslash)
+    if(line MATCHES "[\"']" OR NOT backslash EQUAL -1)
+        # separate_arguments would strip them; test_shader_variants.py would not.
+        message(FATAL_ERROR "EmbedShaders: variants.txt:${lineno}: no quotes or backslashes")
+    endif()
+    separate_arguments(words UNIX_COMMAND "${line}")
+    list(GET words 0 kind)
+    list(LENGTH words nwords)
+    if(kind STREQUAL "const")
+        if(NOT nwords EQUAL 3)
+            message(FATAL_ERROR "EmbedShaders: variants.txt:${lineno}: want `const NAME value`")
+        endif()
+        continue()
+    endif()
+    if(NOT kind STREQUAL "variant" OR nwords LESS 4)
+        message(FATAL_ERROR
+            "EmbedShaders: variants.txt:${lineno}: want `variant <stage> <name> NAME=value ...`")
+    endif()
+    list(GET words 1 vstage)
+    list(GET words 2 vname)
+    list(SUBLIST words 3 -1 vdefs)
+    if(NOT vstage MATCHES "^[a-z0-9_]+\\.(vert|frag|comp)$")
+        message(FATAL_ERROR "EmbedShaders: variants.txt:${lineno}: bad stage `${vstage}`")
+    endif()
+    string(REGEX REPLACE "\\.(vert|frag|comp)$" "_\\1.glsl" vsrc "${vstage}")
+    if(NOT EXISTS "${SHADER_DIR}/${vsrc}")
+        message(FATAL_ERROR "EmbedShaders: variants.txt:${lineno}: no stage ${vstage} (${vsrc})")
+    endif()
+    if(NOT vname MATCHES "^[a-z0-9_]+$")
+        message(FATAL_ERROR "EmbedShaders: variants.txt:${lineno}: bad variant name `${vname}`")
+    endif()
+    set(vtext "")
+    set(vnames "")
+    foreach(def IN LISTS vdefs)
+        if(NOT def MATCHES "^([A-Z_][A-Z0-9_]*)=([^=]+)$")
+            message(FATAL_ERROR "EmbedShaders: variants.txt:${lineno}: bad define `${def}`, want NAME=value")
+        endif()
+        list(FIND vnames "${CMAKE_MATCH_1}" seen)
+        if(NOT seen EQUAL -1)
+            message(FATAL_ERROR "EmbedShaders: variants.txt:${lineno}: ${CMAKE_MATCH_1} set twice")
+        endif()
+        list(APPEND vnames "${CMAKE_MATCH_1}")
+        string(APPEND vtext "#define ${CMAKE_MATCH_1} ${CMAKE_MATCH_2}\n")
+    endforeach()
+    set(VARIANT_${VARIANT_COUNT}_STAGE "${vstage}")
+    set(VARIANT_${VARIANT_COUNT}_NAME "${vname}")
+    set(VARIANT_${VARIANT_COUNT}_TEXT "${vtext}")
+    math(EXPR VARIANT_COUNT "${VARIANT_COUNT} + 1")
+endforeach()
+
+# Every offline copy this run writes; anything else in VK_DIR is stale.
+set(VK_WRITTEN "")
+function(write_vk name content)
+    # list(FIND), not IN_LIST: a -P script runs with CMP0057 unset, so CMake
+    # 3.x rejects IN_LIST here (the wasm CI job's apt cmake is 3.x).
+    list(FIND VK_WRITTEN "${name}" seen)
+    if(NOT seen EQUAL -1)
+        message(FATAL_ERROR "EmbedShaders: two offline copies would both be ${name}")
+    endif()
+    set(VK_WRITTEN ${VK_WRITTEN} "${name}" PARENT_SCOPE)
+    write_if_changed("${VK_DIR}/${name}" "${content}")
+endfunction()
+
 # Rewrite only when the bytes actually change, so a no-op regeneration does not
 # force everything downstream to rebuild.
 function(write_if_changed path content)
@@ -129,16 +221,26 @@ foreach(shader ${SHADER_FILES})
 
     if(VK_DIR)
         if(name MATCHES "^(.+)_(vert|frag|comp)$")
-            write_if_changed("${VK_DIR}/${CMAKE_MATCH_1}.${CMAKE_MATCH_2}"
-                             "${VK_VERSION_LINE}${body}")
+            set(vbase "${CMAKE_MATCH_1}")
+            set(vext "${CMAKE_MATCH_2}")
+            write_vk("${vbase}.${vext}" "${VK_VERSION_LINE}${body}")
             # A stage with an `#ifdef OIT` arm is also linked as an OIT twin,
             # with "#define OIT 1" after its header (GL_InitOITProgramSplit).
             # That arm is a separate shader as far as the offline gates go,
             # so give it its own copy, or CompileSpirv never sees oit.inc.
             string(FIND "${body}" "#ifdef OIT\n" oit_arm)
             if(NOT oit_arm EQUAL -1)
-                write_if_changed("${VK_DIR}/${CMAKE_MATCH_1}_oit.${CMAKE_MATCH_2}"
-                                 "${VK_VERSION_LINE}#define OIT 1\n${body}")
+                write_vk("${vbase}_oit.${vext}" "${VK_VERSION_LINE}#define OIT 1\n${body}")
+            endif()
+            # variants.txt copies of this stage, defines in manifest order.
+            if(VARIANT_COUNT GREATER 0)
+                math(EXPR vlast "${VARIANT_COUNT} - 1")
+                foreach(v RANGE ${vlast})
+                    if(VARIANT_${v}_STAGE STREQUAL "${vbase}.${vext}")
+                        write_vk("${vbase}_${VARIANT_${v}_NAME}.${vext}"
+                                 "${VK_VERSION_LINE}${VARIANT_${v}_TEXT}${body}")
+                    endif()
+                endforeach()
             endif()
         else()
             message(FATAL_ERROR
@@ -155,6 +257,22 @@ foreach(shader ${SHADER_FILES})
     string(APPEND GENERATED
            "static const char ${name}[] SHADER_UNUSED =\n\t\"${body}\";\n\n")
 endforeach()
+
+# A copy no longer produced (a variant dropped from variants.txt, a stage
+# renamed) would otherwise stay in a reused build dir and keep being compiled
+# as if the engine still built it.  CompileSpirv.cmake prunes the .spv of a
+# copy removed here.
+if(VK_DIR)
+    file(GLOB vk_present "${VK_DIR}/*.vert" "${VK_DIR}/*.frag" "${VK_DIR}/*.comp")
+    foreach(stale ${vk_present})
+        get_filename_component(stale_name "${stale}" NAME)
+        list(FIND VK_WRITTEN "${stale_name}" seen)
+        if(seen EQUAL -1)
+            file(REMOVE "${stale}")
+            message(STATUS "EmbedShaders: removed stale ${stale}")
+        endif()
+    endforeach()
+endif()
 
 string(APPEND GENERATED "#endif /* SHADERS_GEN_H */\n")
 

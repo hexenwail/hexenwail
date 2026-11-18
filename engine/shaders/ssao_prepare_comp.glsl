@@ -5,7 +5,7 @@
 
 layout (local_size_x = 8, local_size_y = 8) in;
 
-TEXBIND(8) uniform sampler2D u_world_depth;	/* full-res snapshot, DEPTH24_STENCIL8 */
+TEXBIND2(8, 0) uniform sampler2D u_world_depth;	/* full-res snapshot, DEPTH24_STENCIL8 */
 IMGBIND(0, rg16f) uniform writeonly image2D u_prepared;
 
 void main ()

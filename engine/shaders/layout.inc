@@ -67,6 +67,11 @@
  *   SSBO_RW(gl, vk)   storage buffer that is written (read-write or
  *                     writeonly -- SDL_GPU has no write-only kind); set 1
  *
+ * TEXBIND(b) is only right when b is also the dense set-0 index: the SSAO
+ * stages' TEXBIND(8..10) gave SDL_GPU bindings 8.. in a set that holds two or
+ * three textures (#340).  tools/test_sdlgpu_bindings.py checks every stage's
+ * Vulkan SPIR-V against this numbering, in the shaders-spirv CI job.
+ *
  * The GL arms use `gl` only, so the driver sees exactly the qualifiers it
  * would from a hand-written layout(std430, binding = gl).  Storage blocks
  * take layout(binding=) wherever compute exists (GL 4.3 / ES 3.1), unlike
@@ -160,6 +165,40 @@
   #define FRAG_UBO(b)       layout(std140)
   #define FRAG_SSBO(gl, vk) layout(std430, binding = gl)
   #define VERT_SSBO(gl, vk) layout(std430, binding = gl)
+#endif
+
+/* VK_FLIP_Y(): the last statement of every vertex stage's main(), and of
+ * every early return from it.
+ *
+ * SDL_GPU's clip space is +Y up with framebuffer row 0 at the TOP (it gives
+ * Vulkan a negative-height viewport to match D3D and Metal), while GL puts
+ * NDC y = -1 on row 0.  Negating y in the Vulkan SPIR-V makes every render
+ * target hold the same rows in the same memory order as under GL, so
+ * gl_FragCoord, dFdy, texture coordinates into render targets and readbacks
+ * all keep their GL meaning.  Two consequences for the backend:
+ *   - nothing may be drawn straight into the swapchain texture, which SDL_GPU
+ *     shows row 0 at the top: every pass renders offscreen, and the final
+ *     present blit is the one place that flips;
+ *   - GL viewport and scissor rectangles (bottom-left origin, y counted up
+ *     in rows) go to SDL_GPU UNCHANGED -- with the negative viewport they
+ *     cover the same memory rows GL does.  Converting them to a top-left
+ *     origin would break this.
+ * The negation reverses winding: GL's counter-clockwise front face is
+ * SDL_GPU's CLOCKWISE.  DXIL and MSL are cross-compiled from the Vulkan
+ * SPIR-V, so they inherit it.
+ *
+ * glslang's --invert-y would have done this, but it is implemented only in
+ * the HLSL front end; on GLSL it is accepted and ignored (#340).
+ *
+ * Written without a trailing semicolon at the call site, so the GL arms see
+ * no token at all -- not even an empty statement -- and the preprocessed GL
+ * program is token-identical (the embedded source string does carry the
+ * call).  tools/test_vk_flip_y.py checks the call sites and, on the
+ * compiled SPIR-V, that every Vulkan vertex stage stores the negated y. */
+#ifdef VULKAN
+  #define VK_FLIP_Y()       gl_Position.y = -gl_Position.y;
+#else
+  #define VK_FLIP_Y()
 #endif
 
 #endif /* LAYOUT_INC */

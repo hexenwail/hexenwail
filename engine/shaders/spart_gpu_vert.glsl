@@ -59,6 +59,7 @@ void main() {
         v_color     = vec4(0.0);
         v_texcoord  = vec2(0.0);
         v_fogdist   = 0.0;
+        VK_FLIP_Y()
         return;
     }
 
@@ -79,4 +80,5 @@ void main() {
     vec4 eyepos = u_modelview * vec4(pos, 1.0);
     v_fogdist   = length(eyepos.xyz);
     gl_Position = u_mvp * vec4(pos, 1.0);
+    VK_FLIP_Y()
 }

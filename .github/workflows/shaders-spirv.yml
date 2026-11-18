@@ -14,6 +14,17 @@ name: Shaders SPIR-V
 # numbering only failed there (#448).  The flake.nix shadercross pin is
 # already in the paths below.
 #
+# Last, tools/test_sdlgpu_bindings.py reads the Vulkan .spv and checks
+# that every resource sits at the set and dense binding SDL_GPU will bind
+# it at.  Neither compiler checks that; it needs the .spv, so it runs here
+# and not in lint.yml (#340).  Before it, tools/test_shader_variants.py
+# checks that the staging dir holds exactly one copy per stage, OIT twin
+# and engine/shaders/variants.txt variant; its source-only half, that the
+# manifest covers every #define the C prepends, is in lint.yml (#340).
+# tools/test_vk_flip_y.py then checks that every Vulkan vertex stage stores
+# the negated gl_Position.y on every return path and no GL one does; its
+# source half (each main ends in VK_FLIP_Y()) is in lint.yml (#340).
+#
 # The paths are everything the gate reads: the shaders themselves
 # (.glsl AND .inc -- layout.inc/ssao.inc are the risk), the three CMake
 # scripts that expand, compile and cross-compile them, the CMakeLists
@@ -30,6 +41,9 @@ on:
       - 'engine/CMakeLists.txt'
       - 'flake.nix'
       - '.github/workflows/shaders-spirv.yml'
+      - 'tools/test_sdlgpu_bindings.py'
+      - 'tools/test_shader_variants.py'
+      - 'tools/test_vk_flip_y.py'
   push:
     branches: [master]
     paths:
@@ -40,6 +54,9 @@ on:
       - 'engine/CMakeLists.txt'
       - 'flake.nix'
       - '.github/workflows/shaders-spirv.yml'
+      - 'tools/test_sdlgpu_bindings.py'
+      - 'tools/test_shader_variants.py'
+      - 'tools/test_vk_flip_y.py'
 
 # Builds and throws the result away; nothing here writes to the repository.
 permissions:
@@ -84,3 +101,37 @@ jobs:
         run: |
           set -euo pipefail
           nix develop -c cmake --build /tmp/shader-build --target shaders_cross
+
+      # The .vk.spv are what SDL_GPU will be handed, and SDL_GPU binds by
+      # position: within each descriptor set, sampled textures, then storage
+      # textures, then storage buffers, numbered densely from 0.  glslang and
+      # shadercross both accept a shader that breaks that (the four SSAO
+      # compute stages had their samplers at set 0 bindings 8..), so check it
+      # here, on the SPIR-V itself.  --sources fails any stage the gate did
+      # not compile.  Stock python3; no tool from the dev shell.  #340.
+      # EmbedShaders wrote one offline copy per engine/shaders/variants.txt
+      # variant, so the gates above compiled every program the engine builds
+      # at run time.  Check the staging dir holds exactly those copies, each
+      # with its manifest #defines; the same run re-checks the manifest
+      # against the C.  #340 (P-1b).
+      - name: Check the offline shader variants
+        run: |
+          set -euo pipefail
+          python3 tools/test_shader_variants.py --vk-dir /tmp/shader-build/engine/generated/vk -v
+
+      - name: Check SDL_GPU binding layout
+        run: |
+          set -euo pipefail
+          python3 tools/test_sdlgpu_bindings.py /tmp/shader-build/engine/generated/spirv \
+            --sources /tmp/shader-build/engine/generated/vk -v
+
+      # SDL_GPU is +Y up with row 0 at the top; GL puts NDC y = -1 on row 0.
+      # Every vertex stage negates gl_Position.y in its Vulkan SPIR-V only
+      # (layout.inc VK_FLIP_Y), so render targets keep GL's row order.  A
+      # stage that forgets compiles cleanly and draws upside down under
+      # SDL_GPU alone, so check the compiled blobs.  #340 (Y flip).
+      - name: Check the SDL_GPU Y flip
+        run: |
+          set -euo pipefail
+          python3 tools/test_vk_flip_y.py --spirv /tmp/shader-build/engine/generated/spirv \
+            --sources /tmp/shader-build/engine/generated/vk

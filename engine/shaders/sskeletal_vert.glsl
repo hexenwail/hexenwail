@@ -116,4 +116,5 @@ void main() {
     v_eyepos = eyepos.xyz;
     v_dlightscale = u_alias_dlight;
     gl_Position = u_mvp * vec4(skinned_pos, 1.0);
+    VK_FLIP_Y()
 }
