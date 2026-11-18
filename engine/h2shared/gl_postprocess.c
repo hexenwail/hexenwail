@@ -22,6 +22,9 @@
 #include "gl_pipeline.h"
 #include "gl_vbo.h"
 #include "draw.h"
+#ifdef USE_SDL_GPU
+#include "rg_device.h"	/* R_GPU(): under -gpu the FBO entry points stay stubbed */
+#endif
 
 /* sbloom_*[] -- the bloom family, engine/shaders/sbloom_*.glsl (#450) */
 #include "shaders_gen.h"
@@ -2433,33 +2436,40 @@ void GL_PostProcess_Init (void)
 
 	/* check for FBO function pointers */
 #ifndef USE_GLES
-	/* On desktop GL, dynamically load function pointers */
-	glGenFramebuffers_fp = (glGenFramebuffers_f) SDL_GL_GetProcAddress("glGenFramebuffers");
-	glDeleteFramebuffers_fp = (glDeleteFramebuffers_f) SDL_GL_GetProcAddress("glDeleteFramebuffers");
-	glBindFramebuffer_fp = (glBindFramebuffer_f) SDL_GL_GetProcAddress("glBindFramebuffer");
-	glFramebufferTexture2D_fp = (glFramebufferTexture2D_f) SDL_GL_GetProcAddress("glFramebufferTexture2D");
-	glFramebufferRenderbuffer_fp = (glFramebufferRenderbuffer_f) SDL_GL_GetProcAddress("glFramebufferRenderbuffer");
-	glCheckFramebufferStatus_fp = (glCheckFramebufferStatus_f) SDL_GL_GetProcAddress("glCheckFramebufferStatus");
-	glGenRenderbuffers_fp = (glGenRenderbuffers_f) SDL_GL_GetProcAddress("glGenRenderbuffers");
-	glDeleteRenderbuffers_fp = (glDeleteRenderbuffers_f) SDL_GL_GetProcAddress("glDeleteRenderbuffers");
-	glBindRenderbuffer_fp = (glBindRenderbuffer_f) SDL_GL_GetProcAddress("glBindRenderbuffer");
-	glRenderbufferStorage_fp = (glRenderbufferStorage_f) SDL_GL_GetProcAddress("glRenderbufferStorage");
-	glRenderbufferStorageMultisample_fp = (glRenderbufferStorageMultisample_f) SDL_GL_GetProcAddress("glRenderbufferStorageMultisample");
-	glTexImage2DMultisample_fp = (glTexImage2DMultisample_f) SDL_GL_GetProcAddress("glTexImage2DMultisample");
-	glBlitFramebuffer_fp = (glBlitFramebuffer_f) SDL_GL_GetProcAddress("glBlitFramebuffer");
-
-	if (!glGenFramebuffers_fp || !glDeleteFramebuffers_fp ||
-	    !glBindFramebuffer_fp || !glFramebufferTexture2D_fp ||
-	    !glFramebufferRenderbuffer_fp || !glCheckFramebufferStatus_fp ||
-	    !glGenRenderbuffers_fp || !glDeleteRenderbuffers_fp ||
-	    !glBindRenderbuffer_fp || !glRenderbufferStorage_fp)
+#ifdef USE_SDL_GPU
+	/* -gpu loads no GL library, so every lookup here would return NULL and
+	 * overwrite rg_null.c's stub for the same pointer (#340). */
+	if (!R_GPU())
+#endif
 	{
-		Con_SafePrintf("PostProcess: FBO functions not available\n");
-		return;
-	}
+		/* On desktop GL, dynamically load function pointers */
+		glGenFramebuffers_fp = (glGenFramebuffers_f) SDL_GL_GetProcAddress("glGenFramebuffers");
+		glDeleteFramebuffers_fp = (glDeleteFramebuffers_f) SDL_GL_GetProcAddress("glDeleteFramebuffers");
+		glBindFramebuffer_fp = (glBindFramebuffer_f) SDL_GL_GetProcAddress("glBindFramebuffer");
+		glFramebufferTexture2D_fp = (glFramebufferTexture2D_f) SDL_GL_GetProcAddress("glFramebufferTexture2D");
+		glFramebufferRenderbuffer_fp = (glFramebufferRenderbuffer_f) SDL_GL_GetProcAddress("glFramebufferRenderbuffer");
+		glCheckFramebufferStatus_fp = (glCheckFramebufferStatus_f) SDL_GL_GetProcAddress("glCheckFramebufferStatus");
+		glGenRenderbuffers_fp = (glGenRenderbuffers_f) SDL_GL_GetProcAddress("glGenRenderbuffers");
+		glDeleteRenderbuffers_fp = (glDeleteRenderbuffers_f) SDL_GL_GetProcAddress("glDeleteRenderbuffers");
+		glBindRenderbuffer_fp = (glBindRenderbuffer_f) SDL_GL_GetProcAddress("glBindRenderbuffer");
+		glRenderbufferStorage_fp = (glRenderbufferStorage_f) SDL_GL_GetProcAddress("glRenderbufferStorage");
+		glRenderbufferStorageMultisample_fp = (glRenderbufferStorageMultisample_f) SDL_GL_GetProcAddress("glRenderbufferStorageMultisample");
+		glTexImage2DMultisample_fp = (glTexImage2DMultisample_f) SDL_GL_GetProcAddress("glTexImage2DMultisample");
+		glBlitFramebuffer_fp = (glBlitFramebuffer_f) SDL_GL_GetProcAddress("glBlitFramebuffer");
 
-	/* GL functions loaded at runtime */
-	glTexImage3D_fp = (glTexImage3D_f) SDL_GL_GetProcAddress("glTexImage3D");
+		if (!glGenFramebuffers_fp || !glDeleteFramebuffers_fp ||
+		    !glBindFramebuffer_fp || !glFramebufferTexture2D_fp ||
+		    !glFramebufferRenderbuffer_fp || !glCheckFramebufferStatus_fp ||
+		    !glGenRenderbuffers_fp || !glDeleteRenderbuffers_fp ||
+		    !glBindRenderbuffer_fp || !glRenderbufferStorage_fp)
+		{
+			Con_SafePrintf("PostProcess: FBO functions not available\n");
+			return;
+		}
+
+		/* GL functions loaded at runtime */
+		glTexImage3D_fp = (glTexImage3D_f) SDL_GL_GetProcAddress("glTexImage3D");
+	}
 #endif /* !USE_GLES */
 
 	if (!PP_InitShader())

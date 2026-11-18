@@ -7819,8 +7819,8 @@ R_ProfileSetGPUUnavailable
 Hook for a backend with no GPU timing source (the SDL_GPU backend, #340):
 called once at device creation so the r_speeds 2 report can name why the
 GPU buckets are dark.  The reason must be a string literal (or otherwise
-live for the life of the process) — it is printed, never copied.  The
-declaration belongs in glquake.h once a caller outside this file exists.
+live for the life of the process) — it is printed, never copied.  Called
+by gl_vidsdl.c's GL_Init_NullGL under -gpu.
 ================
 */
 void R_ProfileSetGPUUnavailable (const char *reason)

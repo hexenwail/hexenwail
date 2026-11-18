@@ -295,6 +295,9 @@ typedef struct
 extern	gl_renderer_caps_t	gl_renderer_caps;
 
 void	GL_ReportLightmapStatus (void);
+/* r_speeds 2: name why the GPU buckets are dark on a backend with no timer
+ * source (SDL_GPU, #340/#451).  `reason` must outlive the process. */
+void	R_ProfileSetGPUUnavailable (const char *reason);
 
 /* Block-compressed texture families backing the DDS/KTX loader
  * (engine/h2shared/img_dds.c, uhexen2-0vgo.5).  Probed in GL_Init.  The three
