@@ -14,7 +14,9 @@ Scope: engine/**/*.c only, NOT .h -- gl_func.h defines every _fp name
 than its violations.  Comments are stripped before matching, so a
 /* glClear() ... */ note in a non-renderer file is not a violation.
 
-One allowlist entry: engine/h2shared/web_canvas_gl2.c, the software
+Two allowlist entries.  engine/h2shared/rg_null.c, SDL_GPU mode's
+generated null GL table (#340), assigns every _fp in the loader table.
+engine/h2shared/web_canvas_gl2.c is the software
 renderer's WebGL2 presentation canvas.  It calls raw GLES directly
 because it never includes gl_func.h and the WEBSOFT build has no
 loader table; routing it through _fp would drag the GL loader into a
@@ -35,7 +37,9 @@ ROOT = Path(__file__).resolve().parents[1]
 ALLOWED_DIRS = ("engine/h2shared/gl_", "engine/hexen2/gl_")
 # The software renderer's WebGL2 presentation canvas: raw GLES, no
 # loader table; platform glue, not renderer code.  See the docstring.
-ALLOWLIST = {"engine/h2shared/web_canvas_gl2.c"}
+# rg_null.c is SDL_GPU mode's generated null GL table (#340): filling the
+# loader table is all it does.
+ALLOWLIST = {"engine/h2shared/web_canvas_gl2.c", "engine/h2shared/rg_null.c"}
 
 FP_RE = re.compile(r"\bgl[A-Z][A-Za-z0-9]*_fp\b")
 RAW_RE = re.compile(r"\bgl[A-Z][A-Za-z0-9]*\s*\(")

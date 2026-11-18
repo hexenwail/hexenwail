@@ -66,6 +66,11 @@ option(USE_HEXENWORLD_CLIENT "Include HexenWorld networking in Hexenwail" ON)
 # the same tier against Mesa, which is also the cheap way to validate the ANGLE
 # route to macOS/Metal without a Mac.  uhexen2-0py6.
 option(USE_GLES "Target the OpenGL ES 3.0 render path instead of desktop GL 4.3" OFF)
+# The SDL_GPU backend (#340), chosen at run time with -gpu.  Desktop GL client
+# only: the GLES tier, the browser builds and the dedicated servers never
+# compile it (forced off below), and tools/test_rg_sources.py checks that
+# nothing they compile names it.
+option(USE_SDL_GPU "Build the SDL_GPU backend (-gpu) into the desktop GL client" ON)
 
 # Which renderer the browser build links.  Emscripten-only; ignored elsewhere.
 #
@@ -384,6 +389,26 @@ else()
             set(SDL_LIBRARY ${SDL3_LIBRARIES})
         endif()
     endif()
+endif()
+
+# USE_SDL_GPU rides on the desktop tier's GL_DLSYM loader table (rg_null.c
+# fills it), so it exists only where that table does.  It also needs SDL 3.4
+# (SDL_GetGPUDeviceProperties); SDL3_VERSION is unset only for the bundled
+# Windows SDL, which is 3.4.  A CLIENT_DEFINITION, never add_definitions():
+# h2ded and hwsv must not see it.
+if(USE_SDL_GPU AND (USE_GLES OR EMSCRIPTEN OR NOT "GL_DLSYM" IN_LIST CLIENT_DEFINITIONS OR (DEFINED SDL3_VERSION AND SDL3_VERSION VERSION_LESS 3.4.0)))
+    set(USE_SDL_GPU OFF)
+endif()
+if(USE_SDL_GPU)
+    list(APPEND CLIENT_DEFINITIONS USE_SDL_GPU)
+    set(RG_SOURCES
+        ${COMMONDIR}/rg_device.c
+        ${COMMONDIR}/rg_null.c
+    )
+    message(STATUS "SDL_GPU backend: built in (-gpu)")
+else()
+    set(RG_SOURCES)
+    message(STATUS "SDL_GPU backend: not built")
 endif()
 
 if(NOT EMSCRIPTEN)
@@ -1143,6 +1168,7 @@ endif()
 
 set(ALL_SOURCES
     ${RENDERER_SOURCES}
+    ${RG_SOURCES}
     ${CLIENT_SOURCES}
     ${COMMON_SOURCES}
     ${SOUND_SOURCES}

@@ -50,6 +50,9 @@
 #include "gl_uniforms.h"
 #include "gl_sky.h"		/* Sky_ContextLost/Restored across the context teardown */
 #include "filenames.h"
+#ifdef USE_SDL_GPU
+#include "rg_device.h"	/* -gpu: SDL_GPU device, null GL table (#340) */
+#endif
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten/emscripten.h>
@@ -252,6 +255,13 @@ static attributes_t	vid_attribs;
 
 static SDL_Window	*window;
 static SDL_GLContext	glcontext;
+#ifdef USE_SDL_GPU
+/* -gpu was given and VID_SetMode has not tried SDL_GPU yet. */
+static qboolean		vid_gpu_try;
+#ifdef GL_DLSYM
+static qboolean GL_OpenLibrary (const char *name);	/* the GL fallback */
+#endif
+#endif
 static int	vid_menu_fs;	/* 0=windowed, 1=borderless, 2=fullscreen */
 static qboolean	fs_toggle_works = true;
 
@@ -693,6 +703,10 @@ static void GL_Info_f (void)
 
 static void GL_RendererStatus_f (void)
 {
+#ifdef USE_SDL_GPU
+	if (R_GPU())
+		RG_Status();
+#endif
 	Con_Printf("[RENDERER] %s | GL=%s | GLSL=%s\n",
 		   gl_renderer_caps.profile_name, gl_version,
 		   (const char *)glGetString_fp(GL_SHADING_LANGUAGE_VERSION));
@@ -1510,6 +1524,13 @@ static void VID_Unlock_f (void)
 /* Apply vsync setting, falling back from adaptive to normal if needed */
 static void VID_ApplyVSync (void)
 {
+#ifdef USE_SDL_GPU
+	if (R_GPU())
+	{
+		RG_SetVSync (vid_vsync.integer);
+		return;
+	}
+#endif
 	if (!SDL_GL_SetSwapInterval(vid_vsync.integer))
 	{
 		if (vid_vsync.integer == -1)
@@ -1571,6 +1592,11 @@ static qboolean VID_SetMode (int modenum)
 	// SDL3: SDL_CreateWindow no longer takes x,y position params
 	{
 		Uint32 wflags = SDL_WINDOW_OPENGL | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+#ifdef USE_SDL_GPU
+		/* SDL_ClaimWindowForGPUDevice wants a window no GL owns. */
+		if (vid_gpu_try)
+			wflags &= ~SDL_WINDOW_OPENGL;
+#endif
 		if (vid_borderless.integer && vid_config_fscr.integer == 0)
 			wflags |= SDL_WINDOW_BORDERLESS;
 		window = SDL_CreateWindow("",
@@ -1687,12 +1713,35 @@ static qboolean VID_SetMode (int modenum)
 		SDL_SyncWindow(window);
 	}
 
+#ifdef USE_SDL_GPU
+	if (vid_gpu_try)
+	{
+		vid_gpu_try = false;	/* one attempt per process: restart-only (#340) */
+		if (!RG_CreateDevice(window, vid_vsync.integer))
+		{
+			/* Not fatal: the GL renderer is the shipping one, so a box
+			 * without a usable SDL_GPU device still plays. */
+			Con_SafePrintf ("SDL_GPU unavailable, falling back to OpenGL\n");
+			SDL_DestroyWindow(window);
+			window = NULL;
+#ifdef GL_DLSYM
+			if (!GL_OpenLibrary(gl_library))
+				Sys_Error ("Unable to load GL library %s", (gl_library != NULL) ? gl_library : SDL_GetError());
+#endif
+			in_mode_set = false;
+			return VID_SetMode (modenum);
+		}
+	}
+	if (!R_GPU())
+#endif
+	{
 	glcontext = SDL_GL_CreateContext(window);
 	if (!glcontext)
 	{
 		SDL_DestroyWindow(window);
 		window = NULL;
 		Sys_Error ("Couldn't create gl context: %s", SDL_GetError());
+	}
 	}
 
 	VID_SetIcon();
@@ -1975,6 +2024,81 @@ static void GL_ResetFunctions (void)
 static inline void GL_ResetFunctions (void) { }
 #endif
 
+#ifdef USE_SDL_GPU
+/*
+===============
+GL_Init_NullGL
+
+GL_Init for SDL_GPU mode (#340 P0).  Every GL entry point is a counting
+no-op (rg_null.c), and the renderer is initialised against them exactly as
+it is against a driver, so the engine runs unchanged and gpu_unrouted shows
+what it called.  What this skips is what has a real GL context behind it:
+the SDL_GL_* queries, the debug callback, the FBO self-test (it reads
+pixels back), and the GL-only capability probes, which stay false.
+===============
+*/
+static void GL_Init_NullGL (void)
+{
+	RG_NullGL_Install();
+
+	/* The swapchain's colour format; depth and stencil are offscreen
+	 * targets the backend will own, none of which exist at P0. */
+	memset (&vid_attribs, 0, sizeof(attributes_t));
+	vid_attribs.red = vid_attribs.green = vid_attribs.blue = vid_attribs.alpha = 8;
+	have_stencil = false;
+
+	gl_vendor = (const char *)glGetString_fp (GL_VENDOR);
+	gl_renderer = (const char *)glGetString_fp (GL_RENDERER);
+	gl_version = (const char *)glGetString_fp (GL_VERSION);
+	Con_SafePrintf ("GL: %s -- no GL context, every GL call is counted (gpu_unrouted)\n",
+			gl_renderer);
+
+	glGetIntegerv_fp(GL_MAX_TEXTURE_SIZE, &gl_max_size);
+	glGetIntegerv_fp(GL_MAX_SAMPLES, &gl_max_samples);
+	R_TexBind_Init();
+	gl_have_s3tc = gl_have_rgtc = gl_have_bptc = false;
+
+	/* Nothing behind GL, so no capability is real: GL_InitRendererCaps
+	 * would probe stubs.  Each phase of #340 turns its own on as it routes
+	 * it. */
+	memset (&gl_renderer_caps, 0, sizeof(gl_renderer_caps));
+	gl_renderer_caps.profile = GL_RENDERER_DESKTOP_43;
+	gl_renderer_caps.profile_name = "SDL_GPU (P0: clear only, null GL)";
+	Con_SafeDPrintf ("[RENDERER] Profile: %s\n", gl_renderer_caps.profile_name);
+	gl_max_anisotropy = 1;
+
+	R_PipelineResetState ();
+	R_Uniforms_Init();
+	GL_Shaders_Init();
+	GL_VBO_Init();
+	GL_PostProcess_Init();
+	/* The chain itself runs, into stubbed FBOs, so gpu_unrouted counts it;
+	 * but nothing reaches the screen until P4 routes it, and
+	 * GL_PostProcess_Available() would report the stubs complete. */
+	gl_renderer_caps.postprocess = false;
+	gl_renderer_caps.fbo_selftest = false;
+
+	/* No persistent mapping (glMapBufferRange is a stub returning NULL), no
+	 * fences, no multi-bind: the ring takes its BufferSubData path. */
+	gl_buffer_storage_able = false;
+	gl_sync_able = false;
+	gl_multi_bind_able = false;
+	gl_ssbo_align = gl_ubo_align = 256;
+	GL_CreateFrameResources ();
+
+	gl_clipcontrol_able = false;
+	R_SetCullFace (GL_FRONT);
+	R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+	R_ProfileSetGPUUnavailable ("SDL_GPU has no timer queries (#451)");
+
+	/* A NULL here would be called on the first frame that reaches it, far
+	 * from the loader that wrote it; RG_NullGL_Verify has named it above. */
+	if (RG_NullGL_Verify ())
+		Sys_Error ("SDL_GPU: GL entry points were reloaded after the null table was installed");
+}
+#endif	/* USE_SDL_GPU */
+
 /*
 ===============
 GL_Init
@@ -1982,6 +2106,13 @@ GL_Init
 */
 static void GL_Init (void)
 {
+#ifdef USE_SDL_GPU
+	if (R_GPU())
+	{
+		GL_Init_NullGL();
+		return;
+	}
+#endif
 #ifdef GL_DLSYM
 	// initialize gl function pointers
 	GL_Init_Functions();
@@ -2216,7 +2347,14 @@ void GL_EndRendering (void)
 	GL_PollErrors ("end of frame");
 
 	if (!scr_skipupdate)
+	{
+#ifdef USE_SDL_GPU
+		if (R_GPU())
+			RG_Present();
+		else
+#endif
 		SDL_GL_SwapWindow(window);
+	}
 
 // handle the mouse state when windowed if that's changed
 	if (_enable_mouse.integer != enable_mouse /*&& modestate == MS_WINDOWED*/)
@@ -2558,6 +2696,16 @@ static void VID_ChangeVideoMode (int newmode)
 static void VID_Restart_f (void)
 {
 	int	newmode;
+
+#ifdef USE_SDL_GPU
+	/* VID_ChangeVideoMode tears down and rebuilds a GL context; SDL_GPU
+	 * mode has none, and switching backends is restart-only (#340). */
+	if (R_GPU())
+	{
+		Con_Printf ("vid_restart is not available under -gpu yet; restart the engine\n");
+		return;
+	}
+#endif
 
 	if (vid_locked)
 	{
@@ -3036,6 +3184,10 @@ void	VID_Init (const unsigned char *palette)
 	Cmd_AddCommand ("renderer_status", GL_RendererStatus_f);
 	Cmd_AddCommand ("gl_info", GL_Info_f);
 	Cmd_AddCommand ("renderer_safe", GL_RendererSafe_f);
+#ifdef USE_SDL_GPU
+	RG_Init ();
+	vid_gpu_try = RG_Requested ();
+#endif
 
 	VID_InitPalette (palette);
 
@@ -3072,7 +3224,10 @@ void	VID_Init (const unsigned char *palette)
 	else
 		gl_library = NULL;	// trust SDL's wisdom here
 
-	// load the opengl library
+	// load the opengl library -- under -gpu only if SDL_GPU fails (VID_SetMode)
+#ifdef USE_SDL_GPU
+	if (!vid_gpu_try)
+#endif
 	if (!GL_OpenLibrary(gl_library))
 		Sys_Error ("Unable to load GL library %s", (gl_library != NULL) ? gl_library : SDL_GetError());
 #endif
@@ -3276,6 +3431,9 @@ void	VID_Shutdown (void)
 
 	if (glcontext)
 		SDL_GL_DestroyContext(glcontext);
+#ifdef USE_SDL_GPU
+	RG_Shutdown ();	/* releases the window before it is destroyed below */
+#endif
 
 	for (int i = 0; i < MCURSOR_COUNT; i++)
 	{

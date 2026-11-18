@@ -460,6 +460,22 @@ jobs:
       - name: Vertex stages flip Y for SDL_GPU only
         run: python3 tools/test_vk_flip_y.py
 
+      # The SDL_GPU backend (engine/h2shared/rg_*.c) is built into the
+      # desktop GL client alone: CMake names it only under USE_SDL_GPU, forces
+      # that off for GLES / web / non-GL_DLSYM builds, and keeps the define off
+      # h2ded and hwsv; every reference elsewhere is under #ifdef USE_SDL_GPU,
+      # so the WEBSOFT build cannot fail to link on it.  Also: no
+      # SDL_GL_GetProcAddress load runs under -gpu, where it would write NULL
+      # over a null-GL stub (#340 P0).
+      - name: SDL_GPU backend stays in the desktop GL client
+        run: python3 tools/test_rg_sources.py
+
+      # rg_null.c, SDL_GPU mode's counting null GL table, is generated from
+      # gl_func.h; a stale copy would leave a new entry point NULL under -gpu
+      # (#340 P0).
+      - name: Null GL table matches gl_func.h
+        run: python3 tools/gen_rg_null.py --check
+
       # salias_vert reads VertParams: the C mirror matches the block member
       # for member (sizes AND int/float kinds), all four alias builds compile
       # the file, GL_ImmPushBlocks feeds it, MSL targets 2.1 (#450 S1).

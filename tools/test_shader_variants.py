@@ -925,9 +925,12 @@ class Analysis:
         return out
 
 
-# The loader and the declarations: the only files where glShaderSource may be
-# named other than as a call inside a LEAVES function.
-SOURCE_DECL_FILES = {"engine/h2shared/gl_vidsdl.c", "engine/h2shared/gl_func.h"}
+# The loaders and the declarations: the only files where glShaderSource may be
+# named other than as a call inside a LEAVES function.  rg_null.c is SDL_GPU
+# mode's generated null table (#340): it assigns and checks the pointer and
+# never compiles a shader through it.
+SOURCE_DECL_FILES = {"engine/h2shared/gl_vidsdl.c", "engine/h2shared/gl_func.h",
+                     "engine/h2shared/rg_null.c"}
 
 
 def hidden_paths(an, errors):
