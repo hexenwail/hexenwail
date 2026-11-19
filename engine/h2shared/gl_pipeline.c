@@ -11,6 +11,20 @@
 #include "quakedef.h"
 #include "sdl_inc.h"
 #include "gl_pipeline.h"
+#ifdef USE_SDL_GPU
+#include "rg_device.h"
+#endif
+
+/* Every GL call in this module goes through RP_GL.  Under -gpu (#340 P1c)
+ * there is no GL context: the shadow below IS the draw state, and the
+ * SDL_GPU backend builds each draw's pipeline object from it
+ * (R_PipelineState), so the call is skipped and only the shadow moves.
+ * tools/test_rg_sources.py holds that no GL call here escapes it. */
+#ifdef USE_SDL_GPU
+#define RP_GL(call)	do { if (!R_GPU ()) { call; } } while (0)
+#else
+#define RP_GL(call)	do { call; } while (0)
+#endif
 
 /* glBlendFunci is GL 4.0 and is not in WebGL2, where gl_func.h makes it a
  * no-op function-like macro that cannot be tested as a value.  Same shape as
@@ -24,36 +38,13 @@
 /* The shadow.  Initialised to the GL spec defaults so it is already truthful
  * on a fresh context; R_PipelineResetState re-asserts them anyway so that a
  * context which arrived in some other state is dragged into agreement rather
- * than silently disagreeing. */
-typedef struct {
-	qboolean	blend;
-	GLenum		blend_src[RP_MAX_BLEND_TARGETS];
-	GLenum		blend_dst[RP_MAX_BLEND_TARGETS];
-	qboolean	depth_test;
-	qboolean	depth_mask;
-	GLenum		depth_func;
-	double		depth_near, depth_far;
-	qboolean	cull;
-	GLenum		cull_face;
-	GLenum		polygon_mode;
-	qboolean	poly_offset_fill;
-	qboolean	poly_offset_line;
-	float		poly_factor, poly_units;
-	qboolean	stencil_test;
-	GLenum		stencil_func;
-	GLint		stencil_ref;
-	GLuint		stencil_mask;
-	GLenum		stencil_sfail, stencil_dpfail, stencil_dppass;
-	qboolean	color_mask[4];
-	qboolean	alpha_to_coverage;
-	GLuint		program;
-	qboolean	program_known;
-} rpipestate_t;
-
+ * than silently disagreeing.  The type is in gl_pipeline.h. */
 static rpipestate_t rp = {
 	false,					/* blend */
 	{ GL_ONE, GL_ONE },			/* blend_src */
 	{ GL_ZERO, GL_ZERO },			/* blend_dst */
+	{ GL_ONE, GL_ONE },			/* blend_eff_src */
+	{ GL_ZERO, GL_ZERO },			/* blend_eff_dst */
 	false,					/* depth_test */
 	true,					/* depth_mask */
 	GL_LESS,				/* depth_func */
@@ -83,7 +74,7 @@ void R_SetBlend (qboolean enable)
 	rp.blend = enable ? true : false;
 	if (rp.blend)
 	{
-		glEnable_fp (GL_BLEND);
+		RP_GL (glEnable_fp (GL_BLEND));
 		/* Some drivers reset the per-draw-buffer blend functions to the
 		 * global pair when GL_BLEND is enabled, which silently breaks the
 		 * WBOIT revealage buffer -- every translucent surface disappears.
@@ -97,7 +88,7 @@ void R_SetBlend (qboolean enable)
 	}
 	else
 	{
-		glDisable_fp (GL_BLEND);
+		RP_GL (glDisable_fp (GL_BLEND));
 	}
 }
 
@@ -109,13 +100,13 @@ void R_SetBlendFunc (GLenum src, GLenum dst)
 	    rp.blend_src[1] == src && rp.blend_dst[1] == dst)
 		return;
 
-	glBlendFunc_fp (src, dst);
+	RP_GL (glBlendFunc_fp (src, dst));
 	/* glBlendFunc is the un-indexed entry point: it sets every draw
 	 * buffer, so the whole indexed shadow follows it. */
 	for (i = 0; i < RP_MAX_BLEND_TARGETS; i++)
 	{
-		rp.blend_src[i] = src;
-		rp.blend_dst[i] = dst;
+		rp.blend_src[i] = rp.blend_eff_src[i] = src;
+		rp.blend_dst[i] = rp.blend_eff_dst[i] = dst;
 	}
 }
 
@@ -127,11 +118,11 @@ void R_SetBlendFuncIndexed (GLuint buf, GLenum src, GLenum dst)
 	    rp.blend_src[buf] == src && rp.blend_dst[buf] == dst)
 		return;
 
-	glBlendFunci_fp (buf, src, dst);
+	RP_GL (glBlendFunci_fp (buf, src, dst));
 	if (buf < RP_MAX_BLEND_TARGETS)
 	{
-		rp.blend_src[buf] = src;
-		rp.blend_dst[buf] = dst;
+		rp.blend_src[buf] = rp.blend_eff_src[buf] = src;
+		rp.blend_dst[buf] = rp.blend_eff_dst[buf] = dst;
 	}
 }
 
@@ -145,9 +136,9 @@ void R_SetDepthTest (qboolean enable)
 		return;
 	rp.depth_test = enable ? true : false;
 	if (rp.depth_test)
-		glEnable_fp (GL_DEPTH_TEST);
+		RP_GL (glEnable_fp (GL_DEPTH_TEST));
 	else
-		glDisable_fp (GL_DEPTH_TEST);
+		RP_GL (glDisable_fp (GL_DEPTH_TEST));
 }
 
 void R_SetDepthMask (qboolean enable)
@@ -155,7 +146,7 @@ void R_SetDepthMask (qboolean enable)
 	if (rp.depth_mask == !!enable)
 		return;
 	rp.depth_mask = enable ? true : false;
-	glDepthMask_fp (rp.depth_mask ? GL_TRUE : GL_FALSE);
+	RP_GL (glDepthMask_fp (rp.depth_mask ? GL_TRUE : GL_FALSE));
 }
 
 void R_SetDepthFunc (GLenum func)
@@ -163,7 +154,7 @@ void R_SetDepthFunc (GLenum func)
 	if (rp.depth_func == func)
 		return;
 	rp.depth_func = func;
-	glDepthFunc_fp (func);
+	RP_GL (glDepthFunc_fp (func));
 }
 
 void R_SetDepthRange (double znear, double zfar)
@@ -172,7 +163,7 @@ void R_SetDepthRange (double znear, double zfar)
 		return;
 	rp.depth_near = znear;
 	rp.depth_far = zfar;
-	glDepthRange_fp (znear, zfar);
+	RP_GL (glDepthRange_fp (znear, zfar));
 }
 
 /* ------------------------------------------------------------------ */
@@ -185,9 +176,9 @@ void R_SetCull (qboolean enable)
 		return;
 	rp.cull = enable ? true : false;
 	if (rp.cull)
-		glEnable_fp (GL_CULL_FACE);
+		RP_GL (glEnable_fp (GL_CULL_FACE));
 	else
-		glDisable_fp (GL_CULL_FACE);
+		RP_GL (glDisable_fp (GL_CULL_FACE));
 }
 
 void R_SetCullFace (GLenum face)
@@ -195,7 +186,7 @@ void R_SetCullFace (GLenum face)
 	if (rp.cull_face == face)
 		return;
 	rp.cull_face = face;
-	glCullFace_fp (face);
+	RP_GL (glCullFace_fp (face));
 }
 
 qboolean R_GetCull (void)
@@ -261,15 +252,15 @@ void R_SetPolygonOffsetFill (qboolean enable, float factor, float units)
 	{
 		rp.poly_offset_fill = enable ? true : false;
 		if (rp.poly_offset_fill)
-			glEnable_fp (GL_POLYGON_OFFSET_FILL);
+			RP_GL (glEnable_fp (GL_POLYGON_OFFSET_FILL));
 		else
-			glDisable_fp (GL_POLYGON_OFFSET_FILL);
+			RP_GL (glDisable_fp (GL_POLYGON_OFFSET_FILL));
 	}
 	if (rp.poly_factor != factor || rp.poly_units != units)
 	{
 		rp.poly_factor = factor;
 		rp.poly_units = units;
-		glPolygonOffset_fp (factor, units);
+		RP_GL (glPolygonOffset_fp (factor, units));
 	}
 }
 
@@ -295,15 +286,15 @@ void R_SetPolygonOffsetLine (qboolean enable, float factor, float units)
 	{
 		rp.poly_offset_line = enable ? true : false;
 		if (rp.poly_offset_line)
-			glEnable_fp (GL_POLYGON_OFFSET_LINE);
+			RP_GL (glEnable_fp (GL_POLYGON_OFFSET_LINE));
 		else
-			glDisable_fp (GL_POLYGON_OFFSET_LINE);
+			RP_GL (glDisable_fp (GL_POLYGON_OFFSET_LINE));
 	}
 	if (rp.poly_factor != factor || rp.poly_units != units)
 	{
 		rp.poly_factor = factor;
 		rp.poly_units = units;
-		glPolygonOffset_fp (factor, units);
+		RP_GL (glPolygonOffset_fp (factor, units));
 	}
 #endif	/* USE_GLES */
 }
@@ -319,7 +310,7 @@ void R_SetPolygonMode (GLenum mode)
 	if (rp.polygon_mode == mode)
 		return;
 	rp.polygon_mode = mode;
-	glPolygonMode_fp (GL_FRONT_AND_BACK, mode);
+	RP_GL (glPolygonMode_fp (GL_FRONT_AND_BACK, mode));
 #endif	/* USE_GLES */
 }
 
@@ -333,9 +324,9 @@ void R_SetStencilTest (qboolean enable)
 		return;
 	rp.stencil_test = enable ? true : false;
 	if (rp.stencil_test)
-		glEnable_fp (GL_STENCIL_TEST);
+		RP_GL (glEnable_fp (GL_STENCIL_TEST));
 	else
-		glDisable_fp (GL_STENCIL_TEST);
+		RP_GL (glDisable_fp (GL_STENCIL_TEST));
 }
 
 void R_SetStencilFunc (GLenum func, GLint ref, GLuint mask)
@@ -346,7 +337,7 @@ void R_SetStencilFunc (GLenum func, GLint ref, GLuint mask)
 	rp.stencil_func = func;
 	rp.stencil_ref = ref;
 	rp.stencil_mask = mask;
-	glStencilFunc_fp (func, ref, mask);
+	RP_GL (glStencilFunc_fp (func, ref, mask));
 }
 
 void R_SetStencilOp (GLenum sfail, GLenum dpfail, GLenum dppass)
@@ -357,7 +348,7 @@ void R_SetStencilOp (GLenum sfail, GLenum dpfail, GLenum dppass)
 	rp.stencil_sfail = sfail;
 	rp.stencil_dpfail = dpfail;
 	rp.stencil_dppass = dppass;
-	glStencilOp_fp (sfail, dpfail, dppass);
+	RP_GL (glStencilOp_fp (sfail, dpfail, dppass));
 }
 
 /* ------------------------------------------------------------------ */
@@ -373,8 +364,8 @@ void R_SetColorMask (qboolean r, qboolean g, qboolean b, qboolean a)
 	rp.color_mask[1] = g ? true : false;
 	rp.color_mask[2] = b ? true : false;
 	rp.color_mask[3] = a ? true : false;
-	glColorMask_fp (r ? GL_TRUE : GL_FALSE, g ? GL_TRUE : GL_FALSE,
-			b ? GL_TRUE : GL_FALSE, a ? GL_TRUE : GL_FALSE);
+	RP_GL (glColorMask_fp (r ? GL_TRUE : GL_FALSE, g ? GL_TRUE : GL_FALSE,
+			b ? GL_TRUE : GL_FALSE, a ? GL_TRUE : GL_FALSE));
 }
 
 void R_SetAlphaToCoverage (qboolean enable)
@@ -383,9 +374,9 @@ void R_SetAlphaToCoverage (qboolean enable)
 		return;
 	rp.alpha_to_coverage = enable ? true : false;
 	if (rp.alpha_to_coverage)
-		glEnable_fp (GL_SAMPLE_ALPHA_TO_COVERAGE);
+		RP_GL (glEnable_fp (GL_SAMPLE_ALPHA_TO_COVERAGE));
 	else
-		glDisable_fp (GL_SAMPLE_ALPHA_TO_COVERAGE);
+		RP_GL (glDisable_fp (GL_SAMPLE_ALPHA_TO_COVERAGE));
 }
 
 /* ------------------------------------------------------------------ */
@@ -406,19 +397,46 @@ void GL_SetPointSize (float size)
 	/* No glPointSize on the ES tier (gl_func.h stubs it): point size comes
 	 * from the vertex shader's gl_PointSize output, so square-particle mode
 	 * draws at 1px there.  The call is still spelled the same on both tiers. */
-	glPointSize_fp (size);
+	RP_GL (glPointSize_fp (size));
+}
+
+void R_SetViewport (int x, int y, int width, int height)
+{
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_SetViewport (x, y, width, height);
+		return;
+	}
+#endif
+	glViewport_fp (x, y, width, height);
 }
 
 void GL_SetScissor (int x, int y, int width, int height)
 {
 	/* Coordinates are GL-native (origin bottom-left); the caller flips from
-	 * Quake's top-left origin. */
+	 * Quake's top-left origin.  The SDL_GPU arm takes them unchanged: its
+	 * render targets hold GL's rows in GL's order (VK_FLIP_Y, layout.inc). */
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_SetScissor (true, x, y, width, height);
+		return;
+	}
+#endif
 	glEnable_fp (GL_SCISSOR_TEST);
 	glScissor_fp (x, y, width, height);
 }
 
 void GL_ResetScissor (void)
 {
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_SetScissor (false, 0, 0, 0, 0);
+		return;
+	}
+#endif
 	glDisable_fp (GL_SCISSOR_TEST);
 }
 
@@ -429,12 +447,12 @@ void GL_SetSampleShading (float frac)
 #ifndef USE_GLES
 	if (frac > 0.0f)
 	{
-		glEnable_fp (GL_SAMPLE_SHADING);
-		glMinSampleShading_fp (frac);
+		RP_GL (glEnable_fp (GL_SAMPLE_SHADING));
+		RP_GL (glMinSampleShading_fp (frac));
 	}
 	else
 	{
-		glDisable_fp (GL_SAMPLE_SHADING);
+		RP_GL (glDisable_fp (GL_SAMPLE_SHADING));
 	}
 #else
 	(void) frac;
@@ -451,12 +469,17 @@ void R_UseProgram (GLuint program)
 		return;
 	rp.program = program;
 	rp.program_known = true;
-	glUseProgram_fp (program);
+	RP_GL (glUseProgram_fp (program));
 }
 
 void R_PipelineForgetProgram (void)
 {
 	rp.program_known = false;
+}
+
+const rpipestate_t *R_PipelineState (void)
+{
+	return &rp;
 }
 
 /* ------------------------------------------------------------------ */
@@ -494,29 +517,29 @@ void R_PipelineResetState (void)
 {
 	int i;
 
-	glDisable_fp (GL_BLEND);
-	glBlendFunc_fp (GL_ONE, GL_ZERO);
-	glDisable_fp (GL_DEPTH_TEST);
-	glDepthMask_fp (GL_TRUE);
-	glDepthFunc_fp (GL_LESS);
-	glDepthRange_fp (0.0, 1.0);
-	glDisable_fp (GL_CULL_FACE);
-	glCullFace_fp (GL_BACK);
-	glPolygonMode_fp (GL_FRONT_AND_BACK, GL_FILL);
-	glDisable_fp (GL_POLYGON_OFFSET_FILL);
-	glPolygonOffset_fp (0.0f, 0.0f);
-	glDisable_fp (GL_STENCIL_TEST);
-	glStencilFunc_fp (GL_ALWAYS, 0, ~0u);
-	glStencilOp_fp (GL_KEEP, GL_KEEP, GL_KEEP);
-	glColorMask_fp (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-	glDisable_fp (GL_SAMPLE_ALPHA_TO_COVERAGE);
-	glUseProgram_fp (0);
+	RP_GL (glDisable_fp (GL_BLEND));
+	RP_GL (glBlendFunc_fp (GL_ONE, GL_ZERO));
+	RP_GL (glDisable_fp (GL_DEPTH_TEST));
+	RP_GL (glDepthMask_fp (GL_TRUE));
+	RP_GL (glDepthFunc_fp (GL_LESS));
+	RP_GL (glDepthRange_fp (0.0, 1.0));
+	RP_GL (glDisable_fp (GL_CULL_FACE));
+	RP_GL (glCullFace_fp (GL_BACK));
+	RP_GL (glPolygonMode_fp (GL_FRONT_AND_BACK, GL_FILL));
+	RP_GL (glDisable_fp (GL_POLYGON_OFFSET_FILL));
+	RP_GL (glPolygonOffset_fp (0.0f, 0.0f));
+	RP_GL (glDisable_fp (GL_STENCIL_TEST));
+	RP_GL (glStencilFunc_fp (GL_ALWAYS, 0, ~0u));
+	RP_GL (glStencilOp_fp (GL_KEEP, GL_KEEP, GL_KEEP));
+	RP_GL (glColorMask_fp (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE));
+	RP_GL (glDisable_fp (GL_SAMPLE_ALPHA_TO_COVERAGE));
+	RP_GL (glUseProgram_fp (0));
 
 	rp.blend = false;
 	for (i = 0; i < RP_MAX_BLEND_TARGETS; i++)
 	{
-		rp.blend_src[i] = GL_ONE;
-		rp.blend_dst[i] = GL_ZERO;
+		rp.blend_src[i] = rp.blend_eff_src[i] = GL_ONE;
+		rp.blend_dst[i] = rp.blend_eff_dst[i] = GL_ZERO;
 	}
 	rp.depth_test = false;
 	rp.depth_mask = true;

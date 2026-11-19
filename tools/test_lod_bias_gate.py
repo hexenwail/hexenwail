@@ -69,6 +69,11 @@ def main():
             line = text[line_start:line_end].strip()
             if re.match(r"#\s*(ifndef|ifdef|define|endif)\b", line):
                 continue
+            # The SDL_GPU backend (#340) receives the pname from the seam and
+            # maps it to a sampler field; it makes no GL call to pass it to.
+            if re.match(r"rg_\w+\.c$", path.name) and path.name != "rg_null.c" \
+                    and re.match(r"case\s+GL_TEXTURE_LOD_BIAS\s*:", line):
+                continue
             if path == DRAW and helper_start <= match.start() < helper_end:
                 continue
             lineno = text.count("\n", 0, match.start()) + 1

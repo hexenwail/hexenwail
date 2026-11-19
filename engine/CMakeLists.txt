@@ -303,10 +303,11 @@ add_custom_command(
 )
 add_custom_target(shaders_gen DEPENDS ${SHADERS_GEN_H})
 
-# SPIR-V, for the SDL_GPU backend that does not exist yet.  Deliberately NOT
-# part of ALL: nothing links the .spv, and a build rule whose output nobody
-# consumes has no business being able to fail the default build.  Run it with
-# `make shaders_spirv`.  It joins ALL when the backend starts reading it.
+# SPIR-V, for the SDL_GPU backend (-gpu), which reads the .spv at run time
+# (rg_shader.c has the search order, this tree's generated/spirv last).
+# Deliberately NOT part of ALL: no build needs glslangValidator while #340
+# decision 6 is open, and tools/test_rg_sources.py holds that.  Run it with
+# `make shaders_spirv`.
 find_program(GLSLANG_VALIDATOR glslangValidator)
 if(GLSLANG_VALIDATOR)
     add_custom_target(shaders_spirv
@@ -322,8 +323,8 @@ if(GLSLANG_VALIDATOR)
 endif()
 
 # DXIL/MSL/JSON, for the SDL_GPU D3D12 and Metal drivers.  Same posture as
-# shaders_spirv above: deliberately NOT part of ALL, and it joins ALL when
-# the backend starts reading the outputs.  It depends on shaders_spirv, so
+# shaders_spirv above: deliberately NOT part of ALL; nothing reads the
+# outputs yet (D3D12/Metal blobs are P7).  It depends on shaders_spirv, so
 # the Vulkan .spv inputs exist by the time it runs.  Run it with
 # `make shaders_cross`.  GitHub #448.
 find_program(SHADERCROSS shadercross)
@@ -403,8 +404,19 @@ if(USE_SDL_GPU)
     list(APPEND CLIENT_DEFINITIONS USE_SDL_GPU)
     set(RG_SOURCES
         ${COMMONDIR}/rg_device.c
+        ${COMMONDIR}/rg_frame.c
         ${COMMONDIR}/rg_null.c
+        ${COMMONDIR}/rg_pipeline.c
+        ${COMMONDIR}/rg_resource.c
+        ${COMMONDIR}/rg_shader.c
     )
+    # The backend reads its SPIR-V at run time (rg_shader.c has the search
+    # order); the last place it looks is this build tree's own shaders_spirv
+    # output, so a dev build that ran `make shaders_spirv` needs no flag.
+    # shaders_spirv stays out of ALL: no build needs glslangValidator (#340
+    # decision 6).
+    set_source_files_properties(${COMMONDIR}/rg_shader.c PROPERTIES
+        COMPILE_DEFINITIONS "RG_SPIRV_DIR=\"${CMAKE_CURRENT_BINARY_DIR}/generated/spirv\"")
     message(STATUS "SDL_GPU backend: built in (-gpu)")
 else()
     set(RG_SOURCES)

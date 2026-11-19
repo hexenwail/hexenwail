@@ -6311,7 +6311,7 @@ static void R_SetupGL (void)
 	w = x2 - x;
 	h = y - y2;
 
-	glViewport_fp (glx + x, gly + y2, w, h);
+	R_SetViewport (glx + x, gly + y2, w, h);
 
 	{
 		GLdouble xmax = NEARCLIP * tan(r_refdef.fov_x * M_PI / 360.0);

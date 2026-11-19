@@ -16,6 +16,9 @@
 #include "gl_matrix.h"
 #include "gl_shader.h"		/* UBO_BINDING_VERT / _FRAG / _ALIAS_FRAG / _ALIAS_VERT / _WORLD_FRAG / _OIT_FRAG */
 #include "gl_uniforms.h"
+#ifdef USE_SDL_GPU
+#include "rg_device.h"
+#endif
 
 #ifndef GL_UNIFORM_BLOCK_DATA_SIZE
 #define GL_UNIFORM_BLOCK_DATA_SIZE	0x8A40
@@ -461,6 +464,34 @@ void R_SetOITMode (int mode, qboolean ms)
 /* Upload                                                              */
 /* ------------------------------------------------------------------ */
 
+#ifdef USE_SDL_GPU
+/* R_FlushUniforms' SDL_GPU arm: each dirty mirror is handed to the backend,
+ * which snapshots it.  Table-driven, one row per block, in the GL arm's
+ * order. */
+static void RU_FlushToBackend (void)
+{
+	struct { qboolean *dirty; const char *name; } const rows[] = {
+		{ &vert_dirty, RU_NAME_VERT },
+		{ &frag_dirty, RU_NAME_FRAG },
+		{ &afrag_dirty, RU_NAME_AFRAG },
+		{ &avert_dirty, RU_NAME_AVERT },
+		{ &wfrag_dirty, RU_NAME_WFRAG },
+		{ &ofrag_dirty, RU_NAME_OFRAG }
+	};
+	size_t	i;
+
+	bindings_dirty = false;
+	for (i = 0; i < sizeof(rows) / sizeof(rows[0]); i++)
+	{
+		if (*rows[i].dirty)
+		{
+			*rows[i].dirty = false;
+			RG_UniformBlockFlushed (rows[i].name);
+		}
+	}
+}
+#endif
+
 /*
 ===============
 R_FlushUniforms
@@ -485,6 +516,18 @@ next to the stall it avoids.
 */
 void R_FlushUniforms (void)
 {
+#ifdef USE_SDL_GPU
+	/* No buffers under -gpu: a flush tells the backend which mirrors to
+	 * snapshot, and it pushes the snapshot into whatever slot each draw's
+	 * program declares that block at (SDL_Push*UniformData).  Same contract
+	 * as the GL arm: a draw sees what was last FLUSHED, not what a setter
+	 * wrote since. */
+	if (R_GPU ())
+	{
+		RU_FlushToBackend ();
+		return;
+	}
+#endif
 	if (bindings_dirty)
 	{
 		bindings_dirty = false;
@@ -565,6 +608,12 @@ static void RU_CheckBlockSize (GLuint program, const char *name, size_t expect)
 	GLuint	idx;
 	GLint	size = 0;
 
+#ifdef USE_SDL_GPU
+	/* The SPIR-V's own std140 layout is what SDL_GPU reads; no driver to
+	 * ask.  tools/test_sdlgpu_bindings.py checks the blobs offline. */
+	if (R_GPU ())
+		return;
+#endif
 	if (!RU_HAVE_UBO_QUERY)
 		return;
 	idx = glGetUniformBlockIndex_fp (program, name);
@@ -581,7 +630,19 @@ static void RU_CheckBlockSize (GLuint program, const char *name, size_t expect)
 
 static GLint RU_BindOne (GLuint program, const char *name, GLuint binding)
 {
-	GLuint	index = glGetUniformBlockIndex_fp (program, name);
+	GLuint	index;
+
+#ifdef USE_SDL_GPU
+	/* The block's slot from the program's SPIR-V; no binding point to pin,
+	 * because SDL_GPU numbers uniform slots per stage and the blob fixes
+	 * them (VERT_UBO / FRAG_UBO in layout.inc). */
+	if (R_GPU ())
+	{
+		(void) binding;
+		return RG_ProgramBlock (program, name);
+	}
+#endif
+	index = glGetUniformBlockIndex_fp (program, name);
 
 	if (index == GL_INVALID_INDEX)
 		return -1;
@@ -736,12 +797,26 @@ void R_Uniforms_Init (void)
 	memcpy (worldfrag.lightview, ident, sizeof(ident));
 	memcpy (worldframe.lightview, ident, sizeof(ident));
 
-	glGenBuffers_fp (1, &ubo_vert);
-	glGenBuffers_fp (1, &ubo_frag);
-	glGenBuffers_fp (1, &ubo_afrag);
-	glGenBuffers_fp (1, &ubo_avert);
-	glGenBuffers_fp (1, &ubo_wfrag);
-	glGenBuffers_fp (1, &ubo_ofrag);
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_UniformBlockRegister (RU_NAME_VERT, &vertparams, sizeof(vertparams));
+		RG_UniformBlockRegister (RU_NAME_FRAG, &fragparams, sizeof(fragparams));
+		RG_UniformBlockRegister (RU_NAME_AFRAG, &aliasfrag, sizeof(aliasfrag));
+		RG_UniformBlockRegister (RU_NAME_AVERT, &aliasvert, sizeof(aliasvert));
+		RG_UniformBlockRegister (RU_NAME_WFRAG, &worldfrag, sizeof(worldfrag));
+		RG_UniformBlockRegister (RU_NAME_OFRAG, &oitfrag, sizeof(oitfrag));
+	}
+	else
+#endif
+	{
+		glGenBuffers_fp (1, &ubo_vert);
+		glGenBuffers_fp (1, &ubo_frag);
+		glGenBuffers_fp (1, &ubo_afrag);
+		glGenBuffers_fp (1, &ubo_avert);
+		glGenBuffers_fp (1, &ubo_wfrag);
+		glGenBuffers_fp (1, &ubo_ofrag);
+	}
 
 	/* Seed both stores before anything binds them, so a program that draws
 	 * before its first setter call reads zeros and an identity rather than
@@ -758,6 +833,8 @@ void R_Uniforms_Init (void)
 
 void R_Uniforms_Shutdown (void)
 {
+	/* Under -gpu there are no buffers: every ubo_* stays 0, so each branch
+	 * below is skipped and no GL call is made. */
 	if (ubo_vert)
 	{
 		GL_ForgetBuffer (ubo_vert);

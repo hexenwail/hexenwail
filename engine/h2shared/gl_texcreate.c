@@ -14,6 +14,9 @@
 
 #include "quakedef.h"
 #include "sdl_inc.h"
+#ifdef USE_SDL_GPU
+#include "rg_device.h"
+#endif
 
 #ifndef GL_TEXTURE_CUBE_MAP_ARRAY
 #define GL_TEXTURE_CUBE_MAP_ARRAY	0x9009
@@ -42,6 +45,13 @@ int R_TexCreate_Mismatches (void)
 
 void R_GenTextures (GLsizei n, GLuint *textures)
 {
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_GenTextures (n, textures);
+		return;
+	}
+#endif
 	glGenTextures_fp (n, textures);
 }
 
@@ -50,6 +60,13 @@ void R_TexImage2D (GLenum target, GLuint tex, GLint level, GLint internalformat,
 		   const void *pixels)
 {
 	RTC_Check ("R_TexImage2D", target, tex);
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_TexImage (target, tex, level, internalformat, width, height, 1, format, type, pixels);
+		return;
+	}
+#endif
 	glTexImage2D_fp (target, level, internalformat, width, height, 0, format, type, pixels);
 }
 
@@ -58,6 +75,13 @@ void R_TexImage3D (GLenum target, GLuint tex, GLint level, GLint internalformat,
 		   GLenum type, const void *pixels)
 {
 	RTC_Check ("R_TexImage3D", target, tex);
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_TexImage (target, tex, level, internalformat, width, height, depth, format, type, pixels);
+		return;
+	}
+#endif
 	glTexImage3D_fp (target, level, internalformat, width, height, depth, 0, format, type, pixels);
 }
 
@@ -66,6 +90,13 @@ void R_TexImage2DMultisample (GLenum target, GLuint tex, GLsizei samples,
 			      GLboolean fixedsamplelocations)
 {
 	RTC_Check ("R_TexImage2DMultisample", target, tex);
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_NoteUnhandled ("R_TexImage2DMultisample (MSAA targets are P6)");
+		return;
+	}
+#endif
 	glTexImage2DMultisample_fp (target, samples, internalformat, width, height,
 				    fixedsamplelocations);
 }
@@ -74,6 +105,13 @@ void R_TexStorage2D (GLenum target, GLuint tex, GLsizei levels, GLenum internalf
 		     GLsizei width, GLsizei height)
 {
 	RTC_Check ("R_TexStorage2D", target, tex);
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_TexStorage2D (target, tex, levels, internalformat, width, height);
+		return;
+	}
+#endif
 	glTexStorage2D_fp (target, levels, internalformat, width, height);
 }
 
@@ -82,6 +120,13 @@ void R_TexCompressedImage2D (GLenum target, GLuint tex, GLint level, GLenum inte
 			     const void *data)
 {
 	RTC_Check ("R_TexCompressedImage2D", target, tex);
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_NoteUnhandled ("R_TexCompressedImage2D (no block formats yet)");
+		return;
+	}
+#endif
 	glCompressedTexImage2D_fp (target, level, internalformat, width, height, 0,
 				   imagesize, data);
 }
@@ -91,6 +136,13 @@ void R_TexSubImage2D (GLenum target, GLuint tex, GLint level, GLint x, GLint y,
 		      const void *pixels)
 {
 	RTC_Check ("R_TexSubImage2D", target, tex);
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_TexSubImage (target, tex, level, x, y, width, height, width, format, type, pixels);
+		return;
+	}
+#endif
 	glTexSubImage2D_fp (target, level, x, y, width, height, format, type, pixels);
 }
 
@@ -99,6 +151,13 @@ void R_TexSubImage2DRows (GLenum target, GLuint tex, GLint level, GLint x, GLint
 			  GLenum format, GLenum type, const void *pixels)
 {
 	RTC_Check ("R_TexSubImage2DRows", target, tex);
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_TexSubImage (target, tex, level, x, y, width, height, row_length, format, type, pixels);
+		return;
+	}
+#endif
 	glPixelStorei_fp (GL_UNPACK_ROW_LENGTH, row_length);
 	glTexSubImage2D_fp (target, level, x, y, width, height, format, type, pixels);
 	glPixelStorei_fp (GL_UNPACK_ROW_LENGTH, 0);
@@ -108,12 +167,27 @@ void R_TexCopySubImage2D (GLenum target, GLuint tex, GLint level, GLint xoffset,
 			  GLint yoffset, GLint x, GLint y, GLsizei width, GLsizei height)
 {
 	RTC_Check ("R_TexCopySubImage2D", target, tex);
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_NoteUnhandled ("R_TexCopySubImage2D (framebuffer reads are P4/P7)");
+		return;
+	}
+#endif
 	glCopyTexSubImage2D_fp (target, level, xoffset, yoffset, x, y, width, height);
 }
 
 void R_TexSetFilter (GLenum target, GLuint tex, GLint min_filter, GLint mag_filter)
 {
 	RTC_Check ("R_TexSetFilter", target, tex);
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_TexParameter (target, tex, GL_TEXTURE_MIN_FILTER, min_filter, (GLfloat)min_filter);
+		RG_TexParameter (target, tex, GL_TEXTURE_MAG_FILTER, mag_filter, (GLfloat)mag_filter);
+		return;
+	}
+#endif
 	glTexParameteri_fp (target, GL_TEXTURE_MIN_FILTER, min_filter);
 	glTexParameteri_fp (target, GL_TEXTURE_MAG_FILTER, mag_filter);
 }
@@ -121,6 +195,15 @@ void R_TexSetFilter (GLenum target, GLuint tex, GLint min_filter, GLint mag_filt
 void R_TexSetWrap (GLenum target, GLuint tex, GLint wrap)
 {
 	RTC_Check ("R_TexSetWrap", target, tex);
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_TexParameter (target, tex, GL_TEXTURE_WRAP_S, wrap, (GLfloat)wrap);
+		RG_TexParameter (target, tex, GL_TEXTURE_WRAP_T, wrap, (GLfloat)wrap);
+		RG_TexParameter (target, tex, GL_TEXTURE_WRAP_R, wrap, (GLfloat)wrap);
+		return;
+	}
+#endif
 	glTexParameteri_fp (target, GL_TEXTURE_WRAP_S, wrap);
 	glTexParameteri_fp (target, GL_TEXTURE_WRAP_T, wrap);
 	if (target == GL_TEXTURE_3D || target == GL_TEXTURE_CUBE_MAP_ARRAY)
@@ -130,11 +213,25 @@ void R_TexSetWrap (GLenum target, GLuint tex, GLint wrap)
 void R_TexParameteri (GLenum target, GLuint tex, GLenum pname, GLint value)
 {
 	RTC_Check ("R_TexParameteri", target, tex);
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_TexParameter (target, tex, pname, value, (GLfloat)value);
+		return;
+	}
+#endif
 	glTexParameteri_fp (target, pname, value);
 }
 
 void R_TexParameterf (GLenum target, GLuint tex, GLenum pname, GLfloat value)
 {
 	RTC_Check ("R_TexParameterf", target, tex);
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_TexParameter (target, tex, pname, (GLint)value, value);
+		return;
+	}
+#endif
 	glTexParameterf_fp (target, pname, value);
 }

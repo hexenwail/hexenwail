@@ -2371,7 +2371,7 @@ void GL_SetCanvas (canvastype newcanvas)
 	switch (newcanvas)
 	{
 	case CANVAS_DEFAULT:
-		glViewport_fp (glx, gly, glwidth, glheight);
+		R_SetViewport (glx, gly, glwidth, glheight);
 		GL_Ortho (0, vid.width, vid.height, 0, -99999, 99999);
 		break;
 	case CANVAS_SBAR:
@@ -2381,7 +2381,7 @@ void GL_SetCanvas (canvastype newcanvas)
 		w = (int)((float)SBAR_CANVAS_W * s * px);
 		h = (int)((float)(SBAR_CANVAS_BUMP_H + SBAR_CANVAS_TOP_H + SBAR_CANVAS_BOT_H) * s * py);
 		/* viewport anchored to the bottom of the screen, centered horizontally */
-		glViewport_fp (glx + (glwidth - w) / 2, gly, w, h);
+		R_SetViewport (glx + (glwidth - w) / 2, gly, w, h);
 		/* logical y: [0, total_h]. y=0 is the top of the canvas (top of bumps
 		   when the lower info bar is fully extended), y=total_h is the screen
 		   bottom. All-positive coords keep Draw_PicCropped's "y < 0 means
@@ -2403,12 +2403,12 @@ void GL_SetCanvas (canvastype newcanvas)
 		 * Horizontally centered. In GL viewport coords (origin bottom-
 		 * left) the canvas covers the full screen height. */
 		h = glheight;
-		glViewport_fp (glx + (glwidth - w) / 2, gly, w, h);
+		R_SetViewport (glx + (glwidth - w) / 2, gly, w, h);
 		GL_Ortho (0, 320, (float)gh / s, 0, -99999, 99999);
 		break;
 	case CANVAS_INFO:
 		SCR_InfoCanvasSize (&w, &h);
-		glViewport_fp (glx, gly, glwidth, glheight);
+		R_SetViewport (glx, gly, glwidth, glheight);
 		GL_Ortho (0, w, h, 0, -99999, 99999);
 		break;
 	case CANVAS_CROSSHAIR:
@@ -2417,14 +2417,14 @@ void GL_SetCanvas (canvastype newcanvas)
 		s = q_min (s, (float)gh / 32.0f);
 		w = (int)(gw / s);
 		h = (int)(gh / s);
-		glViewport_fp (glx, gly, glwidth, glheight);
+		R_SetViewport (glx, gly, glwidth, glheight);
 		/* keep crosshair coords aligned with vrect (3D viewport) */
 		GL_Ortho (0, w, h, 0, -99999, 99999);
 		break;
 	case CANVAS_NONE:
 	case CANVAS_INVALID:
 	default:
-		glViewport_fp (glx, gly, glwidth, glheight);
+		R_SetViewport (glx, gly, glwidth, glheight);
 		GL_Ortho (0, vid.width, vid.height, 0, -99999, 99999);
 		break;
 	}

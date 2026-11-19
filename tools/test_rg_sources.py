@@ -32,6 +32,27 @@ Checked, from the sources (stock python3, lint.yml):
     * each refuses to compile without USE_SDL_GPU (#error), so a CMake slip
       that compiled one anyway fails loudly instead of linking half a
       backend.
+    * rg_internal.h, the backend's private header, is included by rg_*.c
+      alone; every seam sees rg_device.h only (#340 P1c).
+  the SDL_GPU seams (#340 P1c) -- gl_texcreate.c, gl_texbind.c,
+  gl_pipeline.c, gl_uniforms.c, gl_vbo.c and gl_shader.c's R_Program_Create
+    * every GL call in them is one -gpu cannot reach: in the body of an
+      `if (!R_GPU ())`, in the else of an `if (R_GPU ())`, after an
+      `if (R_GPU ())` that returns (in a block still open at the call), or
+      wrapped in gl_pipeline.c's RP_GL(), whose USE_SDL_GPU arm must skip the
+      call under R_GPU() and whose other arm must be the bare call.  An
+      arm compiled out by `#if 0` does not count, and "returns" means the
+      arm's last statement is an unconditional return.  Calls made through
+      helpers in other files (GL_Upload, GL_BindBuffer, GL_ForgetBuffer)
+      are not followed: an arm has to sit in the seam itself.  Under -gpu an unarmed call lands in the
+      null table: the frame draws nothing and gpu_unrouted counts it.  The
+      two shutdown functions that make GL calls only on names -gpu never
+      creates are listed, with that reason, in UNARMED_OK.
+  engine/CMakeLists.txt, decision 6 on #340 (still open)
+    * glslangValidator stays optional: never REQUIRED, and shaders_spirv
+      is never part of ALL nor a dependency of an engine target -- the
+      SDL_GPU backend reads its SPIR-V at run time (rg_shader.c), so no
+      build needs the compiler.
 
 Usage: test_rg_sources.py [--root DIR]
 """
@@ -267,6 +288,280 @@ def check_cmake(root):
                 fail("CMakeLists.txt: %s carries the SDL_GPU backend" % lst)
 
 
+# The seams that carry SDL_GPU arms, and the functions in each the arm rule
+# covers (None: every function in the file).
+SEAMS = {
+    "engine/h2shared/gl_texcreate.c": None,
+    "engine/h2shared/gl_texbind.c": None,
+    "engine/h2shared/gl_pipeline.c": None,
+    "engine/h2shared/gl_uniforms.c": None,
+    "engine/h2shared/gl_vbo.c": None,
+    # The rest of gl_shader.c is GL program set-up the seam calls into;
+    # only the creation entry point is the seam.
+    "engine/h2shared/gl_shader.c": {"R_Program_Create"},
+}
+# Functions that make GL calls with no arm, and why that is safe under -gpu.
+UNARMED_OK = {
+    ("engine/h2shared/gl_uniforms.c", "R_Uniforms_Shutdown"):
+        (r"ubo_\w+", "every call is under `if (ubo_*)`; R_Uniforms_Init's arm creates no buffer, "
+                     "so each is 0"),
+    ("engine/h2shared/gl_vbo.c", "GL_VBO_Shutdown"):
+        (r"imm_\w+", "every call is under `if (imm_*)`; GL_VBO_Init's arm returns before creating any"),
+}
+GL_CALL = re.compile(r"\bgl[A-Z]\w*_fp\s*\(")
+
+
+def skip_ws_pp(s, i):
+    """Past whitespace and whole preprocessor lines (#endif between an arm's
+    statement and its else, say)."""
+    while i < len(s):
+        if s[i].isspace():
+            i += 1
+        elif s[i] == "#" and (i == 0 or s.rfind("\n", 0, i) == i - 1 or not s[s.rfind("\n", 0, i) + 1:i].strip()):
+            j = s.find("\n", i)
+            i = len(s) if j < 0 else j + 1
+        else:
+            break
+    return i
+
+
+def stmt_end(s, i):
+    """End of the statement starting at s[i]: a balanced block, or up to the
+    first `;` outside parentheses."""
+    i = skip_ws_pp(s, i)
+    if i < len(s) and s[i] == "{":
+        depth = 0
+        for j in range(i, len(s)):
+            depth += {"{": 1, "}": -1}.get(s[j], 0)
+            if depth == 0:
+                return j + 1
+        return len(s)
+    depth = 0
+    for j in range(i, len(s)):
+        if s[j] == "(":
+            depth += 1
+        elif s[j] == ")":
+            depth -= 1
+        elif s[j] == ";" and depth == 0:
+            return j + 1
+    return len(s)
+
+
+def dead_spans(s):
+    """[(begin, end)] of text inside `#if 0` (until its #else / #endif)."""
+    spans, stack = [], []
+    for m in re.finditer(r"^[ \t]*#\s*(if|ifdef|ifndef|elif|else|endif)\b([^\n]*)", s, re.M):
+        kw, rest = m.group(1), m.group(2).strip()
+        if kw in ("if", "ifdef", "ifndef"):
+            stack.append([kw == "if" and rest == "0", m.end()])
+        elif not stack:
+            continue
+        elif kw in ("else", "elif"):
+            if stack[-1][0]:
+                spans.append((stack[-1][1], m.start()))
+                stack[-1][0] = False
+        else:
+            top = stack.pop()
+            if top[0]:
+                spans.append((top[1], m.start()))
+    return spans
+
+
+def returns_always(s, b, e):
+    """The statement s[b:e] ends in an unconditional return."""
+    body = s[b:e].strip()
+    if body.startswith("{"):
+        body = body[1:-1]
+        depth, last = 0, 0
+        for i, ch in enumerate(body):
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    last = i + 1
+            elif ch == ";" and depth == 0:
+                nxt = body[i + 1:].strip()
+                if nxt:
+                    last = i + 1
+        body = body[last:]
+    return re.fullmatch(r"\s*return\b[^;{}]*;\s*", body) is not None
+
+
+def gpu_arms(s):
+    """Each `if (R_GPU ())` / `if (!R_GPU ())`: (start, negated, then, else),
+    then/else as (begin, end) spans, else None when there is no else."""
+    out = []
+    dead = dead_spans(s)
+    for m in ARM.finditer(s):
+        if any(a <= m.start() < z for a, z in dead):
+            continue
+        neg = "!" in m.group(0)
+        b = skip_ws_pp(s, m.end())
+        e = stmt_end(s, b)
+        k = skip_ws_pp(s, e)
+        els = None
+        if re.match(r"else\b", s[k:]):
+            eb = skip_ws_pp(s, k + 4)
+            els = (eb, stmt_end(s, eb))
+        out.append((m.start(), neg, (b, e), els))
+    return out
+
+
+def excluded(s, arms, c):
+    """A GL call at s[c] that -gpu cannot reach: in an `if (!R_GPU ())` body,
+    in the else of an `if (R_GPU ())`, or after an `if (R_GPU ())` whose body
+    returns, with the block that arm sits in still open at the call."""
+    for start, neg, (tb, te), els in arms:
+        if neg and tb <= c < te:
+            return True
+        if not neg and els and els[0] <= c < els[1]:
+            return True
+        if not neg and te <= c and returns_always(s, tb, te):
+            depth = 0
+            for ch in s[te:c]:
+                depth += {"{": 1, "}": -1}.get(ch, 0)
+                if depth < 0:
+                    break
+            else:
+                return True
+    return False
+
+
+def in_name_guard(code, pos, name_rx):
+    """True if the innermost block around `pos` is the body of `if (name)`,
+    name matching name_rx."""
+    depth = 0
+    while pos > 0:
+        pos -= 1
+        if code[pos] == "}":
+            depth += 1
+        elif code[pos] == "{":
+            if depth:
+                depth -= 1
+            else:
+                return re.search(r"\bif\s*\(\s*(?:%s)\s*\)\s*$" % name_rx,
+                                 code[max(0, pos - 120):pos]) is not None
+    return False
+ARM = re.compile(r"\bif\s*\(\s*!?\s*R_GPU\s*\(\s*\)\s*\)")
+
+
+def check_seams(root):
+    """Every GL call in a seam has an SDL_GPU arm ahead of it."""
+    seen_ok = set()
+    nfuncs = 0
+    for rel, only in SEAMS.items():
+        path = root / rel
+        if not path.exists():
+            fail("%s: seam file missing" % rel)
+            continue
+        code = strip_c_comments(path.read_text(errors="replace"))
+        if rel != "engine/h2shared/gl_pipeline.c" and re.search(r"#\s*define\s+RP_GL\b", code):
+            fail("%s: defines RP_GL -- the skip-under-R_GPU wrapper is gl_pipeline.c's, and only "
+                 "its definition is checked" % rel)
+        funcs = functions(code)
+        names = {f[0] for f in funcs}
+        for want in (only or ()):
+            if want not in names:
+                fail("%s: no %s -- the seam this check covers is gone" % (rel, want))
+        for name, start, end in funcs:
+            if only is not None and name not in only:
+                continue
+            body = code[start:end]
+            # RP_GL(...) wraps a call in its own arm: blank those calls out,
+            # keeping offsets so a line number still lands on the source.
+            # Only gl_pipeline.c's RP_GL, whose definition is checked below.
+            bare = body
+            if rel == "engine/h2shared/gl_pipeline.c":
+                bare = re.sub(r"\bRP_GL\s*\((?:[^()]|\([^()]*(?:\([^()]*\))*[^()]*\))*\)",
+                              lambda m: re.sub(r"[^\n]", " ", m.group(0)), body)
+            calls = [m.start() for m in GL_CALL.finditer(bare)]
+            if not calls:
+                continue
+            nfuncs += 1
+            if (rel, name) in UNARMED_OK:
+                seen_ok.add((rel, name))
+                name_rx, why = UNARMED_OK[(rel, name)]
+                guarded = all(in_name_guard (bare, c, name_rx) for c in calls)
+                if not guarded:
+                    fail("%s: %s makes a GL call outside an `if (%s)` guard -- UNARMED_OK no longer "
+                         "holds (%s)" % (rel, name, name_rx, why))
+                continue
+            arms = gpu_arms(bare)
+            for c in calls:
+                if not excluded(bare, arms, c):
+                    ln = code.count("\n", 0, start + c) + 1
+                    fail("%s:%d: %s makes a GL call no SDL_GPU arm excludes -- under -gpu it lands "
+                         "in the null table (#340 P1c)" % (rel, ln, name))
+                    break
+    for key in UNARMED_OK:
+        if key not in seen_ok:
+            fail("%s: UNARMED_OK names %s, which makes no GL call any more -- drop the entry"
+                 % key)
+    # RP_GL's SDL_GPU arm must skip the call under R_GPU().
+    pipe = strip_c_comments((root / "engine/h2shared/gl_pipeline.c").read_text())
+    m = re.search(r"#\s*ifdef\s+USE_SDL_GPU\s*\n\s*#\s*define\s+RP_GL\s*\(\s*call\s*\)([^\n]*)\n"
+                  r"\s*#\s*else\s*\n\s*#\s*define\s+RP_GL\s*\(\s*call\s*\)([^\n]*)\n", pipe)
+    if not m:
+        fail("gl_pipeline.c: no `#ifdef USE_SDL_GPU / #define RP_GL(call) ... / #else / #define "
+             "RP_GL(call) ...` pair")
+    else:
+        if not re.search(r"if\s*\(\s*!\s*R_GPU\s*\(\s*\)\s*\)\s*\{?\s*call\s*;", m.group(1)):
+            fail("gl_pipeline.c: RP_GL's USE_SDL_GPU arm does not skip `call` under R_GPU ()")
+        if not re.fullmatch(r"\s*(?:do\s*\{\s*call\s*;\s*\}\s*while\s*\(\s*0\s*\)|call)\s*", m.group(2)):
+            fail("gl_pipeline.c: RP_GL's other arm must be the bare call, `do { call; } while (0)`")
+    return nfuncs
+
+
+def check_internal_header(root):
+    """rg_internal.h is the backend's own; only rg_*.c include it."""
+    n = 0
+    for p in sorted((root / "engine").rglob("*")):
+        if p.suffix not in (".c", ".h") or not p.is_file():
+            continue
+        rel = p.relative_to(root)
+        if "rust" in rel.parts and "target" in rel.parts:
+            continue
+        code = strip_c_comments(p.read_text(errors="replace"))
+        if re.search(r'#\s*include\s*"rg_internal\.h"', code):
+            if re.match(r"rg_\w+\.c$", p.name):
+                n += 1
+            else:
+                fail("%s: includes rg_internal.h, the SDL_GPU backend's private header -- a seam "
+                     "includes rg_device.h" % rel)
+    if not n:
+        fail("no rg_*.c includes rg_internal.h -- the backend split is gone")
+
+
+def check_spirv_optional(root):
+    """Decision 6: no build needs glslangValidator."""
+    text = (root / "engine/CMakeLists.txt").read_text()
+    code = "\n".join(l.split("#", 1)[0] for l in text.splitlines())
+    fp = re.search(r"find_program\s*\(\s*GLSLANG_VALIDATOR\b([^)]*)\)", code)
+    if not fp:
+        fail("CMakeLists.txt: no find_program(GLSLANG_VALIDATOR ...)")
+    elif re.search(r"\bREQUIRED\b", fp.group(1)):
+        fail("CMakeLists.txt: glslangValidator is REQUIRED -- decision 6 on #340 keeps it optional")
+    m = re.search(r"add_custom_target\s*\(\s*shaders_spirv\b([^)]*)\)", code, re.S)
+    if not m:
+        fail("CMakeLists.txt: no shaders_spirv target")
+    elif re.search(r"\bALL\b", m.group(1)):
+        fail("CMakeLists.txt: shaders_spirv is part of ALL -- every build would need glslangValidator")
+    m = re.search(r"if\s*\(\s*NOT\s+GLSLANG_VALIDATOR\s*\)(.*?)endif\s*\(", code, re.S)
+    if m and re.search(r"FATAL_ERROR|SEND_ERROR", m.group(1)):
+        fail("CMakeLists.txt: a missing glslangValidator is a configure error -- decision 6 on #340 "
+             "keeps it optional")
+    for b in re.finditer(r"add_custom_(?:command|target)\s*\(\s*(\w+)([^)]*)\)", code, re.S):
+        if b.group(1) != "shaders_cross" and re.search(r"\bDEPENDS\b[^)]*\bshaders_spirv\b", b.group(2)):
+            fail("CMakeLists.txt: `add_custom_%s(%s ... DEPENDS shaders_spirv)` makes a build step "
+                 "need glslangValidator" % ("target" if "target" in b.group(0)[:20] else "command",
+                                            b.group(1)))
+    for d in re.finditer(r"add_dependencies\s*\(([^)]*)\)", code):
+        if re.search(r"\bshaders_(?:spirv|cross)\b", d.group(1)):
+            fail("CMakeLists.txt: `add_dependencies(%s)` makes an engine target need the offline "
+                 "shader compilers" % " ".join(d.group(1).split()))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     ap.add_argument("--root", type=Path, default=ROOT)
@@ -275,6 +570,9 @@ def main(argv=None):
     eng = root / "engine"
     check_cmake(root)
     check_proc_loads(root)
+    nseam = check_seams(root)
+    check_internal_header(root)
+    check_spirv_optional(root)
     nfiles = 0
     rg_files = []
     for p in sorted(eng.rglob("*")):
@@ -300,7 +598,8 @@ def main(argv=None):
         print("test_rg_sources: %d failure(s)" % len(errors))
         return 1
     print("test_rg_sources: OK, %d backend files guarded, %d other engine sources reference it only "
-          "under USE_SDL_GPU, CMake builds it into the desktop GL client alone" % (len(rg_files), nfiles))
+          "under USE_SDL_GPU, CMake builds it into the desktop GL client alone; %d seam functions "
+          "making GL calls all armed for SDL_GPU" % (len(rg_files), nfiles, nseam))
     return 0
 
 

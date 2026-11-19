@@ -11,6 +11,9 @@
 #include "quakedef.h"
 #include "sdl_inc.h"
 #include "gl_texbind.h"
+#ifdef USE_SDL_GPU
+#include "rg_device.h"
+#endif
 
 #ifndef GL_TEXTURE_2D_MULTISAMPLE
 #define GL_TEXTURE_2D_MULTISAMPLE	0x9100
@@ -49,6 +52,11 @@ static void RT_Activate (GLuint slot)
 	if (active_unit == slot)
 		return;
 	active_unit = slot;
+#ifdef USE_SDL_GPU
+	/* No cursor under -gpu: RT_Bind names the unit to the backend. */
+	if (R_GPU ())
+		return;
+#endif
 	glActiveTexture_fp (GL_TEXTURE0 + slot);
 }
 
@@ -56,6 +64,19 @@ static void RT_Bind (GLuint slot, GLenum target, GLuint texture)
 {
 	int ti = RT_TargetIndex (target);
 
+#ifdef USE_SDL_GPU
+	/* Ahead of the fold below: the backend keeps its own exact table, so a
+	 * shadow reset or an untracked target cannot make it guess.  The shadow
+	 * still moves, for R_EditBinding. */
+	if (R_GPU ())
+	{
+		RG_BindTexture (slot, target, texture);
+		if (slot < RT_MAX_TEXTURE_UNITS && ti >= 0)
+			bound[slot][ti] = texture;
+		c_texbinds++;
+		return;
+	}
+#endif
 	if (slot < RT_MAX_TEXTURE_UNITS && ti >= 0)
 	{
 		if (bound[slot][ti] == texture)
@@ -113,6 +134,15 @@ GLuint R_EditBinding (GLenum target)
 void R_BindImageTexture (GLuint unit, GLuint texture, GLint level, GLboolean layered,
 			 GLint layer, GLenum access, GLenum format)
 {
+#ifdef USE_SDL_GPU
+	/* Compute storage images are P5 (#340); nothing reaches here under
+	 * -gpu while R_HiZ_Available and the compute callers stay off. */
+	if (R_GPU ())
+	{
+		RG_NoteUnhandled ("R_BindImageTexture (compute storage image)");
+		return;
+	}
+#endif
 	glBindImageTexture_fp (unit, texture, level, layered, layer, access, format);
 }
 
@@ -130,6 +160,14 @@ void R_ResetTextureBindings (void)
 
 void R_DeleteTextures (GLsizei n, const GLuint *textures)
 {
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_DeleteTextures (n, textures);
+		R_ResetTextureBindings ();
+		return;
+	}
+#endif
 	glDeleteTextures_fp (n, textures);
 	R_ResetTextureBindings ();
 }
@@ -138,6 +176,10 @@ void R_TexBind_Init (void)
 {
 	R_ResetTextureBindings ();
 	active_unit = 0;
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+		return;
+#endif
 	glActiveTexture_fp (GL_TEXTURE0);
 }
 

@@ -17,6 +17,9 @@
 #include "gl_sky.h"
 #include "gl_postprocess.h"
 #include "gl_uniforms.h"
+#ifdef USE_SDL_GPU
+#include "rg_device.h"
+#endif
 
 /* fog globals from gl_fog.c */
 extern float r_fog_density;
@@ -117,6 +120,17 @@ void GL_VBO_Init (void)
 	unsigned short *indices;
 	int i;
 
+#ifdef USE_SDL_GPU
+	/* No VAO and no quad IBO under -gpu: the layout is RG_VL_IMM's
+	 * pipeline vertex input, and rg_frame.c owns the quad index buffer. */
+	if (R_GPU ())
+	{
+		Con_SafePrintf ("GL_VBO: immediate batches go to SDL_GPU (%d max verts)\n",
+				GL_IMM_MAX_VERTS);
+		return;
+	}
+#endif
+
 	/* create VAO */
 	glGenVertexArrays_fp(1, &imm_vao);
 	glBindVertexArray_fp(imm_vao);
@@ -190,6 +204,8 @@ void GL_VBO_Init (void)
 
 void GL_VBO_Shutdown (void)
 {
+	/* Nothing was created under -gpu (GL_VBO_Init), so each name is 0 and
+	 * no GL call is made. */
 	if (imm_quad_ibo) { glDeleteBuffers_fp(1, &imm_quad_ibo); imm_quad_ibo = 0; }
 #ifdef USE_GLES
 	if (imm_vbo)      { glDeleteBuffers_fp(1, &imm_vbo); imm_vbo = 0; }
@@ -545,13 +561,15 @@ void GL_ImmInvalidateState (void)
 	R_InvalidateUniforms ();
 }
 
-void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
+/* GL_ImmEnd's and GL_ImmDraw's VAO bind and stream upload, ahead of the
+ * program and its blocks as they always were.  Nothing under -gpu (#340
+ * P1c): rg_frame.c copies the batch when it records the draw. */
+static void GL_ImmBindVerts (void)
 {
-	float mvp[16];
-
-	if (imm_count == 0)
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
 		return;
-
+#endif
 	/* Bind VAO and stream vertex data.  Desktop GL 4.3 routes through the
 	 * frame ring (GL_Upload returns buf+offset); WebGL2 falls back to a
 	 * dedicated VBO orphaned each frame via glBufferData(STREAM_DRAW). */
@@ -570,6 +588,17 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 		glBindVertexBuffer_fp(0, _imm_buf, _imm_ofs, IMM_STRIDE);
 	}
 #endif
+}
+
+
+void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
+{
+	float mvp[16];
+
+	if (imm_count == 0)
+		return;
+
+	GL_ImmBindVerts ();
 
 	R_UseProgram (shader->program);
 
@@ -598,25 +627,34 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 	}
 
 	/* draw */
-	if (mode == GL_QUADS)
-	{
-		int num_quads = imm_count / 4;
-		glBindBuffer_fp(GL_ELEMENT_ARRAY_BUFFER, imm_quad_ibo);
-		glDrawElements_fp(GL_TRIANGLES, num_quads * 6,
-				   GL_UNSIGNED_SHORT, NULL);
-		glBindBuffer_fp(GL_ELEMENT_ARRAY_BUFFER, 0);
-	}
-	else if (mode == GL_POLYGON)
-	{
-		glDrawArrays_fp(GL_TRIANGLE_FAN, 0, imm_count);
-	}
+#ifdef USE_SDL_GPU
+	/* rg_frame.c turns quads, polygons and line loops into indexed lists:
+	 * SDL_GPU has no quads and no fans. */
+	if (R_GPU ())
+		RG_DrawImm (mode, imm_buffer, imm_count, (int)IMM_STRIDE);
 	else
+#endif
 	{
-		glDrawArrays_fp(mode, 0, imm_count);
-	}
+		if (mode == GL_QUADS)
+		{
+			int num_quads = imm_count / 4;
+			glBindBuffer_fp(GL_ELEMENT_ARRAY_BUFFER, imm_quad_ibo);
+			glDrawElements_fp(GL_TRIANGLES, num_quads * 6,
+					   GL_UNSIGNED_SHORT, NULL);
+			glBindBuffer_fp(GL_ELEMENT_ARRAY_BUFFER, 0);
+		}
+		else if (mode == GL_POLYGON)
+		{
+			glDrawArrays_fp(GL_TRIANGLE_FAN, 0, imm_count);
+		}
+		else
+		{
+			glDrawArrays_fp(mode, 0, imm_count);
+		}
 
-	glBindVertexArray_fp(0);
-	glBindBuffer_fp(GL_ARRAY_BUFFER, 0);
+		glBindVertexArray_fp(0);
+		glBindBuffer_fp(GL_ARRAY_BUFFER, 0);
+	}
 	R_UseProgram (0);
 
 	imm_count = 0;
@@ -629,41 +667,34 @@ void GL_ImmDraw (GLenum mode)
 	if (imm_count == 0)
 		return;
 
-	glBindVertexArray_fp(imm_vao);
-#ifdef USE_GLES
-	glBindBuffer_fp(GL_ARRAY_BUFFER, imm_vbo);
-	glBufferData_fp(GL_ARRAY_BUFFER, imm_count * sizeof(immvert_t),
-			 imm_buffer, GL_STREAM_DRAW);
-#else
-	{
-		GLuint   _imm_buf;
-		GLintptr _imm_ofs;
-		GL_Upload (GL_ARRAY_BUFFER, imm_buffer,
-			   imm_count * sizeof(immvert_t),
-			   &_imm_buf, &_imm_ofs);
-		glBindVertexBuffer_fp(0, _imm_buf, _imm_ofs, IMM_STRIDE);
-	}
-#endif
+	GL_ImmBindVerts ();
 
-	if (mode == GL_QUADS)
-	{
-		int num_quads = imm_count / 4;
-		glBindBuffer_fp(GL_ELEMENT_ARRAY_BUFFER, imm_quad_ibo);
-		glDrawElements_fp(GL_TRIANGLES, num_quads * 6,
-				   GL_UNSIGNED_SHORT, NULL);
-		glBindBuffer_fp(GL_ELEMENT_ARRAY_BUFFER, 0);
-	}
-	else if (mode == GL_POLYGON)
-	{
-		glDrawArrays_fp(GL_TRIANGLE_FAN, 0, imm_count);
-	}
+#ifdef USE_SDL_GPU
+	if (R_GPU ())		/* as in GL_ImmEnd */
+		RG_DrawImm (mode, imm_buffer, imm_count, (int)IMM_STRIDE);
 	else
+#endif
 	{
-		glDrawArrays_fp(mode, 0, imm_count);
-	}
+		if (mode == GL_QUADS)
+		{
+			int num_quads = imm_count / 4;
+			glBindBuffer_fp(GL_ELEMENT_ARRAY_BUFFER, imm_quad_ibo);
+			glDrawElements_fp(GL_TRIANGLES, num_quads * 6,
+					   GL_UNSIGNED_SHORT, NULL);
+			glBindBuffer_fp(GL_ELEMENT_ARRAY_BUFFER, 0);
+		}
+		else if (mode == GL_POLYGON)
+		{
+			glDrawArrays_fp(GL_TRIANGLE_FAN, 0, imm_count);
+		}
+		else
+		{
+			glDrawArrays_fp(mode, 0, imm_count);
+		}
 
-	glBindVertexArray_fp(0);
-	glBindBuffer_fp(GL_ARRAY_BUFFER, 0);
+		glBindVertexArray_fp(0);
+		glBindBuffer_fp(GL_ARRAY_BUFFER, 0);
+	}
 
 	imm_count = 0;
 }
