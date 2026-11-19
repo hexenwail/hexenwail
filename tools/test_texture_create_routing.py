@@ -137,11 +137,6 @@ ALLOWED = {
     ("engine/hexen2/gl_rmisc.c", "GenTextures"): (1, "not routed yet: the rest, P1a step 4"),
     ("engine/hexen2/gl_rmisc.c", "TexImage2D"): (1, "not routed yet: the rest, P1a step 4"),
     ("engine/hexen2/gl_rmisc.c", "TexParameterf"): (2, "not routed yet: the rest, P1a step 4"),
-    ("engine/hexen2/gl_rsurf.c", "GenTextures"): (4, "not routed yet: lightmaps, P1a step 2"),
-    ("engine/hexen2/gl_rsurf.c", "PixelStorei"): (4, "not routed yet: lightmaps, P1a step 2"),
-    ("engine/hexen2/gl_rsurf.c", "TexImage2D"): (3, "not routed yet: lightmaps, P1a step 2"),
-    ("engine/hexen2/gl_rsurf.c", "TexParameterf"): (10, "not routed yet: lightmaps, P1a step 2"),
-    ("engine/hexen2/gl_rsurf.c", "TexSubImage2D"): (3, "not routed yet: lightmaps, P1a step 2"),
 }
 
 NAMES = "|".join(sorted(TEXTURE_CREATION + PIXEL_STORE, key=len, reverse=True))
