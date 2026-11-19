@@ -16,9 +16,9 @@
  * GitHub #340, phase P1a.
  *
  * It is the only renderer code that creates, sizes, uploads into or sets the
- * sampling state of a texture (the loader table gl_func.h and WEBSOFT's
- * raw-GLES canvas web_canvas_gl2.c aside); tools/test_texture_create_routing.py
- * fails on any other caller.
+ * sampling state of a texture (the loader table gl_func.h, the null-GL
+ * table rg_null.c and WEBSOFT's raw-GLES canvas web_canvas_gl2.c aside);
+ * tools/test_texture_create_routing.py fails on any other caller.
  * Deleting stays in gl_texbind.h (R_DeleteTextures), because a delete is the
  * one texture call that has to update the binding shadow.
  *
@@ -90,14 +90,20 @@ void	R_TexCopySubImage2D (GLenum target, GLuint tex, GLint level, GLint xoffset,
  * S and T, plus R on the targets that have a third coordinate
  * (GL_TEXTURE_3D, GL_TEXTURE_CUBE_MAP_ARRAY).  Everything else -- LOD bias,
  * anisotropy, base and max level, swizzle, depth compare -- goes through the
- * generic pair, named by its GL pname. */
+ * generic pair, named by its GL pname.  The helpers are shorthands, not
+ * the only route: the generic pair also carries filter pnames where a site
+ * sets MIN and MAG on different branches (Draw_TouchAllFilterModes), so a
+ * backend has to map every sampler pname from both. */
 void	R_TexSetFilter (GLenum target, GLuint tex, GLint min_filter, GLint mag_filter);
 void	R_TexSetWrap (GLenum target, GLuint tex, GLint wrap);
 void	R_TexParameteri (GLenum target, GLuint tex, GLenum pname, GLint value);
 void	R_TexParameterf (GLenum target, GLuint tex, GLenum pname, GLfloat value);
 
 /* How many entry-point calls named a texture other than the one bound for
- * edit (see GL ARM above).  Zero is the only correct value. */
+ * edit (see GL ARM above); `renderer_status` prints it.  Zero is the only
+ * correct value.  The check is blind where the shadow is: the untracked
+ * GL_TEXTURE_CUBE_MAP_ARRAY, and any edit made after a shadow reset with no
+ * bind of its own. */
 int	R_TexCreate_Mismatches (void);
 
 #endif	/* GL_TEXCREATE_H */

@@ -21,6 +21,9 @@ So, outside gl_texcreate.c, none of these, whatever the file:
     glGenerateMipmap, glGenerateTextureMipmap.
   * sampling state: glTexParameter{f,i,fv,iv,Iiv,Iuiv},
     glTextureParameter*, glSamplerParameter*.
+  * the EXT_direct_state_access and EXT_memory_object spellings of the
+    above: glTextureImage*EXT, glMultiTex{Image,SubImage,Parameter}*EXT,
+    glCopyMultiTex*EXT, glMultiTexGenerateMipmapEXT, glTex/TextureStorageMem*.
   * glPixelStorei / glPixelStoref, unless the first argument is a
     GL_PACK_* name: unpack state belongs to uploads (R_TexSubImage2DRows
     owns GL_UNPACK_ROW_LENGTH), pack state to readbacks, which are a later
@@ -35,11 +38,13 @@ readbacks and are not checked here either.
 Every spelling counts: raw (glTexImage2D), loader table (glTexImage2D_fp),
 extension-suffixed (glTexStorage2DEXT), called through parentheses or a
 dereference ((glTexImage2D_fp)(...), (*glTexImage2D_fp)(...)), and taken as
-a value -- a #define that aliases it, or "= glTexParameteri_fp" /
-"&glTexParameteri_fp" handing it to a pointer.  An availability test
-("glTexStorage2D_fp != NULL", "!glTexImage3D_fp", "&& glTexStorage2D_fp")
-is not a call and not a value hand-off.  Token pasting (gl##n##_fp) is not
-caught.
+a value -- a #define that aliases it, "= glTexParameteri_fp" /
+"&glTexParameteri_fp" handing it to a pointer, or the name passed as an
+argument (install (glTexImage2D_fp, 3)), returned, put in an initializer
+list or a ternary arm, cast or not.  An availability test ("glTexStorage2D_fp != NULL",
+"!glTexImage3D_fp", "&& glTexStorage2D_fp", "if (glTexImage3D_fp)") is not
+a call and not a value hand-off.  Not caught: token pasting (gl##n##_fp),
+and a prefixed wrapper name (qglTexImage2D) -- the engine has neither.
 
 Allowed outside gl_texcreate.c:
   * ALLOWED: (file, GL function without gl/_fp/suffix) -> (exact count,
@@ -54,6 +59,10 @@ Allowed outside gl_texcreate.c:
     rows with it, not its argument lists.
   * engine/h2shared/gl_func.h, the loader table: it declares every _fp
     name (and the GLES no-op macros), which is the contract.
+  * engine/h2shared/rg_null.c, the null-GL table SDL_GPU mode installs,
+    generated from gl_func.h by tools/gen_rg_null.py: it names every entry
+    point to stub and verify it (RGN_VERIFY (glTexImage2D)), which is the
+    table, not a caller.
   * engine/h2shared/web_canvas_gl2.c, the software renderer's WebGL2
     presentation canvas: raw GLES, no loader table, a separate renderer
     path (same exemption as test_gl_call_sites.py).
@@ -72,6 +81,7 @@ OWNER = "engine/h2shared/gl_texcreate.c"
 EXEMPT = {
     "engine/h2shared/gl_func.h",
     "engine/h2shared/web_canvas_gl2.c",
+    "engine/h2shared/rg_null.c",
 }
 SUFFIXES = (".c", ".h", ".inc")
 
@@ -95,8 +105,18 @@ TEXTURE_CREATION = (
     + _dims("CompressedTextureSubImage")
     + _dims("CopyTexImage", ("1D", "2D")) + _dims("CopyTexSubImage")
     + _dims("CopyTextureSubImage")
-    + tuple(stem + v for stem in ("TexParameter", "TextureParameter", "SamplerParameter")
+    + tuple(stem + v for stem in ("TexParameter", "TextureParameter", "SamplerParameter",
+                                  "MultiTexParameter")
             for v in ("f", "i", "fv", "iv", "Iiv", "Iuiv"))
+    # EXT_direct_state_access and EXT_memory_object.
+    + _dims("TextureImage") + _dims("MultiTexImage") + _dims("MultiTexSubImage")
+    + _dims("CopyTextureImage", ("1D", "2D")) + _dims("CopyMultiTexImage", ("1D", "2D"))
+    + _dims("CopyMultiTexSubImage") + _dims("CompressedTextureImage")
+    + _dims("CompressedMultiTexImage") + _dims("CompressedMultiTexSubImage")
+    + ("MultiTexGenerateMipmap", "MultiTexBuffer")
+    + _dims("TexStorageMem") + _dims("TextureStorageMem")
+    + ("TexStorageMem2DMultisample", "TexStorageMem3DMultisample",
+       "TextureStorageMem2DMultisample", "TextureStorageMem3DMultisample")
 )
 PIXEL_STORE = ("PixelStorei", "PixelStoref")
 
@@ -114,12 +134,24 @@ CALL_RE = re.compile(NAME + r"\s*\)?\s*\(([^()]*\))?")
 BARE_RE = re.compile(NAME + r"(?!\s*\)?\s*\()(?!\s*[!=]=)")
 # Outside a #define: the function handed to a pointer.  "&&" is a
 # capability test, not an address-of.
+# An optional cast in front of a handed-on name: "(void *)glTexImage2D_fp".
+_CAST = r"(?:\(\s*[A-Za-z_][\w\s]*\**\s*\)\s*)?"
 VALUE_RE = re.compile(
-    r"(?:(?<![=!<>])=|(?<!&)&(?!&))\s*\(?\s*" + NAME + r"(?!\s*\)?\s*\()(?!\s*[!=]=)")
+    r"(?:(?<![=!<>])=|(?<!&)&(?!&))\s*" + _CAST + r"\(?\s*" + NAME + r"(?!\s*\)?\s*\()(?!\s*[!=]=)")
+# The name handed on rather than called: an argument, a return value, an
+# initializer-list entry, a ternary arm.  After "(" only when the "(" is a
+# call's (an identifier that is not a keyword precedes it), so
+# "if (glTexImage3D_fp)" stays an availability test.
+_NOT_CALLED = r"(?!\s*\)?\s*\()(?!\s*(?:[!=]=|&&|\|\|))"
+HANDOFF_RE = re.compile(r"(?:[,?:{]|\breturn\b)\s*" + _CAST + NAME + _NOT_CALLED)
+ARG_RE = re.compile(r"\b(?!(?:if|while|for|switch|return|sizeof)\b)[A-Za-z_]\w*\s*\(\s*"
+                    + _CAST + NAME + _NOT_CALLED)
 DEFINE_RE = re.compile(r"^[ \t]*#[ \t]*define\b(?:[^\n]*\\\n)*[^\n]*", re.MULTILINE)
 BLANK_RE = re.compile(
     r"//[^\n]*|/\*.*?\*/|\"(?:\\.|[^\"\\\n])*\"|'(?:\\.|[^'\\\n])*'", re.DOTALL)
-PACK_RE = re.compile(r"\s*GL_PACK_\w+\s*$")
+# glPixelStore's first argument is a literal GL_PACK_* name, whatever the
+# rest of the argument list looks like.
+PACK_RE = re.compile(r"\s*\)?\s*\(\s*GL_PACK_\w+\s*,")
 
 
 def blank(text):
@@ -138,7 +170,7 @@ def scan(rel, text, used):
     for m in CALL_RE.finditer(text):
         full, name, args = m.group(1), m.group(2), m.group(3)
         args = " ".join(args[:-1].split()) if args is not None else None
-        if name in PIXEL_STORE and args is not None and PACK_RE.match(args.split(",")[0]):
+        if name in PIXEL_STORE and PACK_RE.match(text, m.end(1)):
             continue	# pack state: a readback's, not an upload's
         key = (rel, name)
         if key in ALLOWED:
@@ -151,9 +183,14 @@ def scan(rel, text, used):
         for m in BARE_RE.finditer(d.group(0)):
             errors.append(f"{rel}:{line(d.start() + m.start())}: #define aliases "
                           f"{m.group(1)} -- texture creation outside gl_texcreate.c")
-    for m in VALUE_RE.finditer(text):
-        errors.append(f"{rel}:{line(m.start(1))}: {m.group(1)} taken as a value "
-                      "-- texture creation outside gl_texcreate.c")
+    seen = set()
+    for rx in (VALUE_RE, HANDOFF_RE, ARG_RE):
+        for m in rx.finditer(text):
+            if m.start(1) in seen:
+                continue
+            seen.add(m.start(1))
+            errors.append(f"{rel}:{line(m.start(1))}: {m.group(1)} taken as a value "
+                          "-- texture creation outside gl_texcreate.c")
     return errors
 
 

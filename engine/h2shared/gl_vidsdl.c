@@ -723,6 +723,8 @@ static void GL_RendererStatus_f (void)
 		   gl_renderer_caps.sample_shading ? "yes" : "no");
 	GL_ReportShaderStatus();
 	GL_ReportLightmapStatus();
+	Con_Printf("[RENDERER] texture-create calls naming a texture other than the one bound: %d\n",
+		   R_TexCreate_Mismatches ());
 }
 
 static void GL_RendererSafe_f (void)
@@ -2295,9 +2297,12 @@ static void GL_Init (void)
 //	glClearColor_fp(1,0,0,0);
 	R_SetCullFace (GL_FRONT);
 
-	/* Unit 0 holds texture 0, the default object, here -- GL_TEXTURE_BINDING_2D
-	 * read 0 at boot and after vid_restart (#340 P1a) -- so this is its
-	 * sampler, which no draw reads. */
+	/* These used to land on whatever unit 0 held, which depends on the path
+	 * through init: texture 0 after the GPU palette-LUT builder, the fallback
+	 * white texture (already NEAREST/REPEAT) everywhere else.  Neither is a
+	 * change a frame can see, so name the default object and make it true on
+	 * every path (#340 P1a). */
+	R_BindTextureForEdit (GL_TEXTURE_2D, 0);
 	R_TexSetFilter(GL_TEXTURE_2D, 0, GL_NEAREST, GL_NEAREST);
 
 	R_TexSetWrap(GL_TEXTURE_2D, 0, GL_REPEAT);

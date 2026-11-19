@@ -122,8 +122,8 @@ jobs:
       # glGenTextures / glTexImage* / glTexSubImage* / glTexStorage* /
       # glCompressedTex* / glCopyTex* / glTexParameter* / glGenerateMipmap /
       # sampler-object call, nor an unpack glPixelStore, outside it, except
-      # the loader table (gl_func.h) and the web canvas blit
-      # (web_canvas_gl2.c).  GitHub #340 (P1a).
+      # the loader table (gl_func.h), the generated null-GL table (rg_null.c)
+      # and the web canvas blit (web_canvas_gl2.c).  GitHub #340 (P1a).
       - name: No texture creation bypasses gl_texcreate.c
         run: python3 tools/test_texture_create_routing.py
 
