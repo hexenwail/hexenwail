@@ -668,16 +668,14 @@ static void Sky_BuildCubemap (void)
 		goto done;
 	}
 
-	glGenTextures_fp (1, &skybox_cubemap);
+	R_GenTextures (1, &skybox_cubemap);
 	R_BindTextureForEdit (GL_TEXTURE_CUBE_MAP, skybox_cubemap);
 	for (i = 0; i < 6; i++)
-		glTexImage2D_fp (GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, GL_RGBA8,
-				 sky_cube_size, sky_cube_size, 0,
+		R_TexImage2D (GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, skybox_cubemap, 0, GL_RGBA8,
+				 sky_cube_size, sky_cube_size,
 				 GL_RGBA, GL_UNSIGNED_BYTE, sky_cube_face[cubemap_order[i]]);
-	glTexParameterf_fp (GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	glTexParameterf_fp (GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	glTexParameterf_fp (GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameterf_fp (GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	R_TexSetFilter (GL_TEXTURE_CUBE_MAP, skybox_cubemap, GL_LINEAR, GL_LINEAR);
+	R_TexSetWrap (GL_TEXTURE_CUBE_MAP, skybox_cubemap, GL_CLAMP_TO_EDGE);
 	R_BindTextureForEdit (GL_TEXTURE_CUBE_MAP, 0);
 
 	Con_DPrintf ("Sky: cubemap built, %dx%d per face\n", sky_cube_size, sky_cube_size);

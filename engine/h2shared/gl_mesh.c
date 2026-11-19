@@ -802,14 +802,12 @@ iqm_gpu_setup:
 
 		/* Pose texture (ES 3.0 compatible) — R32UI, width=poseverts, height=numposes.
 		 * Each texel packs one trivertx_t as: v[0] | v[1]<<8 | v[2]<<16 | ni<<24 */
-		glGenTextures_fp(1, &gm->tex_pose);
+		R_GenTextures(1, &gm->tex_pose);
 		R_BindTextureForEdit (GL_TEXTURE_2D, gm->tex_pose);
-		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-		glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_R32UI,
-				hdr->poseverts, hdr->numposes, 0,
+		R_TexSetFilter(GL_TEXTURE_2D, gm->tex_pose, GL_NEAREST, GL_NEAREST);
+		R_TexSetWrap(GL_TEXTURE_2D, gm->tex_pose, GL_CLAMP_TO_EDGE);
+		R_TexImage2D(GL_TEXTURE_2D, gm->tex_pose, 0, GL_R32UI,
+				hdr->poseverts, hdr->numposes,
 				GL_RED_INTEGER, GL_UNSIGNED_INT, pose_packed);
 		R_BindTextureForEdit (GL_TEXTURE_2D, 0);
 	}

@@ -16,9 +16,9 @@
  * GitHub #340, phase P1a.
  *
  * It is the only renderer code that creates, sizes, uploads into or sets the
- * sampling state of a texture (the loader table gl_func.h, the generated
- * null-GL table rg_null.c and WEBSOFT's raw-GLES canvas web_canvas_gl2.c
- * aside); tools/test_texture_create_routing.py fails on any other caller.
+ * sampling state of a texture (the loader table gl_func.h and WEBSOFT's
+ * raw-GLES canvas web_canvas_gl2.c aside); tools/test_texture_create_routing.py
+ * fails on any other caller.
  * Deleting stays in gl_texbind.h (R_DeleteTextures), because a delete is the
  * one texture call that has to update the binding shadow.
  *

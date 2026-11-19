@@ -190,7 +190,7 @@ void R_InitExtraTextures (void)
 		gl_extra_textures[i] = GL_UNUSED_TEXTURE;
 
 	// see R_TranslatePlayerSkin() below
-	glGenTextures_fp(MAX_CLIENTS, playertextures);
+	R_GenTextures(MAX_CLIENTS, playertextures);
 }
 
 /*
@@ -527,9 +527,8 @@ void R_TranslatePlayerSkin (int playernum)
 //	q_snprintf(texname, 19, "player%i", playernum);
 //	playertextures[playernum] = GL_LoadTexture(texname, (byte *)pixels, scaled_width, scaled_height, TEX_RGBA|TEX_LINEAR);
 	R_BindTextureSlot (0, playertextures[playernum]);
-	glTexImage2D_fp(GL_TEXTURE_2D, 0, gl_solid_format, scaled_width, scaled_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	R_TexImage2D(GL_TEXTURE_2D, playertextures[playernum], 0, gl_solid_format, scaled_width, scaled_height, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+	R_TexSetFilter(GL_TEXTURE_2D, playertextures[playernum], GL_LINEAR, GL_LINEAR);
 }
 
 /*

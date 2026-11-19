@@ -793,14 +793,12 @@ void GL_Shaders_Init (void)
 	 * uhexen2-sjvf. */
 	{
 		static const unsigned char black_pixel[4] = {0, 0, 0, 255};
-		glGenTextures_fp(1, &gl_null_fb_texture);
+		R_GenTextures(1, &gl_null_fb_texture);
 		R_BindTextureSlot (0, gl_null_fb_texture);
-		glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_RGBA8, 1, 1, 0,
+		R_TexImage2D(GL_TEXTURE_2D, gl_null_fb_texture, 0, GL_RGBA8, 1, 1,
 				GL_RGBA, GL_UNSIGNED_BYTE, black_pixel);
-		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+		R_TexSetFilter(GL_TEXTURE_2D, gl_null_fb_texture, GL_NEAREST, GL_NEAREST);
+		R_TexSetWrap(GL_TEXTURE_2D, gl_null_fb_texture, GL_REPEAT);
 	}
 
 	/* Material-map sentinels, bound at units 3 and 4 for any surface whose
@@ -816,23 +814,19 @@ void GL_Shaders_Init (void)
 		static const unsigned char flat_normal_pixel[4] = {128, 128, 255, 255};
 		static const unsigned char black_pixel2[4] = {0, 0, 0, 255};
 
-		glGenTextures_fp(1, &gl_flat_normal_texture);
+		R_GenTextures(1, &gl_flat_normal_texture);
 		R_BindTextureSlot (0, gl_flat_normal_texture);
-		glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_RGBA8, 1, 1, 0,
+		R_TexImage2D(GL_TEXTURE_2D, gl_flat_normal_texture, 0, GL_RGBA8, 1, 1,
 				GL_RGBA, GL_UNSIGNED_BYTE, flat_normal_pixel);
-		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+		R_TexSetFilter(GL_TEXTURE_2D, gl_flat_normal_texture, GL_NEAREST, GL_NEAREST);
+		R_TexSetWrap(GL_TEXTURE_2D, gl_flat_normal_texture, GL_REPEAT);
 
-		glGenTextures_fp(1, &gl_null_gloss_texture);
+		R_GenTextures(1, &gl_null_gloss_texture);
 		R_BindTextureSlot (0, gl_null_gloss_texture);
-		glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_RGBA8, 1, 1, 0,
+		R_TexImage2D(GL_TEXTURE_2D, gl_null_gloss_texture, 0, GL_RGBA8, 1, 1,
 				GL_RGBA, GL_UNSIGNED_BYTE, black_pixel2);
-		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+		R_TexSetFilter(GL_TEXTURE_2D, gl_null_gloss_texture, GL_NEAREST, GL_NEAREST);
+		R_TexSetWrap(GL_TEXTURE_2D, gl_null_gloss_texture, GL_REPEAT);
 	}
 
 	/* Companion to the above: 1x1 opaque white, so an immediate-mode batch
@@ -841,14 +835,12 @@ void GL_Shaders_Init (void)
 	 * uhexen2-2rxl. */
 	{
 		static const unsigned char white_pixel[4] = {255, 255, 255, 255};
-		glGenTextures_fp(1, &gl_solid_white_texture);
+		R_GenTextures(1, &gl_solid_white_texture);
 		R_BindTextureSlot (0, gl_solid_white_texture);
-		glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_RGBA8, 1, 1, 0,
+		R_TexImage2D(GL_TEXTURE_2D, gl_solid_white_texture, 0, GL_RGBA8, 1, 1,
 				GL_RGBA, GL_UNSIGNED_BYTE, white_pixel);
-		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+		R_TexSetFilter(GL_TEXTURE_2D, gl_solid_white_texture, GL_NEAREST, GL_NEAREST);
+		R_TexSetWrap(GL_TEXTURE_2D, gl_solid_white_texture, GL_REPEAT);
 	}
 
 	/* OIT variants for translucent rendering.

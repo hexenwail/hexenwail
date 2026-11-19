@@ -43,13 +43,15 @@ caught.
 
 Allowed outside gl_texcreate.c:
   * ALLOWED: (file, GL function without gl/_fp/suffix) -> (exact count,
-    why).  P1a routes the call sites one family at a time, and this is the
-    list of what is left; it only shrinks.  A count that no longer matches
-    fails -- a new raw call in an allowlisted file is not absorbed by the
-    entry -- and so does an entry matching nothing, so the list cannot
-    outlive the code.  Coarser than test_texture_bind_routing.py's
-    (file, function, arguments) key on purpose: it is a migration ledger,
-    and once a family is routed its rows go, not its argument lists.
+    why).  P1a routed the call sites one family at a time and this was the
+    ledger of what was left; empty since the last family went, and the
+    mechanism stays so the first exception is spelled out and counted
+    rather than slipped in.  A count that no longer matches fails -- a new
+    raw call in an allowlisted file is not absorbed by the entry -- and so
+    does an entry matching nothing, so the list cannot outlive the code.
+    Keyed coarser than test_texture_bind_routing.py's (file, function,
+    arguments) because it was a migration ledger: a routed family took its
+    rows with it, not its argument lists.
   * engine/h2shared/gl_func.h, the loader table: it declares every _fp
     name (and the GLES no-op macros), which is the contract.
   * engine/h2shared/web_canvas_gl2.c, the software renderer's WebGL2
@@ -99,27 +101,8 @@ TEXTURE_CREATION = (
 PIXEL_STORE = ("PixelStorei", "PixelStoref")
 
 # (file, function without gl/_fp/suffix) -> (times it appears, why it may
-# stay there).  The families P1a has not routed yet; shrinks to empty.
+# stay there).  Empty since P1a routed the last family.
 ALLOWED = {
-    ("engine/h2shared/gl_lightcluster.c", "GenTextures"): (1, "not routed yet: the rest, P1a step 4"),
-    ("engine/h2shared/gl_lightcluster.c", "TexImage3D"): (1, "not routed yet: the rest, P1a step 4"),
-    ("engine/h2shared/gl_lightcluster.c", "TexParameterf"): (5, "not routed yet: the rest, P1a step 4"),
-    ("engine/h2shared/gl_mesh.c", "GenTextures"): (1, "not routed yet: the rest, P1a step 4"),
-    ("engine/h2shared/gl_mesh.c", "TexImage2D"): (1, "not routed yet: the rest, P1a step 4"),
-    ("engine/h2shared/gl_mesh.c", "TexParameterf"): (4, "not routed yet: the rest, P1a step 4"),
-    ("engine/h2shared/gl_shader.c", "GenTextures"): (4, "not routed yet: the rest, P1a step 4"),
-    ("engine/h2shared/gl_shader.c", "TexImage2D"): (4, "not routed yet: the rest, P1a step 4"),
-    ("engine/h2shared/gl_shader.c", "TexParameterf"): (16, "not routed yet: the rest, P1a step 4"),
-    ("engine/h2shared/gl_sky.c", "GenTextures"): (1, "not routed yet: the rest, P1a step 4"),
-    ("engine/h2shared/gl_sky.c", "TexImage2D"): (1, "not routed yet: the rest, P1a step 4"),
-    ("engine/h2shared/gl_sky.c", "TexParameterf"): (4, "not routed yet: the rest, P1a step 4"),
-    ("engine/h2shared/gl_vidsdl.c", "GenTextures"): (1, "not routed yet: the rest, P1a step 4"),
-    ("engine/h2shared/gl_vidsdl.c", "TexImage2D"): (1, "not routed yet: the rest, P1a step 4"),
-    ("engine/h2shared/gl_vidsdl.c", "TexParameterf"): (6, "not routed yet: the rest, P1a step 4"),
-    ("engine/hexen2/gl_rmain.c", "TexParameterf"): (4, "not routed yet: the rest, P1a step 4"),
-    ("engine/hexen2/gl_rmisc.c", "GenTextures"): (1, "not routed yet: the rest, P1a step 4"),
-    ("engine/hexen2/gl_rmisc.c", "TexImage2D"): (1, "not routed yet: the rest, P1a step 4"),
-    ("engine/hexen2/gl_rmisc.c", "TexParameterf"): (2, "not routed yet: the rest, P1a step 4"),
 }
 
 NAMES = "|".join(sorted(TEXTURE_CREATION + PIXEL_STORE, key=len, reverse=True))

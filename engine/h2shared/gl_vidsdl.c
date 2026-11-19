@@ -614,12 +614,11 @@ static qboolean GL_RunFramebufferSelfTest (void)
 	/* GL_TEXTURE_BINDING_2D is per-unit; this is unit 0's, which gl_texbind.c
 	 * keeps active between its calls, and the unit the edit bind below uses. */
 	glGetIntegerv_fp(GL_TEXTURE_BINDING_2D, &old_texture);
-	glGenTextures_fp(1, &texture);
+	R_GenTextures(1, &texture);
 	R_BindTextureForEdit (GL_TEXTURE_2D, texture);
-	glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_RGBA8, 2, 2, 0,
+	R_TexImage2D(GL_TEXTURE_2D, texture, 0, GL_RGBA8, 2, 2,
 			GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	R_TexSetFilter(GL_TEXTURE_2D, texture, GL_NEAREST, GL_NEAREST);
 
 	glGenFramebuffers_fp(1, &framebuffer);
 	glBindFramebuffer_fp(GL_FRAMEBUFFER, framebuffer);
@@ -2296,11 +2295,12 @@ static void GL_Init (void)
 //	glClearColor_fp(1,0,0,0);
 	R_SetCullFace (GL_FRONT);
 
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	/* Unit 0 holds texture 0, the default object, here -- GL_TEXTURE_BINDING_2D
+	 * read 0 at boot and after vid_restart (#340 P1a) -- so this is its
+	 * sampler, which no draw reads. */
+	R_TexSetFilter(GL_TEXTURE_2D, 0, GL_NEAREST, GL_NEAREST);
 
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	R_TexSetWrap(GL_TEXTURE_2D, 0, GL_REPEAT);
 
 	R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
