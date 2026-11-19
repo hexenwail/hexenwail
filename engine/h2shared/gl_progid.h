@@ -138,6 +138,17 @@ typedef struct {
  * and samplers, and deletes it, as before. */
 GLuint	R_Program_Create (rprog_id_t id);
 
+/* Sampler set-up, the one way a program's samplers get their texture units
+ * (#340 P2a).  R_ProgramSamplerLoc is glGetUniformLocation: -1 when `prog`
+ * declares no sampler `name`.  R_ProgramSamplerUnit points that sampler at
+ * texture unit `unit`, and does nothing for loc < 0; in GL it is glUniform1i,
+ * so `prog` must be current.  Under -gpu both read the program's SPIR-V
+ * reflection instead.  `name` is the same string the location was asked
+ * for: tools/test_rg_sampler_units.py holds each pair together, and no two
+ * samplers of one program to one unit. */
+GLint	R_ProgramSamplerLoc (GLuint prog, const char *name);
+void	R_ProgramSamplerUnit (GLuint prog, GLint loc, const char *name, GLint unit);
+
 /* The id's log name ("2d", "world_oit", ...): its enumerator, lower case,
  * without RPROG_.  NULL for an id with no row on this tier. */
 const char	*R_Program_Name (rprog_id_t id);

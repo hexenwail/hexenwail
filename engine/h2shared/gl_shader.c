@@ -121,23 +121,23 @@ static void GL_InitOITProgramSplit (glprogram_t *p, rprog_id_t id)
 	{
 		/* bind texture unit defaults (mirrors GL_InitProgramSplit) */
 		R_UseProgram (p->program);
-		if (p->u_texture0 >= 0) glUniform1i_fp(p->u_texture0, 0);
-		if (p->u_texture1 >= 0) glUniform1i_fp(p->u_texture1, 1);
-		if (p->u_texture2 >= 0) glUniform1i_fp(p->u_texture2, 2);
-		if (p->u_texture3 >= 0) glUniform1i_fp(p->u_texture3, 3);	/* uhexen2-mfql */
-		if (p->u_texture4 >= 0) glUniform1i_fp(p->u_texture4, 4);
-		if (p->u_lightgrid >= 0) glUniform1i_fp(p->u_lightgrid, LIGHT_GRID_TMU);	/* uhexen2-26bm */
-		if (p->u_lmlayer1 >= 0) glUniform1i_fp(p->u_lmlayer1, LMSTYLE_TMU);	/* #439 */
-		if (p->u_lmlayer2 >= 0) glUniform1i_fp(p->u_lmlayer2, LMSTYLE_TMU + 1);
-		if (p->u_lmlayer3 >= 0) glUniform1i_fp(p->u_lmlayer3, LMSTYLE_TMU + 2);
-		if (p->u_soft_depth >= 0) glUniform1i_fp(p->u_soft_depth, 1);	/* uhexen2-mf9u */
+		R_ProgramSamplerUnit (p->program, p->u_texture0, "u_texture0", 0);
+		R_ProgramSamplerUnit (p->program, p->u_texture1, "u_texture1", 1);
+		R_ProgramSamplerUnit (p->program, p->u_texture2, "u_texture2", 2);
+		R_ProgramSamplerUnit (p->program, p->u_texture3, "u_texture3", 3);	/* uhexen2-mfql */
+		R_ProgramSamplerUnit (p->program, p->u_texture4, "u_texture4", 4);
+		R_ProgramSamplerUnit (p->program, p->u_lightgrid, "u_lightgrid", LIGHT_GRID_TMU);	/* uhexen2-26bm */
+		R_ProgramSamplerUnit (p->program, p->u_lmlayer1, "u_lmlayer1", LMSTYLE_TMU);	/* #439 */
+		R_ProgramSamplerUnit (p->program, p->u_lmlayer2, "u_lmlayer2", LMSTYLE_TMU + 1);
+		R_ProgramSamplerUnit (p->program, p->u_lmlayer3, "u_lmlayer3", LMSTYLE_TMU + 2);
+		R_ProgramSamplerUnit (p->program, p->u_soft_depth, "u_soft_depth", 1);	/* uhexen2-mf9u */
 		/* MBOIT moment targets (#87): their own units, the 2D and the
 		 * multisample pair apart, so the two sampler types never share a
 		 * unit -- that is an error at draw time even when one is unused */
-		if (p->u_mboit_b0 >= 0)     glUniform1i_fp(p->u_mboit_b0, MBOIT_TMU_B0);
-		if (p->u_mboit_mom >= 0)    glUniform1i_fp(p->u_mboit_mom, MBOIT_TMU_MOM);
-		if (p->u_mboit_b0_ms >= 0)  glUniform1i_fp(p->u_mboit_b0_ms, MBOIT_TMU_B0_MS);
-		if (p->u_mboit_mom_ms >= 0) glUniform1i_fp(p->u_mboit_mom_ms, MBOIT_TMU_MOM_MS);
+		R_ProgramSamplerUnit (p->program, p->u_mboit_b0, "u_mboit_b0", MBOIT_TMU_B0);
+		R_ProgramSamplerUnit (p->program, p->u_mboit_mom, "u_mboit_mom", MBOIT_TMU_MOM);
+		R_ProgramSamplerUnit (p->program, p->u_mboit_b0_ms, "u_mboit_b0_ms", MBOIT_TMU_B0_MS);
+		R_ProgramSamplerUnit (p->program, p->u_mboit_mom_ms, "u_mboit_mom_ms", MBOIT_TMU_MOM_MS);
 		R_Shadow_InitProgram (p->program);	/* #97 */
 		R_UseProgram (0);
 		Con_SafePrintf ("  %s: OK (prog=%u)\n", name, p->program);
@@ -155,22 +155,22 @@ static void GL_InitOITProgramSplit (glprogram_t *p, rprog_id_t id)
 
 static void GL_InitProgramUniforms (glprogram_t *p)
 {
-	p->u_texture0        = glGetUniformLocation_fp(p->program, "u_texture0");
-	p->u_texture1        = glGetUniformLocation_fp(p->program, "u_texture1");
-	p->u_texture2        = glGetUniformLocation_fp(p->program, "u_texture2");
-	p->u_texture3        = glGetUniformLocation_fp(p->program, "u_texture3");
-	p->u_texture4        = glGetUniformLocation_fp(p->program, "u_texture4");
-	p->u_lmlayer1        = glGetUniformLocation_fp(p->program, "u_lmlayer1");
-	p->u_lmlayer2        = glGetUniformLocation_fp(p->program, "u_lmlayer2");
-	p->u_lmlayer3        = glGetUniformLocation_fp(p->program, "u_lmlayer3");
-	p->u_mboit_b0        = glGetUniformLocation_fp(p->program, "u_mboit_b0");	/* #87 */
-	p->u_mboit_mom       = glGetUniformLocation_fp(p->program, "u_mboit_mom");
-	p->u_mboit_b0_ms     = glGetUniformLocation_fp(p->program, "u_mboit_b0_ms");
-	p->u_mboit_mom_ms    = glGetUniformLocation_fp(p->program, "u_mboit_mom_ms");
+	p->u_texture0        = R_ProgramSamplerLoc (p->program, "u_texture0");
+	p->u_texture1        = R_ProgramSamplerLoc (p->program, "u_texture1");
+	p->u_texture2        = R_ProgramSamplerLoc (p->program, "u_texture2");
+	p->u_texture3        = R_ProgramSamplerLoc (p->program, "u_texture3");
+	p->u_texture4        = R_ProgramSamplerLoc (p->program, "u_texture4");
+	p->u_lmlayer1        = R_ProgramSamplerLoc (p->program, "u_lmlayer1");
+	p->u_lmlayer2        = R_ProgramSamplerLoc (p->program, "u_lmlayer2");
+	p->u_lmlayer3        = R_ProgramSamplerLoc (p->program, "u_lmlayer3");
+	p->u_mboit_b0        = R_ProgramSamplerLoc (p->program, "u_mboit_b0");	/* #87 */
+	p->u_mboit_mom       = R_ProgramSamplerLoc (p->program, "u_mboit_mom");
+	p->u_mboit_b0_ms     = R_ProgramSamplerLoc (p->program, "u_mboit_b0_ms");
+	p->u_mboit_mom_ms    = R_ProgramSamplerLoc (p->program, "u_mboit_mom_ms");
 	/* Clustered dynamic lighting (uhexen2-26bm); -1 on every non-world
 	 * program and on the whole ES tier. */
-	p->u_lightgrid       = glGetUniformLocation_fp(p->program, "u_lightgrid");
-	p->u_soft_depth       = glGetUniformLocation_fp(p->program, "u_soft_depth");
+	p->u_lightgrid       = R_ProgramSamplerLoc (p->program, "u_lightgrid");
+	p->u_soft_depth       = R_ProgramSamplerLoc (p->program, "u_soft_depth");
 
 	/* The two shared uniform blocks, for the shaders that have moved to
 	 * engine/shaders/.  Looked up on every program the same way the
@@ -706,6 +706,43 @@ GLuint R_Program_Create (rprog_id_t id)
 	return prog;
 }
 
+/*
+===============
+R_ProgramSamplerLoc / R_ProgramSamplerUnit
+
+The sampler-unit seam (#340 P2a).  The GL arms are the glGetUniformLocation /
+glUniform1i pair every program's builder made before, call for call.  The
+SDL_GPU arms read and write the program's reflected samplers: SDL_GPU binds a
+sampler by its slot in the SPIR-V, and the slot says nothing about which GL
+texture unit the renderer put the texture on (u_lightgrid is slot 4 in
+salias_frag and unit LIGHT_GRID_TMU), so the unit has to be told.
+===============
+*/
+GLint R_ProgramSamplerLoc (GLuint prog, const char *name)
+{
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+		return RG_ProgramSampler (prog, name);
+#endif
+	return glGetUniformLocation_fp (prog, name);
+}
+
+void R_ProgramSamplerUnit (GLuint prog, GLint loc, const char *name, GLint unit)
+{
+	if (loc < 0)
+		return;
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_ProgramSamplerUnit (prog, name, unit);
+		return;
+	}
+#endif
+	(void) prog;
+	(void) name;
+	glUniform1i_fp (loc, unit);
+}
+
 const char *R_Program_Name (rprog_id_t id)
 {
 	const rprog_def_t *def = RP_Def (id);
@@ -756,19 +793,19 @@ static qboolean GL_InitProgramSplit (glprogram_t *p, rprog_id_t id)
 
 	/* bind texture unit defaults */
 	R_UseProgram (p->program);
-	if (p->u_texture0 >= 0) glUniform1i_fp(p->u_texture0, 0);
-	if (p->u_texture1 >= 0) glUniform1i_fp(p->u_texture1, 1);
-	if (p->u_texture2 >= 0) glUniform1i_fp(p->u_texture2, 2);
-		if (p->u_texture3 >= 0) glUniform1i_fp(p->u_texture3, 3);	/* uhexen2-mfql */
-		if (p->u_texture4 >= 0) glUniform1i_fp(p->u_texture4, 4);
-	if (p->u_lightgrid >= 0) glUniform1i_fp(p->u_lightgrid, LIGHT_GRID_TMU);	/* uhexen2-26bm */
-	if (p->u_lmlayer1 >= 0) glUniform1i_fp(p->u_lmlayer1, LMSTYLE_TMU);	/* #439 */
-	if (p->u_lmlayer2 >= 0) glUniform1i_fp(p->u_lmlayer2, LMSTYLE_TMU + 1);
-	if (p->u_lmlayer3 >= 0) glUniform1i_fp(p->u_lmlayer3, LMSTYLE_TMU + 2);
+	R_ProgramSamplerUnit (p->program, p->u_texture0, "u_texture0", 0);
+	R_ProgramSamplerUnit (p->program, p->u_texture1, "u_texture1", 1);
+	R_ProgramSamplerUnit (p->program, p->u_texture2, "u_texture2", 2);
+		R_ProgramSamplerUnit (p->program, p->u_texture3, "u_texture3", 3);	/* uhexen2-mfql */
+		R_ProgramSamplerUnit (p->program, p->u_texture4, "u_texture4", 4);
+	R_ProgramSamplerUnit (p->program, p->u_lightgrid, "u_lightgrid", LIGHT_GRID_TMU);	/* uhexen2-26bm */
+	R_ProgramSamplerUnit (p->program, p->u_lmlayer1, "u_lmlayer1", LMSTYLE_TMU);	/* #439 */
+	R_ProgramSamplerUnit (p->program, p->u_lmlayer2, "u_lmlayer2", LMSTYLE_TMU + 1);
+	R_ProgramSamplerUnit (p->program, p->u_lmlayer3, "u_lmlayer3", LMSTYLE_TMU + 2);
 	/* uhexen2-mf9u.  Unit 1 is free on every program that declares this —
 	 * gl_shader_alias has no u_texture1 — so the depth snapshot can sit
 	 * there permanently and only the sprite path ever binds to it. */
-	if (p->u_soft_depth >= 0) glUniform1i_fp(p->u_soft_depth, 1);
+	R_ProgramSamplerUnit (p->program, p->u_soft_depth, "u_soft_depth", 1);
 	/* The cube shadow maps' block and sampler, on the world and alias
 	 * programs that declare them (#97). */
 	R_Shadow_InitProgram (p->program);
@@ -791,7 +828,7 @@ static qboolean GL_InitParticleGPUProgram (gl_particle_gpu_prog_t *p)
 
 	/* Bind texture unit defaults */
 	R_UseProgram (p->base.program);
-	if (p->base.u_texture0 >= 0) glUniform1i_fp(p->base.u_texture0, 0);
+	R_ProgramSamplerUnit (p->base.program, p->base.u_texture0, "u_texture0", 0);
 	R_UseProgram (0);
 
 	Con_SafePrintf("  shader 'particle_gpu' loaded (program %u)\n", p->base.program);
@@ -845,7 +882,7 @@ static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p, rprog_id_t id)
 
 	memset(p, 0, sizeof(*p));
 	p->program = prog;
-	p->u_lightgrid = glGetUniformLocation_fp(prog, "u_lightgrid");	/* uhexen2-waum */
+	p->u_lightgrid = R_ProgramSamplerLoc (prog, "u_lightgrid");	/* uhexen2-waum */
 	/* This program is linked by hand rather than by GL_InitProgramSplit, so
 	 * it binds its blocks by hand too (#450, hazard 9).  Without this its
 	 * four blocks would all sit at binding 0 -- Hi-Z's HizParams. */
@@ -856,24 +893,20 @@ static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p, rprog_id_t id)
 	/* Bind skin texture to unit 0 */
 	R_UseProgram (prog);
 	{
-		GLint u_tex = glGetUniformLocation_fp(prog, "u_texture0");
-		if (u_tex >= 0)
-			glUniform1i_fp(u_tex, 0);
+		GLint u_tex = R_ProgramSamplerLoc (prog, "u_texture0");
+		R_ProgramSamplerUnit (prog, u_tex, "u_texture0", 0);
 		/* Material maps on units 3 and 4, matching the world program and
 		 * what GL_InitProgramSplit does for every other user of salias_frag.
 		 * Without this both samplers default to unit 0 and every model
 		 * would read its own skin as a normal map.  uhexen2-4kcb. */
-		u_tex = glGetUniformLocation_fp(prog, "u_texture3");
-		if (u_tex >= 0)
-			glUniform1i_fp(u_tex, 3);
-		u_tex = glGetUniformLocation_fp(prog, "u_texture4");
-		if (u_tex >= 0)
-			glUniform1i_fp(u_tex, 4);
+		u_tex = R_ProgramSamplerLoc (prog, "u_texture3");
+		R_ProgramSamplerUnit (prog, u_tex, "u_texture3", 3);
+		u_tex = R_ProgramSamplerLoc (prog, "u_texture4");
+		R_ProgramSamplerUnit (prog, u_tex, "u_texture4", 4);
 	}
 	/* The froxel grid lives on its own unit for the whole world+entity draw;
 	 * GL_InitProgramSplit does this for every other program that declares it. */
-	if (p->u_lightgrid >= 0)
-		glUniform1i_fp(p->u_lightgrid, LIGHT_GRID_TMU);	/* uhexen2-waum */
+	R_ProgramSamplerUnit (p->program, p->u_lightgrid, "u_lightgrid", LIGHT_GRID_TMU);	/* uhexen2-waum */
 	R_Shadow_InitProgram (prog);	/* #97: salias_frag's DlShadow and u_dlshadowmap */
 	R_UseProgram (0);
 

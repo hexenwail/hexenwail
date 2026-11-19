@@ -447,7 +447,7 @@ dead = gpf & {"u_pose_base", "u_pose_base2", "u_skel_blend", "u_shadevector", "u
 if dead:
     errors.append(f"glprogram_t still carries skeletal locations that are -1 now: {sorted(dead)}")
 for n in ("u_pose_base", "u_pose_base2", "u_skel_blend", "u_shadevector", "u_lightcolor", "u_fullbright"):
-    if re.search(rf'glGetUniformLocation_fp\([^)]*"{n}"\)', gsc):
+    if re.search(rf'(?:glGetUniformLocation_fp|R_ProgramSamplerLoc)\s*\([^)]*"{n}"\)', gsc):
         errors.append(f"gl_shader.c still looks up the loose {n}")
 gipu = strip(body_of(gl_shader, r"static void GL_InitProgramUniforms \(glprogram_t \*p\)\s*\{") or "")
 if "R_BindAliasVertBlock(p->program);" not in gipu:

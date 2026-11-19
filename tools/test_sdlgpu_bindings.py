@@ -49,6 +49,13 @@ It also lists (without failing) compute storage images declared neither
 readonly nor writeonly -- read and written in one dispatch, which SDL_GPU
 only allows on a texture created with COMPUTE_STORAGE_SIMULTANEOUS_READ_WRITE.
 
+And it holds every graphics stage's read-only storage buffers to the
+backend's stand-in (#340 P2a): until P5 routes them, rg_frame.c binds each
+such slot to one zeroed buffer of RG_SSBO_STANDIN_BYTES (rg_internal.h),
+and Vulkan faults a draw whose buffer is smaller than the block's fixed part
+-- every member before a trailing runtime array, laid out by the SPIR-V's
+own Offset / ArrayStride / MatrixStride decorations.
+
 Usage:  test_sdlgpu_bindings.py SPIRV_DIR [--sources VK_DIR] [-v]
 
 SPIRV_DIR is CompileSpirv.cmake's output (<build>/engine/generated/spirv);
@@ -59,6 +66,7 @@ no spirv-cross or spirv-reflect needed.
 """
 from pathlib import Path
 import argparse
+import re
 import struct
 import sys
 
@@ -67,6 +75,11 @@ MAGIC = 0x07230203
 # Opcodes
 OP_NAME = 5
 OP_ENTRY_POINT = 15
+OP_TYPE_INT = 21
+OP_TYPE_FLOAT = 22
+OP_TYPE_VECTOR = 23
+OP_TYPE_MATRIX = 24
+OP_CONSTANT = 43
 OP_TYPE_IMAGE = 25
 OP_TYPE_SAMPLER = 26
 OP_TYPE_SAMPLED_IMAGE = 27
@@ -81,6 +94,9 @@ OP_MEMBER_DECORATE = 72
 # Decorations
 DEC_BLOCK = 2
 DEC_BUFFER_BLOCK = 3
+DEC_ARRAY_STRIDE = 6
+DEC_MATRIX_STRIDE = 7
+DEC_OFFSET = 35
 DEC_NON_WRITABLE = 24
 DEC_NON_READABLE = 25
 DEC_BINDING = 33
@@ -251,6 +267,99 @@ def parse(data):
     return stage, resources, problems
 
 
+def _words(data):
+    endian = "<" if struct.unpack_from("<I", data)[0] == MAGIC else ">"
+    return struct.unpack(endian + "%dI" % (len(data) // 4), data)
+
+
+def storage_min_sizes(data):
+    """[(name, bytes)] for each read-only storage buffer of a graphics stage:
+    the size of the block's fixed part, which is the least a bound buffer
+    may hold (a trailing runtime array may be empty)."""
+    words = _words(data)
+    names, decos, mdecos, types, consts, variables, models = {}, {}, {}, {}, {}, [], []
+    i = 5
+    while i < len(words):
+        wc, op = words[i] >> 16, words[i] & 0xFFFF
+        if wc == 0 or i + wc > len(words):
+            raise SpirvError("truncated instruction at word %d" % i)
+        ops = words[i + 1:i + wc]
+        if op == OP_NAME:
+            names[ops[0]] = bytes(struct.pack("<%dI" % (len(ops) - 1), *ops[1:])) \
+                .split(b"\0", 1)[0].decode("utf-8", "replace")
+        elif op == OP_ENTRY_POINT:
+            models.append(ops[0])
+        elif op == OP_DECORATE:
+            decos.setdefault(ops[0], {})[ops[1]] = ops[2:]
+        elif op == OP_MEMBER_DECORATE:
+            mdecos.setdefault(ops[0], {}).setdefault(ops[1], {})[ops[2]] = ops[3:]
+        elif op in (OP_TYPE_INT, OP_TYPE_FLOAT):
+            types[ops[0]] = ("scalar", ops[1] // 8)
+        elif op == OP_TYPE_VECTOR:
+            types[ops[0]] = ("vector", ops[1], ops[2])
+        elif op == OP_TYPE_MATRIX:
+            types[ops[0]] = ("matrix", ops[1], ops[2])
+        elif op == OP_TYPE_ARRAY:
+            types[ops[0]] = ("array", ops[1], ops[2])
+        elif op == OP_TYPE_RUNTIME_ARRAY:
+            types[ops[0]] = ("runtime", ops[1])
+        elif op == OP_TYPE_STRUCT:
+            types[ops[0]] = ("struct", list(ops[1:]))
+        elif op == OP_TYPE_POINTER:
+            types[ops[0]] = ("pointer", ops[1], ops[2])
+        elif op == OP_CONSTANT and len(ops) >= 3:
+            consts[ops[1]] = ops[2]
+        elif op == OP_VARIABLE:
+            variables.append((ops[0], ops[1], ops[2]))
+        i += wc
+    if len(models) != 1 or EXEC_MODELS.get(models[0]) == "compute":
+        return []
+
+    def size(t, mstride=None):
+        k = types.get(t, ("?",))
+        if k[0] == "scalar":
+            return k[1]
+        if k[0] == "vector":
+            return k[2] * size(k[1])
+        if k[0] == "matrix":
+            return k[2] * (mstride if mstride else size(k[1]))
+        if k[0] == "array":
+            stride = decos.get(t, {}).get(DEC_ARRAY_STRIDE, [None])[0]
+            n = consts.get(k[2])
+            if stride is None or n is None:
+                raise SpirvError("array %%%d without ArrayStride or a constant length" % t)
+            return n * stride
+        if k[0] == "runtime":
+            return 0
+        if k[0] == "struct":
+            end = 0
+            for m, mt in enumerate(k[1]):
+                md = mdecos.get(t, {}).get(m, {})
+                if DEC_OFFSET not in md:
+                    raise SpirvError("struct %%%d member %d has no Offset" % (t, m))
+                end = max(end, md[DEC_OFFSET][0] + size(mt, md.get(DEC_MATRIX_STRIDE, [None])[0]))
+            return end
+        raise SpirvError("type %%%d has no size here" % t)
+
+    out = []
+    for ptr_type, var, storage in variables:
+        if storage not in (SC_UNIFORM, SC_STORAGE_BUFFER):
+            continue
+        pointee = types.get(ptr_type, (None, None, None))[2]
+        sdec = decos.get(pointee, {})
+        if types.get(pointee, ("",))[0] != "struct":
+            continue
+        if storage == SC_STORAGE_BUFFER or DEC_BUFFER_BLOCK in sdec:
+            out.append((names.get(var) or names.get(pointee) or "%%%d" % var, size(pointee)))
+    return out
+
+
+def standin_bytes(root):
+    m = re.search(r"^#define RG_SSBO_STANDIN_BYTES\s+(\d+)\b",
+                  (root / "engine/h2shared/rg_internal.h").read_text(), re.M)
+    return int(m.group(1)) if m else None
+
+
 def check(stage, resources):
     """Return the rule violations for one stage's resources."""
     rule = RULES[stage]
@@ -311,6 +420,10 @@ def main(argv=None):
                 failures.append("%s: no %s.vk.spv in %s" % (s, s, args.spirv_dir))
 
     simultaneous = []
+    standin = standin_bytes(Path(__file__).resolve().parents[1])
+    biggest = (0, None)
+    if standin is None:
+        failures.append("engine/h2shared/rg_internal.h: no RG_SSBO_STANDIN_BYTES")
     for f in files:
         label = f.name[:-len(".vk.spv")]
         try:
@@ -319,6 +432,14 @@ def main(argv=None):
             failures.append("%s: %s" % (label, e))
             continue
         errs = problems + check(stage, resources)
+        try:
+            for name, need in storage_min_sizes(f.read_bytes()):
+                biggest = max(biggest, (need, "%s's %s" % (label, name)))
+                if standin is not None and need > standin:
+                    errs.append("%s: read-only storage buffer needs %d bytes, the backend's stand-in "
+                                "(RG_SSBO_STANDIN_BYTES) has %d" % (name, need, standin))
+        except SpirvError as e:
+            errs.append("storage-buffer size: %s" % e)
         failures += ["%s (%s): %s" % (label, stage, e) for e in errs]
         if stage == "compute":
             simultaneous += ["%s: %s" % (label, r.name) for r in resources if r.both_rw]
@@ -337,7 +458,8 @@ def main(argv=None):
         print("%d SDL_GPU binding violation(s) in %d stage(s)" % (len(failures), len(files)),
               file=sys.stderr)
         return 1
-    print("SDL_GPU bindings OK: %d Vulkan SPIR-V stages" % len(files))
+    print("SDL_GPU bindings OK: %d Vulkan SPIR-V stages; the largest graphics storage block is %s, "
+          "%d of the stand-in's %d bytes" % (len(files), biggest[1], biggest[0], standin))
     return 0
 
 

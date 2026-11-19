@@ -389,7 +389,7 @@ for w, why in ((r"p->program = R_Program_Create \(id\);", "build the twin by its
         errors.append(f"GL_InitOITProgramSplit must {why}")
 for s_, u in (("u_mboit_b0", "MBOIT_TMU_B0"), ("u_mboit_mom", "MBOIT_TMU_MOM"),
               ("u_mboit_b0_ms", "MBOIT_TMU_B0_MS"), ("u_mboit_mom_ms", "MBOIT_TMU_MOM_MS")):
-    if not re.search(rf"if \(p->{s_} >= 0\)\s*glUniform1i_fp\(p->{s_}, {u}\);", ip):
+    if not re.search(rf'R_ProgramSamplerUnit \(p->program, p->{s_}, "{s_}", {u}\);', ip):
         errors.append(f"GL_InitOITProgramSplit must point {s_} at {u}")
 if not re.search(r'#define GLSL_OIT_TWIN\t"#define OIT 1\\n"\n', sc):
     errors.append('GLSL_OIT_TWIN must be exactly "#define OIT 1\\n"')

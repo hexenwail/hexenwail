@@ -221,11 +221,33 @@ if "SH_DrawMap (&sh_draws[i]);" not in up or up.find("SH_RestoreState (&saved);"
         or "SH_DrawMap" in (body_of(shadow_c, r"static void SH_Select \(void\)\s*\{") or ""):
     errors.append("R_Shadow_Draw draws the collected maps, restores the state, then uploads; SH_Select draws nothing")
 ip = body_of(shadow_c, r"\nvoid R_Shadow_InitProgram \(GLuint program\)\s*\{") or ""
+# Both arms (#340 P2a): GL pins the block and points the sampler; SDL_GPU finds
+# the block by name at draw time and is told the sampler's unit the same way.
 if 'glGetUniformBlockIndex_fp (program, "DlShadow")' not in ip \
         or "glUniformBlockBinding_fp (program, blk, UBO_BINDING_DLSHADOW);" not in ip \
-        or 'glGetUniformLocation_fp (program, "u_dlshadowmap")' not in ip \
-        or "glUniform1i_fp (loc, DLSHADOW_TMU);" not in ip or "sizeof(r_dlshadow_t)" not in ip:
-    errors.append("R_Shadow_InitProgram must pin DlShadow, check its size, and set u_dlshadowmap to DLSHADOW_TMU")
+        or ip.count('loc = R_ProgramSamplerLoc (program, "u_dlshadowmap");') != 2 \
+        or ip.count('R_ProgramSamplerUnit (program, loc, "u_dlshadowmap", DLSHADOW_TMU);') != 2 \
+        or "sizeof(r_dlshadow_t)" not in ip:
+    errors.append("R_Shadow_InitProgram must pin DlShadow, check its size, and set u_dlshadowmap to DLSHADOW_TMU "
+                  "in both the GL and the SDL_GPU arm")
+# The SDL_GPU mirror (#340 P2a): registered under -gpu over the very struct
+# the GL arm uploads, and flushed where the GL arm uploads it -- after the
+# maps are drawn, before the world and alias draws that read it.  Unregistered,
+# every world and alias draw leaves the slot unpushed; unflushed, it reads
+# the zeros of the registration.
+init = body_of(shadow_c, r"\nvoid R_Shadow_Init \(void\)\s*\{") or ""
+if not re.search(r"#ifdef USE_SDL_GPU\s*(?:/\*.*?\*/\s*)?if \(R_GPU \(\)\)\s*"
+                 r'RG_UniformBlockRegister \("DlShadow", &sh_block, sizeof\(sh_block\)\);\s*#endif', init, re.S):
+    errors.append("R_Shadow_Init must register sh_block as the \"DlShadow\" mirror under USE_SDL_GPU, if R_GPU ()")
+if not re.search(r"#ifdef USE_SDL_GPU\s*(?:/\*.*?\*/\s*)?if \(R_GPU \(\)\)\s*\{\s*"
+                 r'RG_UniformBlockFlushed \("DlShadow"\);\s*return;\s*\}\s*#endif\s*'
+                 r"GL_BindBuffer \(GL_UNIFORM_BUFFER, sh_ubo\);\s*"
+                 r"glBufferData_fp \(GL_UNIFORM_BUFFER, sizeof\(sh_block\), &sh_block, GL_DYNAMIC_DRAW\);", up, re.S) \
+        or up.find("RG_UniformBlockFlushed") < up.find("SH_RestoreState (&saved);"):
+    errors.append("R_Shadow_Draw must flush the DlShadow mirror under -gpu right where the GL arm uploads the "
+                  "block, after the maps are drawn")
+if len(re.findall(r"RG_UniformBlock(?:Register|Flushed) \(\"DlShadow\"", shadow_c)) != 2:
+    errors.append("gl_shadow.c must register the DlShadow mirror once and flush it once")
 SITES = {
     "GL_InitProgramSplit": r"static qboolean GL_InitProgramSplit \([^)]*\)\s*\{",
     "GL_InitOITProgramSplit": r"static void GL_InitOITProgramSplit \([^)]*\)\s*\{",
@@ -251,7 +273,8 @@ for p in sorted((ROOT / "engine").rglob("gl_*.c")):
     if p.name == "gl_shadow.c" or tmu is None:
         continue
     t = strip(p.read_text(errors="replace"))
-    for m in re.finditer(r"GL_TEXTURE0\s*\+\s*(\d+)\b|R_Bind\w*\s*\(\s*(\d+)\s*,|glUniform1i_fp\s*\([^,]+,\s*(\d+)\s*\)", t):
+    for m in re.finditer(r"GL_TEXTURE0\s*\+\s*(\d+)\b|R_Bind\w*\s*\(\s*(\d+)\s*,|glUniform1i_fp\s*\([^,]+,\s*(\d+)\s*\)"
+                         r"|R_ProgramSamplerUnit\s*\([^;]*?,\s*(\d+)\s*\)", t):
         if int(next(g for g in m.groups() if g)) == tmu:
             errors.append(f"{p.relative_to(ROOT)} uses texture unit {tmu}, DLSHADOW_TMU's")
 if tmu is None or tmu in others or not 0 <= tmu < 16:

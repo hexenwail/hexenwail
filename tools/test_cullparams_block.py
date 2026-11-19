@@ -150,8 +150,8 @@ if not draw:
     errors.append("no R_DrawWorldCulled body found")
 elif "R_SetWorldFrag (" not in draw.group(1):
     errors.append("R_DrawWorldCulled no longer writes the world fragment set")
-if "glGetUniformLocation_fp" in code:
-    errors.append("glGetUniformLocation_fp still used in gl_worldcull.c")
+if "glGetUniformLocation_fp" in code or "R_ProgramSamplerLoc" in code:
+    errors.append("glGetUniformLocation_fp (or its R_ProgramSamplerLoc seam) still used in gl_worldcull.c")
 # The block bindings are plumbing, not uploads; both calls must still
 # exist (the bare name also appears in the two null guards -- count calls).
 if len(re.findall(r"glUniformBlockBinding_fp\s*\(", code)) != 2:

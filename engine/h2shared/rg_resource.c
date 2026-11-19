@@ -29,7 +29,16 @@
  * an RGB / RGB8 texture is stored RGBA8 with alpha forced to 255 at upload,
  * which is what GL's RGB8 returns from the sampler; BGRA source data is
  * swizzled to RGBA.  Anything else unsupported is counted and left
- * undefined, and a draw that samples it gets the white placeholder.
+ * undefined, and a draw that samples it gets a placeholder.
+ *
+ * Placeholders (#340 P2a) are typed: Vulkan requires the texture a sampler
+ * reads to match it, so each kind a stage can declare has its own -- per
+ * dimensionality, float (opaque white, as gl_solid_white), int and uint
+ * (zero: u_lightgrid's "no light in this froxel"), and a depth cube array
+ * read through a compare sampler (depth 1.0: "lit") for
+ * samplerCubeArrayShadow.  A texture a sampler cannot read -- a float one
+ * on a uint sampler, a colour one on a shadow sampler -- is swapped for the
+ * placeholder and counted, rather than handed to the draw.
  *
  * Copyright (C) 2026  Contributors of the uHexen2 project
  *
@@ -98,10 +107,13 @@ static GLuint		rgt_units[RT_MAX_TEXTURE_UNITS][RG_TT_COUNT];
 static SDL_GPUTexture	**rgt_retired;
 static int		rgt_numretired, rgt_maxretired;
 
-/* Placeholders, one per dimensionality: opaque white, as gl_solid_white. */
-static SDL_GPUTexture	*rgt_white[RG_TT_COUNT];
-static SDL_GPUSampler	*rgt_white_sampler;
-static qboolean		rgt_white_uploaded;
+/* Placeholders: per class and dimensionality (white or zero, uploaded once),
+ * and the shadow kind (depth, cleared once).  NULL where the device lacks
+ * the format for that dimensionality. */
+static SDL_GPUTexture	*rgt_ph[RG_SC_COUNT][RG_TT_COUNT];
+static SDL_GPUTexture	*rgt_ph_shadow;		/* RG_TT_CUBE_ARRAY */
+static SDL_GPUSampler	*rgt_ph_sampler, *rgt_ph_shadow_sampler;
+static qboolean		rgt_ph_uploaded, rgt_ph_shadow_cleared;
 
 /* Samplers are few and shared; keyed by their whole create-info. */
 #define RG_MAX_SAMPLERS	64
@@ -253,6 +265,7 @@ static qboolean RGT_Target (GLenum target, rg_textype_t *type, int *layer)
 	case GL_TEXTURE_3D:		*type = RG_TT_3D; return true;
 	case GL_TEXTURE_2D_ARRAY:	*type = RG_TT_2D_ARRAY; return true;
 	case GL_TEXTURE_CUBE_MAP:	*type = RG_TT_CUBE; return true;
+	case GL_TEXTURE_CUBE_MAP_ARRAY:	*type = RG_TT_CUBE_ARRAY; return true;
 	}
 	if (target >= GL_TEXTURE_CUBE_MAP_POSITIVE_X && target <= GL_TEXTURE_CUBE_MAP_NEGATIVE_Z)
 	{
@@ -532,6 +545,7 @@ static void RGT_Realize (rgtex_t *t)
 	case RG_TT_3D:		ci.type = SDL_GPU_TEXTURETYPE_3D; break;
 	case RG_TT_CUBE:	ci.type = SDL_GPU_TEXTURETYPE_CUBE; break;
 	case RG_TT_2D_ARRAY:	ci.type = SDL_GPU_TEXTURETYPE_2D_ARRAY; break;
+	case RG_TT_CUBE_ARRAY:	ci.type = SDL_GPU_TEXTURETYPE_CUBE_ARRAY; break;
 	default:		ci.type = SDL_GPU_TEXTURETYPE_2D; break;
 	}
 	ci.format = t->fmt;
@@ -644,10 +658,11 @@ void RG_TexImage (GLenum target, GLuint tex, GLint level, GLint internalformat,
 		RG_NoteUnhandled ("depth texture upload");
 		return;
 	}
-	if (ttype == RG_TT_2D_ARRAY && pixels)
+	if ((ttype == RG_TT_2D_ARRAY || ttype == RG_TT_CUBE_ARRAY) && pixels)
 	{
 		/* One region per layer: SDL_GPU's 2D-array upload is a layer
-		 * with depth 1, not a box. */
+		 * with depth 1, not a box.  A cube-map array's GL depth counts
+		 * layer-faces, which is SDL_GPU's layer index too. */
 		size_t	slab = (((size_t)width * RGT_SourceBpp (format, type) + 3) & ~(size_t)3) * height;
 		int	i;
 
@@ -861,73 +876,208 @@ void RG_BindTexture (GLuint unit, GLenum target, GLuint tex)
 	}
 	if (!RGT_Target (target, &type, &layer))
 	{
-		/* GL_TEXTURE_2D_MULTISAMPLE / CUBE_MAP_ARRAY: P6. */
+		/* GL_TEXTURE_2D_MULTISAMPLE: P6. */
 		RG_NoteUnhandled ("texture bind to a target with no SDL_GPU type yet");
 		return;
 	}
 	rgt_units[unit][type] = tex;
 }
 
-static void RGT_CreatePlaceholders (void)
+/* Layers of a 1x1 placeholder of each dimensionality. */
+static int RGT_PhLayers (int type)
 {
-	SDL_GPUTextureCreateInfo	ci;
-	SDL_GPUSamplerCreateInfo	si;
-	int				i;
-
-	for (i = 0; i < RG_TT_COUNT; i++)
-	{
-		SDL_zero (ci);
-		ci.type = (i == RG_TT_3D) ? SDL_GPU_TEXTURETYPE_3D :
-			  (i == RG_TT_CUBE) ? SDL_GPU_TEXTURETYPE_CUBE :
-			  (i == RG_TT_2D_ARRAY) ? SDL_GPU_TEXTURETYPE_2D_ARRAY : SDL_GPU_TEXTURETYPE_2D;
-		ci.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
-		ci.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
-		ci.width = ci.height = 1;
-		ci.layer_count_or_depth = (i == RG_TT_CUBE) ? 6 : 1;
-		ci.num_levels = 1;
-		rgt_white[i] = SDL_CreateGPUTexture (rg_dev, &ci);
-		if (!rgt_white[i])
-			Sys_Error ("SDL_GPU: cannot create the placeholder texture (%s)", SDL_GetError ());
-	}
-	SDL_zero (si);
-	rgt_white_sampler = RGT_SamplerFor (&si);
-	rgt_white_uploaded = false;
+	return (type == RG_TT_CUBE || type == RG_TT_CUBE_ARRAY) ? 6 : 1;
 }
 
-void RG_Res_ForDraw (GLuint unit, rg_textype_t type, SDL_GPUTextureSamplerBinding *out)
+/* Bytes of one placeholder texel per class: RGBA8 white, RGBA32 zero. */
+static int RGT_PhTexel (int sclass)
+{
+	return (sclass == RG_SC_FLOAT) ? 4 : 16;
+}
+
+static SDL_GPUTexture *RGT_MakePlaceholder (int type, SDL_GPUTextureFormat fmt,
+					    SDL_GPUTextureUsageFlags usage)
+{
+	static const SDL_GPUTextureType	types[RG_TT_COUNT] = {
+		SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTURETYPE_3D, SDL_GPU_TEXTURETYPE_CUBE,
+		SDL_GPU_TEXTURETYPE_2D_ARRAY, SDL_GPU_TEXTURETYPE_CUBE_ARRAY
+	};
+	SDL_GPUTextureCreateInfo	ci;
+	SDL_GPUTexture			*tex;
+
+	SDL_zero (ci);
+	ci.type = types[type];
+	ci.format = fmt;
+	ci.usage = usage;
+	ci.width = ci.height = 1;
+	ci.layer_count_or_depth = RGT_PhLayers (type);
+	ci.num_levels = 1;
+	if (!SDL_GPUTextureSupportsFormat (rg_dev, ci.format, ci.type, ci.usage))
+		return NULL;
+	tex = SDL_CreateGPUTexture (rg_dev, &ci);
+	if (!tex)
+		Con_Printf ("SDL_GPU: cannot create a placeholder texture (%s)\n", SDL_GetError ());
+	return tex;
+}
+
+static void RGT_CreatePlaceholders (void)
+{
+	static const SDL_GPUTextureFormat	fmts[RG_SC_COUNT] = {
+		SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
+		SDL_GPU_TEXTUREFORMAT_R32G32B32A32_INT,
+		SDL_GPU_TEXTUREFORMAT_R32G32B32A32_UINT
+	};
+	SDL_GPUSamplerCreateInfo	si;
+	int				c, i;
+
+	for (c = 0; c < RG_SC_COUNT; c++)
+	{
+		for (i = 0; i < RG_TT_COUNT; i++)
+			rgt_ph[c][i] = RGT_MakePlaceholder (i, fmts[c], SDL_GPU_TEXTUREUSAGE_SAMPLER);
+	}
+	/* The 2D white one is what every 2D draw falls back on. */
+	if (!rgt_ph[RG_SC_FLOAT][RG_TT_2D])
+		Sys_Error ("SDL_GPU: cannot create the placeholder texture (%s)", SDL_GetError ());
+	rgt_ph_shadow = RGT_MakePlaceholder (RG_TT_CUBE_ARRAY, SDL_GPU_TEXTUREFORMAT_D16_UNORM,
+					     SDL_GPU_TEXTUREUSAGE_SAMPLER |
+					     SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET);
+	if (!rgt_ph_shadow)
+		rgt_ph_shadow = RGT_MakePlaceholder (RG_TT_CUBE_ARRAY, SDL_GPU_TEXTUREFORMAT_D32_FLOAT,
+						     SDL_GPU_TEXTUREUSAGE_SAMPLER |
+						     SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET);
+	SDL_zero (si);
+	rgt_ph_sampler = RGT_SamplerFor (&si);
+	/* As GL samples sh_tex: compare on, LEQUAL; nearest, clamped. */
+	si.address_mode_u = si.address_mode_v = si.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+	si.enable_compare = true;
+	si.compare_op = SDL_GPU_COMPAREOP_LESS_OR_EQUAL;
+	rgt_ph_shadow_sampler = RGT_SamplerFor (&si);
+	rgt_ph_uploaded = false;
+	rgt_ph_shadow_cleared = false;
+}
+
+void RG_Res_ClearPlaceholders (SDL_GPUCommandBuffer *cmd)
+{
+	SDL_GPUDepthStencilTargetInfo	ds;
+	SDL_GPURenderPass		*pass;
+	int				k;
+
+	if (rgt_ph_shadow_cleared || !rgt_ph_shadow)
+		return;
+	for (k = 0; k < RGT_PhLayers (RG_TT_CUBE_ARRAY); k++)
+	{
+		SDL_zero (ds);
+		ds.texture = rgt_ph_shadow;
+		ds.clear_depth = 1.0f;
+		ds.load_op = SDL_GPU_LOADOP_CLEAR;
+		ds.store_op = SDL_GPU_STOREOP_STORE;
+		ds.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+		ds.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+		ds.layer = (Uint8) k;
+		pass = SDL_BeginGPURenderPass (cmd, NULL, 0, &ds);
+		if (!pass)
+			return;		/* tried again after the next copy pass */
+		SDL_EndGPURenderPass (pass);
+	}
+	rgt_ph_shadow_cleared = true;
+}
+
+/* What class of sampler can read fmt: an integer format only its own
+ * signedness, anything else (unorm, float, depth) a float one. */
+static rg_sampclass_t RGT_FormatClass (SDL_GPUTextureFormat fmt)
+{
+	switch (fmt)
+	{
+	case SDL_GPU_TEXTUREFORMAT_R16_UINT:
+	case SDL_GPU_TEXTUREFORMAT_R32_UINT:
+	case SDL_GPU_TEXTUREFORMAT_R32G32B32A32_UINT:
+		return RG_SC_UINT;
+	case SDL_GPU_TEXTUREFORMAT_R32G32B32A32_INT:
+		return RG_SC_SINT;
+	default:
+		return RG_SC_FLOAT;
+	}
+}
+
+static qboolean RGT_IsDepth (SDL_GPUTextureFormat fmt)
+{
+	return fmt == SDL_GPU_TEXTUREFORMAT_D16_UNORM || fmt == SDL_GPU_TEXTUREFORMAT_D24_UNORM ||
+	       fmt == SDL_GPU_TEXTUREFORMAT_D32_FLOAT || fmt == SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT ||
+	       fmt == SDL_GPU_TEXTUREFORMAT_D32_FLOAT_S8_UINT;
+}
+
+qboolean RG_Res_ForDraw (GLuint unit, rg_textype_t type, rg_sampclass_t sclass, qboolean shadow,
+			 SDL_GPUTextureSamplerBinding *out)
 {
 	rgtex_t	*t = (unit < RT_MAX_TEXTURE_UNITS) ? RGT_Get (rgt_units[unit][type]) : NULL;
 
 	if (t && t->defined && t->type == type)
 	{
-		RGT_Realize (t);
-		if (t->tex)
+		/* The sampler is built from the texture's GL compare mode, and
+		 * Vulkan wants it to match the shader: a compare sampler for a
+		 * *Shadow one and only for it. */
+		qboolean	cmp = (t->compare_mode == GL_COMPARE_REF_TO_TEXTURE);
+
+		if (shadow ? (!RGT_IsDepth (t->fmt) || !cmp) : (RGT_FormatClass (t->fmt) != sclass || cmp))
+			RG_NoteUnhandled ("texture of a format its sampler cannot read (placeholder bound)");
+		else
 		{
-			t->read_segment = RG_Frame_Segment ();
-			t->read_ever = true;
-			out->texture = t->tex;
-			out->sampler = RGT_Sampler (t);
-			if (out->sampler)
-				return;
+			RGT_Realize (t);
+			if (t->tex)
+			{
+				t->read_segment = RG_Frame_Segment ();
+				t->read_ever = true;
+				out->texture = t->tex;
+				out->sampler = RGT_Sampler (t);
+				if (out->sampler)
+					return true;
+			}
 		}
 	}
-	out->texture = rgt_white[type];
-	out->sampler = rgt_white_sampler;
+	out->texture = shadow ? ((type == RG_TT_CUBE_ARRAY) ? rgt_ph_shadow : NULL)
+			      : rgt_ph[sclass][type];
+	out->sampler = shadow ? rgt_ph_shadow_sampler : rgt_ph_sampler;
+	if (!out->texture || !out->sampler)
+	{
+		RG_NoteUnhandled ("sampler kind with no placeholder on this device (draw dropped)");
+		return false;
+	}
+	return true;
 }
 
 /* ------------------------------------------------------------------ */
 /* The copy pass                                                       */
 /* ------------------------------------------------------------------ */
 
-/* The placeholders' one texel each (2D, 3D, six cube faces, 2D array) is
- * the first upload ever staged, padded like every other to 16 bytes. */
-#define RG_WHITE_BYTES	(4 * (1 + 1 + 6 + 1))
-#define RG_WHITE_STAGED	((RG_WHITE_BYTES + 15) & ~15u)
+/* The placeholders' texels, one per layer of each, are the first upload ever
+ * staged: the float ones' white, then the int and uint ones' zeros.  Each
+ * class starts 16-byte aligned, like every other upload: Vulkan wants a copy's
+ * buffer offset to be a multiple of its texel size, and RGBA32 is 16 bytes.
+ * The depth one is cleared instead (RG_Res_ClearPlaceholders). */
+static Uint32 RGT_PhBytes (int sclass)
+{
+	Uint32	n = 0;
+	int	i;
+
+	for (i = 0; i < RG_TT_COUNT; i++)
+		n += RGT_PhLayers (i) * RGT_PhTexel (sclass);
+	return (n + 15) & ~15u;
+}
+
+static Uint32 RGT_PhStaged (void)
+{
+	Uint32	n = 0;
+	int	c;
+
+	for (c = 0; c < RG_SC_COUNT; c++)
+		n += RGT_PhBytes (c);
+	return n;
+}
 
 Uint32 RG_Res_PendingBytes (void)
 {
 	/* Each upload is staged 16-byte aligned. */
-	Uint32	n = rgt_white_uploaded ? 0 : RG_WHITE_STAGED;
+	Uint32	n = rgt_ph_uploaded ? 0 : RGT_PhStaged ();
 	int	i;
 
 	if (!rgt_pending_bytes)
@@ -944,18 +1094,19 @@ Uint32 RG_Res_PendingBytes (void)
 	return n;
 }
 
-static Uint32	rgt_white_staged;
+static Uint32	rgt_ph_staged;
 
 void RG_Res_StageUploads (Uint8 *dst, Uint32 base)
 {
 	Uint32	off = 0;
 	int	i;
 
-	if (!rgt_white_uploaded)
+	if (!rgt_ph_uploaded)
 	{
-		memset (dst, 255, RG_WHITE_BYTES);
-		rgt_white_staged = base;
-		off = RG_WHITE_STAGED;
+		memset (dst, 0, RGT_PhStaged ());
+		memset (dst, 255, RGT_PhBytes (RG_SC_FLOAT));
+		rgt_ph_staged = base;
+		off = RGT_PhStaged ();
 	}
 	if (!rgt_pending_bytes)
 		return;
@@ -980,27 +1131,32 @@ void RG_Res_IssueUploads (SDL_GPUCopyPass *copy, SDL_GPUTransferBuffer *tb)
 	SDL_GPUTextureRegion		dst;
 	int				i, k;
 
-	if (!rgt_white_uploaded)
+	if (!rgt_ph_uploaded)
 	{
-		Uint32	off = rgt_white_staged;
+		Uint32	start = rgt_ph_staged, off;
+		int	c;
 
-		for (i = 0; i < RG_TT_COUNT; i++)
+		for (c = 0; c < RG_SC_COUNT; start += RGT_PhBytes (c), c++)
 		{
-			int	layers = (i == RG_TT_CUBE) ? 6 : 1;
-
-			for (k = 0; k < layers; k++, off += 4)
+			off = start;
+			for (i = 0; i < RG_TT_COUNT; i++)
 			{
-				SDL_zero (src);
-				src.transfer_buffer = tb;
-				src.offset = off;
-				SDL_zero (dst);
-				dst.texture = rgt_white[i];
-				dst.layer = k;
-				dst.w = dst.h = dst.d = 1;
-				SDL_UploadToGPUTexture (copy, &src, &dst, false);
+				for (k = 0; k < RGT_PhLayers (i); k++, off += RGT_PhTexel (c))
+				{
+					if (!rgt_ph[c][i])
+						continue;
+					SDL_zero (src);
+					src.transfer_buffer = tb;
+					src.offset = off;
+					SDL_zero (dst);
+					dst.texture = rgt_ph[c][i];
+					dst.layer = k;
+					dst.w = dst.h = dst.d = 1;
+					SDL_UploadToGPUTexture (copy, &src, &dst, false);
+				}
 			}
 		}
-		rgt_white_uploaded = true;
+		rgt_ph_uploaded = true;
 	}
 	if (!rgt_pending_bytes)
 		return;
@@ -1068,12 +1224,17 @@ void RG_Res_Shutdown (void)
 			SDL_ReleaseGPUTexture (rg_dev, rgt[i].tex);
 	}
 	RG_Res_EndFrame ();
-	for (i = 0; i < RG_TT_COUNT; i++)
+	for (i = 0; i < RG_SC_COUNT * RG_TT_COUNT; i++)
 	{
-		if (rgt_white[i])
-			SDL_ReleaseGPUTexture (rg_dev, rgt_white[i]);
-		rgt_white[i] = NULL;
+		SDL_GPUTexture	**ph = &rgt_ph[i / RG_TT_COUNT][i % RG_TT_COUNT];
+
+		if (*ph)
+			SDL_ReleaseGPUTexture (rg_dev, *ph);
+		*ph = NULL;
 	}
+	if (rgt_ph_shadow)
+		SDL_ReleaseGPUTexture (rg_dev, rgt_ph_shadow);
+	rgt_ph_shadow = NULL;
 	for (i = 0; i < rgs_count; i++)
 	{
 		if (rgs_cache[i].sampler)

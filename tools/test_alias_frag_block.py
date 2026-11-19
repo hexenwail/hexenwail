@@ -209,7 +209,8 @@ if not re.search(r"GLint R_BindAliasFragBlock \(GLuint program\)\s*\{.*?RU_BindO
 if '#include "layout.inc"\n#define UNIFORMS_FRAG\n#include "uniforms.inc"\n#include "alias.inc"' not in frag:
     errors.append("salias_frag.glsl must include layout.inc, then uniforms.inc with UNIFORMS_FRAG, then alias.inc")
 # Kept loose, on purpose: none.  Samplers are opaque and stay loose (GL
-# assigns their units with glUniform1i; Vulkan via FRAG_TEX).
+# assigns their units with R_ProgramSamplerUnit, glUniform1i in its GL arm;
+# Vulkan binds them via FRAG_TEX).
 ALLOWED_LOOSE = set()
 loose = [m.group(1) for m in re.finditer(
     r"^\s*(?:FRAG_TEX\(\d+\)\s*)?uniform\s+(?:(?:highp|mediump|lowp)\s+)?(?!sampler|usampler|isampler)\w+\s+(\w+)\s*(?:\[\w*\])?\s*;",
