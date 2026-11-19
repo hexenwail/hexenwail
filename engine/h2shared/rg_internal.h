@@ -173,16 +173,49 @@ typedef enum {
 	RG_TT_3D,
 	RG_TT_CUBE,
 	RG_TT_2D_ARRAY,
+	RG_TT_CUBE_ARRAY,
 	RG_TT_COUNT
 } rg_textype_t;
 
+/* What a sampler returns, from its SPIR-V sampled type: a float sampler
+ * reads a float, unorm or depth format, an int / uint sampler only an
+ * integer format of its own signedness.  Vulkan makes any other pairing an
+ * error at the draw. */
+typedef enum {
+	RG_SC_FLOAT,
+	RG_SC_SINT,
+	RG_SC_UINT,
+	RG_SC_COUNT
+} rg_sampclass_t;
+
+/* A sampler's GL texture unit before anything names one: a draw binds it a
+ * placeholder (R_ProgramSamplerUnit, gl_shader.c). */
+#define RG_UNIT_NONE	0xFF
+
+/* The zeroed buffer every read-only storage-buffer slot of a graphics stage
+ * is bound to until P5 routes the real ones.  Big enough for the fixed part
+ * of every such block in engine/shaders -- the largest is salias_inst_vert's
+ * ShadeDots, float[4096]; the others end in runtime arrays, whose minimum is
+ * empty.  tools/test_sdlgpu_bindings.py holds every blob to it. */
+#define RG_SSBO_STANDIN_BYTES	16384
+
 void	RG_Res_Init (void);
 void	RG_Res_Shutdown (void);
-/* The texture and sampler a draw binds for unit `unit` / dimensionality
- * `type`, created now if it has not been; a placeholder (opaque white) when
- * the unit holds nothing usable.  Stamps the texture as read by the current
- * segment, so a later upload into it flushes the segment first. */
-void	RG_Res_ForDraw (GLuint unit, rg_textype_t type, SDL_GPUTextureSamplerBinding *out);
+/* The texture and sampler a draw binds for a sampler reading GL unit `unit`
+ * (RG_UNIT_NONE: none) as dimensionality `type` and class `sclass` -- a depth
+ * texture with a compare sampler when `shadow` -- created now if it has not
+ * been.  A placeholder of exactly that kind when the unit holds nothing the
+ * sampler can read: opaque white (float), zero (int, uint), depth 1.0
+ * (shadow).  Stamps the texture as read by the current segment, so a later
+ * upload into it flushes the segment first.  False, and counted, when there
+ * is nothing to bind at all (a multisample sampler, a placeholder kind the
+ * device lacks): the draw has to be dropped. */
+qboolean RG_Res_ForDraw (GLuint unit, rg_textype_t type, rg_sampclass_t sclass, qboolean shadow,
+			 SDL_GPUTextureSamplerBinding *out);
+/* The depth placeholders are cleared rather than uploaded (a depth upload is
+ * not portable): one depth-only render pass per layer, once, outside any
+ * other pass.  rg_frame.c calls this after each copy pass. */
+void	RG_Res_ClearPlaceholders (SDL_GPUCommandBuffer *cmd);
 /* Bytes of queued texture uploads, and writing them: `RG_Res_StageUploads`
  * copies every queued upload into `dst` (mapped transfer memory at
  * `base`) and records where; `RG_Res_IssueUploads` issues them into the copy
@@ -201,12 +234,16 @@ void	RG_Res_Status (void);
 
 #define RG_MAX_STAGE_SAMPLERS	16
 #define RG_MAX_STAGE_UBOS	4
+#define RG_MAX_STAGE_SSBOS	8
 
 typedef struct {
 	char		name[32];
 	Uint8		binding;
 	Uint8		type;		/* rg_textype_t */
-	Uint8		unit;		/* the GL texture unit it reads */
+	Uint8		sclass;		/* rg_sampclass_t */
+	Uint8		shadow;		/* depth-compare (a *Shadow sampler) */
+	Uint8		ms;		/* multisample: nothing SDL_GPU can sample (P6) */
+	Uint8		unit;		/* the GL texture unit it reads, RG_UNIT_NONE */
 } rgsampler_t;
 
 typedef struct {
@@ -220,6 +257,7 @@ typedef struct {
 	rgsampler_t	samplers[RG_MAX_STAGE_SAMPLERS];
 	int		num_ubos;
 	rgubo_t		ubos[RG_MAX_STAGE_UBOS];
+	int		num_ssbos;	/* read-only storage buffers, the reflection row's */
 } rgstage_t;
 
 typedef struct {

@@ -36,6 +36,7 @@ Checked, from the sources (stock python3, lint.yml):
       alone; every seam sees rg_device.h only (#340 P1c).
   the SDL_GPU seams (#340 P1c) -- gl_texcreate.c, gl_texbind.c,
   gl_pipeline.c, gl_uniforms.c, gl_vbo.c and gl_shader.c's R_Program_Create
+  and R_ProgramSamplerLoc / R_ProgramSamplerUnit
     * every GL call in them is one -gpu cannot reach: in the body of an
       `if (!R_GPU ())`, in the else of an `if (R_GPU ())`, after an
       `if (R_GPU ())` that returns (in a block still open at the call), or
@@ -329,8 +330,10 @@ SEAMS = {
     "engine/h2shared/gl_uniforms.c": None,
     "engine/h2shared/gl_vbo.c": None,
     # The rest of gl_shader.c is GL program set-up the seam calls into;
-    # only the creation entry point is the seam.
-    "engine/h2shared/gl_shader.c": {"R_Program_Create"},
+    # only the creation entry point and the sampler-unit pair (#340 P2a)
+    # are the seam.
+    "engine/h2shared/gl_shader.c": {"R_Program_Create", "R_ProgramSamplerLoc",
+                                    "R_ProgramSamplerUnit"},
 }
 # Functions that make GL calls with no arm, and why that is safe under -gpu.
 UNARMED_OK = {

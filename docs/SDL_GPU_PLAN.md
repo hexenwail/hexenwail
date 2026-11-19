@@ -13,8 +13,9 @@ GitHub #340, under the decision in #447: SDL_GPU is the route to Vulkan, D3D12 a
 | P0 | `-gpu`: device, swapchain, clear colour; generated null-GL table; `gpu_unrouted` | #500 |
 | P1a | Texture creation, upload and sampler state through `gl_texcreate.c` | #501 |
 | P1b | Every program created by id through `R_Program_Create`; reflection rows in `gl_progid_refl.h` | #502 |
-| P1c | Console, menus, HUD and plaque drawn through SDL_GPU. Files: `rg_frame.c`, `rg_resource.c`, `rg_pipeline.c`, `rg_shader.c` | branch `bobberb/sdlgpu-p1c-e34a6394`, not yet merged |
-| Decision 6 | SPIR-V embedded: `EmbedSpirv.cmake` writes `generated/spirv_gen.c` (60 blobs, 638 KiB) under `USE_SDL_GPU`; `-gpu` boots with no flag. Checks: `tools/test_embed_spirv.py`, `tools/test_rg_sources.py` | same branch |
+| P1c | Console, menus, HUD and plaque drawn through SDL_GPU. Files: `rg_frame.c`, `rg_resource.c`, `rg_pipeline.c`, `rg_shader.c` | #504 |
+| Decision 6 | SPIR-V embedded: `EmbedSpirv.cmake` writes `generated/spirv_gen.c` (60 blobs, 638 KiB) under `USE_SDL_GPU`; `-gpu` boots with no flag. Checks: `tools/test_embed_spirv.py`, `tools/test_rg_sources.py` | #504 |
+| P2a | Plumbing the world draws need, nothing new drawn. Sampler units through `R_ProgramSamplerLoc` / `R_ProgramSamplerUnit` (GL arm: the same `glGetUniformLocation` / `glUniform1i` calls); reflection records cube arrays, sampled class (float / int / uint), shadow and multisample, and leaves every non-`u_textureN` sampler unmapped until told; typed placeholders (float, int, uint per dimensionality, a depth cube array with a compare sampler); a zeroed 16 KiB stand-in for every read-only storage-buffer slot; the `DlShadow` mirror. Checks: `tools/test_rg_sampler_units.py`, the stand-in size in `tools/test_sdlgpu_bindings.py`. Known gaps: every OIT twin declares `sampler2DMS` (`oit.inc`), which SDL_GPU cannot sample, so their draws are dropped and counted until P6; and `sh_tex` now binds as a real cube array, so a shadow pass that ran under `-gpu` (gated off today by `R_LightCluster_Available`) would sample a map nothing rendered | branch `bobberb/sdlgpu-p2a-e34a6394` |
 
 ## Decisions
 
@@ -39,13 +40,17 @@ Still open: 4 (first-release scope), 7 (pipeline pre-warm), 8 (D3D12 Tier-1 hard
 
 ## Next
 
-1. ~~Embed the SPIR-V (decision 6).~~ Done, see the table above.
-2. **Land P1c together with step 1.**
-3. **P2:** the opaque world, brush and alias models, and the sky. This needs:
-   - a sampler-unit seam (`glGetUniformLocation` and `glUniform1i` at program setup; about nine lints pin those call sites);
-   - a depth remap from GL [-1,1] to Vulkan [0,1];
-   - a registered DlShadow mirror;
-   - front-face checks against GL frames.
+1. ~~Embed the SPIR-V (decision 6), land P1c.~~ Done, see the table above.
+2. ~~**P2a:** sampler units, typed placeholders, storage-buffer stand-in, DlShadow mirror.~~ Done, see the table above.
+3. **P2:** the opaque world, brush and alias models, and the sky, in four more slices:
+
+   | Slice | What | Gate |
+   |---|---|---|
+   | P2b | Depth: reuse reversed-Z (`gl_clipcontrol_able` on in `GL_Init_NullGL`, so `GL_Frustum` emits [0,1]), a clear seam that sets the next pass's load ops (depth 0 under reversed-Z, not today's 1.0), depth clip on when depth testing; world, brush, alias and classic sky through the immediate path (`R_BuildWorldVBO` / `R_BuildSkyStencilVBO` skipped under `-gpu`, instancing and skeletal gated on `shader_storage`) | a new `tools/sweep-world-gpu.steps` on `demo1` `setpos` cameras, both sides at `+gamma 1 r_dynamic 0 r_gpulightstyles 0 r_ssao 0 r_dlight_occlusion 0`, fog, bloom and MSAA off; `tools/shot-diff.sh` with a PSNR threshold from three reference runs; `gl_cull 1` = `gl_cull 0` = GL; no `glDrawElements*`, `glBindVertexArray`, `glVertexAttrib4f` or `glClear` in `gpu_unrouted`; 0 validation errors; front-face checks against GL frames |
+   | P2c | Stencil (`have_stencil` true under `-gpu`); the sky pre-pass and the stencilled skybox | as P2b, on sky views |
+   | P2d | Buffer seams in `gl_buffer.c` (`R_GenBuffers`, `R_BufferData`, `R_BufferSubData`, `R_DeleteBuffers`) and `rg_buffer.c`; a VAO shadow; `R_DrawElements` / instanced; the constant `ATTR_COLOR` as an instance-rate stream; the VBO paths back on | new routing lints; the draw-site lints updated |
+   | P2e | Skeletal and instanced alias storage buffers (optional, else P5) | |
+
 4. **Later phases:**
 
    | Phase | What |

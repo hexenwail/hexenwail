@@ -457,9 +457,12 @@ cfiles = sorted(p for d in ("engine/h2shared", "engine/hexen2", "engine/hexenwor
                 for p in (ROOT / d).rglob("*") if p.suffix in (".c", ".h"))
 if len(cfiles) < 20:
     errors.append(f"only {len(cfiles)} C files found; the scan is broken")
-WRITE = re.compile(r"\bglUniform(?!BlockBinding)\w*\s*\(")
+# A sampler's unit goes through the #340 P2a seam, R_ProgramSamplerUnit
+# (prog, loc, name, unit), whose GL arm is the one glUniform1i: its location
+# is the second argument, every other write's the first.
+WRITE = re.compile(r"\b(?:glUniform(?!BlockBinding)\w*|R_ProgramSamplerUnit)\s*\(")
 write_ok = stage_samplers
-lookup = re.compile(r'glGetUniformLocation\w*\s*\([^;]*?"(u_\w+)"')
+lookup = re.compile(r'(?:glGetUniformLocation\w*|R_ProgramSamplerLoc)\s*\([^;]*?"(u_\w+)"')
 ALIAS_RX = re.compile(r"\b(?:%s)\b" % "|".join(sorted(alias_names | STAGE_SYMS)))
 for p in cfiles:
     rel = p.relative_to(ROOT)
@@ -495,7 +498,8 @@ for p in cfiles:
         target = re.compile(r"\b(?:%s)\b\s*(?:\([^()]*\))?\s*(?:\[[^\]]*\])?\s*(?:\.|->)\s*(u_\w+)" % obj)
         for w in WRITE.finditer(body):
             i = w.end() - 1
-            loc = split_args(body[i + 1:match_close(body, i, "(", ")") - 1])[0]
+            args = split_args(body[i + 1:match_close(body, i, "(", ")") - 1])
+            loc = args[1] if w.group(0).startswith("R_ProgramSamplerUnit") and len(args) > 1 else args[0]
             for f in target.findall(loc):
                 if f not in write_ok:
                     errors.append(f"{rel}: glUniform* on an alias-family program's {f} (`{loc}`); "
@@ -528,13 +532,13 @@ for cache in sorted(set(re.findall(r"\bimm_cache_(\w+)\b", vbo))):
 gipu = body_of(gsc, gsb, r"static void GL_InitProgramUniforms \(glprogram_t \*p\)\s*\{") or ""
 if not gipu:
     errors.append("cannot find GL_InitProgramUniforms")
-plain = re.compile(r'p->(u_\w+)\s*=\s*glGetUniformLocation_fp\s*\(\s*p->program\s*,\s*"(u_\w+)"\s*\)\s*;')
+plain = re.compile(r'p->(u_\w+)\s*=\s*R_ProgramSamplerLoc\s*\(\s*p->program\s*,\s*"(u_\w+)"\s*\)\s*;')
 gipu_names = set()
-for stmt in re.findall(r"[^;{}]*\bglGetUniformLocation\w*\s*\([^;]*;", gipu):
+for stmt in re.findall(r"[^;{}]*\b(?:glGetUniformLocation\w*|R_ProgramSamplerLoc)\s*\([^;]*;", gipu):
     m = plain.fullmatch(stmt.strip())
     if not m or m.group(1) != m.group(2):
         errors.append(f"GL_InitProgramUniforms: `{' '.join(stmt.split())}` is not "
-                      "`p->u_x = glGetUniformLocation_fp(p->program, \"u_x\");`")
+                      "`p->u_x = R_ProgramSamplerLoc (p->program, \"u_x\");`")
         continue
     gipu_names.add(m.group(1))
     if m.group(1) not in set(live_loose) | NON_ALIAS_DEAD:

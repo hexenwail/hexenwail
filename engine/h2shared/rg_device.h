@@ -90,6 +90,13 @@ GLuint	RG_ProgramCreate (rprog_id_t id);
 /* The SDL_GPU uniform slot `block` is bound to in `program` (either stage),
  * or -1 if no stage declares it.  The GL arm's block index stand-in. */
 GLint	RG_ProgramBlock (GLuint program, const char *block);
+/* gl_shader.c R_ProgramSamplerLoc / R_ProgramSamplerUnit: the binding of
+ * sampler `name` in either stage of `program`, -1 if neither declares it;
+ * and the GL texture unit it reads, set in every stage that declares it.
+ * A sampler nothing names a unit for reads none: each draw binds it a
+ * placeholder and counts that (#340 P2a). */
+GLint	RG_ProgramSampler (GLuint program, const char *name);
+void	RG_ProgramSamplerUnit (GLuint program, const char *name, GLint unit);
 
 /* gl_uniforms.c.  A CPU mirror and the GL binding point it stands for; the
  * backend pushes whatever was last flushed into the slot each program's

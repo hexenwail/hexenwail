@@ -27,6 +27,9 @@ name: Shaders SPIR-V
 # tools/test_vk_flip_y.py then checks that every Vulkan vertex stage stores
 # the negated gl_Position.y on every return path and no GL one does; its
 # source half (each main ends in VK_FLIP_Y()) is in lint.yml (#340).
+# The same script holds every graphics stage's read-only storage blocks to
+# the zeroed stand-in the backend binds until P5 (RG_SSBO_STANDIN_BYTES in
+# engine/h2shared/rg_internal.h, hence that path below; #340 P2a).
 # tools/gen_program_reflection.py --check regenerates the per-blob resource
 # counts SDL_GPU creates each stage with and fails if the checked-in
 # engine/h2shared/gl_progid_refl.h is stale (#340 P1b).
@@ -55,6 +58,7 @@ on:
       - 'tools/gen_program_reflection.py'
       - 'tools/test_embed_spirv.py'
       - 'engine/h2shared/gl_progid_refl.h'
+      - 'engine/h2shared/rg_internal.h'
   push:
     branches: [master]
     paths:
@@ -73,6 +77,7 @@ on:
       - 'tools/gen_program_reflection.py'
       - 'tools/test_embed_spirv.py'
       - 'engine/h2shared/gl_progid_refl.h'
+      - 'engine/h2shared/rg_internal.h'
 
 # Builds and throws the result away; nothing here writes to the repository.
 permissions:

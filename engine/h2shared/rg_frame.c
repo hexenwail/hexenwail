@@ -28,6 +28,11 @@
  * no fans, so quads use a static index buffer (0,1,2, 0,2,3 per quad, as
  * GL_VBO_Init's) and polygons/fans and line loops get indices in the stream.
  *
+ * Every slot a draw's program declares is bound (#340 P2a), because SDL_GPU
+ * faults a draw that leaves one empty: each sampler its texture or a typed
+ * placeholder (rg_resource.c), each read-only storage buffer the zeroed
+ * stand-in below until P5 routes the real ones.
+ *
  * Copyright (C) 2026  Contributors of the uHexen2 project
  *
  * This program is free software; you can redistribute it and/or modify
@@ -135,6 +140,7 @@ typedef struct {
 	Uint32				count;		/* vertices, or indices */
 	int				nvs, nfs;
 	SDL_GPUTextureSamplerBinding	vs[RG_MAX_STAGE_SAMPLERS], fs[RG_MAX_STAGE_SAMPLERS];
+	Uint8				nvssbo, nfssbo;	/* storage-buffer slots, all the stand-in */
 	int				npush;
 	rgpush_t			push[2 * RG_MAX_STAGE_UBOS];
 	SDL_GPUViewport			vp;
@@ -168,6 +174,10 @@ static SDL_GPUBuffer		*rgf_vbuf;	/* the stream, vertex + index usage */
 static Uint32			rgf_vbuf_size;
 static SDL_GPUBuffer		*rgf_quadbuf;	/* static quad indices */
 static qboolean			rgf_quad_uploaded;
+/* RG_SSBO_STANDIN_BYTES of zeros, every read-only storage-buffer slot's */
+static SDL_GPUBuffer		*rgf_ssbo;
+static SDL_GPUBuffer		*rgf_ssbo_slots[RG_MAX_STAGE_SSBOS];
+static qboolean			rgf_ssbo_uploaded;
 static SDL_GPUTransferBuffer	*rgf_tbuf;
 static Uint32			rgf_tbuf_size;
 static SDL_GPUBuffer		*rgf_retired_bufs[8];
@@ -351,7 +361,8 @@ static Uint32 RGF_BlockOffset (rgblock_t *b)
 	return b->arena_ofs;
 }
 
-static void RGF_RecordStage (rgdraw_t *d, const rgprog_t *prog, int stage)
+/* False when the stage cannot be bound whole: the draw is dropped. */
+static qboolean RGF_RecordStage (rgdraw_t *d, const rgprog_t *prog, int stage)
 {
 	const rgstage_t	*st = &prog->stage[stage];
 	SDL_GPUTextureSamplerBinding *out = (stage == RPROG_STAGE_VERTEX) ? d->vs : d->fs;
@@ -361,13 +372,29 @@ static void RGF_RecordStage (rgdraw_t *d, const rgprog_t *prog, int stage)
 	{
 		const rgsampler_t *s = &st->samplers[i];
 
-		RG_Res_ForDraw (s->unit, (rg_textype_t) s->type, &out[s->binding]);
+		if (s->ms)
+		{
+			RG_NoteUnhandled ("multisample sampler (SDL_GPU samples none; P6) -- draw dropped");
+			return false;
+		}
+		if (s->unit == RG_UNIT_NONE)
+			RG_NoteUnhandled ("sampler with no GL unit mapping (bound to a placeholder)");
+		if (!RG_Res_ForDraw (s->unit, (rg_textype_t) s->type, (rg_sampclass_t) s->sclass,
+				     s->shadow, &out[s->binding]))
+			return false;
 		n = q_max (n, s->binding + 1);
 	}
 	if (stage == RPROG_STAGE_VERTEX)
 		d->nvs = n;
 	else
 		d->nfs = n;
+
+	if (st->num_ssbos > 0)
+		RG_NoteUnhandled ("read-only storage buffer read as the zeroed stand-in (routing is P5)");
+	if (stage == RPROG_STAGE_VERTEX)
+		d->nvssbo = (Uint8) st->num_ssbos;
+	else
+		d->nfssbo = (Uint8) st->num_ssbos;
 
 	for (i = 0; i < st->num_ubos; i++)
 	{
@@ -388,6 +415,7 @@ static void RGF_RecordStage (rgdraw_t *d, const rgprog_t *prog, int stage)
 		p->ofs = RGF_BlockOffset (&rgb_blocks[u->block]);
 		p->len = rgb_blocks[u->block].size;
 	}
+	return true;
 }
 
 void RG_DrawImm (GLenum mode, const void *verts, int count, int stride)
@@ -488,8 +516,12 @@ void RG_DrawImm (GLenum mode, const void *verts, int count, int stride)
 
 	/* Bindings and uniforms first: a texture realized here may queue
 	 * nothing, but a hazard flush must not split this draw's bytes. */
-	RGF_RecordStage (d, prog, RPROG_STAGE_VERTEX);
-	RGF_RecordStage (d, prog, RPROG_STAGE_FRAGMENT);
+	if (!RGF_RecordStage (d, prog, RPROG_STAGE_VERTEX) ||
+	    !RGF_RecordStage (d, prog, RPROG_STAGE_FRAGMENT))
+	{
+		rgf_dropped++;
+		return;
+	}
 
 	d->vb_ofs = RGF_StreamAlloc ((Uint32)count * stride);
 	memcpy (rgf_stream + d->vb_ofs, verts, (size_t)count * stride);
@@ -594,8 +626,9 @@ static qboolean RGF_CopyPass (void)
 {
 	Uint32			stream = (rgf_streamlen + 15) & ~15u;
 	Uint32			quad = rgf_quad_uploaded ? 0 : RG_QUAD_INDICES * sizeof(Uint16);
+	Uint32			ssbo = (rgf_ssbo_uploaded || !rgf_ssbo) ? 0 : RG_SSBO_STANDIN_BYTES;
 	Uint32			tex = RG_Res_PendingBytes ();
-	Uint32			total = stream + quad + tex;
+	Uint32			total = stream + quad + ssbo + tex;
 	Uint8			*map;
 	SDL_GPUCopyPass		*copy;
 	SDL_GPUTransferBufferLocation src;
@@ -638,8 +671,10 @@ static qboolean RGF_CopyPass (void)
 			ix[5] = (Uint16)(i * 4 + 3);
 		}
 	}
+	if (ssbo)
+		memset (map + stream + quad, 0, ssbo);
 	if (tex)
-		RG_Res_StageUploads (map + stream + quad, stream + quad);
+		RG_Res_StageUploads (map + stream + quad + ssbo, stream + quad + ssbo);
 	SDL_UnmapGPUTransferBuffer (rg_dev, rgf_tbuf);
 
 	copy = SDL_BeginGPUCopyPass (rgf_cmd);
@@ -662,6 +697,16 @@ static qboolean RGF_CopyPass (void)
 		dst.size = quad;
 		SDL_UploadToGPUBuffer (copy, &src, &dst, false);
 		rgf_quad_uploaded = true;
+	}
+	if (ssbo)
+	{
+		src.transfer_buffer = rgf_tbuf;
+		src.offset = stream + quad;
+		dst.buffer = rgf_ssbo;
+		dst.offset = 0;
+		dst.size = ssbo;
+		SDL_UploadToGPUBuffer (copy, &src, &dst, false);
+		rgf_ssbo_uploaded = true;
 	}
 	if (tex)
 		RG_Res_IssueUploads (copy, rgf_tbuf);
@@ -722,6 +767,10 @@ static void RGF_Replay (SDL_GPURenderPass *pass)
 			SDL_BindGPUVertexSamplers (pass, 0, d->vs, d->nvs);
 		if (d->nfs)
 			SDL_BindGPUFragmentSamplers (pass, 0, d->fs, d->nfs);
+		if (d->nvssbo)
+			SDL_BindGPUVertexStorageBuffers (pass, 0, rgf_ssbo_slots, d->nvssbo);
+		if (d->nfssbo)
+			SDL_BindGPUFragmentStorageBuffers (pass, 0, rgf_ssbo_slots, d->nfssbo);
 
 		vb.buffer = rgf_vbuf;
 		vb.offset = d->vb_ofs;
@@ -760,6 +809,7 @@ static void RGF_EndSegment (void)
 	}
 	if (!RGF_CopyPass ())
 		rgf_numdraws = 0;	/* nothing to read; drawing would fault */
+	RG_Res_ClearPlaceholders (rgf_cmd);
 
 	if (rgf_active && (rgf_numdraws || !rgf_cleared))
 	{
@@ -872,6 +922,20 @@ void RG_Frame_Init (void)
 	rgf_vp_set = false;
 	rgf_scissor_on = false;
 	rgf_quad_uploaded = false;
+	{
+		SDL_GPUBufferCreateInfo	ci;
+		int			i;
+
+		SDL_zero (ci);
+		ci.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
+		ci.size = RG_SSBO_STANDIN_BYTES;
+		rgf_ssbo = SDL_CreateGPUBuffer (rg_dev, &ci);
+		if (!rgf_ssbo)
+			Sys_Error ("SDL_GPU: cannot create the storage-buffer stand-in (%s)", SDL_GetError ());
+		for (i = 0; i < RG_MAX_STAGE_SSBOS; i++)
+			rgf_ssbo_slots[i] = rgf_ssbo;
+		rgf_ssbo_uploaded = false;
+	}
 }
 
 void RG_Frame_Shutdown (void)
@@ -889,6 +953,9 @@ void RG_Frame_Shutdown (void)
 		SDL_ReleaseGPUBuffer (rg_dev, rgf_retired_bufs[--rgf_numretired_bufs]);
 	if (rgf_vbuf)	SDL_ReleaseGPUBuffer (rg_dev, rgf_vbuf);
 	if (rgf_quadbuf) SDL_ReleaseGPUBuffer (rg_dev, rgf_quadbuf);
+	if (rgf_ssbo)	SDL_ReleaseGPUBuffer (rg_dev, rgf_ssbo);
+	rgf_ssbo = NULL;
+	memset (rgf_ssbo_slots, 0, sizeof(rgf_ssbo_slots));
 	if (rgf_tbuf)	SDL_ReleaseGPUTransferBuffer (rg_dev, rgf_tbuf);
 	if (rgf_color)	SDL_ReleaseGPUTexture (rg_dev, rgf_color);
 	if (rgf_depth)	SDL_ReleaseGPUTexture (rg_dev, rgf_depth);

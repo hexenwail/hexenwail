@@ -109,6 +109,12 @@
 #include "gl_pipeline.h"
 #include "gl_lightcluster.h"
 #include "gl_shadow.h"
+#ifdef USE_SDL_GPU
+#include "rg_device.h"	/* R_GPU (), the DlShadow mirror (#340 P2a) */
+#define SH_GPU()	R_GPU ()
+#else
+#define SH_GPU()	false
+#endif
 
 /* Cvars exist on every GL tier, so a config written on desktop loads quietly
  * on the web; only desktop reads them. */
@@ -441,9 +447,8 @@ static qboolean SH_BuildPrograms (void)
 	}
 
 	R_UseProgram (sh_dbgprog);
-	loc = glGetUniformLocation_fp (sh_dbgprog, "u_shadowdbg");
-	if (loc >= 0)
-		glUniform1i_fp (loc, DLSHADOW_TMU);
+	loc = R_ProgramSamplerLoc (sh_dbgprog, "u_shadowdbg");
+	R_ProgramSamplerUnit (sh_dbgprog, loc, "u_shadowdbg", DLSHADOW_TMU);
 	R_UseProgram (0);
 	glGenVertexArrays_fp (1, &sh_dbgvao);
 
@@ -1525,7 +1530,8 @@ void R_Shadow_Prepare (void)
 	sh_frame_updates = sh_frame_maps = sh_frame_acasts = 0;
 	sh_ndraws = 0;
 
-	if (!sh_ubo)
+	/* Under -gpu the block is a mirror (R_Shadow_Init), not a buffer. */
+	if (!sh_ubo && !SH_GPU ())
 	{
 		glGenBuffers_fp (1, &sh_ubo);
 		GL_BindBuffer (GL_UNIFORM_BUFFER, sh_ubo);
@@ -1565,6 +1571,15 @@ void R_Shadow_Draw (void)
 	if (sh_frame_maps > 0)
 		R_BindTextureTarget (DLSHADOW_TMU, GL_TEXTURE_CUBE_MAP_ARRAY, sh_tex);
 
+#ifdef USE_SDL_GPU
+	/* The same upload for the backend: every draw from here on pushes this
+	 * frame's block, as GL's buffer would hold it. */
+	if (R_GPU ())
+	{
+		RG_UniformBlockFlushed ("DlShadow");
+		return;
+	}
+#endif
 	GL_BindBuffer (GL_UNIFORM_BUFFER, sh_ubo);
 	glBufferData_fp (GL_UNIFORM_BUFFER, sizeof(sh_block), &sh_block, GL_DYNAMIC_DRAW);
 	GL_BindBuffer (GL_UNIFORM_BUFFER, 0);
@@ -1577,7 +1592,19 @@ void R_Shadow_InitProgram (GLuint program)
 	GLint	loc, size = 0;
 	static qboolean checked;
 
-	if (!program || !glGetUniformBlockIndex_fp || !glUniformBlockBinding_fp)
+	if (!program)
+		return;
+#ifdef USE_SDL_GPU
+	/* The block's slot is fixed in the SPIR-V and found by name at draw
+	 * time; only the sampler's unit has to be told (#340 P2a). */
+	if (R_GPU ())
+	{
+		loc = R_ProgramSamplerLoc (program, "u_dlshadowmap");
+		R_ProgramSamplerUnit (program, loc, "u_dlshadowmap", DLSHADOW_TMU);
+		return;
+	}
+#endif
+	if (!glGetUniformBlockIndex_fp || !glUniformBlockBinding_fp)
 		return;
 	blk = glGetUniformBlockIndex_fp (program, "DlShadow");
 	if (blk != GL_INVALID_INDEX)
@@ -1593,9 +1620,8 @@ void R_Shadow_InitProgram (GLuint program)
 					    (int)size, (int)sizeof(r_dlshadow_t));
 		}
 	}
-	loc = glGetUniformLocation_fp (program, "u_dlshadowmap");
-	if (loc >= 0)
-		glUniform1i_fp (loc, DLSHADOW_TMU);
+	loc = R_ProgramSamplerLoc (program, "u_dlshadowmap");
+	R_ProgramSamplerUnit (program, loc, "u_dlshadowmap", DLSHADOW_TMU);
 }
 
 void R_Shadow_DrawDebug (void)
@@ -1699,5 +1725,12 @@ void R_Shadow_Init (void)
 	Cvar_RegisterVariable (&r_shadow_casters);
 #ifndef USE_GLES
 	Cmd_AddCommand ("r_shadowinfo", R_ShadowInfo_f);
+#endif
+#ifdef USE_SDL_GPU
+	/* After VID_Init, so R_GPU () is settled (-gpu is restart-only).  The
+	 * world and alias stages declare DlShadow; without the mirror their
+	 * draws would leave its slot unpushed. */
+	if (R_GPU ())
+		RG_UniformBlockRegister ("DlShadow", &sh_block, sizeof(sh_block));
 #endif
 }

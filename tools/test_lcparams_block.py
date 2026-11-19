@@ -86,7 +86,7 @@ if not re.search(r"#define LC_PARAMS_UBO_BINDING\s+5\b", csrc):
     errors.append("LC_PARAMS_UBO_BINDING is not 5")
 if "5 is\n * gl_lightcluster.c's LcParams" not in (ROOT / "engine/h2shared/gl_shader.h").read_text():
     errors.append("gl_shader.h's binding registry does not list 5 as LcParams")
-if "glGetUniformLocation_fp" in code:
+if "glGetUniformLocation_fp" in code or "R_ProgramSamplerLoc" in code:
     errors.append("gl_lightcluster.c still queries a uniform location")
 if "lc_compute_body" in code:
     errors.append("the inline lc_compute_body is back in gl_lightcluster.c")

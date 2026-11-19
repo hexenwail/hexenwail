@@ -496,6 +496,17 @@ jobs:
       - name: SDL_GPU backend stays in the desktop GL client
         run: python3 tools/test_rg_sources.py
 
+      # A sampler's texture unit is set through R_ProgramSamplerLoc /
+      # R_ProgramSamplerUnit, whose GL arms are the glGetUniformLocation /
+      # glUniform1i pair and whose SDL_GPU arms write the unit into the
+      # program's reflected samplers: no other caller but gl_postprocess.c
+      # and gl_ssao.c (P4 / P5), every sampler of every routed program a
+      # unit from the TMU constants, no two on one unit; and the backend's
+      # reflection, unit seam and typed placeholders lifted and run
+      # (#340 P2a).
+      - name: Sampler units go through one seam
+        run: python3 tools/test_rg_sampler_units.py
+
       # rg_null.c, SDL_GPU mode's counting null GL table, is generated from
       # gl_func.h; a stale copy would leave a new entry point NULL under -gpu
       # (#340 P0).
@@ -581,7 +592,8 @@ jobs:
       - name: Held entities keep their lerps
         run: python3 tools/test_delta_held_lerp.py
       # Every value a shader reads comes through a std140 block; the only
-      # glUniform* left is the sampler bind (#19).
+      # glUniform* left is the sampler bind (#19), and that goes through
+      # R_ProgramSamplerUnit (test_rg_sampler_units.py, #340 P2a).
       - name: No loose value uniforms
         run: python3 tools/test_no_loose_uniforms.py
       # A dynamic light behind a face does not light it, on every tier: the

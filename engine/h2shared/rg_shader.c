@@ -44,6 +44,7 @@
 #include "quakedef.h"
 #include "rg_internal.h"
 #include "rg_spirv.h"
+#include "gl_texbind.h"		/* RT_MAX_TEXTURE_UNITS */
 
 /* This run's blob source (see the top): a -gpushaders directory, or the
  * embedded table. */
@@ -127,6 +128,8 @@ const char *RG_ShaderSource (void)
 
 enum {
 	SPV_OpName = 5,
+	SPV_OpTypeInt = 21,
+	SPV_OpTypeFloat = 22,
 	SPV_OpTypeImage = 25,
 	SPV_OpTypeSampledImage = 27,
 	SPV_OpTypeStruct = 30,
@@ -145,11 +148,23 @@ enum {
 
 typedef struct {
 	Uint32		op;		/* the instruction that defines the id */
-	Uint32		a, b, c;	/* its first operands after the result id */
+	Uint32		a, b, c, d, e;	/* its first operands after the result id */
 	Uint32		set, binding;
 	qboolean	has_set, has_binding, block;
 	const char	*name;
 } spvid_t;
+
+/* An OpTypeImage's Dim and Arrayed operands as the texture kind a unit
+ * holds.  Anything else (1D, rect, buffer) reads as 2D; no stage in
+ * engine/shaders declares one. */
+static rg_textype_t RG_ImageType (Uint32 dim, Uint32 arrayed)
+{
+	if (dim == SPV_Dim3D)
+		return RG_TT_3D;
+	if (dim == SPV_DimCube)
+		return arrayed ? RG_TT_CUBE_ARRAY : RG_TT_CUBE;
+	return arrayed ? RG_TT_2D_ARRAY : RG_TT_2D;
+}
 
 /* The sampler and uniform-block bindings of one stage, by name. */
 static qboolean RG_Reflect (const Uint32 *w, size_t nwords, int sampler_set, int ubo_set,
@@ -197,13 +212,27 @@ static qboolean RG_Reflect (const Uint32 *w, size_t nwords, int sampler_set, int
 					d->set = w[p + 3], d->has_set = true;
 			}
 			break;
-		case SPV_OpTypeImage:		/* result, sampled type, dim, depth, arrayed */
-			if (wc >= 6 && w[p + 1] < bound)
+		case SPV_OpTypeImage:		/* result, sampled type, dim, depth, arrayed, ms */
+			if (wc >= 7 && w[p + 1] < bound)
 			{
 				ids[w[p + 1]].op = op;
-				ids[w[p + 1]].a = w[p + 3];
-				ids[w[p + 1]].b = w[p + 5];
+				ids[w[p + 1]].a = w[p + 3];	/* dim */
+				ids[w[p + 1]].b = w[p + 5];	/* arrayed */
+				ids[w[p + 1]].c = w[p + 4];	/* depth: 1 a shadow sampler */
+				ids[w[p + 1]].d = w[p + 2];	/* sampled type */
+				ids[w[p + 1]].e = w[p + 6];	/* multisampled */
 			}
+			break;
+		case SPV_OpTypeInt:		/* result, width, signedness */
+			if (wc >= 4 && w[p + 1] < bound)
+			{
+				ids[w[p + 1]].op = op;
+				ids[w[p + 1]].b = w[p + 3];
+			}
+			break;
+		case SPV_OpTypeFloat:		/* result, width */
+			if (wc >= 3 && w[p + 1] < bound)
+				ids[w[p + 1]].op = op;
 			break;
 		case SPV_OpTypeSampledImage:	/* result, image */
 		case SPV_OpTypeStruct:
@@ -260,21 +289,21 @@ static qboolean RG_Reflect (const Uint32 *w, size_t nwords, int sampler_set, int
 			s = &out->samplers[out->num_samplers++];
 			q_strlcpy (s->name, nm, sizeof(s->name));
 			s->binding = (Uint8) v->binding;
-			s->type = (img->a == SPV_Dim3D) ? RG_TT_3D :
-				  (img->a == SPV_DimCube) ? RG_TT_CUBE :
-				  (img->b) ? RG_TT_2D_ARRAY : RG_TT_2D;
+			s->type = RG_ImageType (img->a, img->b);
+			s->sclass = (img->d < bound && ids[img->d].op == SPV_OpTypeInt)
+				    ? (ids[img->d].b ? RG_SC_SINT : RG_SC_UINT) : RG_SC_FLOAT;
+			s->shadow = (img->c == 1);
+			s->ms = (img->e != 0);
 			/* The GL unit: u_textureN reads unit N, the convention every
-			 * 2D, flat, sky and particle stage follows.  The world's and
-			 * alias family's other samplers (light grid, lightstyle
-			 * layers, MBOIT, shadow maps) take their units from
-			 * glUniform1i in GL_InitProgramSplit; mapping those is P2. */
+			 * 2D, flat, sky and particle stage follows and the unit its
+			 * builder gives it.  Every other sampler (light grid,
+			 * lightstyle layers, MBOIT, shadow maps, soft depth) reads
+			 * the unit R_ProgramSamplerUnit names, and none until then:
+			 * its binding is a slot in the SPIR-V, not a GL unit. */
 			if (!strncmp (nm, "u_texture", 9) && nm[9] >= '0' && nm[9] <= '9' && !nm[10])
 				s->unit = (Uint8)(nm[9] - '0');
 			else
-			{
-				s->unit = s->binding;
-				RG_NoteUnhandled ("sampler with no GL unit mapping yet (bound by its binding)");
-			}
+				s->unit = RG_UNIT_NONE;
 		}
 		else if (v->b == SPV_ScUniform && ty->op == SPV_OpTypeStruct && ty->block)
 		{
@@ -377,6 +406,13 @@ static qboolean RG_CheckStage (rprog_id_t id, int stage, const void *code, size_
 	}
 	if (!RG_Reflect ((const Uint32 *) code, size / 4, sampler_set, ubo_set, out, blob))
 		return false;
+	out->num_ssbos = refl->ro_storage_buffers;
+	if (out->num_ssbos > RG_MAX_STAGE_SSBOS)
+	{
+		Con_Printf ("SDL_GPU: %s has %d read-only storage buffers, the backend binds %d\n",
+			    blob, out->num_ssbos, RG_MAX_STAGE_SSBOS);
+		return false;
+	}
 	if (out->num_samplers != refl->samplers || out->num_ubos != refl->uniform_buffers)
 	{
 		Con_Printf ("SDL_GPU: %s.vk.spv from %s has %d samplers and %d uniform blocks, this "
@@ -540,6 +576,47 @@ GLint RG_ProgramBlock (GLuint program, const char *block)
 		}
 	}
 	return -1;
+}
+
+GLint RG_ProgramSampler (GLuint program, const char *name)
+{
+	const rgprog_t	*p = RG_Program (program);
+	int		s, i;
+
+	if (!p)
+		return -1;
+	for (s = 0; s < RPROG_MAX_STAGES; s++)
+	{
+		for (i = 0; i < p->stage[s].num_samplers; i++)
+		{
+			if (!strcmp (p->stage[s].samplers[i].name, name))
+				return p->stage[s].samplers[i].binding;
+		}
+	}
+	return -1;
+}
+
+void RG_ProgramSamplerUnit (GLuint program, const char *name, GLint unit)
+{
+	rgprog_t	*p;
+	int		s, i;
+
+	if (program == 0 || (int)program > rg_numprogs)
+		return;
+	if (unit < 0 || unit >= RT_MAX_TEXTURE_UNITS)
+	{
+		RG_NoteUnhandled ("sampler pointed at a texture unit above 15 (left unmapped)");
+		return;
+	}
+	p = rg_progs[program - 1];
+	for (s = 0; s < RPROG_MAX_STAGES; s++)
+	{
+		for (i = 0; i < p->stage[s].num_samplers; i++)
+		{
+			if (!strcmp (p->stage[s].samplers[i].name, name))
+				p->stage[s].samplers[i].unit = (Uint8) unit;
+		}
+	}
 }
 
 void RG_Shader_Init (void)
