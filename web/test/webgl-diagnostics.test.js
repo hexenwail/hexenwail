@@ -154,9 +154,12 @@ test('every engine shader family carries an ES-tier header', async () => {
 
   // The tier is USE_GLES, not __EMSCRIPTEN__: a desktop -DUSE_GLES=ON build
   // reaches the same code paths and is how ES regressions get caught locally.
-  // The headers' text is engine/shaders/glonly/tier_*.glsl since #450.
+  // The headers' text is engine/shaders/glonly/tier_*.glsl since #450.  The
+  // post-process headers sit in gl_shader.c beside the program table that
+  // pairs them with their stages (#340 P1b).
   assert.match(shader, /#ifdef USE_GLES\n#define GLSL_VERT_HEADER\s+TIER_ES\n/);
-  assert.match(postprocess, /#ifdef USE_GLES\n#define PP_VERT_HEADER\s+TIER_ES_PP\n/);
+  assert.match(shader, /#ifdef USE_GLES\n#define PP_VERT_HEADER\s+TIER_ES_PP\n/);
+  assert.doesNotMatch(postprocess, /#define PP_VERT_HEADER/);
   assert.match(tierEs, /^#version 300 es\nprecision highp float;\n$/);
   assert.match(tierEsPp, /^#version 300 es\nprecision highp float;\nprecision highp int;\nprecision highp sampler3D;\n$/);
 

@@ -18,10 +18,12 @@ Checks the pieces that have to move together:
   * its outputs match sworld_frag.glsl's and sworld_opaque_frag.glsl's inputs
     by name, type, interpolation, precision and location (FRAG_IN = VERT_OUT,
     for SPIR-V), and their VERT_OUT locations are distinct and 0..n-1;
-  * the literal is gone, the three world programs compile the file through
-    GLSL_VERT_HEADER with GLSL_WORLD_FRAG_HEADER for their fragment files
-    (world_oit desktop-only, built by GL_InitOITProgramSplit as the same file
-    with "#define OIT 1" after the header, #450 W3), the WebGL smoke still builds both ES world programs, and no
+  * the literal is gone, the three world programs' rows in gl_shader.c's
+    program table (#340 P1b) compile the file through GLSL_VERT_HEADER with
+    GLSL_WORLD_FRAG_HEADER for their fragment files (world_oit desktop-only,
+    built by GL_InitOITProgramSplit as the same file with GLSL_OIT_TWIN,
+    "#define OIT 1", after the header, #450 W3), the WebGL smoke still builds
+    both ES world programs, and no
     glprogram_t field, lookup or C identifier for the old loose u_mvp /
     u_modelview is left;
   * every path that draws with a world program writes both members and
@@ -235,7 +237,7 @@ for loc, typ, name in decl_in:
     slot, want_t = WANT_IN[name]
     if not loc or int(loc) != attr.get(slot):
         errors.append(f"{name} must be VERT_IN({attr.get(slot)}) ({slot}); a layout location overrides "
-                      "GL_LinkProgram's glBindAttribLocation, so a wrong one reads another attribute")
+                      "R_Program_Create's glBindAttribLocation, so a wrong one reads another attribute")
     if typ != want_t or imm.get(slot) != WIDTH.get(typ) or (slot in world and world[slot] != WIDTH.get(typ)):
         errors.append(f"{name} is {typ}; the imm VAO feeds {slot} with {imm.get(slot)} and the world VAO "
                       f"with {world.get(slot, 'a generic value')} components")
@@ -305,10 +307,17 @@ if sorted(locs) != list(range(len(vo))) or len(re.findall(r"\bout\b", vcode)) !=
 # ------------------------------------------------------------ the C side's builds
 if re.search(r"static const char sworld_vert\[\]", gl_shader):
     errors.append("the inline sworld_vert literal is back in gl_shader.c")
+# (row in the program table, #340 P1b; its build in GL_Shaders_Init)
 BUILDS = {
-    "world": r'GL_InitProgramSplit\(&gl_shader_world, "world", GLSL_VERT_HEADER, sworld_vert,\s*GLSL_WORLD_FRAG_HEADER, sworld_frag\);',
-    "world_opaque": r'GL_InitProgramSplit\(&gl_shader_world_opaque, "world_opaque", GLSL_VERT_HEADER, sworld_vert,\s*GLSL_WORLD_FRAG_HEADER, sworld_opaque_frag\);',
-    "world_oit": r'GL_InitOITProgramSplit\(&gl_shader_world_oit, "world", GLSL_VERT_HEADER, sworld_vert,\s*GLSL_WORLD_FRAG_HEADER, sworld_frag\);',
+    "world": (r'\[RPROG_WORLD\] = \{ "world", RPROG_LINK_ATTRIBS, \{\s*\{ GLSL_VERT_HEADER, sworld_vert, "sworld.vert" \},'
+              r'\s*\{ GLSL_WORLD_FRAG_HEADER, sworld_frag, "sworld.frag" \} \} \},',
+              r"GL_InitProgramSplit\(&gl_shader_world, RPROG_WORLD\);"),
+    "world_opaque": (r'\[RPROG_WORLD_OPAQUE\] = \{ "world_opaque", RPROG_LINK_ATTRIBS, \{\s*\{ GLSL_VERT_HEADER, sworld_vert, "sworld.vert" \},'
+                     r'\s*\{ GLSL_WORLD_FRAG_HEADER, sworld_opaque_frag, "sworld_opaque.frag" \} \} \},',
+                     r"GL_InitProgramSplit\(&gl_shader_world_opaque, RPROG_WORLD_OPAQUE\);"),
+    "world_oit": (r'\[RPROG_WORLD_OIT\] = \{ "world_oit", RPROG_LINK_ATTRIBS, \{\s*\{ GLSL_VERT_HEADER, sworld_vert, "sworld.vert" \},'
+                  r'\s*\{ GLSL_WORLD_FRAG_HEADER GLSL_OIT_TWIN, sworld_frag, "sworld_oit.frag" \} \} \},',
+                  r"GL_InitOITProgramSplit\(&gl_shader_world_oit, RPROG_WORLD_OIT\);"),
 }
 
 
@@ -328,23 +337,23 @@ def desktop_only(code, pos):
 gs_lit = strip(gl_shader)   # literals kept: the build calls quote names
 init = body_of(gs_lit, r"\nvoid GL_Shaders_Init \(void\)\s*\{") or ""
 init_at = gs_lit.find("{", gs_lit.find("\nvoid GL_Shaders_Init (void)"))
-for name, b in BUILDS.items():
-    found = list(re.finditer(b, init))
-    if len(found) != 1:
-        errors.append(f"{name}: expected one build in GL_Shaders_Init {b[:70]}..., found {len(found)}")
-    elif name == "world_oit" and not desktop_only(gs_lit, init_at + found[0].start()):
-        errors.append("world_oit is built outside #ifndef USE_GLES; the OIT programs are desktop-only")
-    elif name != "world_oit" and desktop_only(gs_lit, init_at + found[0].start()):
-        errors.append(f"{name} is built inside #ifndef USE_GLES; the ES tier needs it")
+for name, (row, b) in BUILDS.items():
+    for what, rx, text, at in (("row", row, gs_lit, 0), ("build in GL_Shaders_Init", b, init, init_at)):
+        found = list(re.finditer(rx, text))
+        if len(found) != 1:
+            errors.append(f"{name}: expected one {what} {rx[:70]}..., found {len(found)}")
+        elif name == "world_oit" and not desktop_only(gs_lit, at + found[0].start()):
+            errors.append(f"world_oit's {what} is outside #ifndef USE_GLES; the OIT programs are desktop-only")
+        elif name != "world_oit" and desktop_only(gs_lit, at + found[0].start()):
+            errors.append(f"{name}'s {what} is inside #ifndef USE_GLES; the ES tier needs it")
 if len(re.findall(r"\bsworld_vert\b", gsc)) != 3:
-    errors.append(f"sworld_vert is named {len(re.findall(r'sworld_vert', gsc))} times in gl_shader.c code, expected the 3 builds")
-if not re.search(r"GL_LoadProgramSplit \(vert_header, vert_src, oit_header, frag_src\);", gsc) \
-        or re.search(r"\bGL_CompileOITFragShader\w*\b", gsc):
-    errors.append("GL_InitOITProgramSplit must build every OIT twin from its vertex header and the fragment "
-                  "header plus \"#define OIT 1\" (#450 W3: the splice had no use left)")
+    errors.append(f"sworld_vert is named {len(re.findall(r'sworld_vert', gsc))} times in gl_shader.c code, expected the 3 rows")
+if re.search(r"\bGL_CompileOITFragShader\w*\b", gsc):
+    errors.append("GL_CompileOITFragShader is back; every OIT twin is the file with GLSL_OIT_TWIN after "
+                  "its header (#450 W3: the splice had no use left)")
 smoke = read("scripts/webgl-engine-shader-smoke.mjs")
-for spec in ("['world', 'shader', 'sworld_vert', 'sworld_frag']",
-             "['world_opaque', 'shader', 'sworld_vert', 'sworld_opaque_frag']"):
+for spec in ("['world', 'RPROG_WORLD', 'sworld_vert', 'sworld_frag']",
+             "['world_opaque', 'RPROG_WORLD_OPAQUE', 'sworld_vert', 'sworld_opaque_frag']"):
     if spec not in smoke:
         errors.append(f"the WebGL smoke no longer builds {spec}; the ES tier's only compile of this file")
 

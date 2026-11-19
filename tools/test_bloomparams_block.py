@@ -65,9 +65,17 @@ for gone in ("bloom_vert_src", "bloom_bright_frag_src", "bloom_down_frag_src",
              "bloom_up_loc_rcpframe", "bloom_bright_loc_rcpframe"):
     if gone in code:
         errors.append(f"{gone} is still in gl_postprocess.c")
-for sym in ("sbloom_vert", "sbloom_bright_frag", "sbloom_down_frag", "sbloom_up_frag"):
-    if sym not in code:
-        errors.append(f"gl_postprocess.c never compiles {sym}")
+# The programs are rows of gl_shader.c's program table (#340 P1b), each
+# sbloom_vert with its fragment stage, built by id here.
+shader_c = (ROOT / "engine/h2shared/gl_shader.c").read_text()
+for pass_ in ("bright", "down", "up"):
+    rid = f"RPROG_BLOOM_{pass_.upper()}"
+    if not re.search(rf'\[{rid}\] = \{{ "bloom_{pass_}", RPROG_LINK_PLAIN, \{{\s*'
+                     rf'\{{ PP_VERT_HEADER, sbloom_vert, "sbloom.vert" \}},\s*'
+                     rf'\{{ PP_FRAG_HEADER, sbloom_{pass_}_frag, "sbloom_{pass_}.frag" \}} \}} \}},', shader_c):
+        errors.append(f"gl_shader.c has no {rid} row of sbloom_vert + sbloom_{pass_}_frag")
+    if not re.search(rf"bloom_{pass_}_prog = R_Program_Create\({rid}\);", code):
+        errors.append(f"gl_postprocess.c never builds {rid}")
 push = re.search(r"static void PP_PushBloomParams \([^)]*\)\s*\{(.*?)\n\}", code, re.S)
 if not push:
     errors.append("no PP_PushBloomParams")

@@ -17,9 +17,11 @@ Checks the pieces that have to move together:
     material, lightgrid) are one copy, included by both families, with no
     GLSL_* macro copy left in gl_shader.c (#450 W2 retired the last), and the
     froxel-grid sizes agree with the C side;
-  * the literal and its alias-only macros are gone, and all ten programs
-    compile the file through GLSL_ALIAS_FRAG_HEADER (NOPERSP in the header
-    for the four affine twins), the instanced pair binding its blocks by hand;
+  * the literal and its alias-only macros are gone, and all ten programs'
+    rows in gl_shader.c's program table (rprog_defs, #340 P1b) compile the
+    file through GLSL_ALIAS_FRAG_HEADER (GLSL_NOPERSP after it for the five
+    affine twins, GLSL_OIT_TWIN for the four OIT ones), each built by its
+    id, the instanced pair binding its blocks by hand;
   * every draw path that uses those programs writes the members it reads
     before it draws (the hazards in the #450 alias plan):
       GL_ImmPushBlocks (8), the skeletal draw (2, 5), the instanced main pass
@@ -339,23 +341,56 @@ for gone in ("GLSL_ALIAS_DLIGHT_DECL", "GLSL_ALIAS_DLIGHT_FN", "GLSL_ALIAS_DLIGH
              "GL_InitProgramDefines"):
     if re.search(rf"\b{gone}\b", strip(gl_shader)):
         errors.append(f"{gone} is still in gl_shader.c; salias_frag.glsl replaced it")
-H, NP = r"GLSL_ALIAS_FRAG_HEADER", r'GLSL_ALIAS_FRAG_HEADER "#define NOPERSP 1\\n"'
+def row(rid, vhdr, vsym, vblob, fhdr, fblob, link="RPROG_LINK_ATTRIBS"):
+    """The program table row of `rid`: its vertex stage, then salias_frag."""
+    return (rf'\[{rid}\] = \{{ "{rid[6:].lower()}", {link}, \{{\s*'
+            rf'\{{ {vhdr}, {vsym}, "{vblob}" \}},\s*\{{ {fhdr}, salias_frag, "{fblob}" \}} \}} \}},')
+
+
+H, NP = "GLSL_ALIAS_FRAG_HEADER", "GLSL_ALIAS_FRAG_HEADER GLSL_NOPERSP"
+V, VNP = "GLSL_VERT_HEADER", "GLSL_VERT_HEADER GLSL_NOPERSP"
+OIT, NPOIT = H + " GLSL_OIT_TWIN", NP + " GLSL_OIT_TWIN"
 builds = {
-    "alias": rf'GL_InitProgramSplit\(&gl_shader_alias, "alias", GLSL_VERT_HEADER, salias_vert,\s*{H}, salias_frag\)',
-    "alias_np": rf'GL_InitProgramSplit\(&gl_shader_alias_np, "alias_np",\s*GLSL_VERT_HEADER "#define NOPERSP 1\\n", salias_vert,\s*{NP}, salias_frag\)',
-    "alias_oit": rf'GL_InitOITProgramSplit\(&gl_shader_alias_oit, "alias", GLSL_VERT_HEADER, salias_vert,\s*{H}, salias_frag\)',
-    "alias_np_oit": rf'GL_InitOITProgramSplit\(&gl_shader_alias_np_oit, "alias_np",\s*GLSL_VERT_HEADER "#define NOPERSP 1\\n", salias_vert,\s*{NP}, salias_frag\)',
-    "skeletal": rf'GL_InitProgramSplit\(&gl_shader_skeletal, "skeletal", GLSL_VERT_HEADER, sskeletal_vert,\s*{H}, salias_frag\)',
-    "skeletal_np": rf'GL_InitProgramSplit\(&gl_shader_skeletal_np, "skeletal_np",\s*GLSL_VERT_HEADER "#define NOPERSP 1\\n", sskeletal_vert,\s*{NP}, salias_frag\)',
-    "skeletal_oit": rf'GL_InitOITProgramSplit\(&gl_shader_skeletal_oit, "skeletal", GLSL_VERT_HEADER, sskeletal_vert,\s*{H}, salias_frag\)',
-    "skeletal_np_oit": rf'GL_InitOITProgramSplit\(&gl_shader_skeletal_np_oit, "skeletal_np",\s*GLSL_VERT_HEADER "#define NOPERSP 1\\n", sskeletal_vert,\s*{NP}, salias_frag\)',
+    "alias": (row("RPROG_ALIAS", V, "salias_vert", "salias.vert", H, "salias.frag"),
+              r"GL_InitProgramSplit\(&gl_shader_alias, RPROG_ALIAS\);"),
+    "alias_np": (row("RPROG_ALIAS_NP", VNP, "salias_vert", "salias_np.vert", NP, "salias_np.frag"),
+                 r"GL_InitProgramSplit\(&gl_shader_alias_np, RPROG_ALIAS_NP\);"),
+    "alias_oit": (row("RPROG_ALIAS_OIT", V, "salias_vert", "salias.vert", OIT, "salias_oit.frag"),
+                  r"GL_InitOITProgramSplit\(&gl_shader_alias_oit, RPROG_ALIAS_OIT\);"),
+    "alias_np_oit": (row("RPROG_ALIAS_NP_OIT", VNP, "salias_vert", "salias_np.vert", NPOIT,
+                         "salias_np_oit.frag"),
+                     r"GL_InitOITProgramSplit\(&gl_shader_alias_np_oit, RPROG_ALIAS_NP_OIT\);"),
+    "skeletal": (row("RPROG_SKELETAL", V, "sskeletal_vert", "sskeletal.vert", H, "salias.frag"),
+                 r"GL_InitProgramSplit\(&gl_shader_skeletal, RPROG_SKELETAL\);"),
+    "skeletal_np": (row("RPROG_SKELETAL_NP", VNP, "sskeletal_vert", "sskeletal_np.vert", NP,
+                        "salias_np.frag"),
+                    r"GL_InitProgramSplit\(&gl_shader_skeletal_np, RPROG_SKELETAL_NP\);"),
+    "skeletal_oit": (row("RPROG_SKELETAL_OIT", V, "sskeletal_vert", "sskeletal.vert", OIT,
+                         "salias_oit.frag"),
+                     r"GL_InitOITProgramSplit\(&gl_shader_skeletal_oit, RPROG_SKELETAL_OIT\);"),
+    "skeletal_np_oit": (row("RPROG_SKELETAL_NP_OIT", VNP, "sskeletal_vert", "sskeletal_np.vert", NPOIT,
+                            "salias_np_oit.frag"),
+                        r"GL_InitOITProgramSplit\(&gl_shader_skeletal_np_oit, RPROG_SKELETAL_NP_OIT\);"),
+    "alias_instanced": (row("RPROG_ALIAS_INSTANCED", "GLSL_ALIAS_INST_VERT_HEADER", "salias_inst_vert",
+                            "salias_inst.vert", H, "salias.frag", "RPROG_LINK_TEXCOORD"),
+                        r"GL_InitAliasInstProgram\(&gl_shader_alias_inst, RPROG_ALIAS_INSTANCED\)"),
+    "alias_instanced_np": (row("RPROG_ALIAS_INSTANCED_NP", "GLSL_ALIAS_INST_VERT_HEADER GLSL_NOPERSP",
+                               "salias_inst_vert", "salias_inst_np.vert", NP, "salias_np.frag",
+                               "RPROG_LINK_TEXCOORD"),
+                           r"GL_InitAliasInstProgram\(&gl_shader_alias_inst_np, RPROG_ALIAS_INSTANCED_NP\);"),
 }
-for name, b in builds.items():
-    if not re.search(b, gl_shader):
-        errors.append(f"build of {name} not found: {b[:70]}...")
+for name, (r, call) in builds.items():
+    if len(re.findall(r, gl_shader)) != 1:
+        errors.append(f"program row of {name} not found once: {r[:90]}...")
+    if not re.search(call, gl_shader):
+        errors.append(f"build of {name} not found: {call[:70]}...")
+if len(re.findall(r"\bsalias_frag\b", strip(gl_shader))) != len(builds):
+    errors.append(f"salias_frag is named {len(re.findall(r'salias_frag', strip(gl_shader)))} times in "
+                  f"gl_shader.c code, expected the {len(builds)} rows")
+if not re.search(r'#define GLSL_NOPERSP\t"#define NOPERSP 1\\n"\n', gl_shader):
+    errors.append('GLSL_NOPERSP must be "#define NOPERSP 1\\n"')
 inst = body_of(gl_shader, r"static qboolean GL_InitAliasInstProgram \([^)]*\)\s*\{") or ""
-for w in (r'q_snprintf \(frag_header, sizeof\(frag_header\), "%s%s",\s*GLSL_ALIAS_FRAG_HEADER, defines \? defines : ""\);',
-          r"fs = GL_CompileShaderSplit\(GL_FRAGMENT_SHADER, frag_header, salias_frag\);",
+for w in (r"prog = R_Program_Create \(id\);",
           r"R_BindProgramBlocks\(prog, &p->ub_vert, &p->ub_frag\);",
           r"p->ub_afrag = R_BindAliasFragBlock\(prog\);"):
     if not re.search(w, inst):
@@ -363,8 +398,6 @@ for w in (r'q_snprintf \(frag_header, sizeof\(frag_header\), "%s%s",\s*GLSL_ALIA
 if "memset(p, 0" in inst and "R_BindAliasFragBlock" in inst \
         and inst.index("memset(p, 0") > inst.index("R_BindAliasFragBlock"):
     errors.append("GL_InitAliasInstProgram binds the blocks before memset clears them")
-if "GL_AliasInst_Init" not in gl_shader or 'GL_InitAliasInstProgram(&gl_shader_alias_inst_np, "alias_instanced_np", "#define NOPERSP 1\\n");' not in gl_shader:
-    errors.append("the instanced affine twin must pass NOPERSP")
 st = re.search(r"typedef struct \{(.*?)\} gl_alias_inst_prog_t;", shader_h, re.S)
 stf = set(re.findall(r"GLint\s+(\w+);", strip(st.group(1)))) if st else set()
 if not {"ub_vert", "ub_frag", "ub_afrag"} <= stf:
@@ -379,13 +412,12 @@ if "p->ub_afrag = R_BindAliasFragBlock(p->program);" not in gl_shader:
 # OIT twin is the same file with "#define OIT 1" after the header since W3; no
 # OIT build may pass a NULL fragment header -- that would hand a #version-less
 # file to the driver.
-if not re.search(r'q_snprintf \(oit_header, sizeof\(oit_header\), "%s%s", frag_header, "#define OIT 1\\n"\);', gl_shader) \
-        or not re.search(r"GL_LoadProgramSplit \(vert_header, vert_src, oit_header, frag_src\);", gl_shader) \
+if not re.search(r'#define GLSL_OIT_TWIN\t"#define OIT 1\\n"\n', gl_shader) \
         or re.search(r"\bGL_CompileOITFragShader\w*\b|\boit_preamble\b", strip(gl_shader)):
-    errors.append("GL_InitOITProgramSplit must compile the file with its header plus \"#define OIT 1\" "
-                  "(the splice and its preamble are gone, #450 W3)")
-for m in re.finditer(r"GL_InitOITProgramSplit\s*\(&(\w+),[^;]*?,\s*NULL\s*,", gl_shader):
-    errors.append(f"{m.group(1)} passes a NULL fragment header; every OIT fragment stage is a file")
+    errors.append("the OIT twins must compile the file with its header plus GLSL_OIT_TWIN, "
+                  "\"#define OIT 1\" (the splice and its preamble are gone, #450 W3)")
+for m in re.finditer(r"\{\s*NULL\s*,\s*(\w+_frag)\s*,", gl_shader):
+    errors.append(f"a program row compiles {m.group(1)} with a NULL header; every fragment stage is a file")
 
 
 # ------------------------------------------------------------ per-path writes

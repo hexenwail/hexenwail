@@ -28,12 +28,14 @@ one ivec4.  Checks the pieces that have to move together:
     its two outputs at 0 and 1, and renames main last; lightgrid.inc moves the
     light buffer past those samplers, and the stages that read it include
     oit.inc first;
-  * the C side: no oit_preamble, splice or GL_SetOITMode is left;
-    GL_InitOITProgramSplit appends exactly "#define OIT 1\\n" (refusing a
-    truncated header), refuses a twin without OitFrag, points the moment
-    samplers at MBOIT_TMU_*, and is called six times, all desktop-only, on
-    exactly the three stages that carry the arm; GL_InitProgramUniforms binds
-    the block on every program; nothing else spells "#define OIT".
+  * the C side: no oit_preamble, splice or GL_SetOITMode is left; the six
+    twins are rows of gl_shader.c's program table (#340 P1b), desktop-only,
+    whose fragment header ends in GLSL_OIT_TWIN -- exactly "#define OIT 1\\n",
+    spelled once -- on exactly the three stages that carry the arm, and every
+    such row is built by GL_InitOITProgramSplit, which refuses a twin without
+    OitFrag and points the moment samplers at MBOIT_TMU_*;
+    GL_InitProgramUniforms binds the block on every program; nothing else
+    spells "#define OIT".
 """
 from pathlib import Path
 import re
@@ -380,48 +382,70 @@ gipu = body(sc, r"static void GL_InitProgramUniforms \(glprogram_t \*p\)\s*\{") 
 if "p->ub_ofrag = R_BindOITFragBlock(p->program);" not in gipu:
     errors.append("GL_InitProgramUniforms must bind OitFrag on every program (p->ub_ofrag)")
 ip = body(sc, r"static void GL_InitOITProgramSplit \([^)]*\)\s*\{") or ""
-for w, why in ((r'n = q_snprintf \(oit_header, sizeof\(oit_header\), "%s%s", frag_header, "#define OIT 1\\n"\);',
-                "append exactly \"#define OIT 1\\n\" to the fragment header"),
-               (r"if \(n > 0 && n < \(int\)sizeof\(oit_header\)\)\s*p->program = GL_LoadProgramSplit "
-                r"\(vert_header, vert_src, oit_header, frag_src\);", "refuse a truncated header"),
+for w, why in ((r"p->program = R_Program_Create \(id\);", "build the twin by its id"),
                (r"GL_InitProgramUniforms \(p\);\s*if \(p->ub_ofrag < 0\)\s*\{[^}]*glDeleteProgram_fp \(p->program\);"
                 r"\s*p->program = 0;", "refuse a twin that declares no OitFrag")):
     if not re.search(w, ip):
         errors.append(f"GL_InitOITProgramSplit must {why}")
-for s, u in (("u_mboit_b0", "MBOIT_TMU_B0"), ("u_mboit_mom", "MBOIT_TMU_MOM"),
-             ("u_mboit_b0_ms", "MBOIT_TMU_B0_MS"), ("u_mboit_mom_ms", "MBOIT_TMU_MOM_MS")):
-    if not re.search(rf"if \(p->{s} >= 0\)\s*glUniform1i_fp\(p->{s}, {u}\);", ip):
-        errors.append(f"GL_InitOITProgramSplit must point {s} at {u}")
-lines = sc.splitlines()
-stack, builds = [], []
-for n, line in enumerate(lines):
-    s = line.strip()
-    if re.match(r"#\s*if", s):
-        stack.append(s)
-    elif re.match(r"#\s*else", s) and stack:
-        stack[-1] = "else:" + stack[-1]
-    elif re.match(r"#\s*endif", s) and stack:
-        stack.pop()
-    m = re.match(r"\s*GL_InitOITProgramSplit\s*\(&(\w+),", line)
-    if m:
-        call = " ".join(lines[n:n + 4])
-        src = re.search(r",\s*(\w+)\s*\)\s*;", call[:call.index(";") + 1])
-        builds.append((m.group(1), src.group(1) if src else None, list(stack)))
-if len(builds) != 6:
-    errors.append(f"{len(builds)} GL_InitOITProgramSplit builds found; the six OIT twins are built once each")
-for prog, src, st in builds:
+for s_, u in (("u_mboit_b0", "MBOIT_TMU_B0"), ("u_mboit_mom", "MBOIT_TMU_MOM"),
+              ("u_mboit_b0_ms", "MBOIT_TMU_B0_MS"), ("u_mboit_mom_ms", "MBOIT_TMU_MOM_MS")):
+    if not re.search(rf"if \(p->{s_} >= 0\)\s*glUniform1i_fp\(p->{s_}, {u}\);", ip):
+        errors.append(f"GL_InitOITProgramSplit must point {s_} at {u}")
+if not re.search(r'#define GLSL_OIT_TWIN\t"#define OIT 1\\n"\n', sc):
+    errors.append('GLSL_OIT_TWIN must be exactly "#define OIT 1\\n"')
+
+
+def conds(text):
+    """The #if stack in force at each line of text."""
+    stack, out = [], []
+    for line in text.splitlines():
+        t = line.strip()
+        if re.match(r"#\s*if", t):
+            stack.append(t)
+        elif re.match(r"#\s*else", t) and stack:
+            stack[-1] = "else:" + stack[-1]
+        elif re.match(r"#\s*endif", t) and stack:
+            stack.pop()
+        out.append(list(stack))
+    return out
+
+
+at = conds(sc)
+ROW = re.compile(r'\[(RPROG_\w+)\] = \{ "\w+", \w+, \{\s*\{ [^{}]*?, \w+, "[\w.]+" \},\s*'
+                 r'\{ ([^{}]*?), (\w+), "[\w.]+" \} \} \},')
+twins = {}
+for m in ROW.finditer(sc):
+    if re.search(r"\bGLSL_OIT_TWIN\s*$", m.group(2)):
+        twins[m.group(1)] = (m.group(3), at[sc.count("\n", 0, m.start())])
+builds = {}
+for m in re.finditer(r"GL_InitOITProgramSplit\s*\(&(\w+), (RPROG_\w+)\);", sc):
+    builds[m.group(2)] = (m.group(1), at[sc.count("\n", 0, m.start())])
+if len(twins) != 6:
+    errors.append(f"{len(twins)} program rows carry GLSL_OIT_TWIN; the six OIT twins are a row each")
+for rid, (src, st) in twins.items():
+    if "#ifndef USE_GLES" not in st:
+        errors.append(f"{rid}'s row is outside #ifndef USE_GLES; OIT is desktop-only")
+    if src + ".glsl" not in STAGES:
+        errors.append(f"{rid} is built from {src}, which carries no OIT arm")
+    if rid not in builds:
+        errors.append(f"{rid} carries GLSL_OIT_TWIN but GL_InitOITProgramSplit does not build it, so "
+                      "nothing refuses it without OitFrag")
+for rid, (prog, st) in builds.items():
+    if rid not in twins:
+        errors.append(f"{prog} is built from {rid}, whose fragment header carries no GLSL_OIT_TWIN")
     if "#ifndef USE_GLES" not in st:
         errors.append(f"{prog} is built outside #ifndef USE_GLES; OIT is desktop-only")
-    if (src or "") + ".glsl" not in STAGES:
-        errors.append(f"{prog} is built from {src}, which carries no OIT arm")
-if sorted({s for _, s, _ in builds}) != sorted(s[:-5] for s in STAGES):
-    errors.append(f"the OIT builds cover {sorted({s for _, s, _ in builds})}; every arm-carrying stage needs one")
+if len(builds) != 6:
+    errors.append(f"{len(builds)} GL_InitOITProgramSplit builds found; the six OIT twins are built once each")
+if sorted({src for src, _ in twins.values()}) != sorted(s_[:-5] for s_ in STAGES):
+    errors.append(f"the OIT twins cover {sorted({src for src, _ in twins.values()})}; every arm-carrying "
+                  "stage needs one")
 for p in sorted(list(H2.glob("*.c")) + list((ROOT / "engine/hexen2").glob("*.c"))):
     for v in re.findall(r'"((?:[^"\\\n]|\\.)*)"', nocomment_c(p.read_text())):
         if re.search(r"#\s*define\s+OIT\b", v) and not (p.name == "gl_shader.c" and v == "#define OIT 1\\n"):
-            errors.append(f"{p.name}: a literal spells `{v}`; only GL_InitOITProgramSplit defines OIT")
+            errors.append(f"{p.name}: a literal spells `{v}`; only GLSL_OIT_TWIN defines OIT")
 if len(re.findall(r'"#define OIT 1\\n"', sc)) != 1:
-    errors.append("gl_shader.c must spell \"#define OIT 1\\n\" exactly once, in GL_InitOITProgramSplit")
+    errors.append("gl_shader.c must spell \"#define OIT 1\\n\" exactly once, as GLSL_OIT_TWIN")
 
 if errors:
     print("FAIL:")

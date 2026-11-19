@@ -26,9 +26,6 @@
 #include "rg_device.h"	/* R_GPU(): under -gpu the FBO entry points stay stubbed */
 #endif
 
-/* sbloom_*[] -- the bloom family, engine/shaders/sbloom_*.glsl (#450) */
-#include "shaders_gen.h"
-
 /* GL defines that may be missing on some platforms (MinGW, ES3) */
 #ifndef GL_RGBA16F
 #define GL_RGBA16F 0x881A
@@ -64,32 +61,10 @@
 #define HW_OIT_HAS_BLEND_FUNCI	(glBlendFunci_fp != NULL)
 #endif
 
-/* GLSL version headers, mirroring gl_shader.c.  Every shader in this file used
- * to be hardcoded to "#version 430 core", so the entire post-process chain --
- * gamma/contrast, FXAA, bloom, motion blur, softemu palettization and the OIT
- * resolve -- failed to compile on the ES tier and silently disabled itself.
- * That went unnoticed because only the browser could reach the tier and nobody
- * was reading its shader log; a desktop -DUSE_GLES=ON build (uhexen2-0py6)
- * makes it a visible crash instead.  uhexen2-7wdv.
- *
- * GLSL ES 3.00 declares no default float precision in the fragment language,
- * so it must be stated.  int is declared mediump there, which is as little as
- * 16 bits -- not enough for bayer16's 32-bit shifts below -- hence highp int.
- * sampler3D likewise has no default (only sampler2D and samplerCube do), and
- * softemu's palette LUT is a sampler3D, so it wants a stated precision too.
- * Those lines are engine/shaders/glonly/tier_es_pp.glsl (TIER_ES_PP in
- * shaders_gen.h); the desktop header is tier_core.glsl, as in gl_shader.c. */
-#ifdef USE_GLES
-#define PP_VERT_HEADER	TIER_ES_PP
-#define PP_FRAG_HEADER	TIER_ES_PP
-/* bitfieldReverse (GLSL 4.00 / ES 3.10) used to be spliced in here for the
- * ES tier as PP_BITFIELD_REVERSE.  Since #450 the polyfill lives in
- * engine/shaders/spp_frag.glsl under #ifdef GL_ES, which the ES compiler
- * predefines, so the tier choice no longer needs C. */
-#else
-#define PP_VERT_HEADER	TIER_CORE
-#define PP_FRAG_HEADER	TIER_CORE
-#endif
+/* The programs in this file -- post-process, bloom, OIT resolve, the GPU
+ * palette-LUT builder -- are built by id (R_Program_Create, #340 P1b).  Their
+ * sources, and the PP_*_HEADER tier headers they compile with (TIER_ES_PP on
+ * the ES tier, uhexen2-7wdv), are their rows in gl_shader.c's rprog_defs. */
 
 /* FBO state — scaled 3D scene */
 static GLuint	pp_fbo;		/* render target (may be multisampled) */
@@ -212,8 +187,9 @@ static GLint	pp_loc_bloom_tex;
  *
  * The colormap LUT (r_softemu 3) stays 32^3: its candidates depend on the
  * target's luma, so it has no such bound, and 128^3 would be 537M
- * evaluations.  The shader is told which grid it is reading (lutmax). */
-#define PP_LUT_DIM	128
+ * evaluations.  The shader is told which grid it is reading (lutmax).
+ * PP_LUT_DIM itself is in gl_postprocess.h, because the compute builder's
+ * program row (gl_shader.c) pastes it into its LUT_DIM. */
 #define PP_LUT_TEXELS	(PP_LUT_DIM * PP_LUT_DIM * PP_LUT_DIM)
 #define PP_CMAP_DIM	32
 #define PP_CMAP_TEXELS	(PP_CMAP_DIM * PP_CMAP_DIM * PP_CMAP_DIM)
@@ -435,7 +411,7 @@ static int	mboit_pass;		/* 0 none, 1 moments, 2 composite */
 
 /* OIT resolve shaders: engine/shaders/soit_resolve_vert.glsl,
  * soit_resolve_frag.glsl and the desktop-only soit_resolve_msaa_frag.glsl,
- * via shaders_gen.h (#450).  The MSAA variant uses sampler2DMS and
+ * built as RPROG_OIT_RESOLVE(_MSAA) (#450).  The MSAA variant uses sampler2DMS and
  * gl_SampleID, which are GLSL ES 3.10, and glTexImage2DMultisample_fp is a
  * no-op on the ES tier, so oit_samples never exceeds 1 there and that program
  * is never built on ES (OIT_InitShader).
@@ -460,8 +436,8 @@ static GLuint	oit_ubo;
 /* Bloom post-process shaders                                          */
 /* ------------------------------------------------------------------ */
 
-/* engine/shaders/sbloom_vert.glsl and sbloom_{bright,down,up}_frag.glsl, via
- * shaders_gen.h (#450).  They carry no #version: PP_VERT_HEADER /
+/* engine/shaders/sbloom_vert.glsl and sbloom_{bright,down,up}_frag.glsl
+ * (#450), built as RPROG_BLOOM_*.  They carry no #version: PP_VERT_HEADER /
  * PP_FRAG_HEADER go in as a separate chunk, so one file serves both tiers. */
 
 /* ------------------------------------------------------------------ */
@@ -800,57 +776,7 @@ static qboolean PP_CreateFBO (int width, int height)
 /* ------------------------------------------------------------------ */
 
 /* The post-process program is engine/shaders/spp_vert.glsl and spp_frag.glsl
- * (#450), via shaders_gen.h; PP_InitShader compiles them with the
- * PP_*_HEADER chunk. */
-
-/* These helpers are already in gl_vidsdl.c but static.  We re-declare
- * local copies here to stay self-contained. */
-static GLuint PP_CompileShader (GLenum type, const char *source)
-{
-	GLuint shader;
-	GLint status;
-	char log[512];
-
-	shader = glCreateShader_fp(type);
-	glShaderSource_fp(shader, 1, &source, NULL);
-	glCompileShader_fp(shader);
-	glGetShaderiv_fp(shader, GL_COMPILE_STATUS, &status);
-	if (!status)
-	{
-		glGetShaderInfoLog_fp(shader, sizeof(log), NULL, log);
-		Con_Printf("PostProcess shader compile error: %s\n", log);
-		glDeleteShader_fp(shader);
-		return 0;
-	}
-	return shader;
-}
-
-/* PP_CompileShader for a body from engine/shaders: the tier header (#version
- * and, on ES, the precision lines) goes first as its own glShaderSource
- * chunk, which is how GL_LoadComputeProgram and GL_InitProgramSplit feed the
- * other file-backed shaders. */
-static GLuint PP_CompileShaderSplit (GLenum type, const char *header, const char *body)
-{
-	GLuint shader;
-	GLint status;
-	char log[512];
-	const char *sources[2];
-
-	sources[0] = header;
-	sources[1] = body;
-	shader = glCreateShader_fp(type);
-	glShaderSource_fp(shader, 2, sources, NULL);
-	glCompileShader_fp(shader);
-	glGetShaderiv_fp(shader, GL_COMPILE_STATUS, &status);
-	if (!status)
-	{
-		glGetShaderInfoLog_fp(shader, sizeof(log), NULL, log);
-		Con_Printf("PostProcess shader compile error: %s\n", log);
-		glDeleteShader_fp(shader);
-		return 0;
-	}
-	return shader;
-}
+ * (#450); PP_InitShader builds it as RPROG_POSTPROCESS. */
 
 /* Pin a program's uniform block to its binding point, checking the driver's
  * layout against the C mirror's size (the RU_CheckBlockSize practice).  The
@@ -917,40 +843,11 @@ static void PP_PushParams (void)
 	GL_BindBufferBase(GL_UNIFORM_BUFFER, PP_FRAG_UBO_BINDING, pp_frag_ubo);
 }
 
-static GLuint PP_LinkProgram (GLuint vert, GLuint frag)
-{
-	GLuint prog;
-	GLint status;
-	char log[512];
-
-	prog = glCreateProgram_fp();
-	glAttachShader_fp(prog, vert);
-	glAttachShader_fp(prog, frag);
-	glLinkProgram_fp(prog);
-	glGetProgramiv_fp(prog, GL_LINK_STATUS, &status);
-	if (!status)
-	{
-		glGetProgramInfoLog_fp(prog, sizeof(log), NULL, log);
-		Con_Printf("PostProcess shader link error: %s\n", log);
-		glDeleteProgram_fp(prog);
-		return 0;
-	}
-	return prog;
-}
-
 static qboolean PP_InitShader (void)
 {
-	GLuint vs, fs;
 	GLint loc;
 
-	vs = PP_CompileShaderSplit(GL_VERTEX_SHADER, PP_VERT_HEADER, spp_vert);
-	if (!vs) return false;
-	fs = PP_CompileShaderSplit(GL_FRAGMENT_SHADER, PP_FRAG_HEADER, spp_frag);
-	if (!fs) { glDeleteShader_fp(vs); return false; }
-
-	pp_program = PP_LinkProgram(vs, fs);
-	glDeleteShader_fp(vs);
-	glDeleteShader_fp(fs);
+	pp_program = R_Program_Create(RPROG_POSTPROCESS);
 	if (!pp_program) return false;
 
 	pp_loc_scene = glGetUniformLocation_fp(pp_program, "scene");
@@ -981,39 +878,20 @@ static qboolean PP_InitShader (void)
 	if (pp_loc_bloom_tex >= 0) glUniform1i_fp(pp_loc_bloom_tex, 2);	/* texture unit 2 */
 	R_UseProgram (0);
 
-	/* Bloom shaders */
-	vs = PP_CompileShaderSplit(GL_VERTEX_SHADER, PP_VERT_HEADER, sbloom_vert);
-	if (!vs) return true;	/* bloom optional */
-
-	fs = PP_CompileShaderSplit(GL_FRAGMENT_SHADER, PP_FRAG_HEADER, sbloom_bright_frag);
-	if (!fs) { glDeleteShader_fp(vs); return true; }
-	bloom_bright_prog = PP_LinkProgram(vs, fs);
-	glDeleteShader_fp(vs);
-	glDeleteShader_fp(fs);
+	/* Bloom shaders; bloom is optional, so a failure still returns true */
+	bloom_bright_prog = R_Program_Create(RPROG_BLOOM_BRIGHT);
 	if (!bloom_bright_prog) return true;
 
 	bloom_bright_loc_scene = glGetUniformLocation_fp(bloom_bright_prog, "u_scene");
 	PP_BindUniformBlock(bloom_bright_prog, "BloomParams", BLOOM_PARAMS_UBO_BINDING, sizeof(bloom_params_t));
 
-	vs = PP_CompileShaderSplit(GL_VERTEX_SHADER, PP_VERT_HEADER, sbloom_vert);
-	if (!vs) return true;
-	fs = PP_CompileShaderSplit(GL_FRAGMENT_SHADER, PP_FRAG_HEADER, sbloom_down_frag);
-	if (!fs) { glDeleteShader_fp(vs); return true; }
-	bloom_down_prog = PP_LinkProgram(vs, fs);
-	glDeleteShader_fp(vs);
-	glDeleteShader_fp(fs);
+	bloom_down_prog = R_Program_Create(RPROG_BLOOM_DOWN);
 	if (!bloom_down_prog) return true;
 
 	bloom_down_loc_scene = glGetUniformLocation_fp(bloom_down_prog, "u_scene");
 	PP_BindUniformBlock(bloom_down_prog, "BloomParams", BLOOM_PARAMS_UBO_BINDING, sizeof(bloom_params_t));
 
-	vs = PP_CompileShaderSplit(GL_VERTEX_SHADER, PP_VERT_HEADER, sbloom_vert);
-	if (!vs) return true;
-	fs = PP_CompileShaderSplit(GL_FRAGMENT_SHADER, PP_FRAG_HEADER, sbloom_up_frag);
-	if (!fs) { glDeleteShader_fp(vs); return true; }
-	bloom_up_prog = PP_LinkProgram(vs, fs);
-	glDeleteShader_fp(vs);
-	glDeleteShader_fp(fs);
+	bloom_up_prog = R_Program_Create(RPROG_BLOOM_UP);
 	if (!bloom_up_prog) return true;
 
 	bloom_up_loc_scene = glGetUniformLocation_fp(bloom_up_prog, "u_scene");
@@ -1606,11 +1484,16 @@ static GLuint	pp_palette_init_prog[SOFTEMU_METRIC_COUNT];
 static GLuint	pp_palette_tex;		/* 256x1 RGBA8, index -> colour */
 static qboolean	pp_lut_gpu_failed;	/* compile failed once; do not keep trying */
 
-/* The pass is engine/shaders/softemu_lut_comp.glsl (#450), reaching us as
- * softemu_lut_comp[] via shaders_gen.h; its header comment carries the notes
- * on how it departs from Ironwail's palette_init.  The header chunk below
- * supplies #version, MODE (the metric) and LUT_DIM, which replaced the loose
+/* The pass is engine/shaders/softemu_lut_comp.glsl (#450); its header comment
+ * carries the notes on how it departs from Ironwail's palette_init.  One
+ * program per metric, each its own id: the row's header chunk supplies
+ * #version, MODE (the metric) and LUT_DIM, which replaced the loose
  * `uniform int u_dim` -- it was always PP_LUT_DIM. */
+static const rprog_id_t pp_palette_init_id[SOFTEMU_METRIC_COUNT] = {
+	[SOFTEMU_METRIC_NAIVE]     = RPROG_SOFTEMU_LUT_MODE0,
+	[SOFTEMU_METRIC_RIEMERSMA] = RPROG_SOFTEMU_LUT_MODE1,
+	[SOFTEMU_METRIC_OKLAB]     = RPROG_SOFTEMU_LUT_MODE2
+};
 
 /* d_8to24table as a 256x1 texture, so the compute pass can read it without an
  * SSBO.  Built once; the table is fixed after VID_InitPalette. */
@@ -1642,8 +1525,6 @@ static GLuint PP_CreatePaletteTexture (void)
 
 static qboolean PP_BuildPaletteLUT_GPU (softemu_metric_t metric)
 {
-	char	header[128];	/* #version + MODE + LUT_DIM is ~55 bytes */
-
 	pp_lut_gpu_built = false;
 
 	if (pp_lut_gpu_failed || !glTexImage3D_fp)
@@ -1653,10 +1534,7 @@ static qboolean PP_BuildPaletteLUT_GPU (softemu_metric_t metric)
 
 	if (!pp_palette_init_prog[metric])
 	{
-		q_snprintf(header, sizeof(header), TIER_CORE "#define MODE %d\n#define LUT_DIM %d\n",
-			   (int)metric, PP_LUT_DIM);
-		pp_palette_init_prog[metric] =
-			GL_LoadComputeProgram(header, softemu_lut_comp, "palette init");
+		pp_palette_init_prog[metric] = R_Program_Create(pp_palette_init_id[metric]);
 		if (!pp_palette_init_prog[metric])
 		{
 			/* One failure means the driver rejects the pass, not this
@@ -1943,30 +1821,11 @@ static qboolean OIT_CreateFBO (int width, int height, GLuint depth_stencil_rb, G
 
 static qboolean OIT_InitShader (void)
 {
-	GLuint vs, fs, prog;
-	GLint linked;
+	GLuint prog;
 
-	vs = PP_CompileShaderSplit(GL_VERTEX_SHADER, PP_VERT_HEADER, soit_resolve_vert);
-	if (!vs) return false;
-	fs = PP_CompileShaderSplit(GL_FRAGMENT_SHADER, PP_FRAG_HEADER, soit_resolve_frag);
-	if (!fs) { glDeleteShader_fp(vs); return false; }
-
-	prog = glCreateProgram_fp();
-	glAttachShader_fp(prog, vs);
-	glAttachShader_fp(prog, fs);
-	glLinkProgram_fp(prog);
-	glDeleteShader_fp(vs);
-	glDeleteShader_fp(fs);
-
-	glGetProgramiv_fp(prog, GL_LINK_STATUS, &linked);
-	if (!linked)
-	{
-		char log[512];
-		glGetProgramInfoLog_fp(prog, sizeof(log), NULL, log);
-		Con_SafePrintf("OIT resolve link failed: %s\n", log);
-		glDeleteProgram_fp(prog);
+	prog = R_Program_Create(RPROG_OIT_RESOLVE);
+	if (!prog)
 		return false;
-	}
 
 	oit_resolve_prog = prog;
 	oit_resolve_loc_accum = glGetUniformLocation_fp(prog, "TexAccum");
@@ -1984,27 +1843,14 @@ static qboolean OIT_InitShader (void)
 	/* MSAA per-sample resolve variant — best-effort. If it fails to build
 	 * the MSAA OIT path is simply never selected, since oit_samples stays 0
 	 * then.  Not built at all on the ES tier — see oit_resolve_frag_msaa. */
-	vs = PP_CompileShaderSplit(GL_VERTEX_SHADER, PP_VERT_HEADER, soit_resolve_vert);
-	fs = vs ? PP_CompileShaderSplit(GL_FRAGMENT_SHADER, PP_FRAG_HEADER, soit_resolve_msaa_frag) : 0;
-	if (vs && fs)
+	prog = R_Program_Create(RPROG_OIT_RESOLVE_MSAA);
+	if (prog)
 	{
-		prog = glCreateProgram_fp();
-		glAttachShader_fp(prog, vs);
-		glAttachShader_fp(prog, fs);
-		glLinkProgram_fp(prog);
-		glGetProgramiv_fp(prog, GL_LINK_STATUS, &linked);
-		if (linked)
-		{
-			oit_resolve_prog_msaa = prog;
-			oit_resolve_msaa_loc_accum = glGetUniformLocation_fp(prog, "TexAccum");
-			oit_resolve_msaa_loc_reveal = glGetUniformLocation_fp(prog, "TexReveal");
-			PP_BindUniformBlock(prog, "OitParams", OIT_PARAMS_UBO_BINDING, sizeof(oit_params_t));
-		}
-		else
-			glDeleteProgram_fp(prog);
+		oit_resolve_prog_msaa = prog;
+		oit_resolve_msaa_loc_accum = glGetUniformLocation_fp(prog, "TexAccum");
+		oit_resolve_msaa_loc_reveal = glGetUniformLocation_fp(prog, "TexReveal");
+		PP_BindUniformBlock(prog, "OitParams", OIT_PARAMS_UBO_BINDING, sizeof(oit_params_t));
 	}
-	if (vs) glDeleteShader_fp(vs);
-	if (fs) glDeleteShader_fp(fs);
 #endif /* !USE_GLES */
 
 	/* GL 4.3 core profile requires a VAO bound for any draw call. */

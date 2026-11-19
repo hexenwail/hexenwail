@@ -28,7 +28,8 @@
 # by EmbedShaders on its own and is not listed here; combinations with OIT,
 # such as the affine OIT twin, are.
 #
-# tools/test_shader_variants.py reads the C that builds the header chunks and
+# tools/test_shader_variants.py reads gl_shader.c's program table (rprog_defs,
+# one row per program id since #340 P1b) and
 # fails on any stage + define set the C can request that this file does not
 # enumerate, and on any line here the C cannot request.  Desktop GL only: the
 # GLES/WebGL2 tier never runs SDL_GPU.  GitHub #340 (P-1b).
@@ -72,5 +73,5 @@ const ALIAS_INST_DLIGHT_BIT        256
 const ALIAS_INST_FULLBRIGHT_BIT    512
 const ALIAS_INST_YAW_SHIFT         16
 
-# Softemu palette LUT edge, PP_LUT_DIM in gl_postprocess.c.
+# Softemu palette LUT edge, PP_LUT_DIM in gl_postprocess.h.
 const LUT_DIM              128

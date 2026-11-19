@@ -63,12 +63,11 @@ void R_SSAO_Init (void)
 
 #ifndef USE_GLES
 
-#include "shaders_gen.h"
-
+/* The six stages are engine/shaders/ssao_*.glsl, built by id (RPROG_SSAO_*,
+ * gl_shader.c's rprog_defs) with the desktop tier header, TIER_CORE. */
 #define SSAO_UBO_BINDING	3	/* 0 Hi-Z, 1 and 2 the shared vert/frag blocks, 4 CullParams */
 #define SSAO_TEX_UNIT		8	/* the shaders' TEXBIND(8..11): clear of the units draws cache */
 #define SSAO_PYRAMID_LEVELS	5
-#define SSAO_VERSION		TIER_CORE	/* engine/shaders/glonly/tier_core.glsl */
 /* Tile tags: one bit per 128x128 AO tile, 8x4 tiles per texel.  16x16 texels
  * covers a 16384x8192 AO target; R_SSAO_Apply clears them from a buffer this
  * size. */
@@ -168,22 +167,22 @@ static void SS_BindSamplers (GLuint prog)
 
 static qboolean SS_BuildPrograms (void)
 {
-	char	header[64];
+	/* r_ssao 1..3 indexes ss_eval_prog[quality - 1]: one program per
+	 * QUALITY, all built together */
+	static const rprog_id_t eval_id[3] = {
+		RPROG_SSAO_EVALUATE_Q1, RPROG_SSAO_EVALUATE_Q2, RPROG_SSAO_EVALUATE_Q3
+	};
 	int	q;
 
 	if (ss_comp_prog)
 		return true;
 
-	ss_prep_prog = GL_LoadComputeProgram (SSAO_VERSION, ssao_prepare_comp, "ssao_prepare");
-	ss_mip_prog = GL_LoadComputeProgram (SSAO_VERSION, ssao_mip_comp, "ssao_mip");
+	ss_prep_prog = R_Program_Create (RPROG_SSAO_PREPARE);
+	ss_mip_prog = R_Program_Create (RPROG_SSAO_MIP);
 	for (q = 0; q < 3; q++)
-	{
-		q_snprintf (header, sizeof(header), SSAO_VERSION "#define QUALITY %d\n", q + 1);
-		ss_eval_prog[q] = GL_LoadComputeProgram (header, ssao_evaluate_comp, "ssao_evaluate");
-	}
-	ss_filter_prog = GL_LoadComputeProgram (SSAO_VERSION, ssao_filter_comp, "ssao_filter");
-	ss_comp_prog = GL_LoadProgramHeaders (SSAO_VERSION, ssao_composite_vert,
-					      SSAO_VERSION, ssao_composite_frag);
+		ss_eval_prog[q] = R_Program_Create (eval_id[q]);
+	ss_filter_prog = R_Program_Create (RPROG_SSAO_FILTER);
+	ss_comp_prog = R_Program_Create (RPROG_SSAO_COMPOSITE);
 
 	if (!ss_prep_prog || !ss_mip_prog || !ss_eval_prog[0] || !ss_eval_prog[1] ||
 	    !ss_eval_prog[2] || !ss_filter_prog || !ss_comp_prog)
