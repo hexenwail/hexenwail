@@ -2087,7 +2087,13 @@ static void GL_Init_NullGL (void)
 	gl_ssbo_align = gl_ubo_align = 256;
 	GL_CreateFrameResources ();
 
-	gl_clipcontrol_able = false;
+	/* SDL_GPU's clip space is GL_ZERO_TO_ONE's, so -gpu always runs the
+	 * reversed-Z path (#340 P2b), whatever gl_reversed_z says -- it has no
+	 * [-1,1] clip to fall back to.  GL_Frustum emits [0,1] and every call
+	 * site takes its gl_clipcontrol_able branch, as GL_Init sets it up. */
+	gl_clipcontrol_able = true;
+	R_SetDepthFunc (GL_GEQUAL);
+	R_SetClearDepth (0.0);
 	R_SetCullFace (GL_FRONT);
 	R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
@@ -2289,7 +2295,7 @@ static void GL_Init (void)
 	{
 		glClipControl_fp (GL_LOWER_LEFT, GL_ZERO_TO_ONE);
 		R_SetDepthFunc (GL_GEQUAL);
-		glClearDepth_fp (0.0);
+		R_SetClearDepth (0.0);
 		Con_SafePrintf ("Reversed-Z depth buffer enabled (ARB_clip_control)\n");
 	}
 #endif

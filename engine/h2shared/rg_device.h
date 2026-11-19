@@ -107,6 +107,10 @@ void	RG_UniformBlockFlushed (const char *name);
 /* gl_pipeline.c: dynamic state the pipeline object does not carry. */
 void	RG_SetViewport (int x, int y, int width, int height);
 void	RG_SetScissor (qboolean enable, int x, int y, int width, int height);
+/* gl_pipeline.c R_ClearBuffers: glClear's GL_COLOR / DEPTH / STENCIL bits,
+ * with the values it clears to.  Ends the open segment if it has draws, so
+ * the clear is the next render pass's load op (#340 P2b). */
+void	RG_Clear (GLbitfield mask, const float color[4], float depth, int stencil);
 
 /* gl_vbo.c GL_ImmEnd / GL_ImmDraw (rg_frame.c): one immediate-mode batch in
  * the immvert_t layout, drawn with the bound program and the current draw

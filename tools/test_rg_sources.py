@@ -73,6 +73,27 @@ Checked, from the sources (stock python3, lint.yml):
       no implicit directory (SDL_GetBasePath, FS_GetBasedir, RG_SPIRV_DIR)
       is searched.
   tools/test_embed_spirv.py checks what EmbedSpirv.cmake writes.
+  the 3D world under -gpu (#340 P2b), which tools/sweep-world-gpu.steps
+  checks frame by frame; these pin the source it rests on:
+    * depth: GL_Init_NullGL turns gl_clipcontrol_able on (SDL_GPU clips to
+      [0,1], GL_ZERO_TO_ONE's space) with the GL_GEQUAL test and a 0.0
+      clear depth GL_Init gives reversed-Z, and never sets it false;
+      rg_pipeline.c clips depth exactly when the draw tests it, and keeps the
+      clockwise front face (GL_CCW seen through VK_FLIP_Y and SDL's
+      negative-height viewport); rg_frame.c clears to the depth RG_Clear was
+      handed, never a literal;
+    * the clear seam: glClear, glClearColor, glClearDepth and glClearStencil
+      appear only in gl_pipeline.c, apart from gl_vidsdl.c's FBO self-test
+      (GL only, it reads pixels back) and the loader table; there each GL
+      arm is the bare call -- glClear_fp (mask) after R_ClearBuffers'
+      -gpu arm returns, the value setters' RP_GL (glClear*_fp (...)) with
+      their own arguments -- and R_ClearBuffers' -gpu arm hands RG_Clear
+      the mask and the three values;
+    * the immediate-mode fallbacks: R_BuildWorldVBO and R_BuildSkyStencilVBO
+      return under R_GPU () before they create a GL object (so world_vao,
+      world_ibo and sky_stencil_vao stay 0), and so does R_BuildWorldCull
+      before its programs; alias instancing and GL_DrawAliasSkeletal need
+      gl_renderer_caps.shader_storage, which GL_Init_NullGL leaves false.
 
 Usage: test_rg_sources.py [--root DIR]
 """
@@ -859,6 +880,151 @@ def check_blob_source(root):
              "and the embedded table otherwise")
 
 
+# GL clear entry points outside gl_pipeline.c: (file, function name) -> count.
+# gl_vidsdl.c's FBO self-test runs on a real context only and puts the clear
+# colour back with the same call.  Exempt: gl_func.h and rg_null.c, the loader
+# table and its null stubs, and web_canvas_gl2.c, the software renderer's raw
+# WebGL2 canvas (test_draw_state_routing.py exempts it the same way).
+CLEAR_RAW_OK = {
+    ("engine/h2shared/gl_vidsdl.c", "glClearColor_fp"): 2,
+    ("engine/h2shared/gl_vidsdl.c", "glClear_fp"): 1,
+}
+CLEAR_RAW = re.compile(r"\b(glClear(?:Color|Depth|Stencil)?(?:f)?(?:_fp)?)\s*\(")
+CLEAR_EXEMPT = {"engine/h2shared/gl_func.h", "engine/h2shared/rg_null.c",
+                "engine/h2shared/gl_pipeline.c", "engine/h2shared/web_canvas_gl2.c"}
+
+
+def body_named(root, rel, name, nth=0):
+    code = strip_c_comments((root / rel).read_text(errors="replace"))
+    found = [code[b:e] for n, b, e in functions(code) if n == name]
+    if len(found) <= nth:
+        fail("%s: no %s -- the #340 P2b check that pins it has nothing to read" % (rel, name))
+        return None
+    return found[nth]
+
+
+def gpu_return_before(body, first_rx):
+    """`#ifdef USE_SDL_GPU / if (R_GPU ()) return;` ahead of the first match of
+    first_rx (and that match exists)."""
+    g = re.search(r"#\s*ifdef\s+USE_SDL_GPU\s*\n\s*if\s*\(\s*R_GPU\s*\(\s*\)\s*\)\s*return\s*;", body)
+    f = re.search(first_rx, body)
+    if g is None or f is None or g.start() > f.start():
+        return False
+    # at the body's own level, not inside a loop or a branch
+    head = body[:g.start()]
+    return head.count("{") - head.count("}") == 1
+
+
+def check_world_imm(root):
+    """#340 P2b: reversed-Z under -gpu, the clear seam, and the 3D world on
+    the GL_ImmEnd fallbacks."""
+    vid = "engine/h2shared/gl_vidsdl.c"
+    b = body_named(root, vid, "GL_Init_NullGL")
+    if b is not None:
+        if [v.strip() for v in re.findall(r"\bgl_clipcontrol_able\s*=\s*([^;=][^;]*);", b)] != ["true"]:
+            fail("%s: GL_Init_NullGL must set gl_clipcontrol_able = true and nothing else -- SDL_GPU "
+                 "clips to [0,1], so -gpu runs the reversed-Z path (#340 P2b)" % vid)
+        if not re.search(r"\bR_SetDepthFunc\s*\(\s*GL_GEQUAL\s*\)\s*;", b):
+            fail("%s: GL_Init_NullGL must set the reversed-Z test, R_SetDepthFunc (GL_GEQUAL)" % vid)
+        if not re.search(r"\bR_SetClearDepth\s*\(\s*0(?:\.0*)?f?\s*\)\s*;", b):
+            fail("%s: GL_Init_NullGL must clear depth to 0, R_SetClearDepth (0.0): reversed-Z's far "
+                 "plane (#340 P2b)" % vid)
+
+    pipe = strip_c_comments((root / "engine/h2shared/rg_pipeline.c").read_text())
+    if not re.search(r"\benable_depth_clip\s*=\s*k->depth_test\s*\?\s*true\s*:\s*false\s*;", pipe):
+        fail("rg_pipeline.c: enable_depth_clip must follow the depth test, `k->depth_test ? true : "
+             "false` -- 3D clips at the near and far planes as GL does, 2D clamps (#340 P2b)")
+    if len(re.findall(r"\bfront_face\s*=", pipe)) != 1 or \
+       not re.search(r"\bfront_face\s*=\s*SDL_GPU_FRONTFACE_CLOCKWISE\s*;", pipe):
+        fail("rg_pipeline.c: the front face is SDL_GPU_FRONTFACE_CLOCKWISE, set once -- GL's GL_CCW "
+             "through VK_FLIP_Y and SDL's negative-height viewport (#340 P2b)")
+    frame = strip_c_comments((root / "engine/h2shared/rg_frame.c").read_text())
+    if not re.search(r"\bds\.load_op\s*=\s*\(\s*\(\s*rgf_clear_mask\s*&\s*GL_DEPTH_BUFFER_BIT\s*\)\s*"
+                     r"\|\|\s*!\s*rgf_cleared\s*\)\s*\?\s*SDL_GPU_LOADOP_CLEAR\s*:\s*SDL_GPU_LOADOP_LOAD\s*;", frame):
+        fail("rg_frame.c: the depth load op must clear when a clear asked for depth or the frame has "
+             "not started, `ds.load_op = ((rgf_clear_mask & GL_DEPTH_BUFFER_BIT) || !rgf_cleared) ? "
+             "SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;` (#340 P2b)")
+    cd = re.findall(r"\bclear_depth\s*=\s*([^;]+);", frame)
+    if cd != ["rgf_clear_depth"]:
+        fail("rg_frame.c: the render pass must clear depth to what RG_Clear was handed, "
+             "`ds.clear_depth = rgf_clear_depth;` alone (found %s) -- a literal 1.0 under "
+             "reversed-Z's GL_GEQUAL draws no 3D at all (#340 P2b)" % (cd or "none"))
+
+    # The clear seam's GL arms, call for call what R_Clear and its neighbours made.
+    gp = "engine/h2shared/gl_pipeline.c"
+    arms = {
+        "R_SetClearColor": r"RP_GL\s*\(\s*glClearColor_fp\s*\(\s*r\s*,\s*g\s*,\s*b\s*,\s*a\s*\)\s*\)\s*;",
+        "R_SetClearDepth": r"RP_GL\s*\(\s*glClearDepth_fp\s*\(\s*depth\s*\)\s*\)\s*;",
+        "R_SetClearStencil": r"RP_GL\s*\(\s*glClearStencil_fp\s*\(\s*s\s*\)\s*\)\s*;",
+    }
+    for fn, rx in arms.items():
+        b = body_named(root, gp, fn)
+        if b is not None and (len(re.findall(r"\bgl\w+_fp\s*\(", b)) != 1 or not re.search(rx, b)):
+            fail("%s: %s's GL arm must be the one bare call, %s" % (gp, fn, rx.replace("\\s*", "")))
+    b = body_named(root, gp, "R_ClearBuffers")
+    if b is not None:
+        if len(re.findall(r"\bgl\w+_fp\s*\(", b)) != 1 or \
+           not re.search(r"\}\s*#\s*endif\s*glClear_fp\s*\(\s*mask\s*\)\s*;\s*$", b):
+            fail("%s: R_ClearBuffers' GL arm must be the bare `glClear_fp (mask);` after its -gpu arm" % gp)
+        if not re.search(r"RG_Clear\s*\(\s*mask\s*,\s*rp_clear_color\s*,\s*\(float\)\s*rp_clear_depth\s*,"
+                         r"\s*rp_clear_stencil\s*\)\s*;\s*return\s*;", b):
+            fail("%s: R_ClearBuffers' -gpu arm must hand RG_Clear the mask and the three clear values, "
+                 "then return" % gp)
+    seen = {}
+    for p in sorted((root / "engine").rglob("*")):
+        if p.suffix not in (".c", ".h", ".inc") or not p.is_file():
+            continue
+        rel = str(p.relative_to(root))
+        if rel in CLEAR_EXEMPT or ("rust" in p.parts and "target" in p.parts):
+            continue
+        code = strip_c_comments(p.read_text(errors="replace"))
+        for m in CLEAR_RAW.finditer(code):
+            key = (rel, m.group(1))
+            seen[key] = seen.get(key, 0) + 1
+            if key not in CLEAR_RAW_OK:
+                fail("%s:%d: %s outside gl_pipeline.c -- clear through R_ClearBuffers / "
+                     "R_SetClear*, or -gpu never sees it (#340 P2b)"
+                     % (rel, code.count("\n", 0, m.start()) + 1, m.group(1)))
+    for key, n in CLEAR_RAW_OK.items():
+        if seen.get(key, 0) != n:
+            fail("%s: CLEAR_RAW_OK expects %d %s, found %d -- update the entry with the code"
+                 % (key[0], n, key[1], seen.get(key, 0)))
+
+    # The immediate-mode fallbacks.
+    rs = "engine/hexen2/gl_rsurf.c"
+    for fn, first in (("R_BuildWorldVBO", r"\bglGen\w*_fp\s*\(|\bmalloc\s*\("),
+                      ("R_BuildSkyStencilVBO", r"\bglGen\w*_fp\s*\(|\bmalloc\s*\(")):
+        b = body_named(root, rs, fn)
+        if b is not None and not gpu_return_before(b, first):
+            fail("%s: %s must return under R_GPU () before it creates anything -- under -gpu the "
+                 "null table's names would turn on the VBO draw paths, whose glDrawElements nothing "
+                 "routes until P2d (#340 P2b)" % (rs, fn))
+    b = body_named(root, "engine/h2shared/gl_worldcull.c", "R_BuildWorldCull")
+    if b is not None and not gpu_return_before(b, r"\bR_Program_Create\s*\("):
+        fail("gl_worldcull.c: R_BuildWorldCull must return under R_GPU () before its programs -- the "
+             "null glDispatchCompute is not NULL, and culling is compute (P5) drawn from world_vao")
+    rm = "engine/hexen2/gl_rmain.c"
+    code = strip_c_comments((root / rm).read_text(errors="replace"))
+    ui = re.findall(r"\buse_instancing\s*=\s*([^;]*);", code)
+    terms = []
+    if len(ui) == 1:
+        e = re.sub(r"\s+", " ", ui[0]).strip()
+        while e.startswith("(") and e.endswith(")"):
+            e = e[1:-1].strip()
+        terms = [t.strip() for t in e.split("&&")] if "||" not in e else []
+    if "gl_renderer_caps.shader_storage" not in terms:
+        fail("%s: use_instancing must require gl_renderer_caps.shader_storage -- instanced alias "
+             "models read storage buffers, which -gpu does not have until P2e (#340 P2b)" % rm)
+    b = body_named(root, rm, "GL_DrawAliasSkeletal")
+    if b is not None:
+        g = re.search(r"if\s*\(\s*!\s*gl_renderer_caps\.shader_storage\s*\)\s*\{[^{}]*\breturn\s*;\s*\}", b)
+        f = re.search(r"\bGL_GetAliasGPUMesh\s*\(", b)
+        if not g or not f or g.start() > f.start():
+            fail("%s: GL_DrawAliasSkeletal must return without shader storage before it touches the "
+                 "mesh -- its bones are a storage buffer (#340 P2b)" % rm)
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     ap.add_argument("--root", type=Path, default=ROOT)
@@ -872,6 +1038,7 @@ def main(argv=None):
     check_spirv_build(root)
     check_flake_glslang(root)
     check_blob_source(root)
+    check_world_imm(root)
     nfiles = 0
     rg_files = []
     for p in sorted(eng.rglob("*")):

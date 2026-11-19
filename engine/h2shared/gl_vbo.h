@@ -26,6 +26,10 @@
 
 int	GL_ImmCount (void);
 void	GL_ImmInvalidateState (void);	/* drop cached uniform state (after vid_restart, etc) */
+/* glBindVertexArray(0), for the draw loops that tidy up after whatever VAO an
+ * entity left bound.  Nothing under -gpu, which binds no VAO until P2d
+ * (#340 P2b). */
+void	GL_UnbindVertexArray (void);
 void	GL_ImmBegin (void);
 void	GL_ImmVertex3f (float x, float y, float z);
 void	GL_ImmVertex2f (float x, float y);
