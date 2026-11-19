@@ -233,9 +233,10 @@ typedef struct {
 
 void	RG_Shader_Init (void);
 void	RG_Shader_Shutdown (void);
-/* Where the .vk.spv blobs were found, NULL if nowhere; RG_CreateDevice
+/* Where this run's .vk.spv blobs come from, for the log ("the embedded
+ * table (N blobs)" or "-gpushaders <dir>"), NULL if nowhere; RG_CreateDevice
  * refuses -gpu without them. */
-const char *RG_ShaderDir (void);
+const char *RG_ShaderSource (void);
 const rgprog_t *RG_Program (GLuint name);
 int	RG_ProgramCount (void);
 

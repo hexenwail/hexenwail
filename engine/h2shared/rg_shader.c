@@ -5,26 +5,28 @@
  * with the resource counts gl_progid_refl.h carries, and a GL-shaped name
  * the renderer binds with R_UseProgram like any other program.
  *
- * WHERE THE SPIR-V COMES FROM (decision 6 on #340, still open).  The blobs
- * are read at run time from a directory, not compiled into the binary:
+ * WHERE THE SPIR-V COMES FROM (decision 6 on #340).  The blobs are compiled
+ * into the binary: the build turns every <blob>.vk.spv into rg_spirv[]
+ * (rg_spirv.h, engine/cmake/EmbedSpirv.cmake).  One source serves a whole
+ * run, picked once:
  *
- *   1. -gpushaders <dir> on the command line;
- *   2. <the executable's directory>/spirv;
- *   3. <basedir>/spirv;
- *   4. the build tree's own generated/spirv, compiled in as RG_SPIRV_DIR when
- *      CMake configured with USE_SDL_GPU (a dev build that ran
- *      `make shaders_spirv` finds its blobs with no flag).
+ *   1. -gpushaders <dir>, if <dir> has the probe blob: every blob is read
+ *      from <dir>/<blob>.vk.spv.  The developer override -- point it at
+ *      <build>/engine/generated/spirv after `make shaders_spirv` to try an
+ *      edited shader without relinking.  A <dir> without the probe blob is
+ *      reported and ignored.
+ *   2. the embedded table.
  *
- * That keeps glslangValidator out of every build -- the shaders_spirv target
- * stays opt-in, exactly as before -- and costs nothing to reverse: embedding
- * them later is a different answer to "find blob X", not a different
- * backend.  Without them, RG_CreateDevice refuses -gpu and the engine runs
- * GL.
+ * Nothing else on disk is looked at.  P1c also searched <exe>/spirv,
+ * <basedir>/spirv and the build tree; ahead of the table those would let a
+ * stale directory beside an installed binary replace the blobs it was built
+ * with -- the drift embedding exists to rule out -- and behind it they could
+ * never be reached, since the table always has the probe blob.
  *
  * Each blob is reflected here as it loads: the sampler and uniform-block
  * bindings, with their names, read from the SPIR-V itself.  The sampler and
  * uniform-buffer counts are checked against gl_progid_refl.h, which the
- * binary was built with; a directory of blobs from another build fails that
+ * binary was built with; an override directory from another build fails that
  * check loudly instead of binding the wrong slots.
  *
  * Copyright (C) 2026  Contributors of the uHexen2 project
@@ -41,9 +43,13 @@
 
 #include "quakedef.h"
 #include "rg_internal.h"
+#include "rg_spirv.h"
 
+/* This run's blob source (see the top): a -gpushaders directory, or the
+ * embedded table. */
 static char		rg_spvdir[MAX_OSPATH];
-static qboolean		rg_spvdir_found;
+static char		rg_spvsource[MAX_OSPATH + 32];
+static qboolean		rg_spv_fromdir, rg_spv_found;
 
 /* One allocation per program: a recorded draw holds its rgprog_t * until
  * the segment replays, and a program created mid-frame must not move it. */
@@ -54,7 +60,7 @@ static int		rg_numprogs, rg_maxprogs;
 /* Finding the blobs                                                   */
 /* ------------------------------------------------------------------ */
 
-/* The blob every program set has; its presence marks a usable directory. */
+/* The blob every program set has; its presence marks a usable source. */
 #define RG_PROBE_BLOB	"s2d.vert"
 
 static qboolean RG_DirHasBlobs (const char *dir)
@@ -73,42 +79,46 @@ static qboolean RG_DirHasBlobs (const char *dir)
 	return true;
 }
 
-static void RG_FindShaderDir (void)
+static const rg_spirv_t *RG_EmbeddedBlob (const char *blob)
 {
-	char		path[MAX_OSPATH];
-	const char	*base;
-	int		i;
+	int	i;
 
-	rg_spvdir_found = false;
+	for (i = 0; i < rg_spirv_count; i++)
+	{
+		if (!strcmp (rg_spirv[i].name, blob))
+			return &rg_spirv[i];
+	}
+	return NULL;
+}
+
+static void RG_FindShaders (void)
+{
+	int	i;
+
+	rg_spv_found = rg_spv_fromdir = false;
 	i = COM_CheckParm ("-gpushaders");
 	if (i && i + 1 < com_argc)
 	{
 		if (RG_DirHasBlobs (com_argv[i + 1]))
-			goto found;
-		Con_SafePrintf ("SDL_GPU: -gpushaders %s has no %s.vk.spv\n", com_argv[i + 1], RG_PROBE_BLOB);
+		{
+			rg_spv_fromdir = rg_spv_found = true;
+			q_snprintf (rg_spvsource, sizeof(rg_spvsource), "-gpushaders %s", rg_spvdir);
+			return;
+		}
+		Con_SafePrintf ("SDL_GPU: -gpushaders %s has no %s.vk.spv; using the embedded blobs\n",
+				com_argv[i + 1], RG_PROBE_BLOB);
 	}
-	base = SDL_GetBasePath ();
-	if (base)
+	if (RG_EmbeddedBlob (RG_PROBE_BLOB))
 	{
-		q_snprintf (path, sizeof(path), "%sspirv", base);
-		if (RG_DirHasBlobs (path))
-			goto found;
+		rg_spv_found = true;
+		q_snprintf (rg_spvsource, sizeof(rg_spvsource), "the embedded table (%d blobs)",
+			    rg_spirv_count);
 	}
-	q_snprintf (path, sizeof(path), "%s/spirv", FS_GetBasedir ());
-	if (RG_DirHasBlobs (path))
-		goto found;
-#ifdef RG_SPIRV_DIR
-	if (RG_DirHasBlobs (RG_SPIRV_DIR))
-		goto found;
-#endif
-	return;
-found:
-	rg_spvdir_found = true;
 }
 
-const char *RG_ShaderDir (void)
+const char *RG_ShaderSource (void)
 {
-	return rg_spvdir_found ? rg_spvdir : NULL;
+	return rg_spv_found ? rg_spvsource : NULL;
 }
 
 /* ------------------------------------------------------------------ */
@@ -325,18 +335,32 @@ static qboolean RG_Reflect (const Uint32 *w, size_t nwords, int sampler_set, int
 /* Programs                                                            */
 /* ------------------------------------------------------------------ */
 
-static void *RG_LoadBlob (const char *blob, size_t *size)
+/* *owned is what the caller SDL_frees: the file read from an override
+ * directory, or NULL for a blob in the embedded table. */
+static const void *RG_LoadBlob (const char *blob, size_t *size, void **owned)
 {
-	char	path[MAX_OSPATH];
-	void	*code;
+	char			path[MAX_OSPATH];
+	const rg_spirv_t	*e;
 
-	if (!rg_spvdir_found)
+	*owned = NULL;
+	if (!rg_spv_found)
 		return NULL;
-	q_snprintf (path, sizeof(path), "%s/%s.vk.spv", rg_spvdir, blob);
-	code = SDL_LoadFile (path, size);
-	if (!code)
-		Con_Printf ("SDL_GPU: cannot read %s (%s)\n", path, SDL_GetError ());
-	return code;
+	if (rg_spv_fromdir)
+	{
+		q_snprintf (path, sizeof(path), "%s/%s.vk.spv", rg_spvdir, blob);
+		*owned = SDL_LoadFile (path, size);
+		if (!*owned)
+			Con_Printf ("SDL_GPU: cannot read %s (%s)\n", path, SDL_GetError ());
+		return *owned;
+	}
+	e = RG_EmbeddedBlob (blob);
+	if (!e)
+	{
+		Con_Printf ("SDL_GPU: %s.vk.spv is not in the embedded table\n", blob);
+		return NULL;
+	}
+	*size = e->size;
+	return e->code;
 }
 
 /* Reflect a stage and hold it to the counts this binary was built with. */
@@ -355,10 +379,13 @@ static qboolean RG_CheckStage (rprog_id_t id, int stage, const void *code, size_
 		return false;
 	if (out->num_samplers != refl->samplers || out->num_ubos != refl->uniform_buffers)
 	{
-		Con_Printf ("SDL_GPU: %s/%s.vk.spv has %d samplers and %d uniform blocks, this build "
-			    "expects %d and %d -- the blobs are from another build\n",
-			    rg_spvdir, blob, out->num_samplers, out->num_ubos,
-			    refl->samplers, refl->uniform_buffers);
+		Con_Printf ("SDL_GPU: %s.vk.spv from %s has %d samplers and %d uniform blocks, this "
+			    "build expects %d and %d -- %s\n",
+			    blob, rg_spvsource, out->num_samplers, out->num_ubos,
+			    refl->samplers, refl->uniform_buffers,
+			    rg_spv_fromdir ? "the blobs are from another build"
+					   : "gl_progid_refl.h is stale; regenerate it with "
+					     "tools/gen_program_reflection.py");
 		return false;
 	}
 	return true;
@@ -372,7 +399,8 @@ static SDL_GPUShader *RG_MakeShader (rprog_id_t id, int stage, SDL_GPUShaderStag
 	SDL_GPUShaderCreateInfo	ci;
 	SDL_GPUShader		*sh;
 	size_t			size;
-	void			*code = RG_LoadBlob (blob, &size);
+	void			*owned;
+	const void		*code = RG_LoadBlob (blob, &size, &owned);
 
 	if (!code)
 		return NULL;
@@ -380,7 +408,7 @@ static SDL_GPUShader *RG_MakeShader (rprog_id_t id, int stage, SDL_GPUShaderStag
 			    kind == SDL_GPU_SHADERSTAGE_VERTEX ? 0 : 2,
 			    kind == SDL_GPU_SHADERSTAGE_VERTEX ? 1 : 3, out))
 	{
-		SDL_free (code);
+		SDL_free (owned);
 		return NULL;
 	}
 	SDL_zero (ci);
@@ -396,7 +424,7 @@ static SDL_GPUShader *RG_MakeShader (rprog_id_t id, int stage, SDL_GPUShaderStag
 	sh = SDL_CreateGPUShader (rg_dev, &ci);
 	if (!sh)
 		Con_Printf ("SDL_GPU: shader %s failed (%s)\n", blob, SDL_GetError ());
-	SDL_free (code);
+	SDL_free (owned);
 	return sh;
 }
 
@@ -407,14 +435,15 @@ static SDL_GPUComputePipeline *RG_MakeCompute (rprog_id_t id, rgstage_t *out)
 	SDL_GPUComputePipelineCreateInfo ci;
 	SDL_GPUComputePipeline		*cp;
 	size_t				size;
-	void				*code = RG_LoadBlob (blob, &size);
+	void				*owned;
+	const void			*code = RG_LoadBlob (blob, &size, &owned);
 
 	if (!code)
 		return NULL;
 	/* Compute: set 0 samplers, set 2 uniform buffers. */
 	if (!RG_CheckStage (id, RPROG_STAGE_COMPUTE, code, size, 0, 2, out))
 	{
-		SDL_free (code);
+		SDL_free (owned);
 		return NULL;
 	}
 	SDL_zero (ci);
@@ -434,7 +463,7 @@ static SDL_GPUComputePipeline *RG_MakeCompute (rprog_id_t id, rgstage_t *out)
 	cp = SDL_CreateGPUComputePipeline (rg_dev, &ci);
 	if (!cp)
 		Con_Printf ("SDL_GPU: compute pipeline %s failed (%s)\n", blob, SDL_GetError ());
-	SDL_free (code);
+	SDL_free (owned);
 	return cp;
 }
 
@@ -515,7 +544,7 @@ GLint RG_ProgramBlock (GLuint program, const char *block)
 
 void RG_Shader_Init (void)
 {
-	RG_FindShaderDir ();
+	RG_FindShaders ();
 }
 
 void RG_Shader_Shutdown (void)

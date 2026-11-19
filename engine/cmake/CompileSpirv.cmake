@@ -4,8 +4,9 @@
 #   cmake -DVK_DIR=<dir> -DSPV_DIR=<dir> -DGLSLANG=<glslangValidator> \
 #         -P CompileSpirv.cmake
 #
-# Nothing in the engine consumes the .spv yet; the SDL_GPU backend is what
-# will.  Until then this is a correctness check with a byproduct: Vulkan
+# With USE_SDL_GPU the client build runs this, and EmbedSpirv.cmake then links
+# the .vk.spv into the client for the SDL_GPU backend (#340 decision 6).  It
+# is also a correctness check: Vulkan
 # rejects a uniform, sampler or varying that has no explicit binding or
 # location, so a shader that grows a resource and forgets to qualify it fails
 # here rather than in the backend.  That is why it runs BOTH frontends and not

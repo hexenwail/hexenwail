@@ -14,6 +14,7 @@ GitHub #340, under the decision in #447: SDL_GPU is the route to Vulkan, D3D12 a
 | P1a | Texture creation, upload and sampler state through `gl_texcreate.c` | #501 |
 | P1b | Every program created by id through `R_Program_Create`; reflection rows in `gl_progid_refl.h` | #502 |
 | P1c | Console, menus, HUD and plaque drawn through SDL_GPU. Files: `rg_frame.c`, `rg_resource.c`, `rg_pipeline.c`, `rg_shader.c` | branch `bobberb/sdlgpu-p1c-e34a6394`, not yet merged |
+| Decision 6 | SPIR-V embedded: `EmbedSpirv.cmake` writes `generated/spirv_gen.c` (60 blobs, 638 KiB) under `USE_SDL_GPU`; `-gpu` boots with no flag. Checks: `tools/test_embed_spirv.py`, `tools/test_rg_sources.py` | same branch |
 
 ## Decisions
 
@@ -31,17 +32,14 @@ Settled:
    - Builds with `USE_SDL_GPU` embed the SPIR-V in the binary, SPIR-V only for now.
    - `glslangValidator` becomes a build input only where `USE_SDL_GPU` is on.
    - DXIL and Metal come at P7.
-   - The runtime loader (`-gpushaders <dir>`, then `<exe>/spirv`, then `<basedir>/spirv`, then the build tree) stays as a developer override.
+   - Lookup order: `-gpushaders <dir>` (the developer override, no relink), then the embedded table. P1c's implicit `<exe>/spirv`, `<basedir>/spirv` and build-tree search is gone: ahead of the table a stale directory could replace the blobs the binary was built with, and behind it nothing could reach them.
+   - `.#h2ded`, `.#hwsv` and `.#h2ded-win64` configure with `-DUSE_SDL_GPU=OFF`, so their configure needs no `glslang`.
 
 Still open: 4 (first-release scope), 7 (pipeline pre-warm), 8 (D3D12 Tier-1 hardware).
 
 ## Next
 
-1. **Embed the SPIR-V (decision 6):**
-   - Add an EmbedShaders-style step that turns `generated/spirv/*.vk.spv` into a header or object. It runs only when `USE_SDL_GPU` is on.
-   - Add `glslang` as a native build input of the desktop and win64 derivations.
-   - `rg_shader.c` looks up embedded blobs first and keeps the runtime search as the override.
-   - Gate it: `nix build .#default` with `-gpu` must boot with no `-gpushaders` flag. Builds without SDL_GPU must not need `glslang`.
+1. ~~Embed the SPIR-V (decision 6).~~ Done, see the table above.
 2. **Land P1c together with step 1.**
 3. **P2:** the opaque world, brush and alias models, and the sky. This needs:
    - a sampler-unit seam (`glGetUniformLocation` and `glUniform1i` at program setup; about nine lints pin those call sites);

@@ -286,6 +286,12 @@
           # OpenGL version (hexenwail) - NixOS build with Nix store rpaths
           # NOTE: Uses CMake build system
           nixos = pkgs.stdenv.mkDerivation (linuxBuildAttrs // {
+            # USE_SDL_GPU (on by default) compiles the SDL_GPU backend's
+            # SPIR-V at build time and links it in (#340 decision 6).  Here
+            # and in .#win64 only, not in linuxBuildAttrs: gles cannot build
+            # the backend, and h2ded/hwsv configure with USE_SDL_GPU=OFF.
+            nativeBuildInputs = linuxBuildAttrs.nativeBuildInputs ++ [ pkgs.glslang ];
+
             # `nix flake check` (and every `nix build .#nixos`) runs this:
             # the engine must install an executable hexenwail.  Kept on the
             # `nixos` override only, not in linuxBuildAttrs -- h2ded
@@ -461,7 +467,10 @@
             # The client's buildInputs are still needed even though h2ded links
             # none of them: engine/CMakeLists.txt looks up SDL3, OpenGL and ALSA
             # as REQUIRED for any Unix configure, not just the client target.
-            cmakeFlags = linuxBuildAttrs.cmakeFlags ++ [ "-DBUILD_DEDICATED=ON" ];
+            # USE_SDL_GPU=OFF: the client target, which this build never
+            # builds, would otherwise make configure require glslang (#340
+            # decision 6).  The server sources never see the define.
+            cmakeFlags = linuxBuildAttrs.cmakeFlags ++ [ "-DBUILD_DEDICATED=ON" "-DUSE_SDL_GPU=OFF" ];
 
             # Build only the server; the default target would also rebuild the
             # whole client, which .#nixos already covers.
@@ -503,7 +512,8 @@
             # a target that the generated build system does not contain.  Both
             # are needed -- the flag to create the target, buildFlags to build
             # that one and not the client.
-            cmakeFlags = linuxBuildAttrs.cmakeFlags ++ [ "-DBUILD_HEXENWORLD=ON" ];
+            # USE_SDL_GPU=OFF: see .#h2ded.
+            cmakeFlags = linuxBuildAttrs.cmakeFlags ++ [ "-DBUILD_HEXENWORLD=ON" "-DUSE_SDL_GPU=OFF" ];
             buildFlags = [ "hwsv" ];
 
             installPhase = ''
@@ -1006,10 +1016,14 @@
 
             src = filteredSrc;
 
+            # glslang is the build machine's (pkgs, not pkgsCross64): the
+            # SDL_GPU backend's SPIR-V is compiled at build time and linked
+            # into the .exe (#340 decision 6).
             nativeBuildInputs = (with pkgs; [
               cmake
               pkg-config
               removeReferencesTo
+              glslang
             ]) ++ rustCrossWin64.nativeBuildInputs;
             inherit (rustCrossWin64) depsBuildBuild;
 
@@ -1178,8 +1192,10 @@
               cd engine
             '';
 
+            # USE_SDL_GPU=OFF: see .#h2ded.
             cmakeFlags = [
               "-DBUILD_DEDICATED=ON"
+              "-DUSE_SDL_GPU=OFF"
             ];
 
             # Only the server target; the client .exe is .#win64's job.

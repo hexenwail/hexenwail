@@ -106,6 +106,13 @@ jobs:
       - name: Test GL model loader invariants
         run: nix develop -c python3 tools/test_gl_model_loaders.py
 
+      # EmbedSpirv.cmake, run on fixtures: the table the USE_SDL_GPU client
+      # links has every gl_progid_refl.h blob, word-exact, and the script
+      # refuses a missing or broken one (#340 decision 6).  Needs cmake and
+      # cc, hence the dev shell.
+      - name: Test the embedded SPIR-V generator
+        run: nix develop -c python3 tools/test_embed_spirv.py
+
       - name: Build Linux
         run: nix build .#nixos --print-build-logs
 

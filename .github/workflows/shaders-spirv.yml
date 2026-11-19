@@ -3,9 +3,12 @@ name: Shaders SPIR-V
 # CompileSpirv.cmake compiles every engine/shaders/ stage with both
 # glslangValidator -V (Vulkan) and -G (OpenGL SPIR-V), which is the only
 # thing that proves the layout.inc set and binding qualifiers are complete.
-# But shaders_spirv is opt-in, not in ALL, and nothing in CI used to run
-# it, so a new shader could ship without its Vulkan bindings and nothing
-# noticed.  The five SSAO stages from #446 are the most recent example.
+# Before #340 decision 6 shaders_spirv was opt-in and nothing in CI ran it,
+# so a new shader could ship without its Vulkan bindings and nothing noticed
+# (the five SSAO stages from #446).  USE_SDL_GPU builds now run it ahead of
+# the client, which embeds the result (spirv_embed, EmbedSpirv.cmake); the dev
+# shell configures with USE_SDL_GPU on, so the target below is that same step,
+# and the embedded table is checked against the .spv near the end.
 #
 # The same job then runs shaders_cross: CrossCompileShaders.cmake feeds
 # the Vulkan .spv to shadercross and demands DXIL, MSL and a reflection
@@ -41,6 +44,8 @@ on:
       - 'engine/cmake/CompileSpirv.cmake'
       - 'engine/cmake/CrossCompileShaders.cmake'
       - 'engine/cmake/EmbedShaders.cmake'
+      - 'engine/cmake/EmbedSpirv.cmake'
+      - 'engine/h2shared/rg_spirv.h'
       - 'engine/CMakeLists.txt'
       - 'flake.nix'
       - '.github/workflows/shaders-spirv.yml'
@@ -48,6 +53,7 @@ on:
       - 'tools/test_shader_variants.py'
       - 'tools/test_vk_flip_y.py'
       - 'tools/gen_program_reflection.py'
+      - 'tools/test_embed_spirv.py'
       - 'engine/h2shared/gl_progid_refl.h'
   push:
     branches: [master]
@@ -56,6 +62,8 @@ on:
       - 'engine/cmake/CompileSpirv.cmake'
       - 'engine/cmake/CrossCompileShaders.cmake'
       - 'engine/cmake/EmbedShaders.cmake'
+      - 'engine/cmake/EmbedSpirv.cmake'
+      - 'engine/h2shared/rg_spirv.h'
       - 'engine/CMakeLists.txt'
       - 'flake.nix'
       - '.github/workflows/shaders-spirv.yml'
@@ -63,6 +71,7 @@ on:
       - 'tools/test_shader_variants.py'
       - 'tools/test_vk_flip_y.py'
       - 'tools/gen_program_reflection.py'
+      - 'tools/test_embed_spirv.py'
       - 'engine/h2shared/gl_progid_refl.h'
 
 # Builds and throws the result away; nothing here writes to the repository.
@@ -136,8 +145,8 @@ jobs:
       # resource counts (and a compute stage's threadcount), which cannot be
       # asked of a blob at run time.  engine/h2shared/gl_progid_refl.h carries
       # them, one row per offline copy, generated from these .vk.spv by
-      # tools/gen_program_reflection.py and checked in so the default build
-      # needs no glslang (#340 decision 6).  Regenerate it and fail if the
+      # tools/gen_program_reflection.py and checked in so the GLES and web
+      # builds need no glslang (#340 decision 6).  Regenerate it and fail if the
       # checked-in copy differs, or if any row disagrees with shadercross's
       # own reflection JSON of the same blob (shaders_cross above); lint.yml's
       # test_program_routing.py checks its rows are the offline copies and
@@ -147,6 +156,19 @@ jobs:
           set -euo pipefail
           python3 tools/gen_program_reflection.py /tmp/shader-build/engine/generated/spirv --check \
             --cross /tmp/shader-build/engine/generated/cross
+
+      # The USE_SDL_GPU client links generated/spirv_gen.c, which the
+      # spirv_embed target writes from these .vk.spv (EmbedSpirv.cmake).  It
+      # refuses a table whose rows are not the blobs, so it runs after the
+      # reflection check above, whose message says how to fix that.  Then
+      # every row must be embedded word for word.  #340 decision 6.
+      - name: Check the embedded SPIR-V table
+        run: |
+          set -euo pipefail
+          nix develop -c cmake --build /tmp/shader-build --target spirv_embed
+          python3 tools/test_embed_spirv.py \
+            --generated /tmp/shader-build/engine/generated/spirv_gen.c \
+            --spirv-dir /tmp/shader-build/engine/generated/spirv
 
       # SDL_GPU is +Y up with row 0 at the top; GL puts NDC y = -1 on row 0.
       # Every vertex stage negates gl_Position.y in its Vulkan SPIR-V only

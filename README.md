@@ -202,7 +202,7 @@ cd engine && mkdir build && cd build
 cmake .. && make -j$(nproc)
 ```
 
-**Requirements:** OpenGL 4.3 (2012+), SDL3, Rust 1.82+ (cargo; part of the engine is Rust, linked into every build), libvorbis, libogg, libopus, opusfile, libxmp, ALSA (optional), FluidSynth (optional)
+**Requirements:** OpenGL 4.3 (2012+), SDL3, Rust 1.82+ (cargo; part of the engine is Rust, linked into every build), libvorbis, libogg, libopus, opusfile, libxmp, glslang (for the SDL_GPU backend; or configure `-DUSE_SDL_GPU=OFF`), ALSA (optional), FluidSynth (optional)
 
 **Nix:**
 ```bash

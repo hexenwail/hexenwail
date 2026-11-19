@@ -8,8 +8,10 @@
 #   STEPS=tools/sweep-2d-gpu.steps ENGINE=$E ./tools/headless-drive.sh script /tmp/2d-gl \
 #       $DATA +gamma 1
 #   VK_ICD_FILENAMES=<lvp_icd or nvidia_icd json> STEPS=tools/sweep-2d-gpu.steps ENGINE=$E \
-#       ./tools/headless-drive.sh script /tmp/2d-gpu $DATA -gpu +gpu_allow_software 1 \
-#       -gpushaders <build>/generated/spirv +gamma 1
+#       ./tools/headless-drive.sh script /tmp/2d-gpu $DATA -gpu +gpu_allow_software 1 +gamma 1
+#
+# The SPIR-V is embedded (#340 decision 6); add -gpushaders <build>/engine/generated/spirv
+# to run freshly compiled blobs instead.
 #
 # Why gamma 1: the demo's default.cfg sets gamma 0.75, which GL applies in the
 # post-process chain, and that chain is P4 -- off under -gpu.  At gamma 1 GL

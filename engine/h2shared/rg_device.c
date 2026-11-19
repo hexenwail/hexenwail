@@ -243,10 +243,10 @@ qboolean RG_CreateDevice (SDL_Window *window, int vsync)
 	 * they are looked for), and a device that can only clear is no use to
 	 * a player: refuse, and the caller falls back to GL. */
 	RG_Shader_Init ();
-	if (!RG_ShaderDir ())
+	if (!RG_ShaderSource ())
 	{
-		Con_SafePrintf ("SDL_GPU: no SPIR-V shaders found (looked for spirv/s2d.vert.vk.spv beside "
-				"the executable and in the basedir; -gpushaders <dir> names one)\n");
+		Con_SafePrintf ("SDL_GPU: no SPIR-V shaders (the embedded table has no s2d.vert, and "
+				"no -gpushaders <dir> holding s2d.vert.vk.spv was given)\n");
 		SDL_ReleaseWindowFromGPUDevice (rg_dev, window);
 		SDL_DestroyGPUDevice (rg_dev);
 		rg_dev = NULL;
@@ -260,7 +260,7 @@ qboolean RG_CreateDevice (SDL_Window *window, int vsync)
 	Con_SafePrintf ("SDL_GPU: %s on %s, present %s, debug %s%s, shaders from %s\n",
 			RG_DriverName (), name, RG_PresentModeName (rg_present_mode),
 			debug ? "on" : "off", software ? ", software drivers allowed" : "",
-			RG_ShaderDir ());
+			RG_ShaderSource ());
 	rg_active = true;
 	RG_Res_Init ();
 	RG_Pipeline_Init ();
@@ -330,7 +330,7 @@ void RG_Status (void)
 		    rg_dev ? "SDR" : "none");
 	Con_Printf ("[RENDERER] SDL_GPU P1c: 2D drawn; GL runs against the null table "
 		    "(%lu calls into %d entry points, see gpu_unrouted)\n", total, hit);
-	Con_Printf ("[RENDERER] SDL_GPU shaders from %s\n", RG_ShaderDir () ? RG_ShaderDir () : "nowhere");
+	Con_Printf ("[RENDERER] SDL_GPU shaders from %s\n", RG_ShaderSource () ? RG_ShaderSource () : "nowhere");
 	if (rg_dev)
 	{
 		RG_Frame_Status ();

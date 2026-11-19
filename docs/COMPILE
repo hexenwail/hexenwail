@@ -25,6 +25,13 @@ Prerequisites:
     finds cargo on PATH, or pass -DCARGO_EXECUTABLE=/path/to/cargo.
   - SDL3 development libraries
   - OpenGL 4.3 capable driver
+  - glslangValidator (package: glslang), on the BUILD machine, for the
+    desktop GL client: its SDL_GPU backend (-gpu, USE_SDL_GPU, on by
+    default) has its Vulkan SPIR-V compiled at build time and linked in.
+    Configure with -DUSE_SDL_GPU=OFF to build without the backend and
+    without glslang.  The GLES tier, the web builds and the dedicated
+    servers never need it (pass -DUSE_SDL_GPU=OFF with BUILD_DEDICATED /
+    BUILD_HEXENWORLD if glslang is absent: the client is still configured).
 
 Optional libraries for music playback:
   - libogg and libvorbis (or libtremor) for OGG Vorbis
