@@ -479,14 +479,14 @@ static void Draw_TouchAllFilterModes (void)
 		if (glt->flags & (TEX_NEAREST|TEX_LINEAR))	/* TEX_MIPMAP mustn't be set in this case */
 			continue;
 		R_BindTextureSlot (0, glt->texnum);
-		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, gl_texmodes[gl_filter_idx].maximize);
+		R_TexParameterf(GL_TEXTURE_2D, glt->texnum, GL_TEXTURE_MAG_FILTER, gl_texmodes[gl_filter_idx].maximize);
 		if (glt->flags & TEX_MIPMAP)
 		{
-			glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, gl_texmodes[gl_filter_idx].minimize);
+			R_TexParameterf(GL_TEXTURE_2D, glt->texnum, GL_TEXTURE_MIN_FILTER, gl_texmodes[gl_filter_idx].minimize);
 			if (gl_max_anisotropy >= 2)
-				glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, gl_texture_anisotropy.value);
+				R_TexParameterf(GL_TEXTURE_2D, glt->texnum, GL_TEXTURE_MAX_ANISOTROPY_EXT, gl_texture_anisotropy.value);
 		}
-		else	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, gl_texmodes[gl_filter_idx].maximize);
+		else	R_TexParameterf(GL_TEXTURE_2D, glt->texnum, GL_TEXTURE_MIN_FILTER, gl_texmodes[gl_filter_idx].maximize);
 	}
 }
 
@@ -837,9 +837,8 @@ static void Draw_TouchMipmapFilterModes (void)
 		if (glt->flags & TEX_MIPMAP)
 		{
 			R_BindTextureSlot (0, glt->texnum);
-			glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, gl_texmodes[gl_filter_idx].maximize);
-			glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, gl_texmodes[gl_filter_idx].minimize);
-			glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, gl_texture_anisotropy.value);
+			R_TexSetFilter(GL_TEXTURE_2D, glt->texnum, gl_texmodes[gl_filter_idx].minimize, gl_texmodes[gl_filter_idx].maximize);
+			R_TexParameterf(GL_TEXTURE_2D, glt->texnum, GL_TEXTURE_MAX_ANISOTROPY_EXT, gl_texture_anisotropy.value);
 		}
 	}
 }
@@ -867,11 +866,11 @@ static float GL_ResolveLodBias (void)
 /* The only place GL_TEXTURE_LOD_BIAS may be set (tools/test_lod_bias_gate.py
  * enforces it): ES 3.0/WebGL2 reject the enum, so an unguarded call there
  * raises GL_INVALID_ENUM on every mipmapped upload (GitHub #149). */
-static void GL_ApplyLodBias (void)
+static void GL_ApplyLodBias (GLuint texnum)
 {
 	if (!gl_renderer_caps.texture_lod_bias)
 		return;
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS, GL_ResolveLodBias());
+	R_TexParameterf(GL_TEXTURE_2D, texnum, GL_TEXTURE_LOD_BIAS, GL_ResolveLodBias());
 }
 
 static void Draw_LodBias_f (cvar_t *var)
@@ -896,7 +895,7 @@ static void Draw_LodBias_f (cvar_t *var)
 		if (glt->flags & TEX_MIPMAP)
 		{
 			R_BindTextureSlot (0, glt->texnum);
-			GL_ApplyLodBias ();
+			GL_ApplyLodBias (glt->texnum);
 		}
 	}
 }
@@ -1165,8 +1164,7 @@ void Draw_Init (void)
 				       TEX_ALPHA|TEX_NEAREST|TEX_UNCOMPRESSED);
 	/* Set CLAMP_TO_EDGE on charset atlas to prevent edge sampling artifacts */
 	R_BindTextureSlot (0, char_texture);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	R_TexSetWrap(GL_TEXTURE_2D, char_texture, GL_CLAMP_TO_EDGE);
 
 	// load the small characters for status bar
 	chars = (byte *) W_GetLumpName("tinyfont");
@@ -1178,8 +1176,7 @@ void Draw_Init (void)
 	char_smalltexture = GL_LoadTexture ("smallcharset", chars, 128, 32,
 					    TEX_ALPHA|TEX_NEAREST|TEX_UNCOMPRESSED);
 	R_BindTextureSlot (0, char_smalltexture);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	R_TexSetWrap(GL_TEXTURE_2D, char_smalltexture, GL_CLAMP_TO_EDGE);
 
 	// load the big menu font
 	// Note: old version of demo has bigfont.lmp, not bigfont2.lmp
@@ -1195,8 +1192,7 @@ void Draw_Init (void)
 	char_menufonttexture = GL_LoadTexture ("menufont", p->data, p->width, p->height,
 					       TEX_ALPHA|TEX_LINEAR|TEX_UNCOMPRESSED);
 	R_BindTextureSlot (0, char_menufonttexture);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	R_TexSetWrap(GL_TEXTURE_2D, char_menufonttexture, GL_CLAMP_TO_EDGE);
 
 	// load the console background
 	p = (qpic_t *)FS_LoadTempFile ("gfx/menu/conback.lmp", NULL);
@@ -1215,7 +1211,7 @@ void Draw_Init (void)
 	cs_texture = GL_LoadPixmap ("crosshair", cs_data);
 
 	// initialize the player texnums for multiplayer config screens
-	glGenTextures_fp(MAX_PLAYER_CLASS, menuplyr_textures);
+	R_GenTextures(MAX_PLAYER_CLASS, menuplyr_textures);
 }
 
 
@@ -1408,8 +1404,7 @@ void Draw_Crosshair (void)
 
 		R_BindTextureSlot (0, cs_texture);
 
-		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		R_TexSetWrap(GL_TEXTURE_2D, cs_texture, GL_CLAMP_TO_EDGE);
 
 		// Our crosshair is now 32x32, but we're drawing 16x16 here
 		// to have a smaller pic. If, in the pixmap, the pixels are
@@ -1573,8 +1568,7 @@ void Draw_Pic (int x, int y, qpic_t *pic)
 	gl = (glpic_t *)pic->data;
 	R_BindTextureSlot (0, gl->texnum);
 
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	R_TexSetWrap(GL_TEXTURE_2D, gl->texnum, GL_CLAMP_TO_EDGE);
 
 	GL_ImmBegin();
 	GL_ImmColor4f (1, 1, 1, pic_alpha);
@@ -1590,8 +1584,7 @@ void Draw_Pic (int x, int y, qpic_t *pic)
 	GL_ImmEnd (GL_QUADS, &gl_shader_2d);
 	Draw_PicAlphaEnd ();
 
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	R_TexSetWrap(GL_TEXTURE_2D, gl->texnum, GL_REPEAT);
 }
 
 /*
@@ -1609,8 +1602,7 @@ void Draw_AlphaPic (int x, int y, qpic_t *pic, float alpha)
 	R_SetCullFace (GL_FRONT);
 	R_BindTextureSlot (0, gl->texnum);
 
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	R_TexSetWrap(GL_TEXTURE_2D, gl->texnum, GL_CLAMP_TO_EDGE);
 
 	GL_ImmBegin();
 	GL_ImmColor4f (1, 1, 1, alpha);
@@ -1625,8 +1617,7 @@ void Draw_AlphaPic (int x, int y, qpic_t *pic, float alpha)
 	GL_ImmEnd (GL_QUADS, &gl_shader_2d);
 	R_SetBlend (false);
 
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	R_TexSetWrap(GL_TEXTURE_2D, gl->texnum, GL_REPEAT);
 }
 
 #if FULLSCREEN_INTERMISSIONS
@@ -1702,8 +1693,7 @@ void Draw_IntermissionPic (qpic_t *pic)
 	gl = (glpic_t *)pic->data;
 	R_BindTextureSlot (0, gl->texnum);
 
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	R_TexSetWrap(GL_TEXTURE_2D, gl->texnum, GL_CLAMP_TO_EDGE);
 
 	GL_ImmBegin();
 	GL_ImmColor4f (1, 1, 1, 1);
@@ -1717,8 +1707,7 @@ void Draw_IntermissionPic (qpic_t *pic)
 	GL_ImmVertex2f (0.0f, vid.height);
 	GL_ImmEnd (GL_QUADS, &gl_shader_2d);
 
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	R_TexSetWrap(GL_TEXTURE_2D, gl->texnum, GL_REPEAT);
 }
 #endif	/* FULLSCREEN_INTERMISSIONS */
 
@@ -1743,8 +1732,7 @@ void Draw_SubPic (int x, int y, qpic_t *pic, int srcx, int srcy, int width, int 
 
 	R_BindTextureSlot (0, gl->texnum);
 
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	R_TexSetWrap(GL_TEXTURE_2D, gl->texnum, GL_CLAMP_TO_EDGE);
 
 	GL_ImmBegin();
 	GL_ImmColor4f (1, 1, 1, 1);
@@ -1758,8 +1746,7 @@ void Draw_SubPic (int x, int y, qpic_t *pic, int srcx, int srcy, int width, int 
 	GL_ImmVertex2f (x, y+height);
 	GL_ImmEnd (GL_QUADS, &gl_shader_2d);
 
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	R_TexSetWrap(GL_TEXTURE_2D, gl->texnum, GL_REPEAT);
 }
 
 void Draw_PicCropped (int x, int y, qpic_t *pic)
@@ -1804,8 +1791,7 @@ void Draw_PicCropped (int x, int y, qpic_t *pic)
 
 	R_BindTextureSlot (0, gl->texnum);
 
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	R_TexSetWrap(GL_TEXTURE_2D, gl->texnum, GL_CLAMP_TO_EDGE);
 
 	GL_ImmBegin();
 	GL_ImmColor4f (1, 1, 1, pic_alpha);
@@ -1821,8 +1807,7 @@ void Draw_PicCropped (int x, int y, qpic_t *pic)
 	GL_ImmEnd (GL_QUADS, &gl_shader_2d);
 	Draw_PicAlphaEnd ();
 
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	R_TexSetWrap(GL_TEXTURE_2D, gl->texnum, GL_REPEAT);
 }
 
 void Draw_SubPicCropped (int x, int y, int h, qpic_t *pic)
@@ -1872,8 +1857,7 @@ void Draw_SubPicCropped (int x, int y, int h, qpic_t *pic)
 
 	R_BindTextureSlot (0, gl->texnum);
 
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	R_TexSetWrap(GL_TEXTURE_2D, gl->texnum, GL_CLAMP_TO_EDGE);
 
 	GL_ImmBegin();
 	GL_ImmColor4f (1, 1, 1, pic_alpha);
@@ -1889,8 +1873,7 @@ void Draw_SubPicCropped (int x, int y, int h, qpic_t *pic)
 	GL_ImmEnd (GL_QUADS, &gl_shader_2d);
 	Draw_PicAlphaEnd ();
 
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	R_TexSetWrap(GL_TEXTURE_2D, gl->texnum, GL_REPEAT);
 }
 
 /*
@@ -1957,12 +1940,10 @@ void Draw_TransPicTranslate (int x, int y, qpic_t *pic, byte *translation, int p
 		}
 	}
 
-	glTexImage2D_fp (GL_TEXTURE_2D, 0, gl_alpha_format, PLAYER_DEST_WIDTH, PLAYER_DEST_HEIGHT,
-			 0, GL_RGBA, GL_UNSIGNED_BYTE, trans);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	R_TexImage2D (GL_TEXTURE_2D, menuplyr_textures[p_class-1], 0, gl_alpha_format,
+		      PLAYER_DEST_WIDTH, PLAYER_DEST_HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE, trans);
+	R_TexSetFilter(GL_TEXTURE_2D, menuplyr_textures[p_class-1], GL_LINEAR, GL_LINEAR);
+	R_TexSetWrap(GL_TEXTURE_2D, menuplyr_textures[p_class-1], GL_CLAMP_TO_EDGE);
 
 	GL_ImmBegin();
 	GL_ImmColor3f (1, 1, 1);
@@ -1995,8 +1976,7 @@ static void Draw_ConsolePic (int lines, float ofs, GLuint num, float alpha)
 	R_SetCullFace (GL_FRONT);
 	R_BindTextureSlot (0, num);
 
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	R_TexSetWrap(GL_TEXTURE_2D, num, GL_CLAMP_TO_EDGE);
 
 	GL_ImmBegin();
 	GL_ImmColor4f (bright, bright, bright, alpha);
@@ -2012,8 +1992,7 @@ static void Draw_ConsolePic (int lines, float ofs, GLuint num, float alpha)
 
 	R_SetBlend (false);
 
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	R_TexSetWrap(GL_TEXTURE_2D, num, GL_REPEAT);
 }
 
 static void Draw_ConsoleVersionInfo (int lines);	/* forward */
@@ -2037,8 +2016,7 @@ void Draw_MenuBackdrop (void)
 	R_SetBlend (false);
 	R_BindTextureSlot (0, conback);
 
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	R_TexSetWrap(GL_TEXTURE_2D, conback, GL_CLAMP_TO_EDGE);
 
 	GL_ImmBegin();
 	GL_ImmColor4f (1, 1, 1, 1);
@@ -2052,8 +2030,7 @@ void Draw_MenuBackdrop (void)
 	GL_ImmVertex2f (0, vid.height);
 	GL_ImmEnd (GL_QUADS, &gl_shader_2d);
 
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	R_TexSetWrap(GL_TEXTURE_2D, conback, GL_REPEAT);
 
 	/* Pin watermark to the bottom-right of the visible canvas. */
 	Draw_ConsoleVersionInfo (vid.height);
@@ -2891,7 +2868,7 @@ static void GL_Upload32 (unsigned int *data, gltexture_t *glt)
 		GL_ResampleTexture (data, glt->width, glt->height, scaled, scaled_width, scaled_height);
 	}
 
-	glTexImage2D_fp (GL_TEXTURE_2D, 0, samples, scaled_width, scaled_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, scaled);
+	R_TexImage2D (GL_TEXTURE_2D, glt->texnum, 0, samples, scaled_width, scaled_height, GL_RGBA, GL_UNSIGNED_BYTE, scaled);
 
 	if (glt->flags & TEX_MIPMAP)
 	{
@@ -2914,7 +2891,7 @@ static void GL_Upload32 (unsigned int *data, gltexture_t *glt)
 					miprgba[ii * 4 + 3] = (miprgba[ii * 4 + 3] >= 128) ? 255 : 0;
 			}
 
-			glTexImage2D_fp (GL_TEXTURE_2D, miplevel, samples, scaled_width, scaled_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, scaled);
+			R_TexImage2D (GL_TEXTURE_2D, glt->texnum, miplevel, samples, scaled_width, scaled_height, GL_RGBA, GL_UNSIGNED_BYTE, scaled);
 		}
 	}
 
@@ -2941,13 +2918,11 @@ static void GL_SetTextureFilter (const gltexture_t *glt)
 {
 	if (glt->flags & TEX_NEAREST)
 	{
-		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		R_TexSetFilter(GL_TEXTURE_2D, glt->texnum, GL_NEAREST, GL_NEAREST);
 	}
 	else if (glt->flags & TEX_LINEAR)
 	{
-		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		R_TexSetFilter(GL_TEXTURE_2D, glt->texnum, GL_LINEAR, GL_LINEAR);
 	}
 	else if (glt->flags & TEX_MIPMAP)
 	{
@@ -2980,16 +2955,14 @@ static void GL_SetTextureFilter (const gltexture_t *glt)
 		 * The mip alpha re-binarization above is the principled half and
 		 * stays.  Do not re-add the demotion without a repro that a
 		 * MIN_FILTER change actually moves. */
-		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, gl_texmodes[gl_filter_idx].minimize);
-		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, gl_texmodes[gl_filter_idx].maximize);
+		R_TexSetFilter(GL_TEXTURE_2D, glt->texnum, gl_texmodes[gl_filter_idx].minimize, gl_texmodes[gl_filter_idx].maximize);
 		if (gl_max_anisotropy >= 2)
-			glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, gl_texture_anisotropy.value);
-		GL_ApplyLodBias ();
+			R_TexParameterf(GL_TEXTURE_2D, glt->texnum, GL_TEXTURE_MAX_ANISOTROPY_EXT, gl_texture_anisotropy.value);
+		GL_ApplyLodBias (glt->texnum);
 	}
 	else
 	{
-		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, gl_texmodes[gl_filter_idx].maximize);
-		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, gl_texmodes[gl_filter_idx].maximize);
+		R_TexSetFilter(GL_TEXTURE_2D, glt->texnum, gl_texmodes[gl_filter_idx].maximize, gl_texmodes[gl_filter_idx].maximize);
 	}
 
 	/* uhexen2-khsa r11: opaque textures get GL_TEXTURE_SWIZZLE_A=GL_ONE so
@@ -3005,7 +2978,7 @@ static void GL_SetTextureFilter (const gltexture_t *glt)
 	 * SPECIAL_TRANS, translucent PNG skins) explicitly reset to
 	 * GL_ALPHA so re-uploads of the same texture name stay correct. */
 	if (gl_renderer_caps.texture_swizzle)
-		glTexParameteri_fp(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A,
+		R_TexParameteri(GL_TEXTURE_2D, glt->texnum, GL_TEXTURE_SWIZZLE_A,
 				   (glt->flags & TEX_ALPHA) ? GL_ALPHA : GL_ONE);
 }
 
@@ -3041,8 +3014,8 @@ static void GL_UploadCompressed (const imgreplace_t *r, unsigned int glformat, g
 	levels = 0;
 	for (i = first; i < r->nummips; i++)
 	{
-		glCompressedTexImage2D_fp (GL_TEXTURE_2D, levels, (GLenum)glformat,
-					   r->mipw[i], r->miph[i], 0,
+		R_TexCompressedImage2D (GL_TEXTURE_2D, glt->texnum, levels, (GLenum)glformat,
+					   r->mipw[i], r->miph[i],
 					   (GLsizei) r->mipsize[i],
 					   r->blocks + r->mipofs[i]);
 		levels++;
@@ -3058,8 +3031,8 @@ static void GL_UploadCompressed (const imgreplace_t *r, unsigned int glformat, g
 	 * 1000.  Set explicitly rather than only when short: this texture name
 	 * is fresh from glGenTextures, but being explicit costs nothing and
 	 * survives any future slot reuse. */
-	glTexParameteri_fp (GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
-	glTexParameteri_fp (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, levels > 0 ? levels - 1 : 0);
+	R_TexParameteri (GL_TEXTURE_2D, glt->texnum, GL_TEXTURE_BASE_LEVEL, 0);
+	R_TexParameteri (GL_TEXTURE_2D, glt->texnum, GL_TEXTURE_MAX_LEVEL, levels > 0 ? levels - 1 : 0);
 
 	GL_SetTextureFilter (glt);
 }
@@ -3109,7 +3082,7 @@ static void GL_Upload8_EmbeddedMips (byte *data, gltexture_t *glt)
 			conv[i] = d_8to24table[mip_ptr[i]] |
 				  ((!(glt->flags & TEX_ALPHA) && !gl_renderer_caps.texture_swizzle) ? MASK_a : 0);	/* #112 */
 
-		glTexImage2D_fp(GL_TEXTURE_2D, gl_level, samples, cur_w, cur_h, 0,
+		R_TexImage2D(GL_TEXTURE_2D, glt->texnum, gl_level, samples, cur_w, cur_h,
 				GL_RGBA, GL_UNSIGNED_BYTE, conv);
 		gl_level++;
 
@@ -3125,23 +3098,22 @@ static void GL_Upload8_EmbeddedMips (byte *data, gltexture_t *glt)
 	while (cur_w > 1 || cur_h > 1)
 	{
 		GL_MipMap((byte *)conv, (byte *)conv, &cur_w, &cur_h, 1, 1);
-		glTexImage2D_fp(GL_TEXTURE_2D, gl_level, samples, cur_w, cur_h, 0,
+		R_TexImage2D(GL_TEXTURE_2D, glt->texnum, gl_level, samples, cur_w, cur_h,
 				GL_RGBA, GL_UNSIGNED_BYTE, conv);
 		gl_level++;
 	}
 
 	/* set mipmap filtering */
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, gl_texmodes[gl_filter_idx].minimize);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, gl_texmodes[gl_filter_idx].maximize);
+	R_TexSetFilter(GL_TEXTURE_2D, glt->texnum, gl_texmodes[gl_filter_idx].minimize, gl_texmodes[gl_filter_idx].maximize);
 	if (gl_max_anisotropy >= 2)
-		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, gl_texture_anisotropy.value);
-	GL_ApplyLodBias ();
+		R_TexParameterf(GL_TEXTURE_2D, glt->texnum, GL_TEXTURE_MAX_ANISOTROPY_EXT, gl_texture_anisotropy.value);
+	GL_ApplyLodBias (glt->texnum);
 
 	/* uhexen2-khsa r11: see GL_Upload32 comment.  Embedded-mip BSP path
 	 * only uploads non-alpha indexed textures, so the swizzle is always
 	 * GL_ONE here — guarded on the flag anyway for safety. */
 	if (gl_renderer_caps.texture_swizzle)
-		glTexParameteri_fp(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A,
+		R_TexParameteri(GL_TEXTURE_2D, glt->texnum, GL_TEXTURE_SWIZZLE_A,
 				   (glt->flags & TEX_ALPHA) ? GL_ALPHA : GL_ONE);
 
 	Hunk_FreeToLowMark(mark);
@@ -3465,7 +3437,7 @@ static GLuint GL_LoadTextureEx (const char *identifier, byte *data, int width, i
 	glt = &gltextures[slot];
 	q_strlcpy (glt->identifier, identifier, MAX_QPATH);
 
-	glGenTextures_fp(1, &glt->texnum);
+	R_GenTextures(1, &glt->texnum);
 	glt->width = width;
 	glt->height = height;
 	glt->flags = flags;

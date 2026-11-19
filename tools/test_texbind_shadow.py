@@ -54,6 +54,8 @@ typedef unsigned char GLboolean;
 #define GL_TEXTURE_3D			0x806F
 #define GL_TEXTURE_CUBE_MAP		0x8513
 #define GL_TEXTURE_CUBE_MAP_ARRAY	0x9009
+#define GL_TEXTURE_CUBE_MAP_POSITIVE_X	0x8515
+#define GL_TEXTURE_CUBE_MAP_NEGATIVE_Z	0x851A
 #define GL_UNUSED_TEXTURE		(~(GLuint)0)
 extern int c_texbinds;
 void glActiveTexture_fp (GLenum unit);
@@ -170,8 +172,25 @@ static int failures;
 
 static void Invariant (const char *after, long step)
 {
+	int t;
+	GLenum face;
+
 	CHECK (active == GL_TEXTURE0, "step %ld, after %s: unit %u left active, not 0",
 	       step, after, active - GL_TEXTURE0);
+	/* R_EditBinding is what gl_texcreate.c checks every call's texture
+	 * against (#340 P1a): it may say "unknown", never something false. */
+	for (t = 0; t < NT; t++)
+	{
+		GLuint e = R_EditBinding (targets[t]);
+		CHECK (e == GL_UNUSED_TEXTURE || e == truth[0][t],
+		       "step %ld, after %s: R_EditBinding (0x%x) says %u, unit 0 holds %u",
+		       step, after, targets[t], e, truth[0][t]);
+	}
+	CHECK (R_EditBinding (GL_TEXTURE_CUBE_MAP_ARRAY) == GL_UNUSED_TEXTURE,
+	       "R_EditBinding claims to know an untracked target");
+	for (face = GL_TEXTURE_CUBE_MAP_POSITIVE_X; face <= GL_TEXTURE_CUBE_MAP_NEGATIVE_Z; face++)
+		CHECK (R_EditBinding (face) == R_EditBinding (GL_TEXTURE_CUBE_MAP),
+		       "R_EditBinding (cube face 0x%x) is not the cube map's binding", face);
 }
 
 static void Fixed (void)
@@ -276,6 +295,10 @@ static void Random (long steps)
 			R_BindTextureForEdit (tg, tex);
 			CHECK (truth[0][TI (tg)] == tex,
 			       "step %ld: %s (0x%x, %u) did not leave it on unit 0", i, what, tg, tex);
+			if (tg != GL_TEXTURE_CUBE_MAP_ARRAY)
+				CHECK (R_EditBinding (tg) == tex,
+				       "step %ld: R_EditBinding (0x%x) is %u right after an edit bind of %u",
+				       i, tg, R_EditBinding (tg), tex);
 		}
 		else if (op < 88)
 		{
@@ -335,7 +358,7 @@ int main (void)
 		return 1;
 	}
 	printf ("PASS gl_texbind.c shadow agrees with a fake GL across 200000 random ops "
-		"and the edit/delete/target sequences (#338)\n");
+		"and the edit/delete/target sequences, R_EditBinding never false (#338, #340)\n");
 	return 0;
 }
 '''

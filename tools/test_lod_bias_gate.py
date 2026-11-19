@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ENGINE = ROOT / "engine"
 DRAW = ENGINE / "h2shared/gl_draw.c"
 VID = ENGINE / "h2shared/gl_vidsdl.c"
-HELPER_SIGNATURE = "static void GL_ApplyLodBias (void)\n{"
+HELPER_SIGNATURE = "static void GL_ApplyLodBias (GLuint texnum)\n{"
 CAP = "gl_renderer_caps.texture_lod_bias"
 
 

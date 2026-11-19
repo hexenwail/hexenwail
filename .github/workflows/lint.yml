@@ -116,6 +116,17 @@ jobs:
       - name: gl_texbind.c shadow agrees with GL
         run: python3 tools/test_texbind_shadow.py
 
+      # Texture creation, upload and sampling state go through gl_texcreate.c,
+      # whose entry points name the texture they act on -- the shape the
+      # SDL_GPU backend needs, and the one place it will branch.  No
+      # glGenTextures / glTexImage* / glTexSubImage* / glTexStorage* /
+      # glCompressedTex* / glCopyTex* / glTexParameter* / glGenerateMipmap /
+      # sampler-object call, nor an unpack glPixelStore, outside it, except
+      # the loader table (gl_func.h), the web canvas blit (web_canvas_gl2.c)
+      # and a shrinking per-file allowlist.  GitHub #340 (P1a).
+      - name: No texture creation bypasses gl_texcreate.c
+        run: python3 tools/test_texture_create_routing.py
+
       # The linker already guarantees the software build *defines* every
       # renderer cvar shared code touches -- r_soft_web.c exists for that, and
       # CI builds the WEBSOFT config on every PR.  What nothing catches is a

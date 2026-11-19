@@ -238,6 +238,12 @@ extern	int		c_texbinds;
  * spelling out.  uhexen2-p4ln.3, #338. */
 #include "gl_texbind.h"
 
+/* Texture creation, upload and sampling state go through gl_texcreate.h,
+ * which names the texture every call acts on -- the shape a second backend
+ * needs.  tools/test_texture_create_routing.py keeps every raw call out.
+ * #340 P1a. */
+#include "gl_texcreate.h"
+
 extern	int		gl_texlevel;
 extern	int		numgltextures;
 extern	qboolean	flush_textures;

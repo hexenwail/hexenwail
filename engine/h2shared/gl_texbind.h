@@ -69,6 +69,13 @@ void	R_BindTextureTarget (GLuint slot, GLenum target, GLuint texture);
  * sites are spelled apart from the sampling ones. */
 void	R_BindTextureForEdit (GLenum target, GLuint texture);
 
+/* What unit 0 holds for `target` (a cube face counts as GL_TEXTURE_CUBE_MAP)
+ * as far as the shadow knows -- GL_UNUSED_TEXTURE when it does not: an
+ * untracked target, or a shadow just reset.  No GL call.  gl_texcreate.c
+ * checks the texture each of its entry points is told it edits against
+ * this (#340 P1a). */
+GLuint	R_EditBinding (GLenum target);
+
 /* A compute pass's storage image (glBindImageTexture).  Image units are not
  * texture units -- binding one cannot change what a sampler reads -- so
  * there is nothing to shadow; it is here so a pass's storage textures are

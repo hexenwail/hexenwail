@@ -26,7 +26,7 @@ vid = read("engine/h2shared/gl_vidsdl.c")
 if not re.search(r"#ifdef __EMSCRIPTEN__\s*gl_renderer_caps\.texture_swizzle = false;\s*#else\s*gl_renderer_caps\.texture_swizzle = true;", vid):
     errors.append("gl_vidsdl.c: texture_swizzle must be false under Emscripten")
 draw = read("engine/h2shared/gl_draw.c")
-calls = [m.start() for m in re.finditer(r"glTexParameteri_fp\(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A", draw)]
+calls = [m.start() for m in re.finditer(r"R_TexParameteri\(GL_TEXTURE_2D, glt->texnum, GL_TEXTURE_SWIZZLE_A", draw)]
 if len(calls) < 2:
     errors.append("gl_draw.c: expected the swizzle calls in GL_Upload32 and the embedded-mips path")
 for c in calls:
