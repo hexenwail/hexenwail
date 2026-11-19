@@ -322,6 +322,9 @@ typedef int64_t  GLint64;
 #ifndef GL_TEXTURE_CUBE_MAP
 #define GL_TEXTURE_CUBE_MAP			0x8513
 #endif
+#ifndef GL_TEXTURE_CUBE_MAP_NEGATIVE_Z
+#define GL_TEXTURE_CUBE_MAP_NEGATIVE_Z		0x851A	/* mingw's gl.h stops at GL 1.1 */
+#endif
 #ifndef GL_TEXTURE_CUBE_MAP_POSITIVE_X
 #define GL_TEXTURE_CUBE_MAP_POSITIVE_X		0x8515
 #endif
