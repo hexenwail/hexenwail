@@ -39,7 +39,7 @@ if "!gl_renderer_caps.texture_swizzle) ? MASK_a : 0" not in draw:
 
 pp = read("engine/h2shared/gl_postprocess.c")
 fbo = pp[pp.index("static qboolean OIT_CreateFBO (int width, int height, GLuint depth_stencil_rb, GLuint depth_stencil_tex, int samples)\n{"):]
-fbo = fbo[:fbo.index("glGenTextures_fp")]
+fbo = fbo[:fbo.index("R_GenTextures")]
 if not re.search(r"#ifdef USE_GLES\s*/\*.*?\*/\s*if \(samples > 1\)\s*\{[^}]*return false;", fbo, re.S):
     errors.append("OIT_CreateFBO: the ES tier must refuse multisampled OIT targets")
 
