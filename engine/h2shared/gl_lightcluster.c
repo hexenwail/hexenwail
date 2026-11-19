@@ -75,8 +75,6 @@
 
 #ifndef USE_GLES
 
-#include "shaders_gen.h"	/* lightcluster_comp[] -- engine/shaders/lightcluster_comp.glsl */
-
 #define LIGHT_MASK_WORDS	(MAX_DLIGHTS / 32)	/* 4 at MAX_DLIGHTS 128 */
 #define LIGHT_FROXELS		(LIGHT_TILES_X * LIGHT_TILES_Y * LIGHT_TILES_Z)
 
@@ -145,9 +143,11 @@ static void LC_UploadAndDispatch (void);
 /* The compute pass                                                    */
 /* ------------------------------------------------------------------ */
 
-/* The pass itself is engine/shaders/lightcluster_comp.glsl (#450), reaching
- * us as lightcluster_comp[] via shaders_gen.h.  Its #version and sizes come
- * from the header chunk R_LightCluster_Build passes alongside it. */
+/* The pass itself is engine/shaders/lightcluster_comp.glsl (#450), built as
+ * RPROG_LIGHTCLUSTER.  Its #version and sizes come from that row's header
+ * chunk, GLSL_LIGHTCLUSTER_HEADER in gl_shader.c, pasted from the same
+ * LIGHT_TILES_* / MAX_DLIGHTS / MAX_LIGHTSTYLES / LIGHT_SSBO_BINDING macros
+ * this file sizes its buffers with. */
 
 /* row-major mat4 (the layout GL_GetModelview hands back) times a column vec4 */
 static void LC_TransformVec4 (const float m[16], const float v[4], float out[4])
@@ -170,8 +170,6 @@ static int LC_PopCount (unsigned int v)
 
 static qboolean R_LightCluster_Build (void)
 {
-	char header[256];
-
 	if (lc_failed)
 		return false;
 	if (!gl_renderer_caps.compute_shaders || !gl_renderer_caps.shader_storage)
@@ -198,18 +196,7 @@ static qboolean R_LightCluster_Build (void)
 		}
 	}
 
-	q_snprintf (header, sizeof(header),
-		    TIER_CORE
-		    "#define LIGHT_TILES_X %d\n"
-		    "#define LIGHT_TILES_Y %d\n"
-		    "#define LIGHT_TILES_Z %d\n"
-		    "#define MAX_LIGHTS %d\n"
-		    "#define MAX_LIGHTSTYLES %d\n"
-		    "#define LIGHT_SSBO_BINDING %d\n",
-		    LIGHT_TILES_X, LIGHT_TILES_Y, LIGHT_TILES_Z,
-		    MAX_DLIGHTS, MAX_LIGHTSTYLES, LIGHT_SSBO_BINDING);
-
-	lc_prog = GL_LoadComputeProgram (header, lightcluster_comp, "light cluster");
+	lc_prog = R_Program_Create (RPROG_LIGHTCLUSTER);
 	if (!lc_prog)
 	{
 		lc_failed = true;

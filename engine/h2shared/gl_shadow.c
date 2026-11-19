@@ -124,7 +124,10 @@ cvar_t	r_shadow_casters = {"r_shadow_casters", "1", CVAR_ARCHIVE};
 
 #ifndef USE_GLES
 
-#include "shaders_gen.h"	/* sshadow_vert[], sshadow_alias_vert[], sshadow_frag[], sshadowdbg_vert[], sshadowdbg_frag[] */
+/* The three programs are RPROG_SHADOW (sshadow_vert + sshadow_frag),
+ * RPROG_SHADOW_DEBUG (sshadowdbg_vert + sshadowdbg_frag) and
+ * RPROG_SHADOW_ALIAS (sshadow_alias_vert + sshadow_frag), built by id
+ * (gl_shader.c's rprog_defs). */
 
 #ifndef GL_TEXTURE_CUBE_MAP_ARRAY
 #define GL_TEXTURE_CUBE_MAP_ARRAY	0x9009
@@ -362,11 +365,11 @@ static void SH_BuildFaceMatrices (void)
 	}
 }
 
-static GLuint SH_LinkProgram (const char *vs, const char *fs, const char *name)
+static GLuint SH_LinkProgram (rprog_id_t id)
 {
-	GLuint p = GL_LoadProgramHeaders (TIER_CORE, vs, TIER_CORE, fs);
+	GLuint p = R_Program_Create (id);
 	if (!p)
-		Con_Printf ("Shadow maps: the %s program failed to build\n", name);
+		Con_Printf ("Shadow maps: the %s program failed to build\n", R_Program_Name (id));
 	return p;
 }
 
@@ -399,8 +402,8 @@ static qboolean SH_BuildPrograms (void)
 		return SH_Fail ();
 	}
 
-	sh_prog = SH_LinkProgram (sshadow_vert, sshadow_frag, "shadow pass");
-	sh_dbgprog = SH_LinkProgram (sshadowdbg_vert, sshadowdbg_frag, "shadow debug");
+	sh_prog = SH_LinkProgram (RPROG_SHADOW);
+	sh_dbgprog = SH_LinkProgram (RPROG_SHADOW_DEBUG);
 	if (!sh_prog || !sh_dbgprog)
 		return SH_Fail ();
 	blk = glGetUniformBlockIndex_fp (sh_prog, "ShadowPass");
@@ -418,7 +421,7 @@ static qboolean SH_BuildPrograms (void)
 
 	/* The alias casters' program is an extra, not a requirement: without it
 	 * the maps still hold the world, and r_shadow_casters 2 reads as 1. */
-	sh_aprog = SH_LinkProgram (sshadow_alias_vert, sshadow_frag, "alias shadow");
+	sh_aprog = SH_LinkProgram (RPROG_SHADOW_ALIAS);
 	if (sh_aprog)
 	{
 		blk = glGetUniformBlockIndex_fp (sh_aprog, "ShadowPass");

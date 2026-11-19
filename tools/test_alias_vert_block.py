@@ -10,9 +10,10 @@ Checks the pieces that have to move together:
   * engine/shaders/salias_vert.glsl includes uniforms.inc, declares no loose
     non-opaque uniform, and keeps the dlight varyings desktop-only (#ifndef
     GL_ES), as the GLSL_ALIAS_DLIGHT_VS_* splices did;
-  * the inline literal is gone, and all four alias builds (alias, alias_np,
-    and both OIT twins) compile the file through GLSL_VERT_HEADER, with
-    NOPERSP in the header for the two affine ones;
+  * the inline literal is gone, and all four alias programs (alias, alias_np,
+    and both OIT twins) are program-table rows (#340 P1b) that compile the
+    file through GLSL_VERT_HEADER, with GLSL_NOPERSP after it for the two
+    affine ones;
   * the varyings of all three vertex stages that link salias_frag (this file,
     engine/shaders/salias_inst_vert.glsl (#450 S3) and
     engine/shaders/sskeletal_vert.glsl (S4)) match the inputs of
@@ -128,15 +129,25 @@ for name, vo in stages.items():
 
 if re.search(r"static const char salias_vert\[\]", src):
     errors.append("the inline salias_vert literal is back in gl_shader.c")
+# The four programs are rows of gl_shader.c's program table (#340 P1b),
+# built by id; the row's first stage is this file with its header chunk.
 builds = [
-    r'GL_InitProgramSplit\(&gl_shader_alias, "alias", GLSL_VERT_HEADER, salias_vert,',
-    r'GL_InitProgramSplit\(&gl_shader_alias_np, "alias_np",\s*GLSL_VERT_HEADER "#define NOPERSP 1\\n", salias_vert,',
-    r'GL_InitOITProgramSplit\(&gl_shader_alias_oit, "alias", GLSL_VERT_HEADER, salias_vert,',
-    r'GL_InitOITProgramSplit\(&gl_shader_alias_np_oit, "alias_np",\s*GLSL_VERT_HEADER "#define NOPERSP 1\\n", salias_vert,',
+    (r'\[RPROG_ALIAS\] = \{ "alias", RPROG_LINK_ATTRIBS, \{\s*\{ GLSL_VERT_HEADER, salias_vert, "salias.vert" \},',
+     r"GL_InitProgramSplit\(&gl_shader_alias, RPROG_ALIAS\);"),
+    (r'\[RPROG_ALIAS_NP\] = \{ "alias_np", RPROG_LINK_ATTRIBS, \{\s*\{ GLSL_VERT_HEADER GLSL_NOPERSP, salias_vert, "salias_np.vert" \},',
+     r"GL_InitProgramSplit\(&gl_shader_alias_np, RPROG_ALIAS_NP\);"),
+    (r'\[RPROG_ALIAS_OIT\] = \{ "alias_oit", RPROG_LINK_ATTRIBS, \{\s*\{ GLSL_VERT_HEADER, salias_vert, "salias.vert" \},',
+     r"GL_InitOITProgramSplit\(&gl_shader_alias_oit, RPROG_ALIAS_OIT\);"),
+    (r'\[RPROG_ALIAS_NP_OIT\] = \{ "alias_np_oit", RPROG_LINK_ATTRIBS, \{\s*\{ GLSL_VERT_HEADER GLSL_NOPERSP, salias_vert, "salias_np.vert" \},',
+     r"GL_InitOITProgramSplit\(&gl_shader_alias_np_oit, RPROG_ALIAS_NP_OIT\);"),
 ]
-for b in builds:
-    if not re.search(b, src):
-        errors.append(f"alias build not found: {b[:60]}...")
+for row, call in builds:
+    if not re.search(row, src):
+        errors.append(f"alias program row not found: {row[:70]}...")
+    if not re.search(call, src):
+        errors.append(f"alias build not found: {call[:60]}...")
+if len(re.findall(r"\bsalias_vert\b", strip(src))) != len(builds):
+    errors.append("salias_vert must be the vertex stage of exactly the four alias rows")
 # The fragment headers are test_alias_frag_block.py's to pin (#450 S2).
 
 vbo = (ROOT / "engine/h2shared/gl_vbo.c").read_text()

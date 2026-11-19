@@ -26,10 +26,12 @@ Checks the pieces that have to move together:
     pass sets the bit on every record, with the flat light, before it
     re-streams them; and nothing else in gl_rmain.c sets it, so the main pass
     stays shaded;
-  * the literal and GL_CompileShaderDefines are gone, both instanced programs
-    compile the file with GLSL_ALIAS_INST_VERT_HEADER (the tier's version line
-    plus the four constants; NOPERSP appended for the affine twin), and the
-    program binds AliasVert after the memset that would clear it;
+  * the literal and GL_CompileShaderDefines are gone, both instanced programs'
+    rows in gl_shader.c's program table (#340 P1b) compile the file with
+    GLSL_ALIAS_INST_VERT_HEADER (the tier's version line plus the four
+    constants; GLSL_NOPERSP appended for the affine twin), linked with the
+    texcoord attribute only, and the program binds AliasVert after the
+    memset that would clear it;
   * R_DrawAliasInstanced writes every VertParams member the stage reads before
     each pass's first flush, sets the instance base PER BATCH and flushes it
     before that batch's draw in BOTH passes (hazard 4), and makes no loose
@@ -315,9 +317,18 @@ want_hdr = ['GLSL_VERT_HEADER',
             '"#define ALIAS_INST_YAW_SHIFT " GLSL_STR(ALIAS_INST_YAW_SHIFT) "\\n"']
 if not hdr or [l.strip().rstrip("\\").strip() for l in hdr.group(1).splitlines()] != want_hdr:
     errors.append("GLSL_ALIAS_INST_VERT_HEADER must be GLSL_VERT_HEADER plus the four ShadedotRow constants")
+for rid, hdr, blob in (("RPROG_ALIAS_INSTANCED", "GLSL_ALIAS_INST_VERT_HEADER", "salias_inst.vert"),
+                       ("RPROG_ALIAS_INSTANCED_NP", "GLSL_ALIAS_INST_VERT_HEADER GLSL_NOPERSP",
+                        "salias_inst_np.vert")):
+    want = (rf'\[{rid}\] = \{{ "{rid[6:].lower()}", RPROG_LINK_TEXCOORD, \{{\s*'
+            rf'\{{ {hdr}, salias_inst_vert, "{blob}" \}},')
+    if len(re.findall(want, gl_shader)) != 1:
+        errors.append(f"the {rid} row must compile salias_inst_vert with {hdr} and link the "
+                      "texcoord attribute only")
+if len(re.findall(r"\bsalias_inst_vert\b", strip(gl_shader))) != 2:
+    errors.append("salias_inst_vert must be the body of exactly the two instanced rows")
 inst = body_of(gl_shader, r"static qboolean GL_InitAliasInstProgram \([^)]*\)\s*\{") or ""
-for w in (r'q_snprintf \(vert_header, sizeof\(vert_header\), "%s%s",\s*GLSL_ALIAS_INST_VERT_HEADER, defines \? defines : ""\);',
-          r"vs = GL_CompileShaderSplit\(GL_VERTEX_SHADER, vert_header, salias_inst_vert\);",
+for w in (r"prog = R_Program_Create \(id\);",
           r"R_BindAliasVertBlock\(prog\);"):
     if not re.search(w, inst):
         errors.append(f"GL_InitAliasInstProgram: missing {w[:70]}")

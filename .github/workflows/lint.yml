@@ -127,6 +127,19 @@ jobs:
       - name: No texture creation bypasses gl_texcreate.c
         run: python3 tools/test_texture_create_routing.py
 
+      # Every GPU program is built by id (gl_progid.h) through
+      # R_Program_Create, from its row of gl_shader.c's program table: no
+      # glCreateShader / glShaderSource / glCompileShader / glCreateProgram /
+      # glAttachShader / glLinkProgram / glBindAttribLocation outside it,
+      # every R_Program_Create argument provably an id, one row per id, each
+      # stage's blob the offline copy EmbedShaders writes for its #define
+      # set, a reflection row (gl_progid_refl.h) per offline copy, and no
+      # id nothing builds.  SDL_GPU creates shaders from those blobs and
+      # counts.  The SPIR-V half (the counts match the .vk.spv) runs in
+      # shaders-spirv.yml.  GitHub #340 (P1b).
+      - name: Every program is built by id from the program table
+        run: python3 tools/test_program_routing.py
+
       # The linker already guarantees the software build *defines* every
       # renderer cvar shared code touches -- r_soft_web.c exists for that, and
       # CI builds the WEBSOFT config on every PR.  What nothing catches is a

@@ -90,8 +90,13 @@ if "glGetUniformLocation_fp" in code:
     errors.append("gl_lightcluster.c still queries a uniform location")
 if "lc_compute_body" in code:
     errors.append("the inline lc_compute_body is back in gl_lightcluster.c")
-if "lightcluster_comp" not in code:
-    errors.append("gl_lightcluster.c does not compile lightcluster_comp")
+# The program is gl_shader.c's RPROG_LIGHTCLUSTER row (#340 P1b), built by id.
+if "lc_prog = R_Program_Create (RPROG_LIGHTCLUSTER);" not in code:
+    errors.append("gl_lightcluster.c does not build RPROG_LIGHTCLUSTER")
+if not re.search(r'\[RPROG_LIGHTCLUSTER\] = \{ "lightcluster", RPROG_LINK_COMPUTE, \{\s*'
+                 r'\{ GLSL_LIGHTCLUSTER_HEADER, lightcluster_comp, "lightcluster.comp" \} \} \},',
+                 (ROOT / "engine/h2shared/gl_shader.c").read_text()):
+    errors.append("gl_shader.c's RPROG_LIGHTCLUSTER row does not compile lightcluster_comp")
 disp = re.search(r"static void LC_UploadAndDispatch \(void\)\s*\{(.*?)\n\}", code, re.S)
 if not disp:
     errors.append("no LC_UploadAndDispatch body")

@@ -3,25 +3,25 @@
 // Extract the engine's *actual* GLSL sources for the ES tier and hand them to a
 // browser to compile and link.
 //
-// The point is that this reads engine/h2shared/gl_shader.c and gl_postprocess.c
-// rather than keeping a parallel copy of the shaders: a hand-maintained copy
+// The point is that this reads engine/h2shared/gl_shader.c's program table
+// (rprog_defs, #340 P1b) rather than keeping a parallel copy of the shaders: a hand-maintained copy
 // tells you the copy is valid GLSL ES 3.00, which is not the question.  Two
 // real regressions motivated it — `bitfieldReverse` (GLSL 4.00, absent from ES
 // 3.00) and a `uniform vec3 palette[256]` that overran the 224 fragment uniform
 // vectors WebGL2 is only required to offer.  Both compiled fine on the desktop
 // and both silently disabled the entire post-process chain in a browser.
 //
-// The C is parsed, not preprocessed, so this understands exactly two shapes.
-// The original one is `static const char <name>[] = <string literals and
-// object-like macros>;` with the tier-specific header macros living in an
-// `#ifdef USE_GLES` block.  The second is a stage that has moved out to
-// engine/shaders/<name>.glsl and reaches the engine through shaders_gen.h --
-// see readFileBackedShaders() below.  Anything fancier should make this file
-// fail loudly rather than guess.
+// The C is parsed, not preprocessed.  Each program is its table row, by id:
+// a header expression (string literals and object-like macros, the
+// tier-specific ones living in an `#ifdef USE_GLES` block) in front of each
+// stage's body.  A body is either a stage in engine/shaders/<name>.glsl,
+// reaching the engine through shaders_gen.h -- see readFileBackedShaders()
+// below -- or, in the original shape, `static const char <name>[] = ...;`.
+// Anything fancier should make this file fail loudly rather than guess.
 //
 // Ported from alextnewman/hexenwail d2c46f078, adapted to this tree's macro
-// layout (USE_GLES rather than __EMSCRIPTEN__, and PP_* headers local to
-// gl_postprocess.c).
+// layout (USE_GLES rather than __EMSCRIPTEN__) and, since #340 P1b, to the
+// program table.
 
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
@@ -29,32 +29,34 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SHADER_SOURCE = resolve(ROOT, 'engine/h2shared/gl_shader.c');
-const POSTPROCESS_SOURCE = resolve(ROOT, 'engine/h2shared/gl_postprocess.c');
 const SHADER_FILE_DIR = resolve(ROOT, 'engine/shaders');
 const GLONLY_DIR = resolve(SHADER_FILE_DIR, 'glonly');
 
+// [log name, rprog_id_t, vertex stage, fragment stage]: every program the ES
+// tier builds, which is every rprog_defs row outside #ifndef USE_GLES.  The
+// stages are restated so a row that changes what it compiles fails here
+// rather than silently testing something else.
 const PROGRAM_SPECS = [
-  ['2d', 'shader', 's2d_vert', 's2d_frag'],
-  ['flat', 'shader', 'sflat_vert', 'sflat_frag'],
-  ['world', 'shader', 'sworld_vert', 'sworld_frag'],
-  ['world_opaque', 'shader', 'sworld_vert', 'sworld_opaque_frag'],
-  ['alias', 'shader', 'salias_vert', 'salias_frag'],
-  ['particle', 'shader', 'spart_vert', 'spart_frag'],
+  ['2d', 'RPROG_2D', 's2d_vert', 's2d_frag'],
+  ['flat', 'RPROG_FLAT', 'sflat_vert', 'sflat_frag'],
+  ['world', 'RPROG_WORLD', 'sworld_vert', 'sworld_frag'],
+  ['world_opaque', 'RPROG_WORLD_OPAQUE', 'sworld_vert', 'sworld_opaque_frag'],
+  ['alias', 'RPROG_ALIAS', 'salias_vert', 'salias_frag'],
+  ['particle', 'RPROG_PARTICLE', 'spart_vert', 'spart_frag'],
   // Two programs since uhexen2-a5nn.4 split the one that branched on
   // u_alpha_threshold; both must still compile on the ES tier.
-  ['sky_layers', 'shader', 'ssky_layers_vert', 'ssky_layers_frag'],
-  ['sky_boxside', 'shader', 'ssky_side_vert', 'ssky_side_frag'],
-  ['sky_cubemap', 'shader', 'ssky_cube_vert', 'ssky_cube_frag'],
-  ['postprocess', 'postprocess', 'spp_vert', 'spp_frag'],
-  // The bloom and OIT-resolve stages are engine/shaders files since #450;
-  // gl_postprocess.c compiles them with PP_CompileShaderSplit.
-  ['bloom_bright', 'postprocess', 'sbloom_vert', 'sbloom_bright_frag'],
-  ['bloom_down', 'postprocess', 'sbloom_vert', 'sbloom_down_frag'],
-  ['bloom_up', 'postprocess', 'sbloom_vert', 'sbloom_up_frag'],
+  ['sky_layers', 'RPROG_SKY_LAYERS', 'ssky_layers_vert', 'ssky_layers_frag'],
+  ['sky_boxside', 'RPROG_SKY_BOXSIDE', 'ssky_side_vert', 'ssky_side_frag'],
+  ['sky_cubemap', 'RPROG_SKY_CUBEMAP', 'ssky_cube_vert', 'ssky_cube_frag'],
+  ['postprocess', 'RPROG_POSTPROCESS', 'spp_vert', 'spp_frag'],
+  // The bloom and OIT-resolve stages are engine/shaders files since #450.
+  ['bloom_bright', 'RPROG_BLOOM_BRIGHT', 'sbloom_vert', 'sbloom_bright_frag'],
+  ['bloom_down', 'RPROG_BLOOM_DOWN', 'sbloom_vert', 'sbloom_down_frag'],
+  ['bloom_up', 'RPROG_BLOOM_UP', 'sbloom_vert', 'sbloom_up_frag'],
   // The single-sample resolve runs on the ES tier whenever OIT does.  Its MSAA
   // twin (soit_resolve_msaa_frag) is desktop-only -- sampler2DMS is ES 3.10 --
   // and deliberately not listed.
-  ['oit_resolve', 'postprocess', 'soit_resolve_vert', 'soit_resolve_frag'],
+  ['oit_resolve', 'RPROG_OIT_RESOLVE', 'soit_resolve_vert', 'soit_resolve_frag'],
 ];
 
 function tokenize(expression) {
@@ -330,49 +332,65 @@ async function readGlOnlyMacros() {
 // SPIR-V compile -- so this has to supply the ES one or hand the browser a
 // shader with no version at all.
 //
-// READ OUT OF THE CALL SITE, not inferred from the _vert/_frag suffix.  The
-// pairing is a fact about the engine, stated by the argument order of the
-// GL_InitProgramSplit() call; inferring it would be this file quietly deciding
-// something it is the engine's business to say -- the same judgement
-// resolveMacro() already refuses to make for a tier-specific macro.
-function splitHeaderFor(ctx, symbol) {
-  const call = /GL_InitProgramSplit\s*\(([^;]*)\)\s*;/g;
-  for (let match = call.exec(ctx.source); match; match = call.exec(ctx.source)) {
-    const args = match[1]
-      .replace(/\/\*[\s\S]*?\*\//g, '')
-      .replace(/\/\/[^\n]*/g, '')
-      .split(',')
-      .map((arg) => arg.trim());
-    /* (program, name, vert_header, vert_src, frag_header, frag_src) */
-    if (args[3] === symbol) return args[2];
-    if (args[5] === symbol) return args[4];
+// READ OUT OF THE PROGRAM'S ROW, not inferred from the _vert/_frag suffix.
+// Every program is a row of gl_shader.c's rprog_defs table, keyed by its id
+// (#340 P1b): `[RPROG_X] = { "name", RPROG_LINK_*, { { header, body, "blob" },
+// ... } }`, and the header expression in front of each body is exactly what
+// R_Program_Create hands glShaderSource first.  Inferring it would be this
+// file quietly deciding something it is the engine's business to say -- the
+// same judgement resolveMacro() already refuses to make for a tier-specific
+// macro.  A row inside `#ifndef USE_GLES` is one the ES tier never builds, so
+// listing it here is an error, not a smoke test.
+function programRow(ctx, id) {
+  const row = new RegExp(
+    `\\[${id}\\]\\s*=\\s*\\{\\s*"(\\w+)",\\s*(\\w+),\\s*\\{([^;]*?)\\}\\s*\\}\\s*,`, 'g');
+  const found = [...ctx.source.matchAll(row)];
+  if (found.length !== 1)
+    throw new Error(`${ctx.name} has ${found.length} rprog_defs rows for ${id}; want exactly one`);
+  const match = found[0];
+  if (desktopOnlyAt(ctx.source, match.index))
+    throw new Error(`${id}'s row in ${ctx.name} is inside #ifndef USE_GLES: the ES tier never builds it`);
+  const stages = [...match[3].matchAll(/\{\s*([^{}]*?)\s*,\s*(\w+)\s*,\s*"[\w.]+"\s*\}/g)]
+    .map((s) => ({ header: s[1].replace(/\/\*[\s\S]*?\*\//g, ' ').trim(), body: s[2] }));
+  if (stages.length !== 2)
+    throw new Error(`${id}'s row in ${ctx.name} has ${stages.length} stages; a graphics program has two`);
+  return { name: match[1], link: match[2], stages };
+}
+
+// Is `pos` inside an `#ifndef USE_GLES` arm (and not its #else)?  The tier
+// conditionals in gl_shader.c are not nested inside one another, but other
+// conditionals sit inside them, so this keeps a real stack.
+function desktopOnlyAt(source, pos) {
+  const stack = [];
+  const directive = /^\s*#\s*(ifndef|ifdef|if|else|elif|endif)\b(.*)$/gm;
+  for (let m = directive.exec(source); m && m.index < pos; m = directive.exec(source)) {
+    const [, d, rest] = m;
+    // A desktop-only arm: `#ifndef USE_GLES`, `#if !defined(USE_GLES)`, or the
+    // #else of `#ifdef USE_GLES`.
+    const r = rest.trim();
+    if (d === 'ifndef' || d === 'ifdef' || d === 'if') {
+      stack.push({
+        desktop: (d === 'ifndef' && r === 'USE_GLES') || (d === 'if' && /^!\s*defined\s*\(?\s*USE_GLES\s*\)?$/.test(r)),
+        esFirst: d === 'ifdef' && r === 'USE_GLES',
+      });
+    } else if ((d === 'else' || d === 'elif') && stack.length) {
+      const top = stack[stack.length - 1];
+      top.desktop = d === 'else' && top.esFirst;
+      top.esFirst = false;
+    } else if (d === 'endif') stack.pop();
   }
-  // gl_postprocess.c's per-stage form: PP_CompileShaderSplit(type, header, body),
-  // which states the header just as explicitly.
-  const stageCall = /PP_CompileShaderSplit\s*\(\s*GL_\w+_SHADER\s*,\s*(\w+)\s*,\s*(\w+)\s*\)/g;
-  for (let match = stageCall.exec(ctx.source); match; match = stageCall.exec(ctx.source)) {
-    if (match[2] === symbol) return match[1];
-  }
-  throw new Error(
-    `engine/shaders/${symbol}.glsl exists but no GL_InitProgramSplit() or PP_CompileShaderSplit() call in `
-    + `${ctx.name} names ${symbol}, so there is no way to know which #version `
-    + 'header the engine compiles it with');
+  return stack.some((s) => s.desktop);
 }
 
 export async function extractEngineWebGLPrograms() {
-  const [shaderSource, postprocessSource, fileBacked, glOnly] = await Promise.all([
+  const [shaderSource, fileBacked, glOnly] = await Promise.all([
     readFile(SHADER_SOURCE, 'utf8'),
-    readFile(POSTPROCESS_SOURCE, 'utf8'),
     readFileBackedShaders(),
     readGlOnlyMacros(),
   ]);
 
-  // One shared macro table, as before: the two files' macro namespaces are
-  // disjoint in practice (GLSL_* in gl_shader.c, PP_* in gl_postprocess.c) and
-  // a name already in the table is never looked up again.
   const macros = new Map(glOnly);
   const shaderCtx = { name: 'gl_shader.c', source: shaderSource, resolving: new Set() };
-  const postprocessCtx = { name: 'gl_postprocess.c', source: postprocessSource, resolving: new Set() };
 
   // THE ONLY MACROS THAT STILL HAVE TO BE NAMED HERE are the tier-specific
   // ones -- those with both a USE_GLES arm and a desktop arm, where this
@@ -386,42 +404,53 @@ export async function extractEngineWebGLPrograms() {
   // #450), has an empty ES arm and has to be named here.  Every alias and
   // world stage is a file now and keeps its desktop-only half under
   // #ifndef GL_ES, as it keeps its early-Z and its bitfieldReverse fallback.
-  for (const name of ['GLSL_VERT_HEADER', 'GLSL_FRAG_HEADER', 'GLSL_LIGHTGRID_CONSTS']) {
+  // The post-process programs' PP_*_HEADER (TIER_ES_PP on the ES tier) moved
+  // into gl_shader.c beside their rows (#340 P1b).
+  for (const name of ['GLSL_VERT_HEADER', 'GLSL_FRAG_HEADER', 'GLSL_LIGHTGRID_CONSTS',
+    'PP_VERT_HEADER', 'PP_FRAG_HEADER']) {
     macros.set(name, readDefine(glesBranchDefining(shaderSource, name), name, macros, shaderCtx));
   }
-  // gl_postprocess.c keeps its own headers (TIER_ES_PP on the ES tier).
-  for (const name of ['PP_VERT_HEADER', 'PP_FRAG_HEADER']) {
-    macros.set(name, readDefine(glesBranchDefining(postprocessSource, name), name, macros, postprocessCtx));
-  }
-
-  const contexts = { shader: shaderCtx, postprocess: postprocessCtx };
 
   // A stage is a C array or a file, and the two routes have to stay exclusive:
   // both at once means a moved shader left its old copy behind, and the C one
   // is what the engine would still compile while this gate read the new file.
-  const stage = (family, symbol) => {
-    const ctx = contexts[family];
-    const inC = arrayMarker(symbol).test(ctx.source);
-    const inFile = fileBacked.has(symbol);
+  const stage = ({ header, body }) => {
+    const inC = arrayMarker(body).test(shaderSource);
+    const inFile = fileBacked.has(body);
     if (inC && inFile) {
       throw new Error(
-        `${symbol} is both a string-literal array in ${ctx.name} and `
-        + `engine/shaders/${symbol}.glsl; delete whichever one the engine no longer builds`);
+        `${body} is both a string-literal array in gl_shader.c and `
+        + `engine/shaders/${body}.glsl; delete whichever one the engine no longer builds`);
     }
     if (inC)
-      return evaluateCStringExpression(readArrayExpression(ctx.source, symbol), macros, ctx);
+      return evaluateCStringExpression(header, macros, shaderCtx)
+        + evaluateCStringExpression(readArrayExpression(shaderSource, body), macros, shaderCtx);
     if (inFile)
-      return resolveMacro(splitHeaderFor(ctx, symbol), macros, ctx) + fileBacked.get(symbol);
+      return evaluateCStringExpression(header, macros, shaderCtx) + fileBacked.get(body);
     throw new Error(
-      `missing shader source ${symbol}: no array in ${ctx.name} and no `
-      + `engine/shaders/${symbol}.glsl`);
+      `missing shader source ${body}: no array in gl_shader.c and no engine/shaders/${body}.glsl`);
   };
 
-  return PROGRAM_SPECS.map(([name, family, vertexName, fragmentName]) => ({
-    name,
-    vertex: stage(family, vertexName),
-    fragment: stage(family, fragmentName),
-  }));
+  // The list is every row the ES tier builds, no more and no fewer: a new
+  // ES row left off it would never reach a browser.
+  const esRows = [...shaderSource.matchAll(/^\s*\[(RPROG_\w+)\]\s*=\s*\{/gm)]
+    .filter((m) => !desktopOnlyAt(shaderSource, m.index)).map((m) => m[1]).sort();
+  const listed = PROGRAM_SPECS.map(([, id]) => id).sort();
+  if (esRows.join() !== listed.join()) {
+    throw new Error(`the ES tier builds rows ${esRows.join(', ')} but this smoke test lists `
+      + `${listed.join(', ')}; PROGRAM_SPECS must be exactly the rows outside #ifndef USE_GLES`);
+  }
+
+  return PROGRAM_SPECS.map(([name, id, vertexName, fragmentName]) => {
+    const row = programRow(shaderCtx, id);
+    const [vertex, fragment] = row.stages;
+    if (row.name !== name || vertex.body !== vertexName || fragment.body !== fragmentName) {
+      throw new Error(
+        `${id} is "${row.name}" (${vertex.body} + ${fragment.body}) in gl_shader.c, but this smoke `
+        + `test lists it as "${name}" (${vertexName} + ${fragmentName})`);
+    }
+    return { name, vertex: stage(vertex), fragment: stage(fragment) };
+  });
 }
 
 export function renderEngineShaderSmokePage(programs) {

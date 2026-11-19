@@ -25,14 +25,12 @@ FLOOR pins today's full derived set, so a name cannot leave it silently --
 which is exactly what re-declaring it loose somewhere would do.
 
 What the stages compile WITH counts as theirs.  The header chunks
-passed alongside a stage (GLSL_VERT_HEADER, GLSL_ALIAS_FRAG_HEADER,
-GLSL_WORLD_FRAG_HEADER, GLSL_ALIAS_INST_VERT_HEADER, the NOPERSP literal, ...
--- resolved from the
-compile calls, through macros, q_snprintf buffers and parameters) are scanned
-like the stage files: a non-opaque loose uniform in one fails, and nothing
-declared there makes a name "live elsewhere".  The OIT twins' fragment header
-is that chunk plus the "#define OIT 1" GL_InitOITProgramSplit appends with
-q_snprintf, which is resolved too.
+paired with a stage in gl_shader.c's program table, rprog_defs (#340 P1b) --
+GLSL_VERT_HEADER, GLSL_ALIAS_FRAG_HEADER, GLSL_WORLD_FRAG_HEADER,
+GLSL_ALIAS_INST_VERT_HEADER, GLSL_NOPERSP, and the OIT twins' GLSL_OIT_TWIN
+("#define OIT 1"), resolved through macros -- are scanned like the stage
+files: a non-opaque loose uniform in one fails, and nothing declared there
+makes a name "live elsewhere".
 
 Checks, for each derived alias name, over every engine C file:
   * no C identifier spells it -- not a struct field of any program struct,
@@ -337,25 +335,21 @@ def resolve(expr, pos, depth=0):
             unresolved.append(f"{ident} in `{' '.join(expr.split())}`")
 
 
+# Every stage compile is a `{ header, body, "blob" }` entry of a program
+# table row (#340 P1b); the alias- and world-family ones are those whose body
+# is one of the stages.  Their headers are macros and literals only -- the
+# OIT twins' "#define OIT 1" is GLSL_OIT_TWIN, a macro like the rest.
 stage_compiles = 0
-for fname, pairs in (("GL_InitProgramSplit", ((2, 3), (4, 5))),
-                     ("GL_InitOITProgramSplit", ((2, 3), (4, 5))),
-                     ("GL_CompileShaderSplit", ((1, 2),))):
-    for p, a in calls(gsc, gsb, fname):
-        for h, s in pairs:
-            if len(a) > s and a[s] in STAGE_SYMS:
-                stage_compiles += 1
-                resolve(a[h], p)
-# The OIT twins compile with more than their callers' fragment header: the
-# builder q_snprintf's "#define OIT 1" onto it (#450 W3).  Everything that
-# buffer is built from is header text too.
-oit_fn = next((f for f in funcs if f[0] == "GL_InitOITProgramSplit"), None)
-if not oit_fn:
-    errors.append("cannot find GL_InitOITProgramSplit; the OIT twins' header resolution is broken")
+tbl = re.search(r"\brprog_defs\s*\[[^\]]*\]\s*=\s*\{", gsb)
+if not tbl:
+    errors.append("cannot find gl_shader.c's rprog_defs table; the header resolution is broken")
 else:
-    for p, a in calls(gsc, gsb, "q_snprintf", oit_fn[2], oit_fn[3]):
-        for arg in a[3:]:
-            resolve(arg, p)
+    lo, hi = tbl.end() - 1, match_close(gsb, tbl.end() - 1)
+    for m in re.finditer(r"\{([^{}]*)\}", gsb[lo + 1:hi - 1]):
+        a = split_args(gsc[lo + 1 + m.start(1):lo + 1 + m.end(1)], m.group(1))
+        if len(a) == 3 and a[1] in STAGE_SYMS:
+            stage_compiles += 1
+            resolve(a[0], lo + 1 + m.start(1))
 for u in unresolved:
     errors.append(f"cannot resolve an alias stage's header chunk: {u}; teach the guard, "
                   "or it cannot see what the stage compiles with")

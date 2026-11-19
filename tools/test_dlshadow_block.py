@@ -479,12 +479,18 @@ dm2 = body_of(shadow_c, r"static void SH_DrawMap \([^)]*\)\s*\{") or ""
 if "if (d->acount > 0)\n\t\t\tSH_DrawAliasFace (d, f, &pass);" not in dm2:
     errors.append("SH_DrawMap must draw each face's alias casters after its world and brush entities")
 bp3 = body_of(shadow_c, r"static qboolean SH_BuildPrograms \(void\)\s*\{") or ""
-for s in ('sh_aprog = SH_LinkProgram (sshadow_alias_vert, sshadow_frag, "alias shadow");',
+for s in ('sh_aprog = SH_LinkProgram (RPROG_SHADOW_ALIAS);',
           'glGetUniformBlockIndex_fp (sh_aprog, "ShadowPass");',
           "glUniformBlockBinding_fp (sh_aprog, blk, UBO_BINDING_SHADOW_PASS);",
           "size != (GLint)sizeof(r_shadowpass_t)"):
     if s not in bp3:
         errors.append(f"SH_BuildPrograms must build and pin the alias program: `{s}`")
+# Its stages are its program-table row (#340 P1b): the alias caster vertex
+# stage with the world casters' fragment stage, both on the desktop header.
+if not re.search(r'\[RPROG_SHADOW_ALIAS\] = \{ "shadow_alias", RPROG_LINK_ATTRIBS, \{\s*'
+                 r'\{ TIER_CORE, sshadow_alias_vert, "sshadow_alias.vert" \},\s*'
+                 r'\{ TIER_CORE, sshadow_frag, "sshadow.frag" \} \} \},', shader_c):
+    errors.append("RPROG_SHADOW_ALIAS must be sshadow_alias_vert + sshadow_frag on TIER_CORE")
 if re.search(r"if \(!sh_aprog[^)]*\)\s*return SH_Fail", bp3) or "!sh_prog || !sh_dbgprog)" not in bp3:
     errors.append("a failed alias program must turn off the alias casters, not the maps")
 if "if (sh_aprog) { glDeleteProgram_fp (sh_aprog); sh_aprog = 0; }" not in \

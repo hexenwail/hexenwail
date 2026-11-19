@@ -29,11 +29,6 @@
 #include "gl_matrix.h"
 #include "gl_postprocess.h"
 
-/* Generated from engine/shaders/*.glsl by engine/cmake/EmbedShaders.cmake.
- * Embedded rather than loaded at runtime: the engine has no shader search
- * path, so a missing file would be an unrecoverable black screen. */
-#include "shaders_gen.h"
-
 /* ------------------------------------------------------------------ */
 /* Data structures matching GLSL std430 layout                         */
 /* ------------------------------------------------------------------ */
@@ -129,22 +124,22 @@ static qboolean	cull_initialized;
 /* Compute shader sources                                              */
 /* ------------------------------------------------------------------ */
 
-/* The cull family lives in engine/shaders/ and reaches us via shaders_gen.h
- * (#450): cull_clear_comp[] (was clear_indirect_src), cull_mark_comp[] and
- * hiz_reduce_comp[].  All three include cull.inc, the one CullParams
- * declaration, whose C mirror is cull_params_t below.  Like hiz_copy_comp
- * they carry no #version; HIZ_COMPUTE_VERSION is passed as a separate
- * glShaderSource chunk.  The GL binding points named in cull_mark_comp.glsl
- * (SSBOs 0-7, the pyramid on unit 1) are the ones R_DispatchWorldCull binds. */
+/* The cull family lives in engine/shaders/ (#450): cull_clear_comp.glsl (was
+ * clear_indirect_src), cull_mark_comp.glsl and hiz_reduce_comp.glsl, built as
+ * RPROG_CULL_CLEAR, RPROG_CULL_MARK and RPROG_HIZ_REDUCE (gl_shader.c's
+ * rprog_defs).  All three include cull.inc, the one CullParams declaration,
+ * whose C mirror is cull_params_t below.  Like hiz_copy_comp they carry no
+ * #version; the desktop tier header, TIER_CORE, is a separate glShaderSource
+ * chunk.  The GL binding points named in cull_mark_comp.glsl (SSBOs 0-7, the
+ * pyramid on unit 1) are the ones R_DispatchWorldCull binds. */
 
 /* ------------------------------------------------------------------ */
 /* Hi-Z compute shaders                                                */
 /* ------------------------------------------------------------------ */
 
-/* hiz_copy lives in engine/shaders/hiz_copy_comp.glsl and reaches us as
- * hiz_copy_comp[] via shaders_gen.h.  Its #version is supplied separately, as
- * a second glShaderSource chunk, so the file itself stays tier-agnostic. */
-#define HIZ_COMPUTE_VERSION	TIER_CORE	/* engine/shaders/glonly/tier_core.glsl */
+/* hiz_copy lives in engine/shaders/hiz_copy_comp.glsl, built as
+ * RPROG_HIZ_COPY.  Its #version is supplied separately, as a second
+ * glShaderSource chunk, so the file itself stays tier-agnostic. */
 
 /* Uniform-block binding point for HizParams.  GLSL ES 3.00 cannot put
  * layout(binding=) on a block, so the shader does not name this and
@@ -228,8 +223,8 @@ void R_BuildWorldCull (void)
 	R_FreeWorldCull();
 
 	/* Compile compute shaders */
-	cull_clear_prog = GL_LoadComputeProgram(HIZ_COMPUTE_VERSION, cull_clear_comp, "clear_indirect");
-	cull_mark_prog = GL_LoadComputeProgram(HIZ_COMPUTE_VERSION, cull_mark_comp, "cull_mark");
+	cull_clear_prog = R_Program_Create(RPROG_CULL_CLEAR);
+	cull_mark_prog = R_Program_Create(RPROG_CULL_MARK);
 	if (!cull_clear_prog || !cull_mark_prog)
 	{
 		Con_Printf("GPU world culling: compute shaders failed, using CPU path\n");
@@ -542,8 +537,7 @@ static qboolean R_HiZ_EnsureResources (int scene_w, int scene_h)
 
 	if (!hiz_copy_prog)
 	{
-		hiz_copy_prog = GL_LoadComputeProgram(HIZ_COMPUTE_VERSION,
-							hiz_copy_comp, "hiz_copy");
+		hiz_copy_prog = R_Program_Create(RPROG_HIZ_COPY);
 		/* Safe to skip: an unassigned block already defaults to binding
 		 * point 0, which is the point we ask for. */
 		if (hiz_copy_prog && glGetUniformBlockIndex_fp &&
@@ -558,7 +552,7 @@ static qboolean R_HiZ_EnsureResources (int scene_w, int scene_h)
 	}
 	if (!hiz_reduce_prog)
 	{
-		hiz_reduce_prog = GL_LoadComputeProgram(HIZ_COMPUTE_VERSION, hiz_reduce_comp, "hiz_reduce");
+		hiz_reduce_prog = R_Program_Create(RPROG_HIZ_REDUCE);
 		WC_BindCullParamsBlock(hiz_reduce_prog);
 	}
 

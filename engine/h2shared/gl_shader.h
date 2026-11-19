@@ -11,16 +11,12 @@
 #ifndef GL_SHADER_H
 #define GL_SHADER_H
 
-/* Shader compilation helpers */
-GLuint	GL_LinkProgram (GLuint vert, GLuint frag);
-/* Compute program from a two-part source: `header` carries the #version line
- * and any #defines, `body` the shader itself, so one body can be compiled as
- * several variants without splicing strings.  `name` only labels the log.
- * Desktop GL 4.3 only -- the ES tier has no compute stage; callers gate on
- * gl_renderer_caps.compute_shaders.  uhexen2-h8yy. */
-GLuint	GL_LoadComputeProgram (const char *header, const char *body, const char *name);
-GLuint	GL_LoadProgramHeaders (const char *vert_header, const char *vert_src,
-			       const char *frag_header, const char *frag_src);
+/* Program creation: every program, graphics or compute, is built by id with
+ * R_Program_Create; the ids and their sources are gl_progid.h / gl_shader.c's
+ * rprog_defs (#340 P1b).  Compute programs are desktop GL 4.3 only -- the ES
+ * tier has no compute stage; callers gate on gl_renderer_caps.compute_shaders
+ * (uhexen2-h8yy). */
+#include "gl_progid.h"
 
 /* Shader programs */
 typedef struct glprogram_s {
@@ -164,7 +160,7 @@ void	GL_ParticleGPU_SetUniforms (const gl_particle_gpu_prog_t *prog,
 
 /* Vertex attribute locations (fixed, shared across all programs).  The
  * file-backed shaders in engine/shaders/ repeat these as layout(location=)
- * qualifiers, which OVERRIDE the glBindAttribLocation calls in GL_LinkProgram
+ * qualifiers, which OVERRIDE the glBindAttribLocation calls in R_Program_Create
  * rather than conflicting with them -- so the two lists have to agree. */
 #define ATTR_POSITION	0
 #define ATTR_TEXCOORD	1

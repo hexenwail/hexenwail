@@ -24,6 +24,9 @@ name: Shaders SPIR-V
 # tools/test_vk_flip_y.py then checks that every Vulkan vertex stage stores
 # the negated gl_Position.y on every return path and no GL one does; its
 # source half (each main ends in VK_FLIP_Y()) is in lint.yml (#340).
+# tools/gen_program_reflection.py --check regenerates the per-blob resource
+# counts SDL_GPU creates each stage with and fails if the checked-in
+# engine/h2shared/gl_progid_refl.h is stale (#340 P1b).
 #
 # The paths are everything the gate reads: the shaders themselves
 # (.glsl AND .inc -- layout.inc/ssao.inc are the risk), the three CMake
@@ -44,6 +47,8 @@ on:
       - 'tools/test_sdlgpu_bindings.py'
       - 'tools/test_shader_variants.py'
       - 'tools/test_vk_flip_y.py'
+      - 'tools/gen_program_reflection.py'
+      - 'engine/h2shared/gl_progid_refl.h'
   push:
     branches: [master]
     paths:
@@ -57,6 +62,8 @@ on:
       - 'tools/test_sdlgpu_bindings.py'
       - 'tools/test_shader_variants.py'
       - 'tools/test_vk_flip_y.py'
+      - 'tools/gen_program_reflection.py'
+      - 'engine/h2shared/gl_progid_refl.h'
 
 # Builds and throws the result away; nothing here writes to the repository.
 permissions:
@@ -124,6 +131,22 @@ jobs:
           set -euo pipefail
           python3 tools/test_sdlgpu_bindings.py /tmp/shader-build/engine/generated/spirv \
             --sources /tmp/shader-build/engine/generated/vk -v
+
+      # SDL_CreateGPUShader / SDL_CreateGPUComputePipeline take each stage's
+      # resource counts (and a compute stage's threadcount), which cannot be
+      # asked of a blob at run time.  engine/h2shared/gl_progid_refl.h carries
+      # them, one row per offline copy, generated from these .vk.spv by
+      # tools/gen_program_reflection.py and checked in so the default build
+      # needs no glslang (#340 decision 6).  Regenerate it and fail if the
+      # checked-in copy differs, or if any row disagrees with shadercross's
+      # own reflection JSON of the same blob (shaders_cross above); lint.yml's
+      # test_program_routing.py checks its rows are the offline copies and
+      # every program's blobs.  #340 (P1b).
+      - name: Check the program reflection table
+        run: |
+          set -euo pipefail
+          python3 tools/gen_program_reflection.py /tmp/shader-build/engine/generated/spirv --check \
+            --cross /tmp/shader-build/engine/generated/cross
 
       # SDL_GPU is +Y up with row 0 at the top; GL puts NDC y = -1 on row 0.
       # Every vertex stage negates gl_Position.y in its Vulkan SPIR-V only

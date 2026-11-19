@@ -22,9 +22,10 @@ Checks the pieces that have to move together:
     which is NOT the ATTR_* contract the other programs share, and its
     BonePose and main match a pinned token stream (GOLDEN);
   * the literal, GL_SpliceDefines and the GLSL_ALIAS_DLIGHT_VS_* splices are
-    gone, all four skeletal programs compile the file through
-    GLSL_VERT_HEADER (NOPERSP appended for the two affine ones) inside a
-    desktop-only region, glprogram_t carries none of the six skeletal-only
+    gone, all four skeletal programs' program-table rows (#340 P1b) compile
+    the file through GLSL_VERT_HEADER (GLSL_NOPERSP appended for the two
+    affine ones), rows and builds inside a desktop-only region, glprogram_t
+    carries none of the six skeletal-only
     locations, and GL_InitProgramUniforms binds AliasVert;
   * GL_DrawAliasSkeletal makes no loose glUniform write, writes every member
     the stage reads (each through its setter, from the values the loose
@@ -296,7 +297,7 @@ graphics = layout_inc[layout_inc.index("#define VERT_IN(loc)"):] if "#define VER
 ssbo_arms = re.findall(r"#define VERT_SSBO\(gl, vk\) (.*)", graphics)
 if ssbo_arms != ["layout(std430, set = 0, binding = vk)", "layout(std430, binding = gl)", "layout(std430, binding = gl)"]:
     errors.append(f"layout.inc VERT_SSBO arms (Vulkan, GL_SPIRV, plain) changed: {ssbo_arms}")
-# The plain arm must keep the location: without it GL_LinkProgram's
+# The plain arm must keep the location: without it R_Program_Create's
 # glBindAttribLocation would put a_texcoord on ATTR_TEXCOORD, the VAO's normal.
 in_arms = re.findall(r"#define VERT_IN\(loc\)\s+(.*)", layout_inc)
 if len(in_arms) != 3 or any(a.strip() != "layout(location = loc)" for a in in_arms):
@@ -394,12 +395,24 @@ if re.search(r"static const char sskeletal_vert\[\]", gl_shader):
 for gone in ("GL_SpliceDefines", "GLSL_ALIAS_DLIGHT_VS_OUT", "GLSL_ALIAS_DLIGHT_VS_CALC"):
     if re.search(rf"\b{gone}\b", strip(gl_shader)):
         errors.append(f"{gone} is back in gl_shader.c; its last user was the skeletal literal")
-NP = r'GLSL_VERT_HEADER "#define NOPERSP 1\\n", sskeletal_vert,\s*GLSL_ALIAS_FRAG_HEADER "#define NOPERSP 1\\n", salias_frag\);'
+# Each program is a row of gl_shader.c's program table (#340 P1b) and a call
+# that builds it by id; both must be desktop-only.
+
+
+def row(rid, vhdr, vblob):
+    return (rf'\[{rid}\] = \{{ "{rid[6:].lower()}", RPROG_LINK_ATTRIBS, \{{\s*'
+            rf'\{{ {vhdr}, sskeletal_vert, "{vblob}" \}},')
+
+
 BUILDS = {
-    "skeletal": r'GL_InitProgramSplit\(&gl_shader_skeletal, "skeletal", GLSL_VERT_HEADER, sskeletal_vert,\s*GLSL_ALIAS_FRAG_HEADER, salias_frag\);',
-    "skeletal_np": r'GL_InitProgramSplit\(&gl_shader_skeletal_np, "skeletal_np",\s*' + NP,
-    "skeletal_oit": r'GL_InitOITProgramSplit\(&gl_shader_skeletal_oit, "skeletal", GLSL_VERT_HEADER, sskeletal_vert,\s*GLSL_ALIAS_FRAG_HEADER, salias_frag\);',
-    "skeletal_np_oit": r'GL_InitOITProgramSplit\(&gl_shader_skeletal_np_oit, "skeletal_np",\s*' + NP,
+    "skeletal": (row("RPROG_SKELETAL", "GLSL_VERT_HEADER", "sskeletal.vert"),
+                 r"GL_InitProgramSplit\(&gl_shader_skeletal, RPROG_SKELETAL\);"),
+    "skeletal_np": (row("RPROG_SKELETAL_NP", "GLSL_VERT_HEADER GLSL_NOPERSP", "sskeletal_np.vert"),
+                    r"GL_InitProgramSplit\(&gl_shader_skeletal_np, RPROG_SKELETAL_NP\);"),
+    "skeletal_oit": (row("RPROG_SKELETAL_OIT", "GLSL_VERT_HEADER", "sskeletal.vert"),
+                     r"GL_InitOITProgramSplit\(&gl_shader_skeletal_oit, RPROG_SKELETAL_OIT\);"),
+    "skeletal_np_oit": (row("RPROG_SKELETAL_NP_OIT", "GLSL_VERT_HEADER GLSL_NOPERSP", "sskeletal_np.vert"),
+                        r"GL_InitOITProgramSplit\(&gl_shader_skeletal_np_oit, RPROG_SKELETAL_NP_OIT\);"),
 }
 gsc = strip(gl_shader)
 
@@ -418,14 +431,15 @@ def desktop_only(pos):
     return any(s[0] for s in stack)
 
 
-for name, b in BUILDS.items():
-    found = list(re.finditer(b, gsc))
-    if len(found) != 1:
-        errors.append(f"{name}: expected one build {b[:70]}..., found {len(found)}")
-    elif not desktop_only(found[0].start()):
-        errors.append(f"{name} is built outside #ifndef USE_GLES; shader storage blocks are not ES 3.00")
+for name, pair in BUILDS.items():
+    for what, b in zip(("row", "build"), pair):
+        found = list(re.finditer(b, gsc))
+        if len(found) != 1:
+            errors.append(f"{name}: expected one {what} {b[:70]}..., found {len(found)}")
+        elif not desktop_only(found[0].start()):
+            errors.append(f"{name}'s {what} is outside #ifndef USE_GLES; shader storage blocks are not ES 3.00")
 if len(re.findall(r"\bsskeletal_vert\b", gsc)) != 4:
-    errors.append(f"sskeletal_vert is referenced {len(re.findall(r'sskeletal_vert', gsc))} times in gl_shader.c code, expected the 4 builds")
+    errors.append(f"sskeletal_vert is referenced {len(re.findall(r'sskeletal_vert', gsc))} times in gl_shader.c code, expected the 4 rows")
 
 gp = re.search(r"typedef struct glprogram_s \{(.*?)\} glprogram_t;", shader_h, re.S)
 gpf = set(re.findall(r"GLint\s+(\w+)", strip(gp.group(1)))) if gp else set()

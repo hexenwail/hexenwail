@@ -16,6 +16,11 @@
 #ifndef __GL_POSTPROCESS_H
 #define __GL_POSTPROCESS_H
 
+/* The nearest-colour palette LUT's grid edge (r_softemu 1/2, GitHub #80; see
+ * gl_postprocess.c).  Here rather than there because the GPU builder's
+ * program row in gl_shader.c compiles it in as LUT_DIM (#340 P1b). */
+#define PP_LUT_DIM	128
+
 /* Call once after GL context creation (from GL_Init or similar). */
 void GL_PostProcess_Init (void);
 

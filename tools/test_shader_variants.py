@@ -10,31 +10,29 @@ programs needs an offline blob, and EmbedShaders.cmake writes a copy per
 lint proves the manifest is the set the C can actually ask for, by reading
 the C:
 
-  * Every function that hands source to glShaderSource is a known leaf
-    (GL_CompileShaderSplit, GL_LoadComputeProgram, PP_CompileShaderSplit,
-    PP_CompileShader); a new one fails until it is taught here.
-  * From each leaf, every call chain is walked back to a function with no
-    parameters, binding each parameter to its caller's argument.  The header
-    argument is then evaluated as the compiler would: string literals and
-    macros concatenated (GLSL_STR stringizes), q_snprintf buffers formatted,
-    integer + - * with C precedence, `for` variables enumerated over their
-    range, enum parameters over their enumerators (less *_COUNT) once every
-    value reaching them is shown to be an enumerator or a cast clamped to
-    [0, *_COUNT), `p ? p : ""` resolved per caller.  Anything else -- a cvar,
-    a function result -- is a failure: a variant that depends on a run-time
-    value has no finite set to compile.
+  * Every program is a row of gl_shader.c's rprog_defs table (one per
+    rprog_id_t, #340 P1b), and RP_CompileStage, which hands a row's two
+    chunks to glShaderSource, is the only compile there is.  Each row's
+    header chunk is evaluated as the compiler would: string literals and
+    macros concatenated (GLSL_STR stringizes), integer + - * with C
+    precedence.  Anything else -- a cvar, a function result -- is a
+    failure: a variant that depends on a run-time value has no finite set
+    to compile.  (Until P1b the headers were built at the call sites, and
+    this walked every call chain into four glShaderSource callers to
+    evaluate them; the table made that walk unnecessary.)
   * The resulting #define lines, per stage, must match an offline copy: the
     plain stage, its OIT twin, or a `variant` line.  `const` defines are
     checked separately: the C must pass the manifest's value, and every
     shader that defaults the name must default it to the same value, which
     is what makes the plain offline compile the same program.
-  * Nothing escapes the walk: every C string literal holding "#define" under
-    engine/h2shared and engine/hexen2 must have been consumed by it, and
-    every shaders_gen.h stage symbol named in the C must have reached a leaf
-    as a source, and every function on a walked chain (and glShaderSource
-    itself) may be named only by its definition, a prototype or a call the
-    walk followed -- not through a macro, a function pointer or a file the
-    parser could not read.
+  * Nothing escapes the table: every C string literal holding "#define"
+    under engine/h2shared and engine/hexen2 must have been consumed by a
+    row, every shaders_gen.h stage symbol named in the C must be a row's
+    body, glShaderSource may be called only inside RP_CompileStage, and
+    RP_CompileStage only by R_Program_Create -- not through a macro, a
+    function pointer or a file the parser could not read.
+    tools/test_program_routing.py holds the rest: no other file creates,
+    compiles or links a program, and every row has its offline blobs.
   * Every `variant` and `const` line, and every OIT twin EmbedShaders
     writes, is needed by some program; stale ones fail.
   * CompileSpirv.cmake does not pass --invert-y: glslang implements it in
@@ -66,13 +64,14 @@ EXCLUDED = {"engine/h2shared/web_canvas_gl2.c"}
 DEFINED = {"GLQUAKE", "GL_DLSYM"}
 UNDEFINED = {"USE_GLES", "H2W", "SERVERONLY", "WEBSOFT", "__EMSCRIPTEN__"}
 
-# glShaderSource callers: name -> (header parameter index or None, source index)
-LEAVES = {
-    "GL_CompileShaderSplit": (1, 2),
-    "GL_LoadComputeProgram": (0, 1),
-    "PP_CompileShaderSplit": (1, 2),
-    "PP_CompileShader": (None, 1),
-}
+# Every program the renderer builds is a row of this table, and this is the
+# one function that hands source to glShaderSource: a row's two chunks.
+# tools/test_program_routing.py holds the rest of that (no other file
+# creates or links a program, every R_Program_Create argument is an id).
+TABLE_FILE = "engine/h2shared/gl_shader.c"
+TABLE_NAME = "rprog_defs"
+LEAF = "RP_CompileStage"
+CREATOR = "R_Program_Create"
 # Names glslang reserves or predefines; a variant may not set them.
 RESERVED = re.compile(r"^(VULKAN|GL_\w+|__\w+)$")
 
@@ -474,15 +473,11 @@ class Sym(str):
 
 
 class Frame:
+    """The context an expression is evaluated in: the function (here, the
+    table initializer) whose file's macros it sees.  The other fields are
+    the call-chain walk's, unused since the table (#340 P1b) replaced it."""
     def __init__(self, func, bind, parent, site):
         self.func, self.bind, self.parent, self.site = func, bind, parent, site
-
-    def chain(self):
-        out, f = [], self
-        while f is not None and f.site is not None:
-            out.append("%s:%d %s" % (f.site.file, f.site.line, f.func.name))
-            f = f.parent
-        return " <- ".join(out) if out else self.func.name
 
 
 class Analysis:
@@ -526,10 +521,9 @@ class Analysis:
         self.by_name = {}
         for f in self.funcs:
             self.by_name.setdefault(f.name, []).append(f)
-        self.consumed = set()      # id() of the "#define" literal tokens the walk read
-        self.sites = set()         # id() of every call-site token frames() looked at
-        self.reached = set()       # stage symbols that reached a leaf as a source
-        self._frames = {}
+        self.consumed = set()      # id() of the "#define" literal tokens the table read
+        self.reached = set()       # stage symbols that are a table row's body
+        self.bodies = set()        # id() of the tokens that name them there
 
     # -- macros --------------------------------------------------------------
     def macro(self, name, file):
@@ -583,35 +577,11 @@ class Analysis:
             i = j + 1
         return out
 
-    # -- frames: every call chain into a function -----------------------------
-    def frames(self, func, depth=0):
-        if func in self._frames:
-            return self._frames[func]
-        if depth > 12:
-            raise Unresolved("call chain into %s deeper than 12" % func.name)
-        if not func.params:
-            out = [Frame(func, {}, None, None)]
-        else:
-            out = []
-            for g in self.funcs:
-                for callee, args, site in calls_in(g, {func.name}):
-                    self.sites.add(id(site))
-                    if func.static and g.src is not func.src:
-                        continue
-                    if not func.static and g.src is not func.src and any(
-                            h.static and h.src is g.src for h in self.by_name[func.name]):
-                        continue
-                    if len(args) != len(func.params):
-                        raise Unresolved("%s:%d: %s called with %d arguments, declared with %d"
-                                         % (site.file, site.line, func.name, len(args), len(func.params)))
-                    for gf in self.frames(g, depth + 1):
-                        out.append(Frame(func, {p[0]: a for p, a in zip(func.params, args)}, gf, site))
-        self._frames[func] = out
-        return out
-
     # -- expressions ----------------------------------------------------------
     def ev(self, toks, frame, asg):
-        """Yield (value, asg) for every value toks can have."""
+        """Yield (value, asg) for every value toks can have.  A table row is
+        compile-time text, so in practice one value: literals and macros
+        concatenated, GLSL_STR stringized, integer + - * folded."""
         func = frame.func
         toks = self.expand(toks, func.src.rel, local=frozenset(p[0] for p in func.params))
         toks = strip_parens(toks)
@@ -670,7 +640,6 @@ class Analysis:
         yield from concat(0, "", asg)
 
     def primary(self, t, frame, asg):
-        func = frame.func
         if t.kind == "str":
             if DEFINE_RE.search(t.val):
                 self.consumed.add(id(t))
@@ -688,258 +657,120 @@ class Analysis:
         if name in self.shader_syms:
             yield Sym(name), asg
             return
-        params = dict(func.params)
-        if name in params:
-            ptype = [x.val for x in params[name] if x.kind == "id"]
-            enum = next((self.enums[x] for x in ptype if x in self.enums and x), None)
-            if enum is not None:
-                if any(v is None for v in enum.values()):
-                    raise Unresolved("%s: enum of parameter %s has an enumerator this lint cannot "
-                                     "evaluate" % (func.where(), name))
-                if frame.parent is not None:
-                    self.enum_safe(frame.bind[name], frame.parent,
-                                   next(x for x in ptype if x in self.enums), 0)
-                key = ("enum", id(frame), name)
-                if key in asg:
-                    yield asg[key], asg
-                    return
-                for en, v in enum.items():
-                    if not en.endswith("_COUNT"):
-                        yield v, {**asg, key: v}
-                return
-            if frame.parent is None:
-                raise Unresolved("%s: parameter %s of %s has no caller to take it from"
-                                 % (func.where(), name, func.name))
-            yield from self.ev(frame.bind[name], frame.parent, asg)
-            return
-        if name in self.enums.get("", {}):
-            if self.enums[""][name] is None:
-                raise Unresolved("%s:%d: enumerator %s has an initialiser this lint does not "
-                                 "evaluate; give it an integer literal" % (t.file, t.line, name))
+        if name in self.enums.get("", {}) and self.enums[""][name] is not None:
             yield self.enums[""][name], asg
             return
-        loop = self.enclosing_loop(func, t, name)
-        if loop is not None:
-            lo_toks, hi_toks, op, lpos = loop
-            key = ("loop", id(frame), name, lpos)
-            if key in asg:
-                yield asg[key], asg
-                return
-            for lo, a2 in self.ev(lo_toks, frame, asg):
-                for hi, a3 in self.ev(hi_toks, frame, a2):
-                    if not (isinstance(lo, int) and isinstance(hi, int)):
-                        raise Unresolved("%s:%d: loop bounds of %s are not integers" % (t.file, t.line, name))
-                    for v in range(lo, hi + 1 if op == "<=" else hi):
-                        yield v, {**a3, key: v}
-            return
-        fmt = self.snprintf_into(func, t, name)
-        if fmt is not None:
-            yield from self.format(fmt, frame, asg)
-            return
-        raise Unresolved("%s:%d: %s in %s is not a literal, macro, parameter, loop variable, enum "
-                         "parameter or q_snprintf buffer -- a run-time value has no finite set of "
-                         "variants to compile" % (t.file, t.line, name, func.name))
+        raise Unresolved("%s:%d: %s is not a literal or a macro -- a program row is compile-time "
+                         "text, and a run-time value has no finite set of variants to compile"
+                         % (t.file, t.line, name))
 
-    def enum_safe(self, toks, frame, etype, depth):
-        """Raise unless the enum-typed value `toks` (in `frame`) can only hold
-        an enumerator of `etype`: an enumerator, an enum parameter whose
-        callers pass such a value, a local only ever assigned such values, or
-        a call to a function returning `etype` whose every return is an
-        enumerator or a cast of a variable clamped to [0, *_COUNT)."""
-        func = frame.func
-        toks = strip_parens(self.expand(toks, func.src.rel, local=frozenset(p[0] for p in func.params)))
-        where = "%s:%d" % (toks[0].file, toks[0].line) if toks else func.where()
-        names = self.enums.get(etype, {})
-        if depth > 8:
-            raise Unresolved("%s: %s value traced too deep" % (where, etype))
-        if len(toks) == 1 and toks[0].val in names:
-            return
-        if len(toks) >= 3 and toks[0].kind == "id" and toks[1].val == "(" and \
-                matching(toks, 1, "(", ")") == len(toks) - 1:
-            for g in self.by_name.get(toks[0].val, []):
-                if etype not in g.ret:
-                    continue
-                self.enum_clamped(g, etype, names)
-                return
-            raise Unresolved("%s: %s() does not return %s" % (where, toks[0].val, etype))
-        if len(toks) == 1 and toks[0].kind == "id":
-            v = toks[0].val
-            params = dict(func.params)
-            if v in params:
-                if etype not in [x.val for x in params[v]]:
-                    raise Unresolved("%s: %s is not a %s parameter" % (where, v, etype))
-                if frame.parent is None:
-                    raise Unresolved("%s: parameter %s of %s has no caller" % (where, v, func.name))
-                return self.enum_safe(frame.bind[v], frame.parent, etype, depth + 1)
-            body = func.toks()
-            rhs = []
-            for k in range(1, len(body) - 1):
-                if body[k].val == v and body[k + 1].val == "=" and body[k - 1].val not in (".", "->"):
-                    end = next(e for e in range(k + 2, len(body)) if body[e].val == ";")
-                    rhs.append(body[k + 2:end])
-                    if body[k - 1].val != etype:
-                        # assigned, not declared: the declaration must be etype too
-                        decl = [body[d - 1].val for d in range(1, len(body)) if body[d].val == v
-                                and body[d - 1].kind == "id" and body[d - 1].val not in KEYWORDS]
-                        if etype not in decl:
-                            raise Unresolved("%s: %s is not declared %s" % (where, v, etype))
-            if not rhs:
-                raise Unresolved("%s: %s is never assigned in %s" % (where, v, func.name))
-            for r in rhs:
-                self.enum_safe(r, frame, etype, depth + 1)
-            return
-        raise Unresolved("%s: cannot show that %s holds only %s enumerators"
-                         % (where, " ".join(x.val for x in toks), etype))
-
-    def enum_clamped(self, g, etype, names):
-        body = g.toks()
-        text = " ".join(x.val for x in body)
-        count = [n for n in names if n.endswith("_COUNT")]
-        for k, tk in enumerate(body):
-            if tk.val != "return":
+    # -- the table ---------------------------------------------------------------
+    def table(self, errors):
+        """The rprog_defs rows, desktop view: [Row].  A Row's stages are
+        (header text, body Sym, blob, where), its `where` file:line."""
+        src = self.sources.get(TABLE_FILE)
+        if src is None:
+            errors.append("%s is missing; the program table %s lives there" % (TABLE_FILE, TABLE_NAME))
+            return []
+        toks, start = src.toks, None
+        for i, t in enumerate(toks):
+            if t.kind == "id" and t.val == TABLE_NAME and i + 1 < len(toks) and toks[i + 1].val == "[":
+                j = matching(toks, i + 1, "[", "]")
+                if j + 2 < len(toks) and toks[j + 1].val == "=" and toks[j + 2].val == "{":
+                    if start is not None:
+                        errors.append("%s:%d: a second %s initializer" % (t.file, t.line, TABLE_NAME))
+                    start = j + 2
+        if start is None:
+            errors.append("%s: no `%s[...] = { ... }` initializer" % (TABLE_FILE, TABLE_NAME))
+            return []
+        end = matching(toks, start, "{", "}")
+        frame = Frame(Func(src, TABLE_NAME, True, [], start, end), {}, None, None)
+        rows = []
+        for entry in split_args(toks[start + 1:end]):
+            if not entry:
                 continue
-            end = next(e for e in range(k + 1, len(body)) if body[e].val == ";")
-            r = body[k + 1:end]
-            if len(r) == 1 and r[0].val in names:
+            where = "%s:%d" % (entry[0].file, entry[0].line)
+            if not (len(entry) >= 6 and entry[0].val == "[" and entry[1].kind == "id" and
+                    entry[2].val == "]" and entry[3].val == "=" and entry[4].val == "{" and
+                    matching(entry, 4, "{", "}") == len(entry) - 1):
+                errors.append("%s: a %s row must be `[RPROG_X] = { name, link, { stages } }`"
+                              % (where, TABLE_NAME))
                 continue
-            if len(r) == 4 and [x.val for x in r[:3]] == ["(", etype, ")"] and r[3].kind == "id":
-                x = re.escape(r[3].val)
-                lo = re.search(r"\b%s < 0\b" % x, text)
-                hi = any(re.search(r"\b%s >= %s\b" % (x, c), text) for c in count)
-                if lo and hi:
-                    continue
-            raise Unresolved("%s:%d: %s returns %s, which is not an enumerator or a cast of a value "
-                             "clamped to [0, %s)" % (tk.file, tk.line, g.name,
-                                                     " ".join(x.val for x in r),
-                                                     count[0] if count else "COUNT"))
-
-    def enclosing_loop(self, func, use, name):
-        """(lo tokens, hi tokens, op, pos) of the `for (name = lo; name < hi; name++)`
-        whose body holds `use`, or None."""
-        toks = func.src.toks
-        a, b = func.body
-        best = None
-        for i in range(a, b):
-            if toks[i].val == "for" and toks[i + 1].val == "(":
-                j = matching(toks, i + 1, "(", ")")
-                parts = split_semis(toks[i + 2:j])
-                if len(parts) != 3:
-                    continue
-                init, cond, step = parts
-                if not (len(init) >= 3 and init[0].val == name and init[1].val == "="):
-                    continue
-                if not (len(cond) >= 3 and cond[0].val == name and cond[1].val in ("<", "<=")):
-                    continue
-                if [s.val for s in step] not in ([name, "++"], ["++", name]):
-                    raise Unresolved("%s:%d: loop over %s does not step by ++" % (toks[i].file, toks[i].line, name))
-                end = matching(toks, j + 1, "{", "}") if toks[j + 1].val == "{" else \
-                    next(k for k in range(j + 1, b + 1) if toks[k].val == ";")
-                if j < use.pos <= end and use.file == func.src.rel:
-                    best = (init[2:], cond[2:], cond[1].val, i)
-        return best
-
-    def snprintf_into(self, func, use, name):
-        """The nearest q_snprintf (name, sizeof name, fmt, args...) before `use`."""
-        best = None
-        for callee, args, site in calls_in(func, {"q_snprintf", "snprintf", "sprintf", "q_strlcpy"}):
-            if callee == "q_strlcpy":
+            row = Row(entry[1].val, where)
+            fields = split_args(entry[5:-1])
+            if len(fields) != 3 or len(fields[0]) != 1 or fields[0][0].kind != "str" or \
+                    len(fields[1]) != 1 or fields[1][0].kind != "id" or \
+                    not fields[2] or fields[2][0].val != "{" or \
+                    matching(fields[2], 0, "{", "}") != len(fields[2]) - 1:
+                errors.append("%s: %s: want `{ \"name\", RPROG_LINK_*, { stages } }`" % (where, row.id))
                 continue
-            if not args or [x.val for x in args[0]] != [name]:
-                continue
-            if use.file == func.src.rel and site.pos >= use.pos:
-                continue
-            best = (callee, args, site)
-        if best is None:
-            return None
-        callee, args, site = best
-        rest = args[1:] if callee == "sprintf" else args[2:]
-        return rest[0], rest[1:], site
-
-    def format(self, fmt, frame, asg):
-        fmt_toks, arg_toks, site = fmt
-
-        def go(k, vals, a):
-            if k == len(arg_toks):
-                yield vals, a
-                return
-            for v, a2 in self.ev(arg_toks[k], frame, a):
-                yield from go(k + 1, vals + [v], a2)
-
-        for fv, a2 in self.ev(fmt_toks, frame, asg):
-            if not isinstance(fv, str):
-                raise Unresolved("%s:%d: format is not a string" % (site.file, site.line))
-            specs = re.findall(r"%[-+ #0]*\d*(?:\.\d+)?(?:hh|h|ll|l|z)?([a-zA-Z%])", fv)
-            if any(s not in "dius%" for s in specs):
-                raise Unresolved("%s:%d: format %r uses a conversion other than %%d/%%i/%%u/%%s"
-                                 % (site.file, site.line, fv))
-            for vals, a3 in go(0, [], a2):
-                out, it = [], iter(vals)
-
-                def sub(m):
-                    c = m.group(1)
-                    if c == "%":
-                        return "%"
-                    v = next(it)
-                    if c == "s":
-                        if not isinstance(v, str) or isinstance(v, Sym):
-                            raise Unresolved("%s:%d: %%s given %r" % (site.file, site.line, v))
-                        return v
-                    if not isinstance(v, int):
-                        raise Unresolved("%s:%d: %%%s given %r" % (site.file, site.line, c, v))
-                    return str(v)
-                yield re.sub(r"%[-+ #0]*\d*(?:\.\d+)?(?:hh|h|ll|l|z)?([a-zA-Z%])", sub, fv), a3
-
-    # -- the walk ---------------------------------------------------------------
-    def programs(self, errors):
-        """[(stage symbol, header text, chain)] for every runtime compile."""
-        found = set()
-        for f in self.funcs:
-            if any(c[0] in ("glShaderSource_fp", "glShaderSource") for c in calls_in(
-                    f, {"glShaderSource_fp", "glShaderSource"})):
-                found.add(f.name)
-        if found != set(LEAVES):
-            for n in sorted(found - set(LEAVES)):
-                errors.append("%s calls glShaderSource and is not a leaf test_shader_variants.py "
-                              "knows; add it to LEAVES (header and source parameter positions)" % n)
-            for n in sorted(set(LEAVES) - found):
-                errors.append("LEAVES names %s, which no longer calls glShaderSource" % n)
-        out = []
-        for lname, (hi, si) in LEAVES.items():
-            for leaf in self.by_name.get(lname, []):
+            row.name, row.link = fields[0][0].val, fields[1][0].val
+            for st in split_args(fields[2][1:-1]):
+                if not st:
+                    continue
+                sw = "%s:%d" % (st[0].file, st[0].line)
+                parts = split_args(st[1:-1]) if st[0].val == "{" and st[-1].val == "}" else []
+                if len(parts) != 3 or len(parts[1]) != 1 or len(parts[2]) != 1 or \
+                        parts[2][0].kind != "str":
+                    errors.append("%s: %s: a stage is `{ header, body, \"blob\" }`" % (sw, row.id))
+                    continue
                 try:
-                    frames = self.frames(leaf)
+                    hv = list(self.ev(parts[0], frame, {}))
+                    bv = list(self.ev(parts[1], frame, {}))
                 except Unresolved as e:
-                    errors.append("%s: %s" % (leaf.name, e))
+                    errors.append("%s: %s: %s" % (sw, row.id, e))
                     continue
-                for fr in frames:
-                    if fr.parent is None and leaf.params:
-                        continue
-                    try:
-                        hdrs = [(NULL, {})] if hi is None else \
-                            list(self.ev([Tok("id", leaf.params[hi][0], leaf.src.rel, 0, -1)], fr, {}))
-                        for hv, a in hdrs:
-                            for sv, _ in self.ev([Tok("id", leaf.params[si][0], leaf.src.rel, 0, -1)], fr, a):
-                                out.append((sv, "" if hv is NULL else hv, fr.chain()))
-                    except Unresolved as e:
-                        errors.append("%s: %s" % (fr.chain(), e))
+                if len(hv) != 1 or not isinstance(hv[0][0], str) or isinstance(hv[0][0], Sym):
+                    errors.append("%s: %s: the header chunk is not one string" % (sw, row.id))
+                    continue
+                if len(bv) != 1 or not isinstance(bv[0][0], Sym):
+                    errors.append("%s: %s: the body is not an engine/shaders stage symbol"
+                                  % (sw, row.id))
+                    continue
+                self.reached.add(str(bv[0][0]))
+                self.bodies.update(id(x) for x in parts[1])
+                row.stages.append((hv[0][0], bv[0][0], parts[2][0].val, sw))
+            rows.append(row)
+        return rows
+
+    def programs(self, errors):
+        """[(stage symbol, header text, where)] for every stage of every row."""
+        out = []
+        for row in self.table(errors):
+            for k, (header, body, blob, where) in enumerate(row.stages):
+                out.append((body, header, "%s %s[%s] stage %d" % (where, TABLE_NAME, row.id, k)))
         return out
 
 
+class Row:
+    def __init__(self, rid, where):
+        self.id, self.where = rid, where
+        self.name = self.link = None
+        self.stages = []
+
+
 # The loaders and the declarations: the only files where glShaderSource may be
-# named other than as a call inside a LEAVES function.  rg_null.c is SDL_GPU
-# mode's generated null table (#340): it assigns and checks the pointer and
-# never compiles a shader through it.
+# named other than as a call inside LEAF.  rg_null.c is SDL_GPU mode's
+# generated null table (#340): it assigns and checks the pointer and never
+# compiles a shader through it.
 SOURCE_DECL_FILES = {"engine/h2shared/gl_vidsdl.c", "engine/h2shared/gl_func.h",
                      "engine/h2shared/rg_null.c"}
 
 
 def hidden_paths(an, errors):
-    """A shader compile the walk cannot see: a function on a walked chain (or
-    glShaderSource itself) named anywhere but its definition, a prototype or
-    a call site the walk visited -- through a macro, a function pointer, an
-    unparsed file."""
-    walk = {f.name for f in an._frames if f.params} | set(LEAVES)
-    leaves = [f for f in an.funcs if f.name in LEAVES]
+    """A shader compile the table does not describe: glShaderSource named
+    anywhere but a call inside LEAF (or the loader and declaration files),
+    LEAF defined more than once or called from anywhere but CREATOR, or
+    either named other than as its definition, prototype or such a call --
+    through a macro or a function pointer, which this could not follow."""
+    leaves = [f for f in an.funcs if f.name == LEAF]
+    creators = [f for f in an.funcs if f.name == CREATOR]
+    if len(leaves) != 1 or leaves[0].src.rel != TABLE_FILE:
+        errors.append("want exactly one %s, in %s; found %s" % (
+            LEAF, TABLE_FILE, ", ".join(f.where() for f in leaves) or "none"))
+    if len(creators) != 1 or creators[0].src.rel != TABLE_FILE:
+        errors.append("want exactly one %s, in %s; found %s" % (
+            CREATOR, TABLE_FILE, ", ".join(f.where() for f in creators) or "none"))
     gss = {"glShaderSource", "glShaderSource_fp"}
     for s in an.sources.values():
         depth = 0
@@ -948,17 +779,21 @@ def hidden_paths(an, errors):
                 depth += 1
             elif tk.kind == "p" and tk.val == "}":
                 depth -= 1
-            if tk.kind != "id" or tk.val not in walk | gss:
+            if tk.kind != "id" or tk.val not in gss | {LEAF}:
                 continue
             nxt = s.toks[k + 1].val if k + 1 < len(s.toks) else None
             if tk.val in gss:
                 in_leaf = any(f.src is s and f.body[0] <= k <= f.body[1] for f in leaves)
                 if (in_leaf and nxt == "(") or (s.rel in SOURCE_DECL_FILES and nxt != "("):
                     continue
-                errors.append("%s:%d: %s named outside a known shader-compile function; "
-                              "test_shader_variants.py cannot follow it" % (tk.file, tk.line, tk.val))
+                errors.append("%s:%d: %s named outside %s; a shader compiled there is no "
+                              "program row, so test_shader_variants.py cannot see it"
+                              % (tk.file, tk.line, tk.val, LEAF))
                 continue
-            if id(tk) in s.def_ids or id(tk) in an.sites:
+            if id(tk) in s.def_ids:
+                continue
+            in_creator = any(f.src is s and f.body[0] <= k <= f.body[1] for f in creators)
+            if in_creator and nxt == "(":
                 continue
             if depth == 0 and nxt == "(":
                 try:
@@ -967,13 +802,12 @@ def hidden_paths(an, errors):
                     j = None
                 if j is not None and j + 1 < len(s.toks) and s.toks[j + 1].val == ";":
                     continue        # prototype
-            errors.append("%s:%d: %s is named here other than as a call the walk followed (a "
-                          "function pointer, a macro, an unparsed file?); a shader built through "
-                          "it would escape test_shader_variants.py" % (tk.file, tk.line, tk.val))
+            errors.append("%s:%d: %s is named here other than as %s's call; a stage compiled "
+                          "through it would not be a program row" % (tk.file, tk.line, LEAF, CREATOR))
         for ms in s.macros.values():
             for m in ms:
                 for b in m.body:
-                    if b.kind == "id" and (b.val in walk or (b.val in gss and s.rel not in SOURCE_DECL_FILES)):
+                    if b.kind == "id" and (b.val == LEAF or (b.val in gss and s.rel not in SOURCE_DECL_FILES)):
                         errors.append("%s:%d: macro %s names %s; a shader built through it would "
                                       "escape test_shader_variants.py" % (b.file, b.line, m.name, b.val))
 
@@ -1005,18 +839,6 @@ def top_index(toks, val, start=0):
         elif depth == 0 and t.kind == "p" and t.val == val:
             return k
     return None
-
-
-def split_semis(toks):
-    parts, cur = [], []
-    for t in toks:
-        if t.val == ";":
-            parts.append(cur)
-            cur = []
-        else:
-            cur.append(t)
-    parts.append(cur)
-    return parts
 
 
 # --------------------------------------------------------------------------
@@ -1113,19 +935,12 @@ def check_invert_y(root, errors):
 
 # --------------------------------------------------------------------------
 
-def main(argv=None):
-    ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
-    ap.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
-    ap.add_argument("--vk-dir", type=Path, help="EmbedShaders VK_DIR to check against the manifest")
-    ap.add_argument("-v", "--verbose", action="store_true")
-    args = ap.parse_args(argv)
-    root = args.root.resolve()
-    shader_dir = root / "engine/shaders"
-    errors = []
-
-    variants, consts = read_manifest(shader_dir / "variants.txt", errors)
-    check_invert_y(root, errors)
-
+def offline_copies(shader_dir, variants, consts, errors):
+    """EmbedShaders.cmake's offline copies, as it names them: (bodies,
+    offline, vfiles).  bodies maps a stage file ("salias.frag") to its
+    include-expanded text; offline maps (stage, frozenset of defines) to the
+    copy's name -- the plain stage, its OIT twin, each variants.txt line --
+    and vfiles the variant copies to (stage, defines, where)."""
     bodies = {}
     for p in sorted(shader_dir.glob("*.glsl")):
         st = stage_file(p.stem)
@@ -1158,6 +973,29 @@ def main(argv=None):
             continue
         offline[key] = fname
         vfiles[fname] = (st, defs, where)
+    return bodies, offline, vfiles
+
+
+def stage_defines(header, st, consts):
+    """The variant axes a header chunk sets on stage `st`: its #defines less
+    the manifest's consts.  Raises Unresolved on a line the manifest cannot
+    express."""
+    return {k: v for k, v in parse_header(header).items() if k not in consts}
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
+    ap.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
+    ap.add_argument("--vk-dir", type=Path, help="EmbedShaders VK_DIR to check against the manifest")
+    ap.add_argument("-v", "--verbose", action="store_true")
+    args = ap.parse_args(argv)
+    root = args.root.resolve()
+    shader_dir = root / "engine/shaders"
+    errors = []
+
+    variants, consts = read_manifest(shader_dir / "variants.txt", errors)
+    check_invert_y(root, errors)
+    bodies, offline, vfiles = offline_copies(shader_dir, variants, consts, errors)
 
     # The C.
     try:
@@ -1211,19 +1049,20 @@ def main(argv=None):
 
     if an is not None:
         if len(progs) < 40:
-            errors.append("the walk found only %d stage compiles; is the C there?" % len(progs))
-        # Nothing escaped the walk.
+            errors.append("the table holds only %d stage compiles; is the C there?" % len(progs))
+        # Nothing escaped the table.
         for s in an.sources.values():
             for t in s.toks + [b for ms in s.macros.values() for m in ms for b in m.body]:
                 if t.kind == "str" and DEFINE_RE.search(t.val) and id(t) not in an.consumed:
-                    errors.append("%s:%d: %r reaches no glShaderSource the walk followed; "
+                    errors.append("%s:%d: %r is no program row's header; "
                                   "test_shader_variants.py cannot see what it is compiled into"
                                   % (t.file, t.line, t.val[:50]))
-            for t in s.toks:
-                if t.kind == "id" and t.val in an.shader_syms and t.val not in an.reached:
-                    errors.append("%s:%d: %s is named here but never reached a shader compile the "
-                                  "walk followed" % (t.file, t.line, t.val))
-                    an.reached.add(t.val)    # once per symbol
+                # A stage symbol is named by its rows and nowhere else: the
+                # engine has no other use for a shader's source than compiling
+                # it, and any other compile would be no row.
+                if t.kind == "id" and t.val in an.shader_syms and id(t) not in an.bodies:
+                    errors.append("%s:%d: %s is named outside the program table (%s); a stage is "
+                                  "compiled only as a row's body" % (t.file, t.line, t.val, TABLE_NAME))
         hidden_paths(an, errors)
         for (st, axes), fname in sorted(offline.items()):
             if axes == frozenset({("OIT", "1")}) and (st, axes) not in runtime:

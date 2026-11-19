@@ -16,6 +16,7 @@
 #include "gl_lightcluster.h"	/* froxel grid dimensions and binding points (uhexen2-26bm) */
 #include "gl_uniforms.h"	/* the two shared std140 blocks (uhexen2-p4ln) */
 #include "gl_shadow.h"		/* DlShadow and u_dlshadowmap, world and alias stages (#97) */
+#include "gl_postprocess.h"	/* PP_LUT_DIM, the palette-LUT builder's LUT_DIM (#340 P1b) */
 
 /* Generated from the .glsl files in engine/shaders by EmbedShaders.cmake.
  * Embedded rather than loaded at runtime: the engine has no shader search
@@ -75,136 +76,9 @@ gl_particle_gpu_prog_t	gl_shader_particle_gpu;
 
 /* Forward declarations */
 static void GL_InitProgramUniforms (glprogram_t *p);
-static GLuint GL_LoadProgramSplit (const char *vert_header, const char *vert_src,
-				   const char *frag_header, const char *frag_src);
 
-/* ------------------------------------------------------------------ */
-/* Shader compilation helpers                                          */
-/* ------------------------------------------------------------------ */
-
-/* `header` carries the #version line and, on the ES tier, the default
- * precision declarations that must precede it; NULL for a source that still
- * spells its own.  Kept a separate glShaderSource chunk rather than spliced
- * because the files in engine/shaders deliberately have no #version: one file
- * has to serve the desktop tier, the ES tier and the offline SPIR-V compile,
- * and those want three different ones. */
-static GLuint GL_CompileShaderSplit (GLenum type, const char *header,
-				     const char *source)
-{
-	GLuint shader;
-	GLint status;
-	char log[2048];
-	const char *type_name = (type == GL_VERTEX_SHADER) ? "VERTEX" : "FRAGMENT";
-	const char *chunks[2];
-	GLsizei nchunks = 0;
-
-	if (header)
-		chunks[nchunks++] = header;
-	chunks[nchunks++] = source;
-
-	shader = glCreateShader_fp(type);
-
-	glShaderSource_fp(shader, nchunks, chunks, NULL);
-
-	glCompileShader_fp(shader);
-	glGetShaderiv_fp(shader, GL_COMPILE_STATUS, &status);
-
-	if (!status)
-	{
-		glGetShaderInfoLog_fp(shader, sizeof(log), NULL, log);
-		Con_Printf("[SHADER] %s COMPILE ERROR:\n%s\n", type_name, log);
-		Con_Printf("[SHADER] First 300 chars of source:\n%.300s\n", source);
-		glDeleteShader_fp(shader);
-		return 0;
-	}
-	if (developer.integer)
-		Con_SafePrintf("[SHADER] %s shader compiled OK (id=%u)\n", type_name, shader);
-	return shader;
-}
-
-GLuint GL_LoadComputeProgram (const char *header, const char *body, const char *name)
-{
-	const char	*sources[2];
-	GLsizei		nsources = 0;
-	GLuint		shader, prog;
-	GLint		status;
-	char		log[2048];
-
-	/* header may be NULL for a body that still carries its own #version
-	 * (gl_worldcull.c's inline cull shaders). */
-	if (header)
-		sources[nsources++] = header;
-	sources[nsources++] = body;
-
-	shader = glCreateShader_fp(GL_COMPUTE_SHADER);
-	glShaderSource_fp(shader, nsources, sources, NULL);
-	glCompileShader_fp(shader);
-	glGetShaderiv_fp(shader, GL_COMPILE_STATUS, &status);
-	if (!status)
-	{
-		glGetShaderInfoLog_fp(shader, sizeof(log), NULL, log);
-		Con_Printf("[SHADER] COMPUTE COMPILE ERROR (%s):\n%s\n", name, log);
-		glDeleteShader_fp(shader);
-		return 0;
-	}
-
-	prog = glCreateProgram_fp();
-	glAttachShader_fp(prog, shader);
-	glLinkProgram_fp(prog);
-	glDeleteShader_fp(shader);	/* flagged for deletion; the program holds it */
-
-	glGetProgramiv_fp(prog, GL_LINK_STATUS, &status);
-	if (!status)
-	{
-		glGetProgramInfoLog_fp(prog, sizeof(log), NULL, log);
-		Con_Printf("[SHADER] COMPUTE LINK ERROR (%s):\n%s\n", name, log);
-		glDeleteProgram_fp(prog);
-		return 0;
-	}
-
-	if (developer.integer >= 2)
-		Con_SafePrintf("[SHADER] compute program '%s' linked OK (id=%u)\n", name, prog);
-	return prog;
-}
-
-GLuint GL_LinkProgram (GLuint vert, GLuint frag)
-{
-	GLuint prog;
-	GLint status;
-	char log[2048];
-
-	if (developer.integer)
-		Con_SafePrintf("[SHADER] Linking program (vert=%u, frag=%u)\n", vert, frag);
-
-	if (!vert || !frag)
-	{
-		Con_Printf("[SHADER] LINK ERROR: Invalid shader IDs (vert=%u, frag=%u)\n", vert, frag);
-		return 0;
-	}
-
-	prog = glCreateProgram_fp();
-	glAttachShader_fp(prog, vert);
-	glAttachShader_fp(prog, frag);
-
-	/* bind fixed attribute locations before linking */
-	glBindAttribLocation_fp(prog, ATTR_POSITION, "a_position");
-	glBindAttribLocation_fp(prog, ATTR_TEXCOORD, "a_texcoord");
-	glBindAttribLocation_fp(prog, ATTR_LMCOORD,  "a_lmcoord");
-	glBindAttribLocation_fp(prog, ATTR_COLOR,    "a_color");
-
-	glLinkProgram_fp(prog);
-	glGetProgramiv_fp(prog, GL_LINK_STATUS, &status);
-	if (!status)
-	{
-		glGetProgramInfoLog_fp(prog, sizeof(log), NULL, log);
-		Con_Printf("[SHADER] LINK ERROR:\n%s\n", log);
-		glDeleteProgram_fp(prog);
-		return 0;
-	}
-	if (developer.integer)
-		Con_SafePrintf("[SHADER] Program linked OK (id=%u)\n", prog);
-	return prog;
-}
+/* Program creation is R_Program_Create (gl_progid.h), further down beside the
+ * program table it reads: it needs the header macros defined below. */
 
 /* The OIT program builder below is desktop-only: OIT cannot run on the ES
  * tier at all (no glBlendFunci in WebGL2), so nothing there would call it.
@@ -215,8 +89,9 @@ GLuint GL_LinkProgram (GLuint vert, GLuint frag)
 GL_InitOITProgramSplit
 
 The OIT twin of a program: the same two stages, the fragment one compiled with
-"#define OIT 1" after its header chunk.  That swaps the stage's colour output
-for engine/shaders/oit.inc -- the accum/revealage outputs, the moment maths and
+"#define OIT 1" after its header chunk (GLSL_OIT_TWIN, in the twin's
+rprog_defs row).  That swaps the stage's colour output for
+engine/shaders/oit.inc -- the accum/revealage outputs, the moment maths and
 the main() that wraps the stage's own -- so the twin is a variant of the file,
 not a splice of it.  (It was a splice, of gl_shader.c's oit_preamble, until
 #450 W3.)  Fails the program rather than build one that cannot be told which
@@ -224,23 +99,17 @@ OIT output to write: a twin without OitFrag would write WBOIT output into the
 moment pass.
 ===============
 */
-static void GL_InitOITProgramSplit (glprogram_t *p, const char *name,
-				    const char *vert_header, const char *vert_src,
-				    const char *frag_header, const char *frag_src)
+static void GL_InitOITProgramSplit (glprogram_t *p, rprog_id_t id)
 {
-	char	oit_header[1024];
-	int	n;
+	const char	*name = R_Program_Name (id);
 
-	n = q_snprintf (oit_header, sizeof(oit_header), "%s%s", frag_header, "#define OIT 1\n");
-	p->program = 0;
-	if (n > 0 && n < (int)sizeof(oit_header))
-		p->program = GL_LoadProgramSplit (vert_header, vert_src, oit_header, frag_src);
+	p->program = R_Program_Create (id);
 	if (p->program)
 	{
 		GL_InitProgramUniforms (p);
 		if (p->ub_ofrag < 0)
 		{
-			Con_Printf ("[SHADER] %s_oit declares no OitFrag block\n", name);
+			Con_Printf ("[SHADER] %s declares no OitFrag block\n", name);
 			glDeleteProgram_fp (p->program);
 			p->program = 0;
 		}
@@ -268,41 +137,14 @@ static void GL_InitOITProgramSplit (glprogram_t *p, const char *name,
 		if (p->u_mboit_mom_ms >= 0) glUniform1i_fp(p->u_mboit_mom_ms, MBOIT_TMU_MOM_MS);
 		R_Shadow_InitProgram (p->program);	/* #97 */
 		R_UseProgram (0);
-		Con_SafePrintf ("  %s_oit: OK (prog=%u)\n", name, p->program);
+		Con_SafePrintf ("  %s: OK (prog=%u)\n", name, p->program);
 	}
 	else
 	{
-		Con_SafePrintf ("  %s_oit: FAILED\n", name);
+		Con_SafePrintf ("  %s: FAILED\n", name);
 	}
 }
 #endif	/* !USE_GLES */
-
-
-/* Compile and link a program where each stage is a (header, body) pair; see
- * GL_CompileShaderSplit for why the header is kept separate. */
-static GLuint GL_LoadProgramSplit (const char *vert_header, const char *vert_src,
-				   const char *frag_header, const char *frag_src)
-{
-	GLuint vs, fs, prog;
-
-	vs = GL_CompileShaderSplit(GL_VERTEX_SHADER, vert_header, vert_src);
-	if (!vs) return 0;
-	fs = GL_CompileShaderSplit(GL_FRAGMENT_SHADER, frag_header, frag_src);
-	if (!fs) { glDeleteShader_fp(vs); return 0; }
-
-	prog = GL_LinkProgram(vs, fs);
-	glDeleteShader_fp(vs);
-	glDeleteShader_fp(fs);
-	return prog;
-}
-
-/* A program whose stages carry no #version of their own (engine/shaders):
- * each gets its header as a separate source chunk.  gl_ssao.c. */
-GLuint GL_LoadProgramHeaders (const char *vert_header, const char *vert_src,
-			      const char *frag_header, const char *frag_src)
-{
-	return GL_LoadProgramSplit (vert_header, vert_src, frag_header, frag_src);
-}
 
 /* ------------------------------------------------------------------ */
 /* Helper to look up all common uniforms                               */
@@ -374,7 +216,7 @@ static void GL_InitProgramUniforms (glprogram_t *p)
  * Lives in engine/shaders/s2d_vert.glsl and s2d_frag.glsl, and reaches us as
  * s2d_vert[] / s2d_frag[] via shaders_gen.h.  Their #version headers are
  * supplied separately, as a second glShaderSource chunk, so the files stay
- * tier-agnostic; GL_InitProgramSplit below is what pairs them up.
+ * tier-agnostic; the RPROG_2D row of rprog_defs below is what pairs them up.
  * u_mvp and u_alpha_threshold sit inside uniform blocks there rather than
  * being loose uniforms, which is the one thing Vulkan GLSL will not have. */
 
@@ -510,20 +352,394 @@ static void GL_InitProgramUniforms (glprogram_t *p)
  * here: we have no cubemap sky path at all to hang it on.
  */
 
+/* The two #define lines that make a variant of a stage, each spelled once:
+ * the affine (NOPERSP) twins of the alias family, and the OIT twins'
+ * fragment stage (see GL_InitOITProgramSplit). */
+#define GLSL_NOPERSP	"#define NOPERSP 1\n"
+#define GLSL_OIT_TWIN	"#define OIT 1\n"
+
+/* GLSL version headers for the post-process programs (gl_postprocess.c).
+ * Every shader there used to be hardcoded to "#version 430 core", so the
+ * entire post-process chain -- gamma/contrast, FXAA, bloom, motion blur,
+ * softemu palettization and the OIT resolve -- failed to compile on the ES
+ * tier and silently disabled itself.  That went unnoticed because only the
+ * browser could reach the tier and nobody was reading its shader log; a
+ * desktop -DUSE_GLES=ON build (uhexen2-0py6) makes it a visible crash
+ * instead.  uhexen2-7wdv.
+ *
+ * GLSL ES 3.00 declares no default float precision in the fragment language,
+ * so it must be stated.  int is declared mediump there, which is as little as
+ * 16 bits -- not enough for bayer16's 32-bit shifts -- hence highp int.
+ * sampler3D likewise has no default (only sampler2D and samplerCube do), and
+ * softemu's palette LUT is a sampler3D, so it wants a stated precision too.
+ * Those lines are engine/shaders/glonly/tier_es_pp.glsl (TIER_ES_PP in
+ * shaders_gen.h); the desktop header is tier_core.glsl, as above.  (They
+ * lived in gl_postprocess.c until the program table, #340 P1b.) */
+#ifdef USE_GLES
+#define PP_VERT_HEADER	TIER_ES_PP
+#define PP_FRAG_HEADER	TIER_ES_PP
+/* bitfieldReverse (GLSL 4.00 / ES 3.10) used to be spliced in here for the
+ * ES tier as PP_BITFIELD_REVERSE.  Since #450 the polyfill lives in
+ * engine/shaders/spp_frag.glsl under #ifdef GL_ES, which the ES compiler
+ * predefines, so the tier choice no longer needs C. */
+#else
+#define PP_VERT_HEADER	TIER_CORE
+#define PP_FRAG_HEADER	TIER_CORE
+#endif
+
+#ifndef USE_GLES
+/* The light-cluster compute pass's constants (gl_lightcluster.c): the grid it
+ * fills has to be the grid GLSL_LIGHTGRID_CONSTS describes to its readers, so
+ * both are pasted from the same C macros.  MAX_LIGHTS is the client's
+ * MAX_DLIGHTS. */
+#define GLSL_LIGHTCLUSTER_HEADER \
+	TIER_CORE \
+	"#define LIGHT_TILES_X " GLSL_STR(LIGHT_TILES_X) "\n" \
+	"#define LIGHT_TILES_Y " GLSL_STR(LIGHT_TILES_Y) "\n" \
+	"#define LIGHT_TILES_Z " GLSL_STR(LIGHT_TILES_Z) "\n" \
+	"#define MAX_LIGHTS " GLSL_STR(MAX_DLIGHTS) "\n" \
+	"#define MAX_LIGHTSTYLES " GLSL_STR(MAX_LIGHTSTYLES) "\n" \
+	"#define LIGHT_SSBO_BINDING " GLSL_STR(LIGHT_SSBO_BINDING) "\n"
+
+/* The softemu palette-LUT builder's (gl_postprocess.c): MODE is the
+ * softemu_metric_t the variant searches with, LUT_DIM the grid it fills. */
+#define GLSL_SOFTEMU_LUT_DIM	"#define LUT_DIM " GLSL_STR(PP_LUT_DIM) "\n"
+#endif /* !USE_GLES */
+
+/* ------------------------------------------------------------------ */
+/* The program table (#340 P1b)                                        */
+/* ------------------------------------------------------------------ */
+
+/* One stage: the two glShaderSource chunks GL compiles -- the tier header and
+ * the engine/shaders body -- and the name of EmbedShaders.cmake's offline copy
+ * of exactly that pair, <build>/engine/generated/spirv/<blob>.vk.spv.  The
+ * header is kept a separate chunk rather than spliced because the files in
+ * engine/shaders deliberately have no #version: one file has to serve the
+ * desktop tier, the ES tier and the offline SPIR-V compile, and those want
+ * three different ones.  tools/test_program_routing.py checks each blob is
+ * the copy EmbedShaders writes for the header's #define set. */
+typedef struct {
+	const char	*header;
+	const char	*body;
+	const char	*blob;
+} rprog_stage_t;
+
+/* How GL links a program: which of the fixed attribute locations it binds
+ * (gl_shader.h ATTR_*), each the way the program's builder did before ids. */
+enum {
+	RPROG_LINK_ATTRIBS,	/* all four: the draw programs, SSAO composite, shadow maps */
+	RPROG_LINK_TEXCOORD,	/* a_texcoord only: the instanced alias pair */
+	RPROG_LINK_PLAIN,	/* none: the post-process programs */
+	RPROG_LINK_COMPUTE	/* one compute stage, in stage[RPROG_STAGE_COMPUTE] */
+};
+
+typedef struct {
+	const char	*name;		/* the id, lower case, without RPROG_ */
+	int		link;		/* RPROG_LINK_* */
+	rprog_stage_t	stage[RPROG_MAX_STAGES];
+} rprog_def_t;
+
+/* Rows a tier does not build are left out, so they read as zero (name NULL).
+ * The ES tier builds the 14 the WebGL smoke test compiles
+ * (scripts/webgl-engine-shader-smoke.mjs); everything under #ifndef USE_GLES
+ * needs SSBOs, compute, noperspective or glBlendFunci, which it lacks. */
+static const rprog_def_t rprog_defs[RPROG_COUNT] = {
+	/* gl_shader.c: GL_Shaders_Init */
+	[RPROG_2D] = { "2d", RPROG_LINK_ATTRIBS, {
+		{ GLSL_VERT_HEADER, s2d_vert, "s2d.vert" },
+		{ GLSL_FRAG_HEADER, s2d_frag, "s2d.frag" } } },
+	[RPROG_FLAT] = { "flat", RPROG_LINK_ATTRIBS, {
+		{ GLSL_VERT_HEADER, sflat_vert, "sflat.vert" },
+		{ GLSL_FRAG_HEADER, sflat_frag, "sflat.frag" } } },
+	[RPROG_WORLD] = { "world", RPROG_LINK_ATTRIBS, {
+		{ GLSL_VERT_HEADER, sworld_vert, "sworld.vert" },
+		{ GLSL_WORLD_FRAG_HEADER, sworld_frag, "sworld.frag" } } },
+	[RPROG_WORLD_OPAQUE] = { "world_opaque", RPROG_LINK_ATTRIBS, {
+		{ GLSL_VERT_HEADER, sworld_vert, "sworld.vert" },
+		{ GLSL_WORLD_FRAG_HEADER, sworld_opaque_frag, "sworld_opaque.frag" } } },
+	[RPROG_ALIAS] = { "alias", RPROG_LINK_ATTRIBS, {
+		{ GLSL_VERT_HEADER, salias_vert, "salias.vert" },
+		{ GLSL_ALIAS_FRAG_HEADER, salias_frag, "salias.frag" } } },
+	[RPROG_PARTICLE] = { "particle", RPROG_LINK_ATTRIBS, {
+		{ GLSL_VERT_HEADER, spart_vert, "spart.vert" },
+		{ GLSL_FRAG_HEADER, spart_frag, "spart.frag" } } },
+	[RPROG_SKY_LAYERS] = { "sky_layers", RPROG_LINK_ATTRIBS, {
+		{ GLSL_VERT_HEADER, ssky_layers_vert, "ssky_layers.vert" },
+		{ GLSL_FRAG_HEADER, ssky_layers_frag, "ssky_layers.frag" } } },
+	[RPROG_SKY_BOXSIDE] = { "sky_boxside", RPROG_LINK_ATTRIBS, {
+		{ GLSL_VERT_HEADER, ssky_side_vert, "ssky_side.vert" },
+		{ GLSL_FRAG_HEADER, ssky_side_frag, "ssky_side.frag" } } },
+	[RPROG_SKY_CUBEMAP] = { "sky_cubemap", RPROG_LINK_ATTRIBS, {
+		{ GLSL_VERT_HEADER, ssky_cube_vert, "ssky_cube.vert" },
+		{ GLSL_FRAG_HEADER, ssky_cube_frag, "ssky_cube.frag" } } },
+	/* gl_postprocess.c: PP_InitShader, OIT_InitShader */
+	[RPROG_POSTPROCESS] = { "postprocess", RPROG_LINK_PLAIN, {
+		{ PP_VERT_HEADER, spp_vert, "spp.vert" },
+		{ PP_FRAG_HEADER, spp_frag, "spp.frag" } } },
+	[RPROG_BLOOM_BRIGHT] = { "bloom_bright", RPROG_LINK_PLAIN, {
+		{ PP_VERT_HEADER, sbloom_vert, "sbloom.vert" },
+		{ PP_FRAG_HEADER, sbloom_bright_frag, "sbloom_bright.frag" } } },
+	[RPROG_BLOOM_DOWN] = { "bloom_down", RPROG_LINK_PLAIN, {
+		{ PP_VERT_HEADER, sbloom_vert, "sbloom.vert" },
+		{ PP_FRAG_HEADER, sbloom_down_frag, "sbloom_down.frag" } } },
+	[RPROG_BLOOM_UP] = { "bloom_up", RPROG_LINK_PLAIN, {
+		{ PP_VERT_HEADER, sbloom_vert, "sbloom.vert" },
+		{ PP_FRAG_HEADER, sbloom_up_frag, "sbloom_up.frag" } } },
+	[RPROG_OIT_RESOLVE] = { "oit_resolve", RPROG_LINK_PLAIN, {
+		{ PP_VERT_HEADER, soit_resolve_vert, "soit_resolve.vert" },
+		{ PP_FRAG_HEADER, soit_resolve_frag, "soit_resolve.frag" } } },
+#ifndef USE_GLES
+	/* gl_shader.c, desktop only: the affine and OIT twins, skeletal, the GPU
+	 * particles and the instanced alias pair */
+	[RPROG_ALIAS_NP] = { "alias_np", RPROG_LINK_ATTRIBS, {
+		{ GLSL_VERT_HEADER GLSL_NOPERSP, salias_vert, "salias_np.vert" },
+		{ GLSL_ALIAS_FRAG_HEADER GLSL_NOPERSP, salias_frag, "salias_np.frag" } } },
+	[RPROG_SKELETAL] = { "skeletal", RPROG_LINK_ATTRIBS, {
+		{ GLSL_VERT_HEADER, sskeletal_vert, "sskeletal.vert" },
+		{ GLSL_ALIAS_FRAG_HEADER, salias_frag, "salias.frag" } } },
+	[RPROG_SKELETAL_NP] = { "skeletal_np", RPROG_LINK_ATTRIBS, {
+		{ GLSL_VERT_HEADER GLSL_NOPERSP, sskeletal_vert, "sskeletal_np.vert" },
+		{ GLSL_ALIAS_FRAG_HEADER GLSL_NOPERSP, salias_frag, "salias_np.frag" } } },
+	[RPROG_WORLD_OIT] = { "world_oit", RPROG_LINK_ATTRIBS, {
+		{ GLSL_VERT_HEADER, sworld_vert, "sworld.vert" },
+		{ GLSL_WORLD_FRAG_HEADER GLSL_OIT_TWIN, sworld_frag, "sworld_oit.frag" } } },
+	[RPROG_ALIAS_OIT] = { "alias_oit", RPROG_LINK_ATTRIBS, {
+		{ GLSL_VERT_HEADER, salias_vert, "salias.vert" },
+		{ GLSL_ALIAS_FRAG_HEADER GLSL_OIT_TWIN, salias_frag, "salias_oit.frag" } } },
+	[RPROG_ALIAS_NP_OIT] = { "alias_np_oit", RPROG_LINK_ATTRIBS, {
+		{ GLSL_VERT_HEADER GLSL_NOPERSP, salias_vert, "salias_np.vert" },
+		{ GLSL_ALIAS_FRAG_HEADER GLSL_NOPERSP GLSL_OIT_TWIN, salias_frag, "salias_np_oit.frag" } } },
+	[RPROG_SKELETAL_OIT] = { "skeletal_oit", RPROG_LINK_ATTRIBS, {
+		{ GLSL_VERT_HEADER, sskeletal_vert, "sskeletal.vert" },
+		{ GLSL_ALIAS_FRAG_HEADER GLSL_OIT_TWIN, salias_frag, "salias_oit.frag" } } },
+	[RPROG_SKELETAL_NP_OIT] = { "skeletal_np_oit", RPROG_LINK_ATTRIBS, {
+		{ GLSL_VERT_HEADER GLSL_NOPERSP, sskeletal_vert, "sskeletal_np.vert" },
+		{ GLSL_ALIAS_FRAG_HEADER GLSL_NOPERSP GLSL_OIT_TWIN, salias_frag, "salias_np_oit.frag" } } },
+	[RPROG_PARTICLE_OIT] = { "particle_oit", RPROG_LINK_ATTRIBS, {
+		{ GLSL_VERT_HEADER, spart_vert, "spart.vert" },
+		{ GLSL_FRAG_HEADER GLSL_OIT_TWIN, spart_frag, "spart_oit.frag" } } },
+	[RPROG_PARTICLE_GPU] = { "particle_gpu", RPROG_LINK_ATTRIBS, {
+		{ GLSL_VERT_HEADER, spart_gpu_vert, "spart_gpu.vert" },
+		{ GLSL_FRAG_HEADER, spart_frag, "spart.frag" } } },
+	[RPROG_ALIAS_INSTANCED] = { "alias_instanced", RPROG_LINK_TEXCOORD, {
+		{ GLSL_ALIAS_INST_VERT_HEADER, salias_inst_vert, "salias_inst.vert" },
+		{ GLSL_ALIAS_FRAG_HEADER, salias_frag, "salias.frag" } } },
+	[RPROG_ALIAS_INSTANCED_NP] = { "alias_instanced_np", RPROG_LINK_TEXCOORD, {
+		{ GLSL_ALIAS_INST_VERT_HEADER GLSL_NOPERSP, salias_inst_vert, "salias_inst_np.vert" },
+		{ GLSL_ALIAS_FRAG_HEADER GLSL_NOPERSP, salias_frag, "salias_np.frag" } } },
+	/* gl_postprocess.c, desktop only: the MSAA resolve (sampler2DMS is ES
+	 * 3.10) and the GPU palette-LUT builder */
+	[RPROG_OIT_RESOLVE_MSAA] = { "oit_resolve_msaa", RPROG_LINK_PLAIN, {
+		{ PP_VERT_HEADER, soit_resolve_vert, "soit_resolve.vert" },
+		{ PP_FRAG_HEADER, soit_resolve_msaa_frag, "soit_resolve_msaa.frag" } } },
+	[RPROG_SOFTEMU_LUT_MODE0] = { "softemu_lut_mode0", RPROG_LINK_COMPUTE, {
+		{ TIER_CORE "#define MODE 0\n" GLSL_SOFTEMU_LUT_DIM, softemu_lut_comp, "softemu_lut_mode0.comp" } } },
+	[RPROG_SOFTEMU_LUT_MODE1] = { "softemu_lut_mode1", RPROG_LINK_COMPUTE, {
+		{ TIER_CORE "#define MODE 1\n" GLSL_SOFTEMU_LUT_DIM, softemu_lut_comp, "softemu_lut_mode1.comp" } } },
+	[RPROG_SOFTEMU_LUT_MODE2] = { "softemu_lut_mode2", RPROG_LINK_COMPUTE, {
+		{ TIER_CORE "#define MODE 2\n" GLSL_SOFTEMU_LUT_DIM, softemu_lut_comp, "softemu_lut_mode2.comp" } } },
+	/* gl_ssao.c: SS_BuildPrograms */
+	[RPROG_SSAO_PREPARE] = { "ssao_prepare", RPROG_LINK_COMPUTE, {
+		{ TIER_CORE, ssao_prepare_comp, "ssao_prepare.comp" } } },
+	[RPROG_SSAO_MIP] = { "ssao_mip", RPROG_LINK_COMPUTE, {
+		{ TIER_CORE, ssao_mip_comp, "ssao_mip.comp" } } },
+	[RPROG_SSAO_EVALUATE_Q1] = { "ssao_evaluate_q1", RPROG_LINK_COMPUTE, {
+		{ TIER_CORE "#define QUALITY 1\n", ssao_evaluate_comp, "ssao_evaluate_q1.comp" } } },
+	[RPROG_SSAO_EVALUATE_Q2] = { "ssao_evaluate_q2", RPROG_LINK_COMPUTE, {
+		{ TIER_CORE "#define QUALITY 2\n", ssao_evaluate_comp, "ssao_evaluate_q2.comp" } } },
+	[RPROG_SSAO_EVALUATE_Q3] = { "ssao_evaluate_q3", RPROG_LINK_COMPUTE, {
+		{ TIER_CORE "#define QUALITY 3\n", ssao_evaluate_comp, "ssao_evaluate_q3.comp" } } },
+	[RPROG_SSAO_FILTER] = { "ssao_filter", RPROG_LINK_COMPUTE, {
+		{ TIER_CORE, ssao_filter_comp, "ssao_filter.comp" } } },
+	[RPROG_SSAO_COMPOSITE] = { "ssao_composite", RPROG_LINK_ATTRIBS, {
+		{ TIER_CORE, ssao_composite_vert, "ssao_composite.vert" },
+		{ TIER_CORE, ssao_composite_frag, "ssao_composite.frag" } } },
+	/* gl_shadow.c: SH_BuildPrograms */
+	[RPROG_SHADOW] = { "shadow", RPROG_LINK_ATTRIBS, {
+		{ TIER_CORE, sshadow_vert, "sshadow.vert" },
+		{ TIER_CORE, sshadow_frag, "sshadow.frag" } } },
+	[RPROG_SHADOW_DEBUG] = { "shadow_debug", RPROG_LINK_ATTRIBS, {
+		{ TIER_CORE, sshadowdbg_vert, "sshadowdbg.vert" },
+		{ TIER_CORE, sshadowdbg_frag, "sshadowdbg.frag" } } },
+	[RPROG_SHADOW_ALIAS] = { "shadow_alias", RPROG_LINK_ATTRIBS, {
+		{ TIER_CORE, sshadow_alias_vert, "sshadow_alias.vert" },
+		{ TIER_CORE, sshadow_frag, "sshadow.frag" } } },
+	/* gl_worldcull.c: R_BuildWorldCull, R_HiZ_Ensure */
+	[RPROG_CULL_CLEAR] = { "cull_clear", RPROG_LINK_COMPUTE, {
+		{ TIER_CORE, cull_clear_comp, "cull_clear.comp" } } },
+	[RPROG_CULL_MARK] = { "cull_mark", RPROG_LINK_COMPUTE, {
+		{ TIER_CORE, cull_mark_comp, "cull_mark.comp" } } },
+	[RPROG_HIZ_COPY] = { "hiz_copy", RPROG_LINK_COMPUTE, {
+		{ TIER_CORE, hiz_copy_comp, "hiz_copy.comp" } } },
+	[RPROG_HIZ_REDUCE] = { "hiz_reduce", RPROG_LINK_COMPUTE, {
+		{ TIER_CORE, hiz_reduce_comp, "hiz_reduce.comp" } } },
+	/* gl_lightcluster.c: LC_Init */
+	[RPROG_LIGHTCLUSTER] = { "lightcluster", RPROG_LINK_COMPUTE, {
+		{ GLSL_LIGHTCLUSTER_HEADER, lightcluster_comp, "lightcluster.comp" } } },
+#endif /* !USE_GLES */
+};
+
+/* The per-blob counts SDL_GPU creates each stage with; see gl_progid.h. */
+#include "gl_progid_refl.h"
+
+static const char *RP_StageKind (GLenum type)
+{
+	if (type == GL_VERTEX_SHADER)
+		return "VERTEX";
+	return (type == GL_FRAGMENT_SHADER) ? "FRAGMENT" : "COMPUTE";
+}
+
+/* The only glShaderSource in the renderer: a stage is its row's two chunks
+ * and nothing else. */
+static GLuint RP_CompileStage (const rprog_def_t *def, GLenum type, const rprog_stage_t *st)
+{
+	const char	*chunks[2];
+	GLuint		shader;
+	GLint		status;
+	char		log[2048];
+
+	chunks[0] = st->header;
+	chunks[1] = st->body;
+	shader = glCreateShader_fp (type);
+	glShaderSource_fp (shader, 2, chunks, NULL);
+	glCompileShader_fp (shader);
+	glGetShaderiv_fp (shader, GL_COMPILE_STATUS, &status);
+	if (!status)
+	{
+		glGetShaderInfoLog_fp (shader, sizeof(log), NULL, log);
+		Con_Printf ("[SHADER] %s %s COMPILE ERROR:\n%s\n", def->name, RP_StageKind (type), log);
+		Con_Printf ("[SHADER] First 300 chars of source:\n%.300s\n", st->body);
+		glDeleteShader_fp (shader);
+		return 0;
+	}
+	if (developer.integer)
+		Con_SafePrintf ("[SHADER] %s shader compiled OK (id=%u)\n", RP_StageKind (type), shader);
+	return shader;
+}
+
+static const rprog_def_t *RP_Def (rprog_id_t id)
+{
+	if ((unsigned int)id >= RPROG_COUNT || !rprog_defs[id].name)
+		return NULL;
+	return &rprog_defs[id];
+}
+
+static int RP_NumStages (const rprog_def_t *def)
+{
+	return (def->link == RPROG_LINK_COMPUTE) ? 1 : 2;
+}
+
+/*
+===============
+R_Program_Create
+
+Compile the id's stages in order, then create, attach, bind, link and drop the
+shaders -- the same GL call sequence each program's builder made before ids,
+so GL hands out the same names.  SDL_GPU ARM (P1c): this is the one place the
+create path branches, `if (R_GPU ()) return RG_ProgramCreate (id, ...);` from
+the row's blobs and rprog_refl; nothing in this phase compiles any SDL_GPU
+code.
+===============
+*/
+GLuint R_Program_Create (rprog_id_t id)
+{
+	static const GLenum	graphics[2] = { GL_VERTEX_SHADER, GL_FRAGMENT_SHADER };
+	const rprog_def_t	*def = RP_Def (id);
+	GLuint			sh[RPROG_MAX_STAGES], prog;
+	GLint			status;
+	char			log[2048];
+	int			i, n;
+
+	if (!def)
+	{
+		Con_Printf ("[SHADER] program %d is not built on this renderer tier\n", (int)id);
+		return 0;
+	}
+	n = RP_NumStages (def);
+	for (i = 0; i < n; i++)
+	{
+		sh[i] = RP_CompileStage (def, (n == 1) ? GL_COMPUTE_SHADER : graphics[i], &def->stage[i]);
+		if (!sh[i])
+		{
+			while (i--)
+				glDeleteShader_fp (sh[i]);
+			return 0;
+		}
+	}
+	if (developer.integer && n == 2)
+		Con_SafePrintf ("[SHADER] Linking program (vert=%u, frag=%u)\n", sh[0], sh[1]);
+
+	prog = glCreateProgram_fp ();
+	for (i = 0; i < n; i++)
+		glAttachShader_fp (prog, sh[i]);
+	/* fixed attribute locations, before linking */
+	if (def->link == RPROG_LINK_ATTRIBS)
+	{
+		glBindAttribLocation_fp (prog, ATTR_POSITION, "a_position");
+		glBindAttribLocation_fp (prog, ATTR_TEXCOORD, "a_texcoord");
+		glBindAttribLocation_fp (prog, ATTR_LMCOORD,  "a_lmcoord");
+		glBindAttribLocation_fp (prog, ATTR_COLOR,    "a_color");
+	}
+	else if (def->link == RPROG_LINK_TEXCOORD)
+		glBindAttribLocation_fp (prog, ATTR_TEXCOORD, "a_texcoord");
+	glLinkProgram_fp (prog);
+	for (i = 0; i < n; i++)
+		glDeleteShader_fp (sh[i]);	/* flagged for deletion; the program holds them */
+
+	glGetProgramiv_fp (prog, GL_LINK_STATUS, &status);
+	if (!status)
+	{
+		glGetProgramInfoLog_fp (prog, sizeof(log), NULL, log);
+		Con_Printf ("[SHADER] %s LINK ERROR:\n%s\n", def->name, log);
+		glDeleteProgram_fp (prog);
+		return 0;
+	}
+	if (developer.integer)
+		Con_SafePrintf ("[SHADER] program '%s' linked OK (id=%u)\n", def->name, prog);
+	return prog;
+}
+
+const char *R_Program_Name (rprog_id_t id)
+{
+	const rprog_def_t *def = RP_Def (id);
+
+	return def ? def->name : NULL;
+}
+
+const char *R_Program_Blob (rprog_id_t id, int stage)
+{
+	const rprog_def_t *def = RP_Def (id);
+
+	if (!def || stage < 0 || stage >= RP_NumStages (def))
+		return NULL;
+	return def->stage[stage].blob;
+}
+
+const rprog_refl_t *R_Program_Reflection (rprog_id_t id, int stage)
+{
+	const char	*blob = R_Program_Blob (id, stage);
+	size_t		i;
+
+	if (!blob)
+		return NULL;
+	for (i = 0; i < sizeof(rprog_refl) / sizeof(rprog_refl[0]); i++)
+	{
+		if (!strcmp (rprog_refl[i].blob, blob))
+			return &rprog_refl[i];
+	}
+	return NULL;
+}
+
 /* ------------------------------------------------------------------ */
 /* Init / Shutdown                                                     */
 /* ------------------------------------------------------------------ */
 
-/* Each stage is a (header, body) pair; a NULL header is for a source that
- * carries its own #version, which no program built here does since the world
- * fragment stages moved to files (#450 W2).  (GL_InitProgram, the both-NULL
- * wrapper, went with its last caller when sworld_vert moved, #450 W1.) */
-static qboolean GL_InitProgramSplit (glprogram_t *p, const char *name,
-				     const char *vert_header, const char *vert_src,
-				     const char *frag_header, const char *frag_src)
+/* Build program `id` into p: its stages are the id's rprog_defs row. */
+static qboolean GL_InitProgramSplit (glprogram_t *p, rprog_id_t id)
 {
-	p->program = GL_LoadProgramSplit(vert_header, vert_src,
-					 frag_header, frag_src);
+	const char	*name = R_Program_Name (id);
+
+	p->program = R_Program_Create (id);
 	if (!p->program)
 	{
 		Con_Printf("Failed to load shader: %s\n", name);
@@ -558,7 +774,7 @@ static qboolean GL_InitProgramSplit (glprogram_t *p, const char *name,
 #ifndef USE_GLES
 static qboolean GL_InitParticleGPUProgram (gl_particle_gpu_prog_t *p)
 {
-	p->base.program = GL_LoadProgramSplit(GLSL_VERT_HEADER, spart_gpu_vert, GLSL_FRAG_HEADER, spart_frag);
+	p->base.program = R_Program_Create (RPROG_PARTICLE_GPU);
 	if (!p->base.program)
 	{
 		Con_Printf("Failed to load shader: particle_gpu\n");
@@ -607,50 +823,18 @@ gl_alias_inst_prog_t gl_shader_alias_inst_np;	/* affine twin, uhexen2-ktjv */
 extern float r_avertexnormal_dots[16][256];
 
 #ifndef USE_GLES
-static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p, const char *name,
-					 const char *defines)
+static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p, rprog_id_t id)
 {
-	GLuint vs, fs, prog;
-	char	vert_header[512];
-	char	frag_header[512];
+	const char	*name = R_Program_Name (id);
+	GLuint		prog;
 
-	/* `defines` is NULL for the ordinary program and "#define NOPERSP 1" for
-	 * the affine twin -- one source, two programs.  uhexen2-ktjv.  Both
-	 * stages are files (#450), so the defines ride each one's header chunk,
-	 * as for the other eight alias-family programs. */
-	q_snprintf (vert_header, sizeof(vert_header), "%s%s",
-		    GLSL_ALIAS_INST_VERT_HEADER, defines ? defines : "");
-	vs = GL_CompileShaderSplit(GL_VERTEX_SHADER, vert_header, salias_inst_vert);
-	q_snprintf (frag_header, sizeof(frag_header), "%s%s",
-		    GLSL_ALIAS_FRAG_HEADER, defines ? defines : "");
-	fs = GL_CompileShaderSplit(GL_FRAGMENT_SHADER, frag_header, salias_frag);
-	if (!vs || !fs) {
-		if (vs) glDeleteShader_fp(vs);
-		if (fs) glDeleteShader_fp(fs);
+	/* RPROG_ALIAS_INSTANCED, or its affine twin _NP with "#define NOPERSP 1"
+	 * on both stages' header chunks -- one source, two programs.
+	 * uhexen2-ktjv.  The only per-vertex attribute is the texcoord, so the
+	 * row links with RPROG_LINK_TEXCOORD. */
+	prog = R_Program_Create (id);
+	if (!prog)
 		return false;
-	}
-	prog = glCreateProgram_fp();
-	glAttachShader_fp(prog, vs);
-	glAttachShader_fp(prog, fs);
-
-	/* Only per-vertex attribute is texcoord */
-	glBindAttribLocation_fp(prog, ATTR_TEXCOORD, "a_texcoord");
-
-	glLinkProgram_fp(prog);
-	glDeleteShader_fp(vs);
-	glDeleteShader_fp(fs);
-
-	{
-		GLint status;
-		glGetProgramiv_fp(prog, GL_LINK_STATUS, &status);
-		if (!status) {
-			char log[1024];
-			glGetProgramInfoLog_fp(prog, sizeof(log), NULL, log);
-			Sys_Printf("%s link failed: %s\n", name, log);
-			glDeleteProgram_fp(prog);
-			return false;
-		}
-	}
 
 	memset(p, 0, sizeof(*p));
 	p->program = prog;
@@ -702,8 +886,8 @@ static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p, const char *na
 void GL_AliasInst_Init (void)
 {
 #ifndef USE_GLES
-	GL_InitAliasInstProgram(&gl_shader_alias_inst_np, "alias_instanced_np", "#define NOPERSP 1\n");
-	if (!GL_InitAliasInstProgram(&gl_shader_alias_inst, "alias_instanced", NULL))
+	GL_InitAliasInstProgram(&gl_shader_alias_inst_np, RPROG_ALIAS_INSTANCED_NP);
+	if (!GL_InitAliasInstProgram(&gl_shader_alias_inst, RPROG_ALIAS_INSTANCED))
 		Sys_Printf("WARNING: instanced alias shader failed to init\n");
 #endif
 }
@@ -729,18 +913,14 @@ void GL_Shaders_Init (void)
 {
 	Con_SafePrintf("Initializing shaders...\n");
 
-	GL_InitProgramSplit(&gl_shader_2d,  "2d",       GLSL_VERT_HEADER, s2d_vert,
-							GLSL_FRAG_HEADER, s2d_frag);
-	GL_InitProgramSplit(&gl_shader_flat, "flat",    GLSL_VERT_HEADER, sflat_vert,
-							GLSL_FRAG_HEADER, sflat_frag);
+	/* Each program's stages are its rprog_defs row, above. */
+	GL_InitProgramSplit(&gl_shader_2d, RPROG_2D);
+	GL_InitProgramSplit(&gl_shader_flat, RPROG_FLAT);
 	/* All three stages are files (#450, world slices W1 and W2). */
-	GL_InitProgramSplit(&gl_shader_world, "world", GLSL_VERT_HEADER, sworld_vert,
-							GLSL_WORLD_FRAG_HEADER, sworld_frag);
-	GL_InitProgramSplit(&gl_shader_world_opaque, "world_opaque", GLSL_VERT_HEADER, sworld_vert,
-							GLSL_WORLD_FRAG_HEADER, sworld_opaque_frag);
+	GL_InitProgramSplit(&gl_shader_world, RPROG_WORLD);
+	GL_InitProgramSplit(&gl_shader_world_opaque, RPROG_WORLD_OPAQUE);
 	/* Both stages are files (#450, alias slices S1 and S2). */
-	GL_InitProgramSplit(&gl_shader_alias, "alias", GLSL_VERT_HEADER, salias_vert,
-							GLSL_ALIAS_FRAG_HEADER, salias_frag);
+	GL_InitProgramSplit(&gl_shader_alias, RPROG_ALIAS);
 #ifndef USE_GLES
 	/* Affine-mapping twin (uhexen2-ktjv).  Same sources, NOPERSP defined:
 	 * an interpolation qualifier cannot be switched by a uniform, so this
@@ -756,9 +936,7 @@ void GL_Shaders_Init (void)
 	 * which is the same answer the ES tier already gives for skeletal
 	 * models (uhexen2-dfay). */
 	/* NOPERSP reaches both file-backed stages through their header chunks. */
-	GL_InitProgramSplit(&gl_shader_alias_np, "alias_np",
-			    GLSL_VERT_HEADER "#define NOPERSP 1\n", salias_vert,
-			    GLSL_ALIAS_FRAG_HEADER "#define NOPERSP 1\n", salias_frag);
+	GL_InitProgramSplit(&gl_shader_alias_np, RPROG_ALIAS_NP);
 #endif
 #ifndef USE_GLES
 	/* Skipped on the ES tier: sskeletal_vert reads its bone matrices from a
@@ -772,20 +950,13 @@ void GL_Shaders_Init (void)
 	 * uhexen2-dfay. */
 	/* Both stages are files (#450, alias slices S4 and S2); NOPERSP reaches
 	 * the affine twin's two through their header chunks. */
-	GL_InitProgramSplit(&gl_shader_skeletal, "skeletal", GLSL_VERT_HEADER, sskeletal_vert,
-			    GLSL_ALIAS_FRAG_HEADER, salias_frag);
-	GL_InitProgramSplit(&gl_shader_skeletal_np, "skeletal_np",
-			    GLSL_VERT_HEADER "#define NOPERSP 1\n", sskeletal_vert,
-			    GLSL_ALIAS_FRAG_HEADER "#define NOPERSP 1\n", salias_frag);
+	GL_InitProgramSplit(&gl_shader_skeletal, RPROG_SKELETAL);
+	GL_InitProgramSplit(&gl_shader_skeletal_np, RPROG_SKELETAL_NP);
 #endif
-	GL_InitProgramSplit(&gl_shader_particle, "particle", GLSL_VERT_HEADER, spart_vert,
-							GLSL_FRAG_HEADER, spart_frag);
-	GL_InitProgramSplit(&gl_shader_sky_layers,  "sky_layers",  GLSL_VERT_HEADER, ssky_layers_vert,
-							GLSL_FRAG_HEADER, ssky_layers_frag);
-	GL_InitProgramSplit(&gl_shader_sky_boxside, "sky_boxside", GLSL_VERT_HEADER, ssky_side_vert,
-							GLSL_FRAG_HEADER, ssky_side_frag);
-	GL_InitProgramSplit(&gl_shader_sky_cubemap, "sky_cubemap", GLSL_VERT_HEADER, ssky_cube_vert,
-							GLSL_FRAG_HEADER, ssky_cube_frag);
+	GL_InitProgramSplit(&gl_shader_particle, RPROG_PARTICLE);
+	GL_InitProgramSplit(&gl_shader_sky_layers, RPROG_SKY_LAYERS);
+	GL_InitProgramSplit(&gl_shader_sky_boxside, RPROG_SKY_BOXSIDE);
+	GL_InitProgramSplit(&gl_shader_sky_cubemap, RPROG_SKY_CUBEMAP);
 
 	/* Create the 1x1 black sentinel texture used as u_texture2 in
 	 * gl_shader_world for surfaces with no fullbright pixels.  Sampled
@@ -860,20 +1031,12 @@ void GL_Shaders_Init (void)
 	 * compile failure in these three on ES, but it did not make OIT work
 	 * there and could not have.  uhexen2-ha7n. */
 #ifndef USE_GLES
-	GL_InitOITProgramSplit(&gl_shader_world_oit, "world", GLSL_VERT_HEADER, sworld_vert,
-							      GLSL_WORLD_FRAG_HEADER, sworld_frag);
-	GL_InitOITProgramSplit(&gl_shader_alias_oit, "alias", GLSL_VERT_HEADER, salias_vert,
-							      GLSL_ALIAS_FRAG_HEADER, salias_frag);
-	GL_InitOITProgramSplit(&gl_shader_alias_np_oit, "alias_np",
-			       GLSL_VERT_HEADER "#define NOPERSP 1\n", salias_vert,
-			       GLSL_ALIAS_FRAG_HEADER "#define NOPERSP 1\n", salias_frag);
-	GL_InitOITProgramSplit(&gl_shader_skeletal_oit, "skeletal", GLSL_VERT_HEADER, sskeletal_vert,
-			       GLSL_ALIAS_FRAG_HEADER, salias_frag);
-	GL_InitOITProgramSplit(&gl_shader_skeletal_np_oit, "skeletal_np",
-			       GLSL_VERT_HEADER "#define NOPERSP 1\n", sskeletal_vert,
-			       GLSL_ALIAS_FRAG_HEADER "#define NOPERSP 1\n", salias_frag);
-	GL_InitOITProgramSplit(&gl_shader_particle_oit, "particle", GLSL_VERT_HEADER, spart_vert,
-							GLSL_FRAG_HEADER, spart_frag);
+	GL_InitOITProgramSplit(&gl_shader_world_oit, RPROG_WORLD_OIT);
+	GL_InitOITProgramSplit(&gl_shader_alias_oit, RPROG_ALIAS_OIT);
+	GL_InitOITProgramSplit(&gl_shader_alias_np_oit, RPROG_ALIAS_NP_OIT);
+	GL_InitOITProgramSplit(&gl_shader_skeletal_oit, RPROG_SKELETAL_OIT);
+	GL_InitOITProgramSplit(&gl_shader_skeletal_np_oit, RPROG_SKELETAL_NP_OIT);
+	GL_InitOITProgramSplit(&gl_shader_particle_oit, RPROG_PARTICLE_OIT);
 #endif
 
 #ifndef USE_GLES
