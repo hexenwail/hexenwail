@@ -1,0 +1,67 @@
+# SDL_GPU backend: plan and state
+
+GitHub #340, under the decision in #447: SDL_GPU is the route to Vulkan, D3D12 and Metal. It is a fourth renderer pathway. GL 4.3, GLES3/WebGL2 and WEBSOFT all stay. The issue thread holds the full design notes. This file is the short version, kept next to the code.
+
+## Done
+
+| Phase | What | Where |
+|---|---|---|
+| Prereqs | Draw state routed (#337), texture binds routed (#338), uniforms in std140 blocks (#19), every stage in `engine/shaders` with an offline SPIR-V gate (#339/#450) | master |
+| P−1a | Dense SDL_GPU bindings; `tools/test_sdlgpu_bindings.py` | #499 |
+| P−1b | Every runtime shader variant compiled offline from `engine/shaders/variants.txt` | #499 |
+| Y flip | `VK_FLIP_Y()` in every vertex stage, Vulkan arm only | #499 |
+| P0 | `-gpu`: device, swapchain, clear colour; generated null-GL table; `gpu_unrouted` | #500 |
+| P1a | Texture creation, upload and sampler state through `gl_texcreate.c` | #501 |
+| P1b | Every program created by id through `R_Program_Create`; reflection rows in `gl_progid_refl.h` | #502 |
+| P1c | Console, menus, HUD and plaque drawn through SDL_GPU. Files: `rg_frame.c`, `rg_resource.c`, `rg_pipeline.c`, `rg_shader.c` | branch `bobberb/sdlgpu-p1c-e34a6394`, not yet merged |
+| Decision 6 | SPIR-V embedded: `EmbedSpirv.cmake` writes `generated/spirv_gen.c` (60 blobs, 638 KiB) under `USE_SDL_GPU`; `-gpu` boots with no flag. Checks: `tools/test_embed_spirv.py`, `tools/test_rg_sources.py` | same branch |
+
+## Decisions
+
+The first five are provisional: the code is built on them, and any of them can still be reversed.
+
+1. **Handles:** GL-shaped handles and enums are the backend's vocabulary.
+2. **Null-GL safety net:** a generated null-GL stub table, which feeds `gpu_unrouted`.
+3. **Software Vulkan:** `gpu_allow_software` is test-only, default 0.
+5. **Switching:** `-gpu` is restart-only.
+9. **Y orientation:** handled by negating `gl_Position.y` under `VULKAN` (`--invert-y` does nothing for GLSL).
+
+Settled:
+
+6. **Shader packaging, decided 2026-11-19:**
+   - Builds with `USE_SDL_GPU` embed the SPIR-V in the binary, SPIR-V only for now.
+   - `glslangValidator` becomes a build input only where `USE_SDL_GPU` is on.
+   - DXIL and Metal come at P7.
+   - Lookup order: `-gpushaders <dir>` (the developer override, no relink), then the embedded table. P1c's implicit `<exe>/spirv`, `<basedir>/spirv` and build-tree search is gone: ahead of the table a stale directory could replace the blobs the binary was built with, and behind it nothing could reach them.
+   - `.#h2ded`, `.#hwsv` and `.#h2ded-win64` configure with `-DUSE_SDL_GPU=OFF`, so their configure needs no `glslang`.
+
+Still open: 4 (first-release scope), 7 (pipeline pre-warm), 8 (D3D12 Tier-1 hardware).
+
+## Next
+
+1. ~~Embed the SPIR-V (decision 6).~~ Done, see the table above.
+2. **Land P1c together with step 1.**
+3. **P2:** the opaque world, brush and alias models, and the sky. This needs:
+   - a sampler-unit seam (`glGetUniformLocation` and `glUniform1i` at program setup; about nine lints pin those call sites);
+   - a depth remap from GL [-1,1] to Vulkan [0,1];
+   - a registered DlShadow mirror;
+   - front-face checks against GL frames.
+4. **Later phases:**
+
+   | Phase | What |
+   |---|---|
+   | P3 | Translucents, particles, warp, fog |
+   | P4 | Post-process |
+   | P5 | Compute and storage |
+   | P6 | Shadows, OIT, MSAA |
+   | P7 | Readbacks, #451 timing, the #103 menu switch, D3D12/MSL, Windows |
+
+## Verification habits that held
+
+- **Pixel identity:** GL without `-gpu` must stay pixel-identical. Gates: `tools/sweep-2d.steps`, `gl_hiz_stats` via `tools/sweep-worldcull.steps`, and `tools/dlight-leak-check.sh`.
+- **Comparing `-gpu` frames:** GL/llvmpipe against SDL_GPU/lavapipe, with a fuzz or PSNR threshold. Run the Vulkan validation layers, and require 0 errors.
+- **Every phase checks:**
+  - `.#win64` (mingw's `gl.h` is GL 1.1, so new enums need `glheader.h` fallbacks);
+  - the WEBSOFT wasm link;
+  - `node --test web/test/*.test.js` (some tests pin C source text);
+  - the shaders gate, with `shaders_cross` run as `env -u LD_LIBRARY_PATH`.

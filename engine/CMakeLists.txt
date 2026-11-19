@@ -303,42 +303,8 @@ add_custom_command(
 )
 add_custom_target(shaders_gen DEPENDS ${SHADERS_GEN_H})
 
-# SPIR-V, for the SDL_GPU backend that does not exist yet.  Deliberately NOT
-# part of ALL: nothing links the .spv, and a build rule whose output nobody
-# consumes has no business being able to fail the default build.  Run it with
-# `make shaders_spirv`.  It joins ALL when the backend starts reading it.
-find_program(GLSLANG_VALIDATOR glslangValidator)
-if(GLSLANG_VALIDATOR)
-    add_custom_target(shaders_spirv
-        COMMAND ${CMAKE_COMMAND}
-                -DVK_DIR=${SHADERS_VK_DIR}
-                -DSPV_DIR=${CMAKE_CURRENT_BINARY_DIR}/generated/spirv
-                -DGLSLANG=${GLSLANG_VALIDATOR}
-                -P ${CMAKE_CURRENT_LIST_DIR}/cmake/CompileSpirv.cmake
-        DEPENDS ${SHADERS_GEN_H}
-        COMMENT "Compiling shaders to SPIR-V"
-        VERBATIM
-    )
-endif()
-
-# DXIL/MSL/JSON, for the SDL_GPU D3D12 and Metal drivers.  Same posture as
-# shaders_spirv above: deliberately NOT part of ALL, and it joins ALL when
-# the backend starts reading the outputs.  It depends on shaders_spirv, so
-# the Vulkan .spv inputs exist by the time it runs.  Run it with
-# `make shaders_cross`.  GitHub #448.
-find_program(SHADERCROSS shadercross)
-if(SHADERCROSS AND TARGET shaders_spirv)
-    add_custom_target(shaders_cross
-        COMMAND ${CMAKE_COMMAND}
-                -DSPV_DIR=${CMAKE_CURRENT_BINARY_DIR}/generated/spirv
-                -DCROSS_DIR=${CMAKE_CURRENT_BINARY_DIR}/generated/cross
-                -DSHADERCROSS=${SHADERCROSS}
-                -P ${CMAKE_CURRENT_LIST_DIR}/cmake/CrossCompileShaders.cmake
-        DEPENDS shaders_spirv
-        COMMENT "Cross-compiling shaders to DXIL/MSL/JSON"
-        VERBATIM
-    )
-endif()
+# The SPIR-V and DXIL/MSL targets (shaders_spirv, shaders_cross) are defined
+# below, once USE_SDL_GPU is settled: under it the client embeds the SPIR-V.
 
 # Windows-specific includes
 if(WIN32)
@@ -399,16 +365,115 @@ endif()
 if(USE_SDL_GPU AND (USE_GLES OR EMSCRIPTEN OR NOT "GL_DLSYM" IN_LIST CLIENT_DEFINITIONS OR (DEFINED SDL3_VERSION AND SDL3_VERSION VERSION_LESS 3.4.0)))
     set(USE_SDL_GPU OFF)
 endif()
+# SPIR-V.  With USE_SDL_GPU the client carries the backend's Vulkan blobs
+# compiled in (#340 decision 6), the way shaders_gen.h carries the GLSL: the
+# build compiles generated/vk to generated/spirv (CompileSpirv.cmake, both
+# frontends, so every SDL_GPU build is also the -V/-G binding check), and
+# EmbedSpirv.cmake turns the .vk.spv into spirv_gen.c, which only the client
+# compiles.  So glslangValidator is required exactly there: GLES, the web
+# builds, h2ded and hwsv (the flake configures those two with USE_SDL_GPU=OFF)
+# never need it.  Without USE_SDL_GPU, shaders_spirv is the old opt-in gate
+# target, outside ALL.  tools/test_rg_sources.py holds both halves.
+find_program(GLSLANG_VALIDATOR glslangValidator)
+set(SPIRV_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated/spirv)
+set(SPIRV_GEN_C ${CMAKE_CURRENT_BINARY_DIR}/generated/spirv_gen.c)
+set(SPIRV_STAMP ${CMAKE_CURRENT_BINARY_DIR}/generated/spirv.stamp)
 if(USE_SDL_GPU)
+    if(NOT GLSLANG_VALIDATOR)
+        message(FATAL_ERROR
+            "USE_SDL_GPU builds the SDL_GPU backend (-gpu) into the client with its "
+            "SPIR-V embedded, which needs glslangValidator (package: glslang) at build "
+            "time.  Install glslang, or configure with -DUSE_SDL_GPU=OFF to build "
+            "without the backend.")
+    endif()
     list(APPEND CLIENT_DEFINITIONS USE_SDL_GPU)
     set(RG_SOURCES
         ${COMMONDIR}/rg_device.c
+        ${COMMONDIR}/rg_frame.c
         ${COMMONDIR}/rg_null.c
+        ${COMMONDIR}/rg_pipeline.c
+        ${COMMONDIR}/rg_resource.c
+        ${COMMONDIR}/rg_shader.c
+        ${SPIRV_GEN_C}
     )
-    message(STATUS "SDL_GPU backend: built in (-gpu)")
+    # Two steps, so `--target shaders_spirv` only compiles: regenerating a
+    # stale gl_progid_refl.h needs the .spv, and the embed step is what
+    # refuses a stale table.  The stamp stands in for CompileSpirv's many
+    # outputs.  DEPENDS names the shader sources too: EmbedShaders writes
+    # shaders_gen.h only when its text changes, and a variants.txt edit can
+    # change generated/vk alone.
+    add_custom_command(
+        OUTPUT ${SPIRV_STAMP}
+        COMMAND ${CMAKE_COMMAND}
+                -DVK_DIR=${SHADERS_VK_DIR}
+                -DSPV_DIR=${SPIRV_DIR}
+                -DGLSLANG=${GLSLANG_VALIDATOR}
+                -P ${CMAKE_CURRENT_LIST_DIR}/cmake/CompileSpirv.cmake
+        COMMAND ${CMAKE_COMMAND} -E touch ${SPIRV_STAMP}
+        DEPENDS ${SHADERS_GEN_H}
+                ${SHADER_SOURCES}
+                ${CMAKE_CURRENT_LIST_DIR}/cmake/EmbedShaders.cmake
+                ${CMAKE_CURRENT_LIST_DIR}/cmake/CompileSpirv.cmake
+                ${GLSLANG_VALIDATOR}
+        COMMENT "Compiling shaders to SPIR-V"
+        VERBATIM
+    )
+    add_custom_command(
+        OUTPUT ${SPIRV_GEN_C}
+        COMMAND ${CMAKE_COMMAND}
+                -DSPV_DIR=${SPIRV_DIR}
+                -DREFL=${COMMONDIR}/gl_progid_refl.h
+                -DOUT_FILE=${SPIRV_GEN_C}
+                -P ${CMAKE_CURRENT_LIST_DIR}/cmake/EmbedSpirv.cmake
+        DEPENDS ${SPIRV_STAMP}
+                ${CMAKE_CURRENT_LIST_DIR}/cmake/EmbedSpirv.cmake
+                ${COMMONDIR}/gl_progid_refl.h
+        COMMENT "Embedding the Vulkan SPIR-V"
+        VERBATIM
+    )
+    # A custom command's output listed by several targets is a rule copied
+    # into each of them, and unordered copies run at once under make -j.
+    # So the chain is ordered: shaders_gen, then shaders_spirv (the stamp),
+    # then spirv_embed (spirv_gen.c), then the client (add_dependencies below).
+    add_custom_target(shaders_spirv DEPENDS ${SPIRV_STAMP})
+    add_dependencies(shaders_spirv shaders_gen)
+    add_custom_target(spirv_embed DEPENDS ${SPIRV_GEN_C})
+    add_dependencies(spirv_embed shaders_spirv)
+    message(STATUS "SDL_GPU backend: built in (-gpu), SPIR-V embedded")
 else()
     set(RG_SOURCES)
+    if(GLSLANG_VALIDATOR)
+        add_custom_target(shaders_spirv
+            COMMAND ${CMAKE_COMMAND}
+                    -DVK_DIR=${SHADERS_VK_DIR}
+                    -DSPV_DIR=${SPIRV_DIR}
+                    -DGLSLANG=${GLSLANG_VALIDATOR}
+                    -P ${CMAKE_CURRENT_LIST_DIR}/cmake/CompileSpirv.cmake
+            DEPENDS ${SHADERS_GEN_H}
+            COMMENT "Compiling shaders to SPIR-V"
+            VERBATIM
+        )
+        add_dependencies(shaders_spirv shaders_gen)
+    endif()
     message(STATUS "SDL_GPU backend: not built")
+endif()
+
+# DXIL/MSL/JSON, for the SDL_GPU D3D12 and Metal drivers.  Deliberately NOT
+# part of ALL; nothing reads the outputs yet (D3D12/Metal blobs are P7).  It
+# depends on shaders_spirv, so the Vulkan .spv inputs exist by the time it
+# runs.  Run it with `make shaders_cross`.  GitHub #448.
+find_program(SHADERCROSS shadercross)
+if(SHADERCROSS AND TARGET shaders_spirv)
+    add_custom_target(shaders_cross
+        COMMAND ${CMAKE_COMMAND}
+                -DSPV_DIR=${SPIRV_DIR}
+                -DCROSS_DIR=${CMAKE_CURRENT_BINARY_DIR}/generated/cross
+                -DSHADERCROSS=${SHADERCROSS}
+                -P ${CMAKE_CURRENT_LIST_DIR}/cmake/CrossCompileShaders.cmake
+        DEPENDS shaders_spirv
+        COMMENT "Cross-compiling shaders to DXIL/MSL/JSON"
+        VERBATIM
+    )
 endif()
 
 if(NOT EMSCRIPTEN)
@@ -1265,6 +1330,9 @@ endif()
 
 target_compile_definitions(${EXECUTABLE_NAME} PRIVATE ${CLIENT_DEFINITIONS})
 add_dependencies(${EXECUTABLE_NAME} shaders_gen)
+if(USE_SDL_GPU)
+    add_dependencies(${EXECUTABLE_NAME} spirv_embed)
+endif()
 
 # Keep renderer-policy tests in the normal CMake graph.  The test only needs
 # the backend-neutral header, so it remains cheap to build alongside the

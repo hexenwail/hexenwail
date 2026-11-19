@@ -28,6 +28,9 @@
 #include "gl_vbo.h"
 #include "gl_matrix.h"
 #include "gl_postprocess.h"
+#ifdef USE_SDL_GPU
+#include "rg_device.h"	/* R_GPU (): Hi-Z stays off under -gpu (#340 P5) */
+#endif
 
 /* ------------------------------------------------------------------ */
 /* Data structures matching GLSL std430 layout                         */
@@ -503,6 +506,11 @@ static int R_HiZ_MipCount (int w, int h)
 
 static qboolean R_HiZ_Available (void)
 {
+#ifdef USE_SDL_GPU
+	/* Hi-Z is compute, P5 of #340: off under -gpu until it is routed. */
+	if (R_GPU ())
+		return false;
+#endif
 	return (gl_hiz_cull.integer != 0)
 	    && (glDispatchCompute_fp != NULL)
 	    && (glTexStorage2D_fp    != NULL)

@@ -1,10 +1,13 @@
-/* rg_device.c -- SDL_GPU backend: device, swapchain and frame (#340 P0)
+/* rg_device.c -- SDL_GPU backend: device, swapchain and frame (#340 P0, P1c)
  *
- * P0 of the SDL_GPU backend: under -gpu the window is claimed by an SDL_GPU
- * device instead of a GL context, and each frame is one render pass that
- * clears the swapchain to gpu_clearcolor.  Nothing else is drawn yet; the GL
- * renderer still runs, against rg_null.c's counting no-ops, and
- * `gpu_unrouted` reports what it called.
+ * Under -gpu the window is claimed by an SDL_GPU device instead of a GL
+ * context.  The GL renderer still runs, but every GL entry point it calls is
+ * a counting no-op (rg_null.c); the seams the renderer draws through
+ * (gl_texcreate.c, gl_texbind.c, gl_pipeline.c, gl_uniforms.c, gl_vbo.c,
+ * R_Program_Create) have SDL_GPU arms that reach the rest of the backend
+ * instead (rg_internal.h has the map).  P1c draws the 2D: console, menus,
+ * HUD, loading plaque.  `gpu_unrouted` reports what still reaches the null
+ * table, and which routed requests the backend could not do yet.
  *
  * Copyright (C) 2026  Contributors of the uHexen2 project
  *
@@ -20,18 +23,14 @@
 
 #include "quakedef.h"
 #include "cfgfile.h"
-#include "rg_device.h"
+#include "rg_internal.h"
 
 qboolean	rg_active = false;
 
-static SDL_GPUDevice	*rg_device;
-static SDL_Window	*rg_window;
+SDL_GPUDevice		*rg_dev;
+SDL_Window		*rg_win;
 static SDL_GPUPresentMode	rg_present_mode = SDL_GPU_PRESENTMODE_VSYNC;
 static float		rg_clear[3] = { 0.25f, 0.5f, 0.75f };
-/* Per kind, so a burst of one cannot silence another for the whole run. */
-enum { RG_FAIL_CMDBUF, RG_FAIL_SWAPCHAIN, RG_FAIL_SUBMIT, RG_FAIL_KINDS };
-static unsigned int	rg_failures[RG_FAIL_KINDS];
-#define RG_REPORT(kind)	(rg_failures[kind]++ < 4)
 
 /* #77 requires a hardware device: a software Vulkan driver would "work" at a
  * frame rate nobody can play at, and a player whose GPU driver is broken is
@@ -60,6 +59,96 @@ static void RG_ClearColor_f (cvar_t *var)
 	rg_clear[2] = CLAMP (0.0f, c[2], 1.0f);
 }
 
+float *RG_ClearColor (void)
+{
+	return rg_clear;
+}
+
+/* ------------------------------------------------------------------ */
+/* Requests a seam routed but the backend cannot do yet                */
+/* ------------------------------------------------------------------ */
+
+#define RG_MAX_UNHANDLED	64
+static struct {
+	const char	*what;		/* a string literal at the call site */
+	unsigned long	calls;
+} rg_unhandled[RG_MAX_UNHANDLED];
+static int		rg_numunhandled;
+
+void RG_NoteUnhandled (const char *what)
+{
+	int	i;
+
+	for (i = 0; i < rg_numunhandled; i++)
+	{
+		if (rg_unhandled[i].what == what || !strcmp (rg_unhandled[i].what, what))
+		{
+			rg_unhandled[i].calls++;
+			return;
+		}
+	}
+	if (rg_numunhandled == RG_MAX_UNHANDLED)
+		i = RG_MAX_UNHANDLED - 1;	/* the last row absorbs the overflow */
+	else
+	{
+		i = rg_numunhandled++;
+		rg_unhandled[i].what = what;
+		if (developer.integer)
+			Con_DPrintf ("SDL_GPU: not handled yet: %s\n", what);
+	}
+	rg_unhandled[i].calls++;
+}
+
+unsigned long RG_UnhandledTotal (int *kinds)
+{
+	unsigned long	n = 0;
+	int		i, k = 0;
+
+	for (i = 0; i < rg_numunhandled; i++)
+	{
+		n += rg_unhandled[i].calls;
+		k += (rg_unhandled[i].calls != 0);
+	}
+	if (kinds)
+		*kinds = k;
+	return n;
+}
+
+void RG_UnhandledReport (void)
+{
+	int		i, k;
+	unsigned long	n = RG_UnhandledTotal (&k);
+
+	for (i = 0; i < rg_numunhandled; i++)
+	{
+		if (rg_unhandled[i].calls)
+			Con_Printf ("%10lu  (routed, not handled) %s\n", rg_unhandled[i].calls,
+				    rg_unhandled[i].what);
+	}
+	Con_Printf ("gpu_unrouted: %lu routed calls the SDL_GPU backend did not handle, %d kinds\n",
+		    n, k);
+}
+
+void RG_UnhandledReset (void)
+{
+	int	i;
+
+	for (i = 0; i < rg_numunhandled; i++)
+		rg_unhandled[i].calls = 0;
+}
+
+/* gpu_unrouted [reset]: the null table's report, then the backend's. */
+static void RG_Unrouted_f (void)
+{
+	RG_NullGL_Report_f ();
+	if (!R_GPU ())
+		return;
+	if (Cmd_Argc () > 1 && !q_strcasecmp (Cmd_Argv (1), "reset"))
+		RG_UnhandledReset ();
+	else
+		RG_UnhandledReport ();
+}
+
 qboolean RG_Requested (void)
 {
 	return COM_CheckParm ("-gpu") != 0;
@@ -79,7 +168,7 @@ void RG_Init (void)
 	CFG_ReadCvarOverrides (early, (int)(sizeof(early) / sizeof(early[0])));
 	RG_ClearColor_f (&gpu_clearcolor);
 
-	Cmd_AddCommand ("gpu_unrouted", RG_NullGL_Report_f);
+	Cmd_AddCommand ("gpu_unrouted", RG_Unrouted_f);
 }
 
 static const char *RG_PresentModeName (SDL_GPUPresentMode mode)
@@ -110,7 +199,7 @@ static SDL_GPUPresentMode RG_PickPresentMode (int vsync)
 		want[n++] = SDL_GPU_PRESENTMODE_MAILBOX;
 	for (i = 0; i < n; i++)
 	{
-		if (SDL_WindowSupportsGPUPresentMode (rg_device, rg_window, want[i]))
+		if (SDL_WindowSupportsGPUPresentMode (rg_dev, rg_win, want[i]))
 			return want[i];
 	}
 	return SDL_GPU_PRESENTMODE_VSYNC;
@@ -133,31 +222,49 @@ qboolean RG_CreateDevice (SDL_Window *window, int vsync)
 	SDL_SetBooleanProperty (props, SDL_PROP_GPU_DEVICE_CREATE_PREFERLOWPOWER_BOOLEAN, false);
 	SDL_SetBooleanProperty (props,
 		SDL_PROP_GPU_DEVICE_CREATE_VULKAN_REQUIRE_HARDWARE_ACCELERATION_BOOLEAN, !software);
-	rg_device = SDL_CreateGPUDeviceWithProperties (props);
+	rg_dev = SDL_CreateGPUDeviceWithProperties (props);
 	SDL_DestroyProperties (props);
-	if (!rg_device)
+	if (!rg_dev)
 	{
 		Con_SafePrintf ("SDL_GPU: no device (%s)%s\n", SDL_GetError (),
 				software ? "" : "; software drivers are refused unless gpu_allow_software is 1");
 		return false;
 	}
-	if (!SDL_ClaimWindowForGPUDevice (rg_device, window))
+	if (!SDL_ClaimWindowForGPUDevice (rg_dev, window))
 	{
 		Con_SafePrintf ("SDL_GPU: cannot claim the window (%s)\n", SDL_GetError ());
-		SDL_DestroyGPUDevice (rg_device);
-		rg_device = NULL;
+		SDL_DestroyGPUDevice (rg_dev);
+		rg_dev = NULL;
 		return false;
 	}
-	rg_window = window;
+	rg_win = window;
+
+	/* No program can be built without the blobs (rg_shader.c has where
+	 * they are looked for), and a device that can only clear is no use to
+	 * a player: refuse, and the caller falls back to GL. */
+	RG_Shader_Init ();
+	if (!RG_ShaderSource ())
+	{
+		Con_SafePrintf ("SDL_GPU: no SPIR-V shaders (the embedded table has no s2d.vert, and "
+				"no -gpushaders <dir> holding s2d.vert.vk.spv was given)\n");
+		SDL_ReleaseWindowFromGPUDevice (rg_dev, window);
+		SDL_DestroyGPUDevice (rg_dev);
+		rg_dev = NULL;
+		rg_win = NULL;
+		return false;
+	}
 	RG_SetVSync (vsync);
 
-	name = SDL_GetStringProperty (SDL_GetGPUDeviceProperties (rg_device),
+	name = SDL_GetStringProperty (SDL_GetGPUDeviceProperties (rg_dev),
 				      SDL_PROP_GPU_DEVICE_NAME_STRING, "unknown device");
-	Con_SafePrintf ("SDL_GPU: %s on %s, present %s, debug %s%s\n",
+	Con_SafePrintf ("SDL_GPU: %s on %s, present %s, debug %s%s, shaders from %s\n",
 			RG_DriverName (), name, RG_PresentModeName (rg_present_mode),
-			debug ? "on" : "off", software ? ", software drivers allowed" : "");
+			debug ? "on" : "off", software ? ", software drivers allowed" : "",
+			RG_ShaderSource ());
 	rg_active = true;
-	memset (rg_failures, 0, sizeof(rg_failures));
+	RG_Res_Init ();
+	RG_Pipeline_Init ();
+	RG_Frame_Init ();
 	return true;
 }
 
@@ -165,96 +272,68 @@ qboolean RG_CreateDevice (SDL_Window *window, int vsync)
  * as SDL_GL_SetSwapInterval does on the GL path. */
 void RG_SetVSync (int vsync)
 {
-	if (!rg_device || !rg_window)
+	if (!rg_dev || !rg_win)
 		return;
 	rg_present_mode = RG_PickPresentMode (vsync);
-	if (!SDL_SetGPUSwapchainParameters (rg_device, rg_window,
+	if (!SDL_SetGPUSwapchainParameters (rg_dev, rg_win,
 					    SDL_GPU_SWAPCHAINCOMPOSITION_SDR, rg_present_mode))
 	{
 		Con_SafePrintf ("SDL_GPU: present mode %s refused (%s), using vsync\n",
 				RG_PresentModeName (rg_present_mode), SDL_GetError ());
 		rg_present_mode = SDL_GPU_PRESENTMODE_VSYNC;
-		SDL_SetGPUSwapchainParameters (rg_device, rg_window,
+		SDL_SetGPUSwapchainParameters (rg_dev, rg_win,
 					       SDL_GPU_SWAPCHAINCOMPOSITION_SDR, rg_present_mode);
 	}
 }
 
 void RG_Shutdown (void)
 {
-	if (!rg_device)
+	if (!rg_dev)
 		return;
-	SDL_WaitForGPUIdle (rg_device);
-	if (rg_window)
-		SDL_ReleaseWindowFromGPUDevice (rg_device, rg_window);
-	SDL_DestroyGPUDevice (rg_device);
-	rg_device = NULL;
-	rg_window = NULL;
+	SDL_WaitForGPUIdle (rg_dev);
+	RG_Frame_Shutdown ();
+	RG_Pipeline_Shutdown ();
+	RG_Shader_Shutdown ();
+	RG_Res_Shutdown ();
+	if (rg_win)
+		SDL_ReleaseWindowFromGPUDevice (rg_dev, rg_win);
+	SDL_DestroyGPUDevice (rg_dev);
+	rg_dev = NULL;
+	rg_win = NULL;
 	rg_active = false;
 }
 
 const char *RG_DriverName (void)
 {
-	const char	*d = rg_device ? SDL_GetGPUDeviceDriver (rg_device) : NULL;
+	const char	*d = rg_dev ? SDL_GetGPUDeviceDriver (rg_dev) : NULL;
 
 	return d ? d : "none";
 }
 
-void RG_Present (void)
+void RG_EndFrame (qboolean show)
 {
-	SDL_GPUCommandBuffer	*cmd;
-	SDL_GPUTexture		*swap = NULL;
-	Uint32			w, h;
-
-	if (!rg_device)
+	if (!rg_dev)
 		return;
-	cmd = SDL_AcquireGPUCommandBuffer (rg_device);
-	if (!cmd)
-	{
-		if (RG_REPORT (RG_FAIL_CMDBUF))
-			Con_Printf ("SDL_GPU: no command buffer (%s)\n", SDL_GetError ());
-		return;
-	}
-	if (!SDL_WaitAndAcquireGPUSwapchainTexture (cmd, rg_window, &swap, &w, &h))
-	{
-		if (RG_REPORT (RG_FAIL_SWAPCHAIN))
-			Con_Printf ("SDL_GPU: no swapchain texture (%s)\n", SDL_GetError ());
-		SDL_CancelGPUCommandBuffer (cmd);
-		return;
-	}
-	/* NULL with success is a minimised or occluded window: nothing to draw
-	 * into, but the command buffer still has to be submitted. */
-	if (swap)
-	{
-		SDL_GPUColorTargetInfo	target;
-		SDL_GPURenderPass	*pass;
-
-		SDL_zero (target);
-		target.texture = swap;
-		target.clear_color.r = rg_clear[0];
-		target.clear_color.g = rg_clear[1];
-		target.clear_color.b = rg_clear[2];
-		target.clear_color.a = 1.0f;
-		target.load_op = SDL_GPU_LOADOP_CLEAR;
-		target.store_op = SDL_GPU_STOREOP_STORE;
-		pass = SDL_BeginGPURenderPass (cmd, &target, 1, NULL);
-		if (pass)
-			SDL_EndGPURenderPass (pass);
-	}
-	if (!SDL_SubmitGPUCommandBuffer (cmd) && RG_REPORT (RG_FAIL_SUBMIT))
-		Con_Printf ("SDL_GPU: submit failed (%s)\n", SDL_GetError ());
+	RG_Frame_End (show);
 }
 
 void RG_Status (void)
 {
 	int		hit;
 	unsigned long	total = RG_NullGL_Total (&hit);
-	const char	*name = rg_device ?
-		SDL_GetStringProperty (SDL_GetGPUDeviceProperties (rg_device),
+	const char	*name = rg_dev ?
+		SDL_GetStringProperty (SDL_GetGPUDeviceProperties (rg_dev),
 				       SDL_PROP_GPU_DEVICE_NAME_STRING, "unknown device") : "none";
 
 	Con_Printf ("[RENDERER] SDL_GPU driver=%s device=%s present=%s swapchain=%s\n",
 		    RG_DriverName (), name, RG_PresentModeName (rg_present_mode),
-		    rg_device ? "SDR" : "none");
-	Con_Printf ("[RENDERER] SDL_GPU P0: clear colour only; GL runs against the null table "
+		    rg_dev ? "SDR" : "none");
+	Con_Printf ("[RENDERER] SDL_GPU P1c: 2D drawn; GL runs against the null table "
 		    "(%lu calls into %d entry points, see gpu_unrouted)\n", total, hit);
+	Con_Printf ("[RENDERER] SDL_GPU shaders from %s\n", RG_ShaderSource () ? RG_ShaderSource () : "nowhere");
+	if (rg_dev)
+	{
+		RG_Frame_Status ();
+		RG_Res_Status ();
+	}
 }

@@ -67,6 +67,44 @@ typedef struct rpipeline_s {
 	qboolean	alpha_to_coverage;
 } rpipeline_t;
 
+/* The shadow: the whole draw state as this module last set it.  Under -gpu
+ * (#340 P1c) it is not a cache of the GL context but the state itself --
+ * no GL call is made, and rg_pipeline.c builds each draw's pipeline object
+ * from what is here.  Read-only outside gl_pipeline.c. */
+typedef struct rpipestate_s {
+	qboolean	blend;
+	/* What the redundancy filter compares against: RP_ENUM_UNKNOWN after
+	 * R_SetBlend(true), to model the drivers that reset per-buffer funcs
+	 * on enable (see R_SetBlend). */
+	GLenum		blend_src[RP_MAX_BLEND_TARGETS];
+	GLenum		blend_dst[RP_MAX_BLEND_TARGETS];
+	/* What was last issued, never unknown: the blend a conformant driver
+	 * is actually using.  The SDL_GPU arm draws with these. */
+	GLenum		blend_eff_src[RP_MAX_BLEND_TARGETS];
+	GLenum		blend_eff_dst[RP_MAX_BLEND_TARGETS];
+	qboolean	depth_test;
+	qboolean	depth_mask;
+	GLenum		depth_func;
+	double		depth_near, depth_far;
+	qboolean	cull;
+	GLenum		cull_face;
+	GLenum		polygon_mode;
+	qboolean	poly_offset_fill;
+	qboolean	poly_offset_line;
+	float		poly_factor, poly_units;
+	qboolean	stencil_test;
+	GLenum		stencil_func;
+	GLint		stencil_ref;
+	GLuint		stencil_mask;
+	GLenum		stencil_sfail, stencil_dpfail, stencil_dppass;
+	qboolean	color_mask[4];
+	qboolean	alpha_to_coverage;
+	GLuint		program;
+	qboolean	program_known;
+} rpipestate_t;
+
+const rpipestate_t *R_PipelineState (void);
+
 /* Apply a whole bundle.  No draw site uses this yet: converting one means
  * deciding its depth-write value explicitly, and the depth mask is the one
  * piece of state the scattered clusters leave implicit, so each conversion
@@ -102,6 +140,11 @@ void	R_SetAlphaToCoverage (qboolean enable);
  * every caller puts back what it changed -- set/reset pairs, or for
  * gl_shadow.c's passes reset then restore the saved scissor.  #453, #337. */
 void	GL_SetPointSize (float size);
+/* glViewport.  Not draw state in the pipeline-object sense (SDL_GPU sets it
+ * per command buffer), but it has to reach the backend, so the 2D canvas
+ * and the 3D view set it here.  GL-native coordinates, origin bottom-left.
+ * #340 P1c. */
+void	R_SetViewport (int x, int y, int width, int height);
 void	GL_SetScissor (int x, int y, int width, int height);
 void	GL_ResetScissor (void);
 void	GL_SetSampleShading (float frac);	/* <= 0 turns it off */

@@ -490,7 +490,9 @@ jobs:
       # h2ded and hwsv; every reference elsewhere is under #ifdef USE_SDL_GPU,
       # so the WEBSOFT build cannot fail to link on it.  Also: no
       # SDL_GL_GetProcAddress load runs under -gpu, where it would write NULL
-      # over a null-GL stub (#340 P0).
+      # over a null-GL stub (#340 P0).  And glslangValidator is required only
+      # under USE_SDL_GPU, which embeds the SPIR-V; the flake gives glslang to
+      # the SDL_GPU client builds alone (#340 decision 6).
       - name: SDL_GPU backend stays in the desktop GL client
         run: python3 tools/test_rg_sources.py
 

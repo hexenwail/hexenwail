@@ -26,9 +26,13 @@
  * The per-blob resource counts SDL_CreateGPUShader and
  * SDL_CreateGPUComputePipeline need are in gl_progid_refl.h, generated from
  * the .vk.spv by tools/gen_program_reflection.py and checked against them in
- * shaders-spirv.yml.  The blobs themselves are not embedded yet: that would
- * put glslangValidator into the default build, which #340 decision 6 leaves
- * open.
+ * shaders-spirv.yml.  The header is checked in because builds without
+ * USE_SDL_GPU (GLES, web) compile this table too and have no glslangValidator.
+ * USE_SDL_GPU builds embed the blobs themselves, one per row
+ * (engine/cmake/EmbedSpirv.cmake, rg_spirv.h; #340 decision 6), and the embed
+ * step fails when the rows and the compiled blobs are not the same set.  The
+ * reflection rows double as a staleness check: rg_shader.c refuses a blob
+ * whose sampler or uniform-buffer count disagrees with its row.
  *
  * R_Program_Create is the only way any renderer code gets a program; no
  * other file creates, compiles or links one.  tools/test_program_routing.py

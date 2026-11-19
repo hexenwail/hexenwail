@@ -37,9 +37,12 @@
  * checks it against gl_texbind.c's record of unit 0 (R_EditBinding) and
  * reports a disagreement on the console -- no GL call, just the shadow.
  *
- * SDL_GPU ARM (P1c onward).  Each entry point's first statement becomes
- * `if (R_GPU ()) { RG_xxx (...); return; }`, per the #340 plan; nothing in
- * this phase compiles any SDL_GPU code.
+ * SDL_GPU ARM (#340 P1c).  After the RTC_Check, each entry point is
+ * `if (R_GPU ()) { RG_xxx (...); return; }` (rg_resource.c): the texture is
+ * named, so the backend needs no binding.  The entry points SDL_GPU cannot
+ * do yet -- multisample storage, block-compressed data, framebuffer copies
+ * -- count themselves in `gpu_unrouted` instead of drawing wrong.
+ * tools/test_rg_sources.py fails a GL call here with no arm ahead of it.
  *
  * Arguments mirror the GL call they replace, minus what core GL fixes: no
  * border (always 0).  Handles and enums stay GL-shaped -- decision 1 on #340:

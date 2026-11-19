@@ -17,6 +17,9 @@
 #include "gl_uniforms.h"	/* the two shared std140 blocks (uhexen2-p4ln) */
 #include "gl_shadow.h"		/* DlShadow and u_dlshadowmap, world and alias stages (#97) */
 #include "gl_postprocess.h"	/* PP_LUT_DIM, the palette-LUT builder's LUT_DIM (#340 P1b) */
+#ifdef USE_SDL_GPU
+#include "rg_device.h"	/* R_GPU (), RG_ProgramCreate (#340 P1c) */
+#endif
 
 /* Generated from the .glsl files in engine/shaders by EmbedShaders.cmake.
  * Embedded rather than loaded at runtime: the engine has no shader search
@@ -635,10 +638,10 @@ R_Program_Create
 
 Compile the id's stages in order, then create, attach, bind, link and drop the
 shaders -- the same GL call sequence each program's builder made before ids,
-so GL hands out the same names.  SDL_GPU ARM (P1c): this is the one place the
-create path branches, `if (R_GPU ()) return RG_ProgramCreate (id, ...);` from
-the row's blobs and rprog_refl; nothing in this phase compiles any SDL_GPU
-code.
+so GL hands out the same names.  SDL_GPU ARM (#340 P1c): the one place the
+create path branches.  RG_ProgramCreate builds the id's stages from its
+offline blobs (R_Program_Blob) with rprog_refl's counts, and hands back a
+GL-shaped name the rest of the renderer treats exactly like a GL program.
 ===============
 */
 GLuint R_Program_Create (rprog_id_t id)
@@ -655,6 +658,10 @@ GLuint R_Program_Create (rprog_id_t id)
 		Con_Printf ("[SHADER] program %d is not built on this renderer tier\n", (int)id);
 		return 0;
 	}
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+		return RG_ProgramCreate (id);
+#endif
 	n = RP_NumStages (def);
 	for (i = 0; i < n; i++)
 	{

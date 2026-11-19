@@ -26,6 +26,7 @@
 #endif
 
 #include "sdl_inc.h"
+#include "gl_progid.h"		/* rprog_id_t */
 
 /* True once the SDL_GPU device owns the window.  Read through R_GPU() at the
  * seams, so a later phase can turn it into something cheaper to test. */
@@ -39,7 +40,9 @@ qboolean RG_Requested (void);		/* -gpu on the command line */
 qboolean RG_CreateDevice (SDL_Window *window, int vsync);
 void	RG_Shutdown (void);
 void	RG_SetVSync (int vsync);		/* vid_vsync: 0 off, 1 on, -1 adaptive */
-void	RG_Present (void);		/* replaces SDL_GL_SwapWindow */
+/* Replaces SDL_GL_SwapWindow: submit the frame, and with `show` blit it to
+ * the swapchain.  Called every frame, shown or not. */
+void	RG_EndFrame (qboolean show);
 void	RG_Status (void);		/* renderer_status lines */
 const char *RG_DriverName (void);
 
@@ -48,5 +51,62 @@ void	RG_NullGL_Install (void);
 int	RG_NullGL_Verify (void);		/* entries no longer stubbed */
 void	RG_NullGL_Report_f (void);
 unsigned long RG_NullGL_Total (int *entry_points);
+
+/* A seam whose SDL_GPU arm exists but cannot do this request yet (a texture
+ * format, a sampler mode, a compute bind).  Counted by name and listed by
+ * `gpu_unrouted` after the null table, so a routed call that the backend
+ * drops is as visible as one that never reached it (#340 P1c). */
+void	RG_NoteUnhandled (const char *what);
+unsigned long RG_UnhandledTotal (int *kinds);
+void	RG_UnhandledReport (void);
+void	RG_UnhandledReset (void);
+
+/* ------------------------------------------------------------------ */
+/* The seams' SDL_GPU arms (#340 P1c).  Handles and enums stay GL-shaped:  */
+/* the backend maps each GL name the engine already uses to its own        */
+/* object (decision 1).                                                     */
+/* ------------------------------------------------------------------ */
+
+/* gl_texcreate.c (rg_resource.c).  `target` is the GL image target, as at
+ * the seam: a cube face for one face of a cube map. */
+void	RG_GenTextures (GLsizei n, GLuint *textures);
+void	RG_DeleteTextures (GLsizei n, const GLuint *textures);
+void	RG_TexImage (GLenum target, GLuint tex, GLint level, GLint internalformat,
+		     GLsizei width, GLsizei height, GLsizei depth, GLenum format,
+		     GLenum type, const void *pixels);
+void	RG_TexStorage2D (GLenum target, GLuint tex, GLsizei levels, GLenum internalformat,
+			 GLsizei width, GLsizei height);
+void	RG_TexSubImage (GLenum target, GLuint tex, GLint level, GLint x, GLint y,
+			GLsizei width, GLsizei height, GLint row_length,
+			GLenum format, GLenum type, const void *pixels);
+void	RG_TexParameter (GLenum target, GLuint tex, GLenum pname, GLint ivalue, GLfloat fvalue);
+
+/* gl_texbind.c: what each texture unit holds, per target, exactly -- the
+ * GL arm's shadow folds repeats and forgets on reset, this does neither. */
+void	RG_BindTexture (GLuint unit, GLenum target, GLuint tex);
+
+/* gl_shader.c R_Program_Create (rg_shader.c).  0 after logging why. */
+GLuint	RG_ProgramCreate (rprog_id_t id);
+/* The SDL_GPU uniform slot `block` is bound to in `program` (either stage),
+ * or -1 if no stage declares it.  The GL arm's block index stand-in. */
+GLint	RG_ProgramBlock (GLuint program, const char *block);
+
+/* gl_uniforms.c.  A CPU mirror and the GL binding point it stands for; the
+ * backend pushes whatever was last flushed into the slot each program's
+ * SPIR-V gives that block name. */
+void	RG_UniformBlockRegister (const char *name, const void *mirror, int size);
+void	RG_UniformBlockFlushed (const char *name);
+
+/* gl_pipeline.c: dynamic state the pipeline object does not carry. */
+void	RG_SetViewport (int x, int y, int width, int height);
+void	RG_SetScissor (qboolean enable, int x, int y, int width, int height);
+
+/* gl_vbo.c GL_ImmEnd / GL_ImmDraw (rg_frame.c): one immediate-mode batch in
+ * the immvert_t layout, drawn with the bound program and the current draw
+ * state.  `mode` is the GL primitive, quads and polygons included. */
+void	RG_DrawImm (GLenum mode, const void *verts, int count, int stride);
+
+/* gl_vidsdl.c GL_BeginRendering: the frame's render target size. */
+void	RG_BeginFrame (int width, int height);
 
 #endif /* RG_DEVICE_H */

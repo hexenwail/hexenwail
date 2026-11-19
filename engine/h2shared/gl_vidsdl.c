@@ -2064,7 +2064,7 @@ static void GL_Init_NullGL (void)
 	 * it. */
 	memset (&gl_renderer_caps, 0, sizeof(gl_renderer_caps));
 	gl_renderer_caps.profile = GL_RENDERER_DESKTOP_43;
-	gl_renderer_caps.profile_name = "SDL_GPU (P0: clear only, null GL)";
+	gl_renderer_caps.profile_name = "SDL_GPU";
 	Con_SafeDPrintf ("[RENDERER] Profile: %s\n", gl_renderer_caps.profile_name);
 	gl_max_anisotropy = 1;
 
@@ -2329,6 +2329,15 @@ void GL_BeginRendering (int *x, int *y, int *width, int *height)
 
 //	glViewport_fp (*x, *y, *width, *height);
 
+#ifdef USE_SDL_GPU
+	/* The frame's command buffer and scene target (#340 P1c); there is no
+	 * GL ring or fence to cycle. */
+	if (R_GPU())
+	{
+		RG_BeginFrame (*width, *height);
+		return;
+	}
+#endif
 #ifndef USE_GLES
 	/* Wait on the slot we're about to reuse (and drain its garbage),
 	 * then advance the ring writes to that slot.  uhexen2-8pc2. */
@@ -2351,13 +2360,16 @@ void GL_EndRendering (void)
 	 * debug callback reports errors as they happen.  uhexen2-ekuj. */
 	GL_PollErrors ("end of frame");
 
+#ifdef USE_SDL_GPU
+	/* Ended whether or not it is shown: SCR_UpdateScreen records a frame
+	 * even while scr_skipupdate holds (a minimised window), and a frame
+	 * never ended would keep growing (#340 P1c). */
+	if (R_GPU())
+		RG_EndFrame (!scr_skipupdate);
+	else
+#endif
 	if (!scr_skipupdate)
 	{
-#ifdef USE_SDL_GPU
-		if (R_GPU())
-			RG_Present();
-		else
-#endif
 		SDL_GL_SwapWindow(window);
 	}
 

@@ -446,6 +446,14 @@ static qboolean PP_NeedsPostProcess (void)
 {
 	if (!pp_initialized)
 		return false;
+#ifdef USE_SDL_GPU
+	/* The chain is P4 of #340.  Until it is routed, an SDL_GPU frame draws
+	 * straight into rg_frame.c's scene target and the present blit is the
+	 * whole of "post": running the chain into stubbed FBOs would only feed
+	 * gpu_unrouted. */
+	if (R_GPU ())
+		return false;
+#endif
 	if (v_gamma.value != 1.0f || PP_Contrast () != 1.0f)
 		return true;
 	if (r_scale.value < 1.0f)

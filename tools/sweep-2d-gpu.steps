@@ -1,0 +1,50 @@
+# sweep-2d-gpu.steps -- the 2D sweep for comparing the SDL_GPU backend (-gpu)
+# against GL (#340 P1c onward).  Frames 01-04 are tools/sweep-2d.steps'; 05 adds
+# a console frame whose text is the same on both renderers (04's boot log is
+# not: it names the renderer), 06 the menu again.
+#
+# Run the SAME binary both ways, with gamma 1 on both:
+#
+#   STEPS=tools/sweep-2d-gpu.steps ENGINE=$E ./tools/headless-drive.sh script /tmp/2d-gl \
+#       $DATA +gamma 1
+#   VK_ICD_FILENAMES=<lvp_icd or nvidia_icd json> STEPS=tools/sweep-2d-gpu.steps ENGINE=$E \
+#       ./tools/headless-drive.sh script /tmp/2d-gpu $DATA -gpu +gpu_allow_software 1 +gamma 1
+#
+# The SPIR-V is embedded (#340 decision 6); add -gpushaders <build>/engine/generated/spirv
+# to run freshly compiled blobs instead.
+#
+# Why gamma 1: the demo's default.cfg sets gamma 0.75, which GL applies in the
+# post-process chain, and that chain is P4 -- off under -gpu.  At gamma 1 GL
+# skips the chain too, so both sides draw the 2D straight to the frame.
+#
+# Compare with sweep-2d.steps' two cursor masks plus 8,584-300,595: the main
+# menu's footer names the renderer ("Desktop OpenGL 4.3" / "SDL_GPU").  What
+# is left is isolated columns inside text rows, where a pixel centre lands on
+# a glyph texel boundary and the two implementations round the nearest texel
+# differently, plus (NVIDIA) 1-level blend rounding under the translucent
+# console; 04 differs by its text.  Measured at P1c, llvmpipe GL vs lavapipe
+# -gpu, pixels off by more than 2/255: 63 on 01-03 and 06 (PSNR 51.7 dB),
+# 610 on 05 (47.2 dB).
+
+sleep 6
+shot 01-main-menu
+key Down
+sleep 1
+shot 02-menu-moved
+key Return
+sleep 2
+shot 03-submenu
+key Escape
+sleep 1
+key Escape
+sleep 1
+shot 04-back-to-main
+# 04 leaves the console up with focus, so this types straight into it.
+enter clear
+enter echo The quick brown fox jumps over the lazy dog 0123456789
+enter echo HEXEN II -- SDL_GPU sweep: ()[]{}<>+-*/=_.,:;!?
+sleep 2
+shot 05-console-fixed
+key Escape
+sleep 2
+shot 06-menu-again
