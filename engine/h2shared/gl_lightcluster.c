@@ -248,16 +248,13 @@ static qboolean R_LightCluster_Build (void)
 			 NULL, GL_DYNAMIC_DRAW);
 	GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, 0);
 
-	glGenTextures_fp (1, &lc_grid);
+	R_GenTextures (1, &lc_grid);
 	R_BindTextureForEdit (GL_TEXTURE_3D, lc_grid);
-	glTexImage3D_fp (GL_TEXTURE_3D, 0, GL_RGBA32UI,
-			 LIGHT_TILES_X, LIGHT_TILES_Y, LIGHT_TILES_Z, 0,
+	R_TexImage3D (GL_TEXTURE_3D, lc_grid, 0, GL_RGBA32UI,
+			 LIGHT_TILES_X, LIGHT_TILES_Y, LIGHT_TILES_Z,
 			 GL_RGBA_INTEGER, GL_UNSIGNED_INT, NULL);
-	glTexParameterf_fp (GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameterf_fp (GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-	glTexParameterf_fp (GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameterf_fp (GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glTexParameterf_fp (GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+	R_TexSetFilter (GL_TEXTURE_3D, lc_grid, GL_NEAREST, GL_NEAREST);
+	R_TexSetWrap (GL_TEXTURE_3D, lc_grid, GL_CLAMP_TO_EDGE);
 	R_BindTextureForEdit (GL_TEXTURE_3D, 0);
 
 	if (!lc_ssbo || !lc_grid)

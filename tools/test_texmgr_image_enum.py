@@ -83,7 +83,9 @@ extern GLuint currenttexture;
 #define GL_Bind(x) do {} while (0)
 extern int deleted;
 static GLuint next_name = 1;
-static inline void glGenTextures_fp (int n, GLuint *t) { (void)n; *t = next_name++; }
+/* gl_texcreate.h (#340 P1a): names, storage and sampler state go through
+ * the texture-creation module, which names the texture it acts on. */
+static inline void R_GenTextures (int n, GLuint *t) { (void)n; *t = next_name++; }
 static inline void glDeleteTextures_fp (int n, GLuint *t) { (void)n; (void)t; deleted++; }
 static inline void glBindTexture_fp (GLenum a, GLuint b) { (void)a; (void)b; }
 /* gl_texbind.h (#338): gl_texmgr.c binds and deletes through the binding
@@ -92,10 +94,11 @@ static inline void glBindTexture_fp (GLenum a, GLuint b) { (void)a; (void)b; }
 static inline void R_DeleteTextures (int n, const GLuint *t) { (void)n; (void)t; deleted++; }
 static inline void R_BindTextureSlot (GLuint slot, GLuint t) { (void)slot; (void)t; }
 static inline void R_BindTextureForEdit (GLenum a, GLuint t) { (void)a; (void)t; }
-static inline void glTexParameterf_fp (GLenum a, GLenum b, float c) { (void)a; (void)b; (void)c; }
-static inline void glTexImage2D_fp (GLenum a, int b, int c, int w, int h, int d,
-				    GLenum e, GLenum f, const void *p)
-{ (void)a; (void)b; (void)c; (void)w; (void)h; (void)d; (void)e; (void)f; (void)p; }
+static inline void R_TexSetFilter (GLenum a, GLuint t, int mn, int mg) { (void)a; (void)t; (void)mn; (void)mg; }
+static inline void R_TexSetWrap (GLenum a, GLuint t, int w) { (void)a; (void)t; (void)w; }
+static inline void R_TexImage2D (GLenum a, GLuint t, int b, int c, int w, int h,
+				 GLenum e, GLenum f, const void *p)
+{ (void)a; (void)t; (void)b; (void)c; (void)w; (void)h; (void)e; (void)f; (void)p; }
 static inline void glActiveTexture_fp (GLenum a) { (void)a; }
 #define Con_Printf printf
 static inline void q_strlcpy (char *d, const char *s, size_t n) { snprintf (d, n, "%s", s); }

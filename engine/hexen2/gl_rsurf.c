@@ -940,7 +940,7 @@ void R_UpdateLightmaps (qboolean Translucent)
 		// if lightmaps were hosed in a video mode change, make
 		// sure we allocate new slots for lightmaps, otherwise
 		// we'll probably overwrite some other existing textures.
-		glGenTextures_fp(MAX_LIGHTMAPS, lightmap_textures);
+		R_GenTextures(MAX_LIGHTMAPS, lightmap_textures);
 	}
 
 	/* Bounded by the pages this map filled, not MAX_LIGHTMAPS: the page
@@ -980,24 +980,20 @@ void R_UpdateLightmaps (qboolean Translucent)
 					int col = i % LM_ATLAS_COLS;
 					int row = i / LM_ATLAS_COLS;
 					R_BindTextureSlot (0, lm_atlas_texture);
-					glPixelStorei_fp(GL_UNPACK_ROW_LENGTH, BLOCK_WIDTH);
-					glTexSubImage2D_fp(GL_TEXTURE_2D, 0,
+					R_TexSubImage2DRows (GL_TEXTURE_2D, lm_atlas_texture, 0,
 							col * BLOCK_WIDTH + rx,
 							row * BLOCK_HEIGHT + ry,
-							rw, rh,
+							rw, rh, BLOCK_WIDTH,
 							gl_lightmap_format, GL_UNSIGNED_BYTE, src);
-					glPixelStorei_fp(GL_UNPACK_ROW_LENGTH, 0);
 				}
 			}
 			else
 			{
 				/* Per-page mode: upload to individual page texture */
 				R_BindTextureSlot (0, lightmap_textures[i]);
-				glPixelStorei_fp(GL_UNPACK_ROW_LENGTH, BLOCK_WIDTH);
-				glTexSubImage2D_fp(GL_TEXTURE_2D, 0,
-						rx, ry, rw, rh,
+				R_TexSubImage2DRows (GL_TEXTURE_2D, lightmap_textures[i], 0,
+						rx, ry, rw, rh, BLOCK_WIDTH,
 						gl_lightmap_format, GL_UNSIGNED_BYTE, src);
-				glPixelStorei_fp(GL_UNPACK_ROW_LENGTH, 0);
 			}
 		}
 	}
@@ -4310,16 +4306,14 @@ static qboolean LM_StitchAtlas (void)
 	}
 
 	if (!lm_atlas_texture)
-		glGenTextures_fp(1, &lm_atlas_texture);
+		R_GenTextures(1, &lm_atlas_texture);
 	R_BindTextureSlot (0, lm_atlas_texture);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	R_TexSetFilter(GL_TEXTURE_2D, lm_atlas_texture, GL_LINEAR, GL_LINEAR);
+	R_TexSetWrap(GL_TEXTURE_2D, lm_atlas_texture, GL_CLAMP_TO_EDGE);
 	while (glGetError_fp() != GL_NO_ERROR)
 		;	/* drop anything already pending so the test below is ours */
-	glTexImage2D_fp(GL_TEXTURE_2D, 0, lightmap_internalformat,
-			LM_ATLAS_WIDTH, lm_atlas_height, 0,
+	R_TexImage2D(GL_TEXTURE_2D, lm_atlas_texture, 0, lightmap_internalformat,
+			LM_ATLAS_WIDTH, lm_atlas_height,
 			gl_lightmap_format, GL_UNSIGNED_BYTE, atlas);
 	free(atlas);
 
@@ -4450,14 +4444,12 @@ static qboolean LM_BuildStyleLayers (void)
 	for (k = 0; k < 3; k++)
 	{
 		if (!lm_style_layers[k])
-			glGenTextures_fp (1, &lm_style_layers[k]);
+			R_GenTextures (1, &lm_style_layers[k]);
 		R_BindTextureSlot (0, lm_style_layers[k]);
-		glTexParameterf_fp (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-		glTexParameterf_fp (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-		glTexParameterf_fp (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-		glTexParameterf_fp (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-		glTexImage2D_fp (GL_TEXTURE_2D, 0, lightmap_internalformat,
-				 LM_ATLAS_WIDTH, lm_atlas_height, 0,
+		R_TexSetFilter (GL_TEXTURE_2D, lm_style_layers[k], GL_LINEAR, GL_LINEAR);
+		R_TexSetWrap (GL_TEXTURE_2D, lm_style_layers[k], GL_CLAMP_TO_EDGE);
+		R_TexImage2D (GL_TEXTURE_2D, lm_style_layers[k], 0, lightmap_internalformat,
+				 LM_ATLAS_WIDTH, lm_atlas_height,
 				 GL_RGBA, GL_UNSIGNED_BYTE, clear);
 	}
 	free (clear);
@@ -4483,7 +4475,7 @@ static qboolean LM_BuildStyleLayers (void)
 			{
 				LM_BuildRawLayer (surf, map, blockbuf + ((size_t)LM_GUTTER * w + LM_GUTTER) * 4, w * 4);
 				R_BindTextureSlot (0, lm_style_layers[map - 1]);
-				glTexSubImage2D_fp (GL_TEXTURE_2D, 0,
+				R_TexSubImage2D (GL_TEXTURE_2D, lm_style_layers[map - 1], 0,
 						    (page % LM_ATLAS_COLS) * BLOCK_WIDTH + surf->light_s - LM_GUTTER,
 						    (page / LM_ATLAS_COLS) * BLOCK_HEIGHT + surf->light_t - LM_GUTTER,
 						    w, h, GL_RGBA, GL_UNSIGNED_BYTE, blockbuf);
@@ -4577,7 +4569,7 @@ void GL_BuildLightmaps (void)
 
 	if (! lightmap_textures[0])
 	{
-		glGenTextures_fp(MAX_LIGHTMAPS, lightmap_textures);
+		R_GenTextures(MAX_LIGHTMAPS, lightmap_textures);
 	}
 
 	/* Decide atlas mode BEFORE building surfaces (UVs depend on it) */
@@ -4759,10 +4751,9 @@ void GL_BuildLightmaps (void)
 			continue;	/* atlas is live — per-page copy is dead weight */
 
 		R_BindTextureSlot (0, lightmap_textures[i]);
-		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-		glTexImage2D_fp (GL_TEXTURE_2D, 0, lightmap_internalformat, BLOCK_WIDTH,
-				BLOCK_HEIGHT, 0, gl_lightmap_format, GL_UNSIGNED_BYTE,
+		R_TexSetFilter(GL_TEXTURE_2D, lightmap_textures[i], GL_LINEAR, GL_LINEAR);
+		R_TexImage2D (GL_TEXTURE_2D, lightmap_textures[i], 0, lightmap_internalformat, BLOCK_WIDTH,
+				BLOCK_HEIGHT, gl_lightmap_format, GL_UNSIGNED_BYTE,
 				lightmaps + i*BLOCK_WIDTH*BLOCK_HEIGHT*lightmap_bytes);
 	}
 

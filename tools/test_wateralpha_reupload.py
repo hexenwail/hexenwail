@@ -130,7 +130,8 @@ static void q_strlcpy (char *d, const char *s, size_t n) { snprintf (d, n, "%s",
 #define Con_Printf(...) ((void)0)
 #define Con_DPrintf(...) ((void)0)
 static GLuint next_name = 1;
-static void glGenTextures_fp (int n, GLuint *t) { (void)n; *t = next_name++; }
+/* gl_texcreate.h (#340 P1a): names come from the texture-creation module. */
+static void R_GenTextures (int n, GLuint *t) { (void)n; *t = next_name++; }
 static void glDeleteTextures_fp (int n, GLuint *t) { (void)n; (void)t; }
 /* gl_texbind.h (#338): GL_LoadTextureEx's cache-mismatch delete goes through
  * the binding module so a recycled name cannot hit a stale shadow entry. */

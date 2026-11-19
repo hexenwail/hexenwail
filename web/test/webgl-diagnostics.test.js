@@ -191,7 +191,7 @@ test('post-process palette stays inside the WebGL2 fragment uniform budget', asy
   // The size is a parameter since the palette and colormap LUTs got
   // separate grids (GitHub #80).
   assert.match(postprocess,
-    /GL_RGBA8,\s+dim, dim, dim, 0,\s+GL_RGBA,/);
+    /R_TexImage3D\(GL_TEXTURE_3D, \*?tex, 0, GL_RGBA8,\s+dim, dim, dim,\s+GL_RGBA,/);
 });
 
 test('brush-entity instancing stays off on the ES tier', async () => {

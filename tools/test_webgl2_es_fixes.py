@@ -26,7 +26,7 @@ vid = read("engine/h2shared/gl_vidsdl.c")
 if not re.search(r"#ifdef __EMSCRIPTEN__\s*gl_renderer_caps\.texture_swizzle = false;\s*#else\s*gl_renderer_caps\.texture_swizzle = true;", vid):
     errors.append("gl_vidsdl.c: texture_swizzle must be false under Emscripten")
 draw = read("engine/h2shared/gl_draw.c")
-calls = [m.start() for m in re.finditer(r"glTexParameteri_fp\(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A", draw)]
+calls = [m.start() for m in re.finditer(r"R_TexParameteri\(GL_TEXTURE_2D, glt->texnum, GL_TEXTURE_SWIZZLE_A", draw)]
 if len(calls) < 2:
     errors.append("gl_draw.c: expected the swizzle calls in GL_Upload32 and the embedded-mips path")
 for c in calls:
@@ -39,7 +39,7 @@ if "!gl_renderer_caps.texture_swizzle) ? MASK_a : 0" not in draw:
 
 pp = read("engine/h2shared/gl_postprocess.c")
 fbo = pp[pp.index("static qboolean OIT_CreateFBO (int width, int height, GLuint depth_stencil_rb, GLuint depth_stencil_tex, int samples)\n{"):]
-fbo = fbo[:fbo.index("glGenTextures_fp")]
+fbo = fbo[:fbo.index("R_GenTextures")]
 if not re.search(r"#ifdef USE_GLES\s*/\*.*?\*/\s*if \(samples > 1\)\s*\{[^}]*return false;", fbo, re.S):
     errors.append("OIT_CreateFBO: the ES tier must refuse multisampled OIT targets")
 

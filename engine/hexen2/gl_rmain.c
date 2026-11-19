@@ -1241,8 +1241,7 @@ static void R_DrawSpriteModel (entity_t *e)
 
 	R_BindTextureSlot (0, frame->gl_texturenum);
 
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	R_TexSetWrap(GL_TEXTURE_2D, frame->gl_texturenum, GL_CLAMP_TO_EDGE);
 
 	GL_ImmBegin ();
 
@@ -1305,8 +1304,7 @@ static void R_DrawSpriteModel (entity_t *e)
 	}
 
 // restore tex parms
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	R_TexSetWrap(GL_TEXTURE_2D, frame->gl_texturenum, GL_REPEAT);
 
 	GL_SetAlphaThreshold(0.01f);
 	/* During an OIT pass leave GL_BLEND on and let OIT_EndTranslucency

@@ -100,6 +100,16 @@ void R_BindTextureForEdit (GLenum target, GLuint texture)
 	RT_Activate (0);
 }
 
+GLuint R_EditBinding (GLenum target)
+{
+	int ti;
+
+	if (target >= GL_TEXTURE_CUBE_MAP_POSITIVE_X && target <= GL_TEXTURE_CUBE_MAP_NEGATIVE_Z)
+		target = GL_TEXTURE_CUBE_MAP;
+	ti = RT_TargetIndex (target);
+	return ti < 0 ? GL_UNUSED_TEXTURE : bound[0][ti];
+}
+
 void R_BindImageTexture (GLuint unit, GLuint texture, GLint level, GLboolean layered,
 			 GLint layer, GLenum access, GLenum format)
 {

@@ -614,12 +614,11 @@ static qboolean GL_RunFramebufferSelfTest (void)
 	/* GL_TEXTURE_BINDING_2D is per-unit; this is unit 0's, which gl_texbind.c
 	 * keeps active between its calls, and the unit the edit bind below uses. */
 	glGetIntegerv_fp(GL_TEXTURE_BINDING_2D, &old_texture);
-	glGenTextures_fp(1, &texture);
+	R_GenTextures(1, &texture);
 	R_BindTextureForEdit (GL_TEXTURE_2D, texture);
-	glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_RGBA8, 2, 2, 0,
+	R_TexImage2D(GL_TEXTURE_2D, texture, 0, GL_RGBA8, 2, 2,
 			GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	R_TexSetFilter(GL_TEXTURE_2D, texture, GL_NEAREST, GL_NEAREST);
 
 	glGenFramebuffers_fp(1, &framebuffer);
 	glBindFramebuffer_fp(GL_FRAMEBUFFER, framebuffer);
@@ -724,6 +723,8 @@ static void GL_RendererStatus_f (void)
 		   gl_renderer_caps.sample_shading ? "yes" : "no");
 	GL_ReportShaderStatus();
 	GL_ReportLightmapStatus();
+	Con_Printf("[RENDERER] texture-create calls naming a texture other than the one bound: %d\n",
+		   R_TexCreate_Mismatches ());
 }
 
 static void GL_RendererSafe_f (void)
@@ -2296,11 +2297,15 @@ static void GL_Init (void)
 //	glClearColor_fp(1,0,0,0);
 	R_SetCullFace (GL_FRONT);
 
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	/* These used to land on whatever unit 0 held, which depends on the path
+	 * through init: texture 0 after the GPU palette-LUT builder, the fallback
+	 * white texture (already NEAREST/REPEAT) everywhere else.  Neither is a
+	 * change a frame can see, so name the default object and make it true on
+	 * every path (#340 P1a). */
+	R_BindTextureForEdit (GL_TEXTURE_2D, 0);
+	R_TexSetFilter(GL_TEXTURE_2D, 0, GL_NEAREST, GL_NEAREST);
 
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	R_TexSetWrap(GL_TEXTURE_2D, 0, GL_REPEAT);
 
 	R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 

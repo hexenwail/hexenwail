@@ -533,13 +533,11 @@ static qboolean R_HiZ_EnsureResources (int scene_w, int scene_h)
 	hiz_height = scene_h;
 	hiz_mip_count = R_HiZ_MipCount(scene_w, scene_h);
 
-	glGenTextures_fp(1, &hiz_pyramid_tex);
+	R_GenTextures(1, &hiz_pyramid_tex);
 	R_BindTextureForEdit (GL_TEXTURE_2D, hiz_pyramid_tex);
-	glTexStorage2D_fp(GL_TEXTURE_2D, hiz_mip_count, GL_R32F, scene_w, scene_h);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	R_TexStorage2D(GL_TEXTURE_2D, hiz_pyramid_tex, hiz_mip_count, GL_R32F, scene_w, scene_h);
+	R_TexSetFilter(GL_TEXTURE_2D, hiz_pyramid_tex, GL_NEAREST_MIPMAP_NEAREST, GL_NEAREST);
+	R_TexSetWrap(GL_TEXTURE_2D, hiz_pyramid_tex, GL_CLAMP_TO_EDGE);
 	R_BindTextureForEdit (GL_TEXTURE_2D, 0);
 
 	if (!hiz_copy_prog)
@@ -628,15 +626,13 @@ static GLuint R_HiZ_ResolveStandaloneDepth (int scene_w, int scene_h)
 		hiz_resolve_fbo = 0;
 	}
 
-	glGenTextures_fp(1, &hiz_resolve_depth_tex);
+	R_GenTextures(1, &hiz_resolve_depth_tex);
 	R_BindTextureForEdit (GL_TEXTURE_2D, hiz_resolve_depth_tex);
-	glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24,
-			scene_w, scene_h, 0,
+	R_TexImage2D(GL_TEXTURE_2D, hiz_resolve_depth_tex, 0, GL_DEPTH_COMPONENT24,
+			scene_w, scene_h,
 			GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, NULL);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	R_TexSetFilter(GL_TEXTURE_2D, hiz_resolve_depth_tex, GL_NEAREST, GL_NEAREST);
+	R_TexSetWrap(GL_TEXTURE_2D, hiz_resolve_depth_tex, GL_CLAMP_TO_EDGE);
 	R_BindTextureForEdit (GL_TEXTURE_2D, 0);
 
 	glGenFramebuffers_fp(1, &hiz_resolve_fbo);

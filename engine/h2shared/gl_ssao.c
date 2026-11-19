@@ -211,13 +211,11 @@ static GLuint SS_Tex2D (GLsizei levels, GLenum fmt, int w, int h, GLenum min_fil
 {
 	GLuint	t;
 
-	glGenTextures_fp (1, &t);
+	R_GenTextures (1, &t);
 	R_BindTextureForEdit (GL_TEXTURE_2D, t);
-	glTexStorage2D_fp (GL_TEXTURE_2D, levels, fmt, w, h);
-	glTexParameteri_fp (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, min_filter);
-	glTexParameteri_fp (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-	glTexParameteri_fp (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameteri_fp (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	R_TexStorage2D (GL_TEXTURE_2D, t, levels, fmt, w, h);
+	R_TexSetFilter (GL_TEXTURE_2D, t, min_filter, GL_NEAREST);
+	R_TexSetWrap (GL_TEXTURE_2D, t, GL_CLAMP_TO_EDGE);
 	return t;
 }
 
@@ -270,7 +268,7 @@ static void SS_UploadHilbert (void)
 			data[y * 64 + x] = (unsigned short)index;
 		}
 	ss_hilbert = SS_Tex2D (1, GL_R16UI, 64, 64, GL_NEAREST);
-	glTexSubImage2D_fp (GL_TEXTURE_2D, 0, 0, 0, 64, 64, GL_RED_INTEGER, GL_UNSIGNED_SHORT, data);
+	R_TexSubImage2D (GL_TEXTURE_2D, ss_hilbert, 0, 0, 0, 64, 64, GL_RED_INTEGER, GL_UNSIGNED_SHORT, data);
 }
 
 static qboolean SS_EnsureTargets (int w, int h, int scale)
@@ -304,7 +302,7 @@ static qboolean SS_EnsureTargets (int w, int h, int scale)
 		return false;
 	}
 	ss_pyramid = SS_Tex2D (ss_levels, GL_RG16F, ss_aow, ss_aoh, GL_NEAREST_MIPMAP_NEAREST);
-	glTexParameteri_fp (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, ss_levels - 1);
+	R_TexParameteri (GL_TEXTURE_2D, ss_pyramid, GL_TEXTURE_MAX_LEVEL, ss_levels - 1);
 	ss_ao = SS_Tex2D (1, GL_R8, ss_aow, ss_aoh, GL_NEAREST);
 	ss_filtered = SS_Tex2D (1, GL_R8, ss_aow, ss_aoh, GL_NEAREST);
 	ss_edges = SS_Tex2D (1, GL_R8, ss_aow, ss_aoh, GL_NEAREST);
@@ -476,7 +474,7 @@ void R_SSAO_Apply (void)
 	/* The tile tags accumulate with atomics, so start them clear.  At most
 	 * a handful of texels: glClearTexImage is GL 4.4, this is not. */
 	R_BindTextureForEdit (GL_TEXTURE_2D, ss_mismatch);
-	glTexSubImage2D_fp (GL_TEXTURE_2D, 0, 0, 0, ss_mismatch_w, ss_mismatch_h,
+	R_TexSubImage2D (GL_TEXTURE_2D, ss_mismatch, 0, 0, 0, ss_mismatch_w, ss_mismatch_h,
 			    GL_RED_INTEGER, GL_UNSIGNED_INT, zeros);
 	R_BindTextureForEdit (GL_TEXTURE_2D, 0);
 	glMemoryBarrier_fp (GL_TEXTURE_UPDATE_BARRIER_BIT);
