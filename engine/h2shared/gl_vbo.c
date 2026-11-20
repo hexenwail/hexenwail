@@ -563,11 +563,35 @@ void GL_ImmInvalidateState (void)
 
 void GL_UnbindVertexArray (void)
 {
+	R_BindVertexArray (0);
+}
+
+/* The indexed-draw seam (#340 P2d): each GL arm is the bare call; under
+ * -gpu, rg_frame.c records the draw from the VAO gl_buffer.c's seams
+ * shadowed. */
+void R_DrawElements (GLenum mode, GLsizei count, GLenum type, const void *indices)
+{
 #ifdef USE_SDL_GPU
 	if (R_GPU ())
+	{
+		RG_DrawIndexed (mode, count, type, indices, 1);
 		return;
+	}
 #endif
-	glBindVertexArray_fp(0);
+	glDrawElements_fp (mode, count, type, indices);
+}
+
+void R_DrawElementsInstanced (GLenum mode, GLsizei count, GLenum type, const void *indices,
+			      GLsizei instancecount)
+{
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_DrawIndexed (mode, count, type, indices, instancecount);
+		return;
+	}
+#endif
+	glDrawElementsInstanced_fp (mode, count, type, indices, instancecount);
 }
 
 /* GL_ImmEnd's and GL_ImmDraw's VAO bind and stream upload, ahead of the
@@ -638,9 +662,16 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 	/* draw */
 #ifdef USE_SDL_GPU
 	/* rg_frame.c turns quads, polygons and line loops into indexed lists:
-	 * SDL_GPU has no quads and no fans. */
+	 * SDL_GPU has no quads and no fans.  The GL arm leaves VAO 0 and
+	 * array buffer 0 bound, so the -gpu shadow does too (#340 P2d): a bind
+	 * or pointer after an immediate batch must not land on what an earlier
+	 * draw used. */
 	if (R_GPU ())
+	{
 		RG_DrawImm (mode, imm_buffer, imm_count, (int)IMM_STRIDE);
+		RG_BindVertexArray (0);
+		RG_BindBuffer (GL_ARRAY_BUFFER, 0);
+	}
 	else
 #endif
 	{
@@ -680,7 +711,11 @@ void GL_ImmDraw (GLenum mode)
 
 #ifdef USE_SDL_GPU
 	if (R_GPU ())		/* as in GL_ImmEnd */
+	{
 		RG_DrawImm (mode, imm_buffer, imm_count, (int)IMM_STRIDE);
+		RG_BindVertexArray (0);
+		RG_BindBuffer (GL_ARRAY_BUFFER, 0);
+	}
 	else
 #endif
 	{

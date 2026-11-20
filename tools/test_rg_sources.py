@@ -89,11 +89,11 @@ Checked, from the sources (stock python3, lint.yml):
       -gpu arm returns, the value setters' RP_GL (glClear*_fp (...)) with
       their own arguments -- and R_ClearBuffers' -gpu arm hands RG_Clear
       the mask and the three values;
-    * the immediate-mode fallbacks: R_BuildWorldVBO and R_BuildSkyStencilVBO
-      return under R_GPU () before they create a GL object (so world_vao,
-      world_ibo and sky_stencil_vao stay 0), and so does R_BuildWorldCull
-      before its programs; alias instancing and GL_DrawAliasSkeletal need
+    * R_BuildWorldCull returns under R_GPU () before its programs (compute is
+      P5); alias instancing and GL_DrawAliasSkeletal need
       gl_renderer_caps.shader_storage, which GL_Init_NullGL leaves false.
+      (Through P2c R_BuildWorldVBO and R_BuildSkyStencilVBO returned too, and
+      the world took the GL_ImmEnd fallbacks; P2d below turns that round.)
   stencil under -gpu (#340 P2c), which tools/sweep-skybox-gpu.steps checks
   frame by frame:
     * GL_Init_NullGL sets have_stencil = RG_DepthHasStencil () and nothing
@@ -113,6 +113,34 @@ Checked, from the sources (stock python3, lint.yml):
       the shadow's reference per draw and sets it with
       SDL_SetGPUStencilReference, and a stencil clear becomes the pass's
       stencil load op with RG_Clear's value.
+  buffers, vertex arrays and indexed draws under -gpu (#340 P2d), the world,
+  brush-model and sky VBO paths, which both sweeps draw:
+    * each seam -- gl_buffer.c's GL_BindBuffer, R_GenBuffers,
+      R_DeleteBuffers, R_BufferData, R_BufferSubData, R_GenVertexArrays,
+      R_DeleteVertexArrays, R_BindVertexArray, R_Enable/
+      DisableVertexAttribArray, R_VertexAttribPointer, R_VertexAttribIPointer,
+      R_VertexAttrib4f and gl_vbo.c's R_DrawElements / Instanced -- is
+      exactly `#ifdef USE_SDL_GPU / if (R_GPU ()) { RG_x (...); return; } /
+      #endif / glX_fp (...);` with the seam's own parameters, so GL is
+      call-for-call what the call sites made (BUFFER_SEAMS);
+    * R_BuildWorldVBO and R_BuildSkyStencilVBO no longer test R_GPU (),
+      make no raw GL call, and make their VAO and buffers through the seams;
+    * rg_buffer.c: a respecify (glBufferData) ends a segment that reads the
+      buffer and queues the whole store with cycling on, a sub-update ends
+      it and queues without, each upload is issued with the cycle it was
+      queued with, and the disabled standard inputs ATTR_POSITION ..
+      ATTR_COLOR are an instance-rate FLOAT4 slot of glVertexAttrib4f's
+      values; rg_frame.c takes the index width from GL's type (2 / 4 bytes),
+      the first index from the byte offset divided by it, records both and
+      replays them, and draws with the pipeline of the VAO's interned
+      layout; rg_pipeline.c keys the pipeline on that layout id and builds
+      the vertex input from it; the hazard's other half -- a recorded draw,
+      only once recorded, stamps its element and vertex buffers -- a delete
+      that lets go of the name in every VAO, the upload list's tail
+      re-derived after the name table moves, retired buffers released at
+      submit (BUFFER_PINS).  tools/test_buffer_routing.py keeps every other
+      file off the raw calls; tools/test_rg_buffer_shadow.py runs
+      rg_buffer.c itself against a fake SDL_GPU.
 
 Usage: test_rg_sources.py [--root DIR]
 """
@@ -374,6 +402,14 @@ SEAMS = {
     # are the seam.
     "engine/h2shared/gl_shader.c": {"R_Program_Create", "R_ProgramSamplerLoc",
                                     "R_ProgramSamplerUnit"},
+    # The rest of gl_buffer.c is the GL 4.3 frame ring and the indexed
+    # binding cache, which -gpu leaves on the null table; the buffer and
+    # vertex-array entry points (#340 P2d) are the seam.
+    "engine/h2shared/gl_buffer.c": {"GL_BindBuffer", "R_GenBuffers", "R_DeleteBuffers", "R_BufferData",
+                                    "R_BufferSubData", "R_GenVertexArrays", "R_DeleteVertexArrays",
+                                    "R_BindVertexArray", "R_EnableVertexAttribArray",
+                                    "R_DisableVertexAttribArray", "R_VertexAttribPointer",
+                                    "R_VertexAttribIPointer", "R_VertexAttrib4f"},
 }
 # Functions that make GL calls with no arm, and why that is safe under -gpu.
 UNARMED_OK = {
@@ -914,6 +950,9 @@ CLEAR_EXEMPT = {"engine/h2shared/gl_func.h", "engine/h2shared/rg_null.c",
 
 
 def body_named(root, rel, name, nth=0):
+    if not (root / rel).is_file():
+        fail("%s: missing -- the #340 check that pins %s has nothing to read" % (rel, name))
+        return None
     code = strip_c_comments((root / rel).read_text(errors="replace"))
     found = [code[b:e] for n, b, e in functions(code) if n == name]
     if len(found) <= nth:
@@ -1009,15 +1048,27 @@ def check_world_imm(root):
             fail("%s: CLEAR_RAW_OK expects %d %s, found %d -- update the entry with the code"
                  % (key[0], n, key[1], seen.get(key, 0)))
 
-    # The immediate-mode fallbacks.
+    # The world and sky VBOs are built under -gpu too, through gl_buffer.c's
+    # seams (#340 P2d): no R_GPU () return, no raw GL, the objects each path
+    # draws from made by the seams.
     rs = "engine/hexen2/gl_rsurf.c"
-    for fn, first in (("R_BuildWorldVBO", r"\bglGen\w*_fp\s*\(|\bmalloc\s*\("),
-                      ("R_BuildSkyStencilVBO", r"\bglGen\w*_fp\s*\(|\bmalloc\s*\(")):
+    for fn, want in (("R_BuildWorldVBO", ("R_GenVertexArrays(1, &world_vao);", "R_GenBuffers(1, &world_vbo);",
+                                          "R_GenBuffers(1, &world_ibo);")),
+                     ("R_BuildSkyStencilVBO", ("R_GenVertexArrays(1, &sky_stencil_vao);",
+                                               "R_GenBuffers(1, &sky_stencil_vbo);",
+                                               "R_GenBuffers(1, &sky_stencil_ibo);"))):
         b = body_named(root, rs, fn)
-        if b is not None and not gpu_return_before(b, first):
-            fail("%s: %s must return under R_GPU () before it creates anything -- under -gpu the "
-                 "null table's names would turn on the VBO draw paths, whose glDrawElements nothing "
-                 "routes until P2d (#340 P2b)" % (rs, fn))
+        if b is None:
+            continue
+        if re.search(r"\bR_GPU\s*\(", b):
+            fail("%s: %s tests R_GPU () -- since P2d -gpu builds the VBO through the seams, and the "
+                 "world, brush entities and sky draw from it as on GL (#340 P2d)" % (rs, fn))
+        if re.search(r"\bgl[A-Z]\w*_fp\s*\(", b):
+            fail("%s: %s makes a raw GL call -- buffers and vertex state go through gl_buffer.c's "
+                 "seams, or -gpu never sees them (#340 P2d)" % (rs, fn))
+        for w in want:
+            if w not in b:
+                fail("%s: %s no longer makes its objects through the seams, `%s` (#340 P2d)" % (rs, fn, w))
     b = body_named(root, "engine/h2shared/gl_worldcull.c", "R_BuildWorldCull")
     if b is not None and not gpu_return_before(b, r"\bR_Program_Create\s*\("):
         fail("gl_worldcull.c: R_BuildWorldCull must return under R_GPU () before its programs -- the "
@@ -1105,11 +1156,18 @@ def check_stencil(root):
     b = body_named(root, rf, "RGF_EnsureScene")
     if b is not None and not re.search(r"\brgf_depth\s*=\s*RGF_MakeTarget\s*\(\s*rgf_depth_fmt\s*,", b):
         fail("%s: RGF_EnsureScene must make the depth target in rgf_depth_fmt (#340 P2c)" % rf)
-    b = body_named(root, rf, "RG_DrawImm")
+    # Every draw is committed through RGF_CommitDraw (#340 P2d), which records
+    # the dynamic state the pipeline does not carry.
+    b = body_named(root, rf, "RGF_CommitDraw")
     if b is not None and not re.search(r"\bd->stencil_ref\s*=\s*\(Uint8\)\s*CLAMP\s*\(\s*0\s*,\s*ps->stencil_ref\s*,"
                                        r"\s*255\s*\)\s*;", b):
-        fail("%s: RG_DrawImm must record the shadow's reference, `d->stencil_ref = (Uint8) CLAMP (0, "
+        fail("%s: RGF_CommitDraw must record the shadow's reference, `d->stencil_ref = (Uint8) CLAMP (0, "
              "ps->stencil_ref, 255);` -- GL clamps it to the buffer's 8 bits (#340 P2c)" % rf)
+    for fn in ("RG_DrawImm", "RG_DrawIndexed"):
+        b = body_named(root, rf, fn)
+        if b is not None and not re.search(r"\bRGF_CommitDraw\s*\(\s*d\s*,\s*ps\s*\)\s*;\s*$", b):
+            fail("%s: %s must end in RGF_CommitDraw (d, ps), which records its viewport, depth range "
+                 "and stencil reference (#340 P2c, P2d)" % (rf, fn))
     b = body_named(root, rf, "RGF_Replay")
     if b is not None and not re.search(r"if\s*\(\s*d->stencil_ref\s*!=\s*ref\s*\)\s*\{\s*ref\s*=\s*d->stencil_ref\s*;"
                                        r"\s*SDL_SetGPUStencilReference\s*\(\s*pass\s*,\s*\(Uint8\)\s*ref\s*\)\s*;", b):
@@ -1214,6 +1272,143 @@ def check_stencil(root):
     return 0
 
 
+# The buffer, vertex-array and indexed-draw seams (#340 P2d): function ->
+# (file, its GL arm, its SDL_GPU arm), each the one call, with the seam's own
+# parameters in GL's order.
+BUFFER_SEAMS = {
+    "GL_BindBuffer": ("gl_buffer.c", "glBindBuffer_fp (target, buffer)", "RG_BindBuffer (target, buffer)"),
+    "R_GenBuffers": ("gl_buffer.c", "glGenBuffers_fp (n, buffers)", "RG_GenBuffers (n, buffers)"),
+    "R_DeleteBuffers": ("gl_buffer.c", "glDeleteBuffers_fp (n, buffers)", "RG_DeleteBuffers (n, buffers)"),
+    "R_BufferData": ("gl_buffer.c", "glBufferData_fp (target, size, data, usage)",
+                     "RG_BufferData (target, size, data, usage)"),
+    "R_BufferSubData": ("gl_buffer.c", "glBufferSubData_fp (target, offset, size, data)",
+                        "RG_BufferSubData (target, offset, size, data)"),
+    "R_GenVertexArrays": ("gl_buffer.c", "glGenVertexArrays_fp (n, arrays)", "RG_GenVertexArrays (n, arrays)"),
+    "R_DeleteVertexArrays": ("gl_buffer.c", "glDeleteVertexArrays_fp (n, arrays)",
+                             "RG_DeleteVertexArrays (n, arrays)"),
+    "R_BindVertexArray": ("gl_buffer.c", "glBindVertexArray_fp (array)", "RG_BindVertexArray (array)"),
+    "R_EnableVertexAttribArray": ("gl_buffer.c", "glEnableVertexAttribArray_fp (index)",
+                                  "RG_EnableVertexAttribArray (index, true)"),
+    "R_DisableVertexAttribArray": ("gl_buffer.c", "glDisableVertexAttribArray_fp (index)",
+                                   "RG_EnableVertexAttribArray (index, false)"),
+    "R_VertexAttribPointer": ("gl_buffer.c",
+                              "glVertexAttribPointer_fp (index, size, type, normalized, stride, pointer)",
+                              "RG_VertexAttribPointer (index, size, type, normalized, false, stride, pointer)"),
+    "R_VertexAttribIPointer": ("gl_buffer.c", "glVertexAttribIPointer_fp (index, size, type, stride, pointer)",
+                               "RG_VertexAttribPointer (index, size, type, GL_FALSE, true, stride, pointer)"),
+    "R_VertexAttrib4f": ("gl_buffer.c", "glVertexAttrib4f_fp (index, x, y, z, w)",
+                         "RG_VertexAttrib4f (index, x, y, z, w)"),
+    "R_DrawElements": ("gl_vbo.c", "glDrawElements_fp (mode, count, type, indices)",
+                       "RG_DrawIndexed (mode, count, type, indices, 1)"),
+    "R_DrawElementsInstanced": ("gl_vbo.c",
+                                "glDrawElementsInstanced_fp (mode, count, type, indices, instancecount)",
+                                "RG_DrawIndexed (mode, count, type, indices, instancecount)"),
+}
+
+# rg_*.c lines P2d rests on: (file, function or None for the file, regex, why).
+BUFFER_PINS = (
+    ("rg_buffer.c", "RG_BufferData", r"\bRGB_FlushIfRead\s*\(\s*b\s*\)\s*;\s*RGB_DropUploads\s*\(\s*b\s*\)\s*;"
+     r".*\bRGB_Queue\s*\(\s*b\s*,\s*0\s*,\s*\(Uint32\)\s*size\s*,\s*data\s*,\s*true\s*\)\s*;",
+     "a respecify ends a segment that reads the buffer before it drops or re-targets anything, then "
+     "queues the whole store with cycling on: draws still in flight keep the old contents"),
+    ("rg_buffer.c", "RGB_FlushIfRead", r"^\s*\{\s*if\s*\(\s*b->read_ever\s*&&\s*b->read_segment\s*==\s*"
+     r"RG_Frame_Segment\s*\(\s*\)\s*&&\s*RG_Frame_SegmentHasDraws\s*\(\s*\)\s*\)\s*RG_Frame_Flush\s*\(\s*\)\s*;\s*$",
+     "the hazard: a buffer a draw of the open segment reads ends the segment"),
+    ("rg_buffer.c", "RG_Buf_ForDraw", r"\bin->reads\[in->nreads\+\+\]\s*=\s*b\s*;.*"
+     r"\bin->reads\[in->nreads\+\+\]\s*=\s*used\[s\]\s*;",
+     "the draw's element buffer and every vertex buffer are the ones it marks read"),
+    ("rg_buffer.c", "RG_Buf_MarkRead", r"for\s*\(\s*i\s*=\s*0\s*;\s*i\s*<\s*in->nreads\s*;\s*i\+\+\s*\)\s*"
+     r"RGB_Stamp\s*\(\s*\(rgbuf_t\s*\*\)\s*in->reads\[i\]\s*\)\s*;",
+     "marking a draw's buffers read stamps every one with the open segment"),
+    ("rg_buffer.c", "RGB_Stamp", r"\bb->read_ever\s*=\s*true\s*;\s*b->read_segment\s*=\s*RG_Frame_Segment\s*\(\s*\)\s*;",
+     "a stamp is the open segment"),
+    ("rg_buffer.c", "RG_DeleteBuffers", r"for\s*\(\s*k\s*=\s*1\s*;\s*k\s*<=\s*rgb_vaonames\.used\s*;\s*k\+\+\s*\)"
+     r"\s*\{\s*if\s*\(\s*RGB_VAOS\[k\]\.alive\s*\)\s*RGB_Detach\s*\(\s*&RGB_VAOS\[k\]\s*,\s*buffers\[i\]\s*\)\s*;",
+     "a deleted buffer's name leaves every VAO: the name is reused, and a stale VAO would draw from its successor"),
+    ("rg_buffer.c", "RGB_Queue", r"if\s*\(\s*!\s*b->uploads\s*\)\s*b->uploads_tail\s*=\s*&b->uploads\s*;\s*"
+     r"\*b->uploads_tail\s*=\s*u\s*;",
+     "an empty upload list's tail is re-derived: the name table may have moved under it"),
+    ("rg_frame.c", "RG_DrawIndexed", r"\bd\s*=\s*RGF_BeginDraw\s*\(\s*prog\s*,\s*prim\s*,\s*layout\s*\)\s*;\s*"
+     r"if\s*\(\s*!\s*d\s*\)\s*return\s*;\s*RG_Buf_MarkRead\s*\(\s*&in\s*\)\s*;",
+     "a recorded draw, and only a recorded one, marks its buffers read"),
+    ("rg_frame.c", "RGF_Submit", r"\bRG_Buf_EndFrame\s*\(\s*\)\s*;",
+     "retired buffers are released after the frame's command buffer is submitted"),
+    ("rg_buffer.c", "RG_BufferSubData", r"\bRGB_FlushIfRead\s*\(\s*b\s*\)\s*;\s*RGB_Queue\s*\(\s*b\s*,\s*"
+     r"\(Uint32\)\s*offset\s*,\s*\(Uint32\)\s*size\s*,\s*data\s*,\s*false\s*\)\s*;",
+     "a partial update ends a segment that reads the buffer, then queues without cycling: a cycled "
+     "buffer loses the rest of its contents"),
+    ("rg_buffer.c", "RG_Buf_IssueUploads", r"\bSDL_UploadToGPUBuffer\s*\(\s*copy\s*,\s*&src\s*,\s*&dst\s*,"
+     r"\s*u->cycle\s*\)\s*;", "each upload cycles exactly when it was queued to"),
+    ("rg_buffer.c", None, r"#define\s+RGB_CONST_FIRST\s+ATTR_POSITION\s*\n\s*#define\s+RGB_CONST_LAST\s+ATTR_COLOR\b",
+     "every standard input, ATTR_POSITION .. ATTR_COLOR, has a value when its array is off"),
+    ("rg_buffer.c", "RG_Buf_ForDraw", r"for\s*\(\s*i\s*=\s*RGB_CONST_FIRST\s*;\s*i\s*<=\s*RGB_CONST_LAST\s*;\s*i\+\+\s*\)"
+     r"\s*\{[^{}]*?if\s*\(\s*v->attr\[i\]\.enabled\s*\)\s*continue\s*;",
+     "the disabled standard inputs are fed their current value (glVertexAttrib4f): a vertex input the "
+     "pipeline does not supply is an error"),
+    ("rg_buffer.c", "RG_Buf_ForDraw", r"\bin->layout\.slot\[nslots\]\.instance\s*=\s*1\s*;.*"
+     r"\bla->format\s*=\s*SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4\s*;.*"
+     r"\bmemcpy\s*\(\s*in->consts\[in->nconst\]\s*,\s*rgb_current\[i\]\s*,",
+     "the constants are an instance-rate FLOAT4 slot holding glVertexAttrib4f's values"),
+    ("rg_frame.c", "RG_DrawIndexed", r"case\s+GL_UNSIGNED_SHORT\s*:\s*isize\s*=\s*2\s*;\s*break\s*;\s*"
+     r"case\s+GL_UNSIGNED_INT\s*:\s*isize\s*=\s*4\s*;\s*break\s*;",
+     "the index width is GL's type: 2 bytes for GL_UNSIGNED_SHORT, 4 for GL_UNSIGNED_INT"),
+    ("rg_frame.c", "RG_DrawIndexed", r"\bfirst\s*=\s*\(Uint32\)\s*\(\s*\(uintptr_t\)\s*indices\s*/\s*isize\s*\)\s*;",
+     "GL's byte offset becomes SDL_GPU's first index, divided by the index width"),
+    ("rg_frame.c", "RG_DrawIndexed", r"\bd->ib_size\s*=\s*\(\s*isize\s*==\s*4\s*\)\s*\?\s*"
+     r"SDL_GPU_INDEXELEMENTSIZE_32BIT\s*:\s*SDL_GPU_INDEXELEMENTSIZE_16BIT\s*;\s*d->first_index\s*=\s*first\s*;",
+     "the recorded index size and first index are the ones computed from GL's type and offset"),
+    ("rg_frame.c", "RG_DrawIndexed", r"\blayout\s*=\s*RG_LayoutIntern\s*\(\s*&in\.layout\s*\)\s*;\s*"
+     r"d\s*=\s*RGF_BeginDraw\s*\(\s*prog\s*,\s*prim\s*,\s*layout\s*\)\s*;",
+     "the pipeline is the one for this VAO's interned layout"),
+    ("rg_frame.c", "RGF_Replay", r"\bSDL_BindGPUIndexBuffer\s*\(\s*pass\s*,\s*&ib\s*,\s*d->ib_size\s*\)\s*;\s*"
+     r"SDL_DrawGPUIndexedPrimitives\s*\(\s*pass\s*,\s*d->count\s*,\s*d->instances\s*,\s*d->first_index\s*,",
+     "the replay binds the recorded index size and draws from the recorded first index"),
+    ("rg_pipeline.c", "RG_MakeKey", r"\bk->layout\s*=\s*layout\s*;",
+     "the vertex layout id is part of the pipeline key: two layouts never share a pipeline"),
+    ("rg_pipeline.c", "RG_CreatePipeline", r"\bconst\s+rgvlayout_t\s*\*\s*l\s*=\s*&rg_layouts\s*\[\s*k->layout\s*\]\s*;",
+     "the pipeline's vertex input is the key's layout"),
+)
+
+
+def check_buffers(root):
+    """#340 P2d: the buffer, vertex-array and indexed-draw seams' arms, and
+    the backend lines the sweeps rest on."""
+    for fn, (f, gl, rg) in BUFFER_SEAMS.items():
+        rel = "engine/h2shared/" + f
+        b = body_named(root, rel, fn)
+        if b is None:
+            continue
+        glrx = re.escape(gl).replace(r"\ ", r"\s*").replace(r"\(", r"\s*\(\s*").replace(",", r"\s*,\s*")
+        rgrx = re.escape(rg).replace(r"\ ", r"\s*").replace(r"\(", r"\s*\(\s*").replace(",", r"\s*,\s*")
+        shape = (r"^\s*#\s*ifdef\s+USE_SDL_GPU\s*if\s*\(\s*R_GPU\s*\(\s*\)\s*\)\s*\{\s*" + rgrx +
+                 r"\s*;\s*return\s*;\s*\}\s*#\s*endif\s*" + glrx + r"\s*;\s*$")
+        if not re.match(r"\s*\{", b) or not re.search(shape, b[1:]):
+            fail("%s: %s must be `#ifdef USE_SDL_GPU / if (R_GPU ()) { %s; return; } / #endif / %s;` "
+                 "-- the GL arm the one bare call, so GL is call-for-call unchanged (#340 P2d)"
+                 % (rel, fn, rg, gl))
+    # The GL 4.3 ring binds raw: through the seam, a GL_Upload to a vertex
+    # target would write a null-table name into rg_buffer.c's bindings.
+    for fn in ("GL_Upload", "GL_AllocFrameHostBuffers", "GL_DeleteFrameResources"):
+        b = body_named(root, "engine/h2shared/gl_buffer.c", fn)
+        if b is not None and re.search(r"\bGL_BindBuffer\s*\(", b):
+            fail("engine/h2shared/gl_buffer.c: %s binds through GL_BindBuffer -- the ring is GL-only and "
+                 "binds with the bare glBindBuffer_fp, or -gpu's buffer shadow takes its names (#340 P2d)" % fn)
+    for f, fn, rx, why in BUFFER_PINS:
+        rel = "engine/h2shared/" + f
+        if fn is None:
+            if not (root / rel).is_file():
+                fail("%s: missing -- %s (#340 P2d)" % (rel, why))
+                continue
+            code = strip_c_comments((root / rel).read_text(errors="replace"))
+        else:
+            code = body_named(root, rel, fn)
+            if code is None:
+                continue
+        if not re.search(rx, code, re.S):
+            fail("%s: %s: %s (#340 P2d)" % (rel, fn or "file", why))
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     ap.add_argument("--root", type=Path, default=ROOT)
@@ -1229,6 +1424,7 @@ def main(argv=None):
     check_blob_source(root)
     check_world_imm(root)
     check_stencil(root)
+    check_buffers(root)
     nfiles = 0
     rg_files = []
     for p in sorted(eng.rglob("*")):

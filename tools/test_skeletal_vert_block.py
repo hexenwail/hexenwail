@@ -457,7 +457,7 @@ if "R_BindAliasVertBlock(p->program);" not in gipu:
 sig = r"static void GL_DrawAliasSkeletal \(entity_t \*e, aliashdr_t \*paliashdr,\s*int posenum, int prevposenum, float lerpfrac\)\s*\{"
 raw = body_of(rmain, sig) or ""
 draw = strip(raw)
-if "glDrawElements_fp" not in draw:
+if "R_DrawElements (" not in draw:
     errors.append("cannot find the desktop GL_DrawAliasSkeletal (the first definition, with the draw)")
 else:
     if re.search(r"\bglUniform\w*_fp\b", draw):
@@ -465,7 +465,7 @@ else:
     if re.search(r"prog->u_\w+", draw):
         errors.append("GL_DrawAliasSkeletal still reads a per-program uniform location")
     flushes = [m.start() for m in re.finditer(r"\bR_FlushUniforms \(\);", draw)]
-    dm = re.search(r"\bglDrawElements_fp \(GL_TRIANGLES, gm->num_indices, GL_UNSIGNED_SHORT, NULL\);", draw)
+    dm = re.search(r"\bR_DrawElements \(GL_TRIANGLES, gm->num_indices, GL_UNSIGNED_SHORT, NULL\);", draw)
     if len(flushes) != 1 or not dm:
         errors.append(f"GL_DrawAliasSkeletal must flush exactly once ({len(flushes)}) and draw gm->num_indices")
     else:
@@ -518,7 +518,7 @@ else:
             return None
         if fpos > dpos:
             errors.append("GL_DrawAliasSkeletal flushes after its draw")
-        for what, at in (("R_FlushUniforms", fpos), ("glDrawElements_fp", dpos)):
+        for what, at in (("R_FlushUniforms", fpos), ("R_DrawElements", dpos)):
             why = conditional(at)
             if why:
                 errors.append(f"GL_DrawAliasSkeletal's {what} must be unconditional: {why}")

@@ -26,10 +26,16 @@
 
 int	GL_ImmCount (void);
 void	GL_ImmInvalidateState (void);	/* drop cached uniform state (after vid_restart, etc) */
-/* glBindVertexArray(0), for the draw loops that tidy up after whatever VAO an
- * entity left bound.  Nothing under -gpu, which binds no VAO until P2d
- * (#340 P2b). */
+/* R_BindVertexArray (0), for the draw loops that tidy up after whatever VAO
+ * an entity left bound. */
 void	GL_UnbindVertexArray (void);
+/* The indexed draws (#340 P2d), from the bound VAO's element buffer: GL's
+ * signatures, each GL arm the bare call, the -gpu arm rg_frame.c's
+ * RG_DrawIndexed.  The buffer and vertex-array seams they read are in
+ * gl_buffer.c (glquake.h). */
+void	R_DrawElements (GLenum mode, GLsizei count, GLenum type, const void *indices);
+void	R_DrawElementsInstanced (GLenum mode, GLsizei count, GLenum type, const void *indices,
+				 GLsizei instancecount);
 void	GL_ImmBegin (void);
 void	GL_ImmVertex3f (float x, float y, float z);
 void	GL_ImmVertex2f (float x, float y);

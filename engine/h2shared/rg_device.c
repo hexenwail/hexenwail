@@ -4,7 +4,7 @@
  * context.  The GL renderer still runs, but every GL entry point it calls is
  * a counting no-op (rg_null.c); the seams the renderer draws through
  * (gl_texcreate.c, gl_texbind.c, gl_pipeline.c, gl_uniforms.c, gl_vbo.c,
- * R_Program_Create) have SDL_GPU arms that reach the rest of the backend
+ * gl_buffer.c, R_Program_Create) have SDL_GPU arms that reach the rest of the backend
  * instead (rg_internal.h has the map).  P1c draws the 2D: console, menus,
  * HUD, loading plaque.  `gpu_unrouted` reports what still reaches the null
  * table, and which routed requests the backend could not do yet.
@@ -263,6 +263,7 @@ qboolean RG_CreateDevice (SDL_Window *window, int vsync)
 			RG_ShaderSource ());
 	rg_active = true;
 	RG_Res_Init ();
+	RG_Buf_Init ();
 	RG_Pipeline_Init ();
 	RG_Frame_Init ();
 	return true;
@@ -295,6 +296,7 @@ void RG_Shutdown (void)
 	RG_Pipeline_Shutdown ();
 	RG_Shader_Shutdown ();
 	RG_Res_Shutdown ();
+	RG_Buf_Shutdown ();
 	if (rg_win)
 		SDL_ReleaseWindowFromGPUDevice (rg_dev, rg_win);
 	SDL_DestroyGPUDevice (rg_dev);
@@ -328,12 +330,14 @@ void RG_Status (void)
 	Con_Printf ("[RENDERER] SDL_GPU driver=%s device=%s present=%s swapchain=%s\n",
 		    RG_DriverName (), name, RG_PresentModeName (rg_present_mode),
 		    rg_dev ? "SDR" : "none");
-	Con_Printf ("[RENDERER] SDL_GPU P2c: 2D, world, brush and alias models and the stencilled sky drawn; GL runs against "
+	Con_Printf ("[RENDERER] SDL_GPU P2d: 2D, world, brush and alias models and the stencilled sky drawn, the world, "
+		    "brush models and sky pre-pass from their vertex buffers; GL runs against "
 		    "the null table (%lu calls into %d entry points, see gpu_unrouted)\n", total, hit);
 	Con_Printf ("[RENDERER] SDL_GPU shaders from %s\n", RG_ShaderSource () ? RG_ShaderSource () : "nowhere");
 	if (rg_dev)
 	{
 		RG_Frame_Status ();
 		RG_Res_Status ();
+		RG_Buf_Status ();
 	}
 }

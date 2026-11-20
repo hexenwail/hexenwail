@@ -64,9 +64,18 @@ def main():
     text = SRC.read_text()
 
     # 1. GL_BindBuffer must bind unconditionally: one call, no branch, no return.
+    #    The one exception is the SDL_GPU backend's arm (#340 P2d), exactly
+    #    `if (R_GPU ()) { RG_BindBuffer (target, buffer); return; }` under
+    #    USE_SDL_GPU: under -gpu there is no GL binding to skip (rg_buffer.c
+    #    records every bind it is handed, no cache), and without -gpu the GL
+    #    bind below is still the unconditional one.  It is cut out first, and
+    #    only in that exact shape; anything else stays for the checks.
     body = body_of(text, "void GL_BindBuffer (GLenum target, GLuint buffer)")
     stripped = re.sub(r"/\*.*?\*/", "", body, flags=re.S)
     stripped = re.sub(r"//[^\n]*", "", stripped)
+    stripped = re.sub(r"^\s*#\s*ifdef\s+USE_SDL_GPU\s*if\s*\(\s*R_GPU\s*\(\s*\)\s*\)\s*\{\s*"
+                      r"RG_BindBuffer\s*\(\s*target\s*,\s*buffer\s*\)\s*;\s*return\s*;\s*\}\s*#\s*endif\s*\n",
+                      "", stripped, count=1)
     statements = [s.strip() for s in stripped.split(";") if s.strip()]
 
     if statements != ["glBindBuffer_fp (target, buffer)"]:

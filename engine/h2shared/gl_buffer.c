@@ -21,6 +21,12 @@
  * The whole module is GL 4.3 territory; the WebGL2/Emscripten build
  * stubs out at compile time via USE_GLES guards (the alias
  * instance SSBO shader doesn't compile on WebGL2 anyway).
+ *
+ * The end of the file, built on every tier, is the buffer and vertex-array
+ * seam (#340 P2d): GL_BindBuffer and the R_* entry points below, each GL
+ * arm the bare call it replaced, each SDL_GPU arm rg_buffer.c.
+ * tools/test_buffer_routing.py keeps those calls out of every other file
+ * but the ones its ledger names.
  */
 
 #include "quakedef.h"
@@ -54,37 +60,11 @@ static bufferrange_t ubo_ranges[CACHED_BUFFER_RANGES];
  *  Buffer binding wrappers — drop redundant binds.
  * ---------------------------------------------------------------------- */
 
-/* The generic (non-indexed) binding point is deliberately NOT cached.
- *
- * It used to be, and skipping the "redundant" bind is what produced the
- * glBufferSubData errors in issue #203 and its GL_INVALID_OPERATION twin
- * ("no buffer bound").  The cache can only be trusted if every binder in the
- * engine goes through it, and roughly forty raw glBindBuffer_fp calls do not
- * — gl_mesh.c, gl_shader.c, r_part.c and gl_worldcull.c all bind
- * GL_SHADER_STORAGE_BUFFER directly and then unbind to 0.  Sequence that bit:
- *
- *   frame N   LC_SetupFrame        GL_BindBufferBase(SSBO, 6, lc_ssbo)
- *                                    -> cache says lc_ssbo, real binding lc_ssbo
- *   map load  GL_MakeAliasGPUMesh  glBindBuffer_fp(SSBO, 0)
- *                                    -> cache still says lc_ssbo, real binding 0
- *   frame N+1 LC_UploadAndDispatch GL_BindBuffer(SSBO, lc_ssbo)  [skipped!]
- *                                  glBufferSubData(SSBO, 0, 1024, styles)
- *                                    -> GL_INVALID_OPERATION, no buffer bound,
- *                                       or GL_INVALID_VALUE into whatever a
- *                                       sibling path left bound instead.
- *
- * glBindBuffer is a cheap state set and this wrapper has under a dozen call
- * sites, a handful of which run per frame, so binding unconditionally costs
- * nothing measurable and removes the entire failure class.  The indexed
- * binding points below ARE still cached, which is safe because no raw
- * glBindBufferBase_fp / glBindBufferRange_fp call exists outside this file;
- * the one remaining way to stale that cache is deleting a buffer and having
- * GL hand the name back out, which GL_ForgetBuffer covers. */
-void GL_BindBuffer (GLenum target, GLuint buffer)
-{
-	glBindBuffer_fp (target, buffer);
-}
-#define GL_BindBufferForce GL_BindBuffer
+/* GL_BindBuffer is with the seams at the end of the file, shared with the
+ * ES tier.  The ring below binds with the bare glBindBuffer_fp: it is GL 4.3
+ * state -gpu leaves on the null table, and through the seam a GL_Upload to a
+ * vertex target would write a null-table name into rg_buffer.c's array or
+ * element binding (#340 P2d). */
 
 void GL_BindBufferRange (GLenum target, GLuint index,
 			 GLuint buffer, GLintptr offset, GLsizeiptr size)
@@ -314,7 +294,7 @@ static void GL_AllocFrameHostBuffers (void)
 		{
 			if (frame->host_ptr)
 			{
-				GL_BindBufferForce (GL_SHADER_STORAGE_BUFFER,
+				glBindBuffer_fp (GL_SHADER_STORAGE_BUFFER,
 						    frame->host_buffer);
 				glUnmapBuffer_fp (GL_SHADER_STORAGE_BUFFER);
 				frame->host_ptr = NULL;
@@ -326,7 +306,7 @@ static void GL_AllocFrameHostBuffers (void)
 		}
 
 		glGenBuffers_fp (1, &frame->host_buffer);
-		GL_BindBufferForce (GL_SHADER_STORAGE_BUFFER, frame->host_buffer);
+		glBindBuffer_fp (GL_SHADER_STORAGE_BUFFER, frame->host_buffer);
 
 		if (gl_buffer_storage_able)
 		{
@@ -380,7 +360,7 @@ void GL_DeleteFrameResources (void)
 
 		if (frame->host_ptr)
 		{
-			GL_BindBufferForce (GL_SHADER_STORAGE_BUFFER,
+			glBindBuffer_fp (GL_SHADER_STORAGE_BUFFER,
 					    frame->host_buffer);
 			glUnmapBuffer_fp (GL_SHADER_STORAGE_BUFFER);
 			frame->host_ptr = NULL;
@@ -484,7 +464,7 @@ void GL_Upload (GLenum target, const void *data, size_t numbytes,
 	}
 	else
 	{
-		GL_BindBufferForce (target, frame->host_buffer);
+		glBindBuffer_fp (target, frame->host_buffer);
 		glBufferSubData_fp (target, frameres_host_offset, numbytes, data);
 	}
 
@@ -531,12 +511,6 @@ void GL_BindBufferRange (GLenum target, GLuint index,
 	(void)target; (void)index; (void)buffer; (void)offset; (void)size;
 }
 
-/* No binding cache to keep in sync here, but callers still need the binds. */
-void GL_BindBuffer (GLenum target, GLuint buffer)
-{
-	glBindBuffer_fp (target, buffer);
-}
-
 void GL_BindBufferBase (GLenum target, GLuint index, GLuint buffer)
 {
 	glBindBufferBase_fp (target, index, buffer);
@@ -565,3 +539,207 @@ void GL_DeleteParticleResources (GLuint ssbo, GLuint vao)
 }
 
 #endif	/* USE_GLES */
+
+/* ----------------------------------------------------------------------
+ *  Buffer and vertex-array seams (#340 P2d), every tier.
+ *
+ *  GL names buffers and vertex arrays and edits whatever is bound; so do
+ *  these, with GL's signatures, and each GL arm is the one bare call the
+ *  call site used to make -- GL is call-for-call unchanged.  The SDL_GPU
+ *  arm (rg_buffer.c) shadows the same bindings by GL's rules: the array
+ *  buffer is context state a pointer captures, the element buffer belongs
+ *  to the bound VAO, the current attribute values are context state.
+ *  The draws that read them are gl_vbo.c's R_DrawElements pair.
+ * ---------------------------------------------------------------------- */
+
+#ifdef USE_SDL_GPU
+#include "rg_device.h"
+#endif
+
+/* The generic (non-indexed) binding point is deliberately NOT cached.
+ *
+ * It used to be, and skipping the "redundant" bind is what produced the
+ * glBufferSubData errors in issue #203 and its GL_INVALID_OPERATION twin
+ * ("no buffer bound").  The cache can only be trusted if every binder in the
+ * engine goes through it, and roughly forty raw glBindBuffer_fp calls do not
+ * — gl_mesh.c, gl_shader.c, r_part.c and gl_worldcull.c all bind
+ * GL_SHADER_STORAGE_BUFFER directly and then unbind to 0.  Sequence that bit:
+ *
+ *   frame N   LC_SetupFrame        GL_BindBufferBase(SSBO, 6, lc_ssbo)
+ *                                    -> cache says lc_ssbo, real binding lc_ssbo
+ *   map load  GL_MakeAliasGPUMesh  glBindBuffer_fp(SSBO, 0)
+ *                                    -> cache still says lc_ssbo, real binding 0
+ *   frame N+1 LC_UploadAndDispatch GL_BindBuffer(SSBO, lc_ssbo)  [skipped!]
+ *                                  glBufferSubData(SSBO, 0, 1024, styles)
+ *                                    -> GL_INVALID_OPERATION, no buffer bound,
+ *                                       or GL_INVALID_VALUE into whatever a
+ *                                       sibling path left bound instead.
+ *
+ * glBindBuffer is a cheap state set and this wrapper has under a dozen call
+ * sites, a handful of which run per frame, so binding unconditionally costs
+ * nothing measurable and removes the entire failure class.  The indexed
+ * binding points above ARE still cached, which is safe because no raw
+ * glBindBufferBase_fp / glBindBufferRange_fp call exists outside this file;
+ * the one remaining way to stale that cache is deleting a buffer and having
+ * GL hand the name back out, which GL_ForgetBuffer covers.
+ *
+ * Under -gpu the element and array bindings are what a VAO and a pointer
+ * capture (rg_buffer.c); the uniform and storage targets reach nothing
+ * there (gl_uniforms.c mirrors the blocks, storage is P5). */
+void GL_BindBuffer (GLenum target, GLuint buffer)
+{
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_BindBuffer (target, buffer);
+		return;
+	}
+#endif
+	glBindBuffer_fp (target, buffer);
+}
+
+void R_GenBuffers (GLsizei n, GLuint *buffers)
+{
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_GenBuffers (n, buffers);
+		return;
+	}
+#endif
+	glGenBuffers_fp (n, buffers);
+}
+
+void R_DeleteBuffers (GLsizei n, const GLuint *buffers)
+{
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_DeleteBuffers (n, buffers);
+		return;
+	}
+#endif
+	glDeleteBuffers_fp (n, buffers);
+}
+
+void R_BufferData (GLenum target, GLsizeiptr size, const void *data, GLenum usage)
+{
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_BufferData (target, size, data, usage);
+		return;
+	}
+#endif
+	glBufferData_fp (target, size, data, usage);
+}
+
+void R_BufferSubData (GLenum target, GLintptr offset, GLsizeiptr size, const void *data)
+{
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_BufferSubData (target, offset, size, data);
+		return;
+	}
+#endif
+	glBufferSubData_fp (target, offset, size, data);
+}
+
+void R_GenVertexArrays (GLsizei n, GLuint *arrays)
+{
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_GenVertexArrays (n, arrays);
+		return;
+	}
+#endif
+	glGenVertexArrays_fp (n, arrays);
+}
+
+void R_DeleteVertexArrays (GLsizei n, const GLuint *arrays)
+{
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_DeleteVertexArrays (n, arrays);
+		return;
+	}
+#endif
+	glDeleteVertexArrays_fp (n, arrays);
+}
+
+void R_BindVertexArray (GLuint array)
+{
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_BindVertexArray (array);
+		return;
+	}
+#endif
+	glBindVertexArray_fp (array);
+}
+
+void R_EnableVertexAttribArray (GLuint index)
+{
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_EnableVertexAttribArray (index, true);
+		return;
+	}
+#endif
+	glEnableVertexAttribArray_fp (index);
+}
+
+void R_DisableVertexAttribArray (GLuint index)
+{
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_EnableVertexAttribArray (index, false);
+		return;
+	}
+#endif
+	glDisableVertexAttribArray_fp (index);
+}
+
+void R_VertexAttribPointer (GLuint index, GLint size, GLenum type, GLboolean normalized,
+			    GLsizei stride, const void *pointer)
+{
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_VertexAttribPointer (index, size, type, normalized, false, stride, pointer);
+		return;
+	}
+#endif
+	glVertexAttribPointer_fp (index, size, type, normalized, stride, pointer);
+}
+
+void R_VertexAttribIPointer (GLuint index, GLint size, GLenum type, GLsizei stride,
+			     const void *pointer)
+{
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_VertexAttribPointer (index, size, type, GL_FALSE, true, stride, pointer);
+		return;
+	}
+#endif
+	glVertexAttribIPointer_fp (index, size, type, stride, pointer);
+}
+
+void R_VertexAttrib4f (GLuint index, GLfloat x, GLfloat y, GLfloat z, GLfloat w)
+{
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_VertexAttrib4f (index, x, y, z, w);
+		return;
+	}
+#endif
+	glVertexAttrib4f_fp (index, x, y, z, w);
+}

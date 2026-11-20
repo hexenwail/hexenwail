@@ -342,6 +342,25 @@ void GL_ForgetBuffer (GLuint handle);
  * engine bypass any such cache and made it lie.  See gl_buffer.c. */
 void GL_BindBuffer (GLenum target, GLuint buffer);
 
+/* Buffer and vertex-array seams (gl_buffer.c, #340 P2d).  GL's signatures,
+ * and each GL arm is the bare call; under -gpu they reach rg_buffer.c.
+ * tools/test_buffer_routing.py keeps the raw calls out of every file its
+ * ledger does not name. */
+void R_GenBuffers (GLsizei n, GLuint *buffers);
+void R_DeleteBuffers (GLsizei n, const GLuint *buffers);
+void R_BufferData (GLenum target, GLsizeiptr size, const void *data, GLenum usage);
+void R_BufferSubData (GLenum target, GLintptr offset, GLsizeiptr size, const void *data);
+void R_GenVertexArrays (GLsizei n, GLuint *arrays);
+void R_DeleteVertexArrays (GLsizei n, const GLuint *arrays);
+void R_BindVertexArray (GLuint array);
+void R_EnableVertexAttribArray (GLuint index);
+void R_DisableVertexAttribArray (GLuint index);
+void R_VertexAttribPointer (GLuint index, GLint size, GLenum type, GLboolean normalized,
+			    GLsizei stride, const void *pointer);
+void R_VertexAttribIPointer (GLuint index, GLint size, GLenum type, GLsizei stride,
+			     const void *pointer);
+void R_VertexAttrib4f (GLuint index, GLfloat x, GLfloat y, GLfloat z, GLfloat w);
+
 void GL_Upload (GLenum target, const void *data, size_t numbytes,
 		GLuint *outbuf, GLintptr *outofs);
 void GL_BindBufferRange (GLenum target, GLuint index,

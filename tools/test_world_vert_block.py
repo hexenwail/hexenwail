@@ -42,7 +42,8 @@ Checks the pieces that have to move together:
     path, no #if), comes after the matrix fill, and no block writer runs
     between a draw and the flush nearest before it (DrawDeferred flushes once
     more per batch, for its fragment set).  Every function anywhere in
-    the engine that names a world program and issues a glDraw* is one of
+    the engine that names a world program and issues a glDraw* (or
+    R_DrawElements*, gl_vbo.c's indexed-draw seam, #340 P2d) is one of
     these, so a new path has to be added here, and two of them (FlushBatch,
     DispatchBrushInstancedPass) are reached only from their pinned callers.
   * the flow pass (end of file) checks the same three things by following
@@ -226,9 +227,10 @@ vbo = strip(read("engine/h2shared/gl_vbo.c"))
 rsurf_raw = read("engine/hexen2/gl_rsurf.c")
 rsurf = strip(rsurf_raw)
 imm = {a: int(n) for a, n in re.findall(r"glVertexAttribFormat_fp\((ATTR_\w+), (\d+),", vbo)}
-wvao = rsurf[rsurf.find("glGenVertexArrays_fp(1, &world_vao);"):]
-wvao = wvao[:wvao.find("glGenBuffers_fp(1, &world_ibo);")]
-world = {a: int(n) for a, n in re.findall(r"glVertexAttribPointer_fp\((ATTR_\w+), (\d+),", wvao)}
+# The world VAO, built through gl_buffer.c's seams (#340 P2d).
+wvao = rsurf[rsurf.find("R_GenVertexArrays(1, &world_vao);"):]
+wvao = wvao[:wvao.find("R_GenBuffers(1, &world_ibo);")]
+world = {a: int(n) for a, n in re.findall(r"R_VertexAttribPointer\((ATTR_\w+), (\d+),", wvao)}
 if len(imm) != 4 or len(world) != 3:
     errors.append(f"cannot read the imm ({imm}) and world ({world}) VAO formats")
 for loc, typ, name in decl_in:
@@ -380,7 +382,9 @@ BLOCK_WRITERS = set(re.findall(r"\bvoid\s+(R_Set\w+)\s*\(", uh)) | {
     "R_FlushUniforms", "R_InvalidateUniforms", "GL_ImmEnd", "GL_ImmPushBlocks", "GL_ImmInvalidateState"}
 if not {"R_SetMVP", "R_SetModelView", "R_SetFog", "R_SetAliasDlight"} <= BLOCK_WRITERS:
     errors.append("cannot read the block setters out of gl_uniforms.h")
-DRAW = r"\bglDraw\w*_fp\b|^\s*EMIT_BATCH\("
+# R_DrawElements / R_DrawElementsInstanced are gl_vbo.c's indexed-draw seam
+# (#340 P2d): a call to one is a draw here, as the glDraw*_fp it wraps was.
+DRAW = r"\bglDraw\w*_fp\b|\bR_DrawElements(?:Instanced)?\b|^\s*EMIT_BATCH\("
 WORLD_PROG = r"\bgl_shader_world(?:_opaque|_oit)?\b"
 
 # function -> (file, mvp expr, mv expr, where the pair comes from, allowed enclosing heads)
@@ -646,7 +650,7 @@ CKEYS = {"if", "while", "for", "switch", "return", "sizeof", "do", "else", "case
          "struct", "union", "enum", "static", "extern", "register", "inline", "__inline", "__inline__"}
 BINDS = {"R_UseProgram", "glUseProgram_fp"}
 BINDS_RE = r"\b(?:R_UseProgram|glUseProgram_fp)\b"
-GLDRAW = r"\b(?:glDraw(?!Buffers?_)\w*_fp|glMultiDraw\w*_fp)\b"
+GLDRAW = r"\b(?:glDraw(?!Buffers?_)\w*_fp|glMultiDraw\w*_fp|R_DrawElements(?:Instanced)?)\b"
 CALL = re.compile(r"\b([A-Za-z_]\w*)\s*\(")
 PROTO = re.compile(r"\s*(?:(?:extern|static|const|struct|unsigned|signed)\s+)*\w+(?:\s+|\s*\*+\s*)\**\s*\w+\s*\([^=]*\)\s*")
 EMPTY = frozenset()

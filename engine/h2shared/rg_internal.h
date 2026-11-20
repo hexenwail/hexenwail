@@ -7,6 +7,7 @@
  *   rg_resource.c  textures and samplers, keyed by the GL texture names
  *   rg_shader.c    SPIR-V loading and reflection, programs by GL-shaped name
  *   rg_pipeline.c  graphics pipelines, cached by draw state + program + layout
+ *   rg_buffer.c    buffers and vertex arrays, keyed by the GL names (P2d)
  *   rg_frame.c     the frame recorder: draws per render-target segment, one
  *                  copy pass per segment, the scene target and the present
  *
@@ -282,21 +283,80 @@ int	RG_ProgramCount (void);
 /* rg_pipeline.c                                                       */
 /* ------------------------------------------------------------------ */
 
-/* Vertex layouts the recorder draws with. */
-typedef enum {
-	RG_VL_IMM,		/* immvert_t: pos3 tc2 lm2 color4, 44 bytes */
-	RG_VL_COUNT
-} rg_vlayout_t;
+/* A vertex layout: the pipeline's vertex input state, zero-padded so it
+ * can be compared as bytes.  Interned (RG_LayoutIntern), and the pipeline
+ * key carries the id (#340 P2d). */
+#define RG_MAX_VBUFS	8	/* vertex buffer slots */
+#define RG_MAX_VATTRS	16	/* attribute locations, GL's minimum */
+
+typedef struct {
+	Uint32		pitch;
+	Uint32		instance;	/* 1: instance-rate */
+} rgvslot_t;
+
+typedef struct {
+	Uint32		location, slot, format, offset;	/* format: SDL_GPUVertexElementFormat */
+} rgvattr_t;
+
+typedef struct {
+	Uint32		num_slots, num_attrs;
+	rgvslot_t	slot[RG_MAX_VBUFS];
+	rgvattr_t	attr[RG_MAX_VATTRS];
+} rgvlayout_t;
+
+/* immvert_t (gl_vbo.c): pos3 tc2 lm2 color4, 44 bytes, interned first by
+ * RG_Pipeline_Init. */
+#define RG_VL_IMM	0u
 
 void	RG_Pipeline_Init (void);
 void	RG_Pipeline_Shutdown (void);
+/* The id of `layout`, interned now if it is new; past the table's size an
+ * id RG_PipelineFor refuses (counted), so the draw is dropped. */
+Uint32	RG_LayoutIntern (const rgvlayout_t *layout);
+int	RG_LayoutCount (void);
 /* The pipeline for the current draw state (gl_pipeline.c's shadow), `prog`,
- * primitive and layout, created on first use; NULL when the state has no
+ * primitive and layout id, created on first use; NULL when the state has no
  * SDL_GPU equivalent (logged once through RG_NoteUnhandled). */
 SDL_GPUGraphicsPipeline *RG_PipelineFor (const rgprog_t *prog, SDL_GPUPrimitiveType prim,
-					 rg_vlayout_t layout, SDL_GPUTextureFormat color,
+					 Uint32 layout, SDL_GPUTextureFormat color,
 					 SDL_GPUTextureFormat depth);
 int	RG_PipelineCount (void);
+
+/* ------------------------------------------------------------------ */
+/* rg_buffer.c                                                         */
+/* ------------------------------------------------------------------ */
+
+/* What an indexed draw reads from the bound VAO.  vb[s] NULL is the
+ * constant slot, whose bytes (consts, one FLOAT4 per location in layout
+ * order) rg_frame.c puts in its stream and whose vb_ofs it fills. */
+typedef struct {
+	rgvlayout_t	layout;
+	SDL_GPUBuffer	*vb[RG_MAX_VBUFS];
+	Uint32		vb_ofs[RG_MAX_VBUFS];
+	int		const_slot;	/* -1: every input has an array */
+	int		nconst;
+	float		consts[RG_MAX_VATTRS][4];
+	SDL_GPUBuffer	*ib;
+	Uint32		ib_count;	/* indices the element buffer holds */
+	int		nreads;		/* rg_buffer.c's buffers the draw reads */
+	void		*reads[RG_MAX_VBUFS + 1];
+} rgvinput_t;
+
+void	RG_Buf_Init (void);
+void	RG_Buf_Shutdown (void);
+/* The bound VAO's buffers and layout for a draw with `index_bytes`-wide
+ * indices; false, and counted, when there is nothing SDL_GPU can draw from.
+ * RG_Buf_MarkRead stamps those buffers as read by the open segment, once
+ * the draw is recorded, so an upload into one ends the segment first. */
+qboolean RG_Buf_ForDraw (int index_bytes, rgvinput_t *in);
+void	RG_Buf_MarkRead (const rgvinput_t *in);
+/* Queued buffer uploads, as RG_Res_PendingBytes / StageUploads /
+ * IssueUploads, and the buffers retired during the frame. */
+Uint32	RG_Buf_PendingBytes (void);
+void	RG_Buf_StageUploads (Uint8 *dst, Uint32 base);
+void	RG_Buf_IssueUploads (SDL_GPUCopyPass *copy, SDL_GPUTransferBuffer *tb);
+void	RG_Buf_EndFrame (void);
+void	RG_Buf_Status (void);
 
 /* ------------------------------------------------------------------ */
 /* rg_frame.c                                                          */
