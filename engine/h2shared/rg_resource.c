@@ -510,12 +510,22 @@ static int RGT_FullChain (const rgtex_t *t)
  * between two of them (the 64 MB flush, a hazard flush), which would
  * otherwise re-create the texture mid-chain and strand the levels already
  * uploaded in the retired object.  The sampler's max_lod keeps the levels
- * never defined out of reach.  Render targets keep what they declared. */
+ * never defined out of reach.  Render targets keep what they declared.
+ *
+ * So do 3D textures.  SDL 3.4.12's Vulkan memory defragmenter
+ * (VULKAN_INTERNAL_DefragmentMemory) copies every level of a 3D texture at
+ * level 0's depth, an out-of-bounds vkCmdCopyImage for each level past 0;
+ * a map change frees enough to trigger it (#340 P3a,
+ * tools/sweep-liquid-gpu.steps).  The engine's 3D textures, the softemu
+ * LUT and the light grid, define level 0 alone.  This can go once SDL
+ * scales extent.depth by the level there. */
 static int RGT_CreateLevels (const rgtex_t *t)
 {
 	int	full = RGT_FullChain (t);
 
 	if (t->usage & (SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET))
+		return q_min (t->levels, full);
+	if (t->type == RG_TT_3D)
 		return q_min (t->levels, full);
 	return full;
 }

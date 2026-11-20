@@ -163,6 +163,24 @@ Checked, from the sources (stock python3, lint.yml):
       culling, SSAO and GPU particles (P5) stay off;
     * GL_DrawAliasSkeletal and use_instancing test shader_storage alone,
       with no -gpu note left behind.
+  liquids and the translucent world under -gpu (#340 P3a), which
+  tools/sweep-liquid-gpu.steps draws: they go through GL_ImmEnd and the P2
+  seams, and three GL-only paths stay off under -gpu, each by
+  `#ifdef USE_SDL_GPU / if (R_GPU ()) return[ false];` at the body's own
+  level, ahead of the first thing the path does (GPU_GATES):
+    * OIT (P6): OIT_CreateFBO, OIT_BeginTranslucency, OIT_EndTranslucency
+      and OIT_Active.  The OIT twins read their targets through
+      sampler2DMS, which -gpu drops; once P4 turns post-process on under
+      -gpu, r_oit 1 would otherwise lose every translucent;
+    * the soft-particle depth snapshot (P4): GL_SoftDepth_Capture returns
+      after clearing soft_depth_valid, so sprites never sample a depth
+      texture the null glBlitFramebuffer (not NULL) never wrote;
+    * the GPU particle buffers: R_GPU_Particles_Init makes none, where it
+      made raw GL into the null table for an SSBO path nothing draws.
+  and one SDL workaround the sweep's map changes found: rg_resource.c's
+  RGT_CreateLevels creates a 3D texture with the levels GL defined, not the
+  full chain -- SDL 3.4's Vulkan defragmenter copies every level of a 3D
+  texture at level 0's depth, out of bounds past level 0.
 
 Usage: test_rg_sources.py [--root DIR]
 """
@@ -1548,6 +1566,94 @@ def check_storage(root):
     return 0
 
 
+# (file, function, what the gate returns, the first thing it must come before,
+#  what must come before the gate or None, why).  #340 P3a.
+GPU_GATES = (
+    ("engine/h2shared/gl_postprocess.c", "OIT_CreateFBO", "false",
+     r"\bOIT_DeleteFBO\s*\(|\bR_GenTextures\s*\(|\bgl\w+_fp\s*\(", None,
+     "OIT is P6: its twins read sampler2DMS, which -gpu drops"),
+    ("engine/h2shared/gl_postprocess.c", "OIT_BeginTranslucency", "",
+     r"\boit_in_pass\s*=|\bgl\w+_fp\s*\(|\bR_Set\w+\s*\(", None,
+     "OIT is P6: once P4 runs post-process under -gpu, r_oit 1 would draw every translucent into nothing"),
+    ("engine/h2shared/gl_postprocess.c", "OIT_EndTranslucency", "",
+     r"\boit_in_pass\s*=|\bgl\w+_fp\s*\(|\bR_\w+\s*\(", None,
+     "OIT is P6: the resolve samples the twins' sampler2DMS targets"),
+    ("engine/h2shared/gl_postprocess.c", "OIT_Active", "false",
+     r"\breturn\s+oit_available\b", None,
+     "OIT is P6: callers must see sorted blending under -gpu"),
+    ("engine/h2shared/gl_postprocess.c", "GL_SoftDepth_Capture", "",
+     r"\bR_GenTextures\s*\(|\bgl\w+_fp\s*\(|\bsoft_depth_valid\s*=\s*true\b",
+     r"\bsoft_depth_valid\s*=\s*false\s*;",
+     "soft particles are P4: the null glBlitFramebuffer is not NULL, so the snapshot would be marked "
+     "valid and sprites would sample a texture nothing wrote"),
+    ("engine/hexen2/r_part.c", "R_GPU_Particles_Init", "",
+     r"\bGL_CreateParticleResources\s*\(", None,
+     "the GPU particle buffers are raw GL, into the null table, for a path nothing draws"),
+)
+
+
+def check_translucency(root):
+    """#340 P3a: the GL-only paths beside the liquids and translucents stay
+    off under -gpu."""
+    for rel, name, ret, first_rx, after_rx, why in GPU_GATES:
+        if not (root / rel).is_file():
+            fail("%s: missing -- the #340 P3a gate on %s has nothing to read" % (rel, name))
+            continue
+        code = strip_c_comments((root / rel).read_text(errors="replace"))
+        bodies = [code[b:e] for n, b, e in functions(code) if n == name]
+        # the real definition, not a tier's empty stub
+        bodies = [b for b in bodies if re.search(first_rx, b)]
+        if len(bodies) != 1:
+            fail("%s: %d definitions of %s doing what the #340 P3a gate guards -- the check pins "
+                 "exactly one" % (rel, len(bodies), name))
+            continue
+        body = bodies[0]
+        gates = list(re.finditer(r"#\s*ifdef\s+USE_SDL_GPU\s*\n\s*if\s*\(\s*R_GPU\s*\(\s*\)\s*\)\s*"
+                                 r"return\s*%s\s*;\s*#\s*endif" % (re.escape(ret) if ret else ""), body))
+        first = re.search(first_rx, body)
+        ok = bool(gates) and first is not None and gates[0].start() < first.start()
+        if ok:
+            head = body[:gates[0].start()]
+            ok = head.count("{") - head.count("}") == 1
+            # and not inside a conditional the body opened (#if 0 hides it)
+            opened = len(re.findall(r"^\s*#\s*if(?:def|ndef)?\b", head, re.M)) - \
+                len(re.findall(r"^\s*#\s*endif\b", head, re.M))
+            ok = ok and opened == 0
+        if ok and after_rx:
+            a = re.search(after_rx, body)
+            ok = a is not None and a.end() <= gates[0].start()
+        if not ok:
+            want = "`#ifdef USE_SDL_GPU / if (R_GPU ()) return%s; / #endif`" % (" " + ret if ret else "")
+            where = " after `%s`" % after_rx.replace("\\b", "").replace("\\s*", " ") if after_rx else ""
+            fail("%s: %s needs %s%s at the body's own level, ahead of what it guards -- %s "
+                 "(#340 P3a)" % (rel, name, want, where, why))
+    rr = "engine/h2shared/rg_resource.c"
+    b = body_named(root, rr, "RGT_CreateLevels")
+    shape = (r"^\{\s*int\s+full\s*=\s*RGT_FullChain\s*\(\s*t\s*\)\s*;"
+             r"\s*if\s*\(\s*t->usage\s*&\s*\(\s*SDL_GPU_TEXTUREUSAGE_COLOR_TARGET\s*\|\s*"
+             r"SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET\s*\)\s*\)\s*return\s+q_min\s*\(\s*t->levels\s*,\s*full\s*\)\s*;"
+             r"\s*if\s*\(\s*t->type\s*==\s*RG_TT_3D\s*\)\s*return\s+q_min\s*\(\s*t->levels\s*,\s*full\s*\)\s*;"
+             r"\s*return\s+full\s*;\s*\}?$")
+    if b is not None and not re.match(shape, b.strip()):
+        fail("%s: RGT_CreateLevels must be exactly: the full chain, render targets and then 3D textures "
+             "with the levels GL defined (`if (t->type == RG_TT_3D) return q_min (t->levels, full);`), "
+             "everything else the full chain -- SDL 3.4.12's Vulkan defragmenter copies each level of a "
+             "3D texture at level 0's depth, out of bounds past level 0 (#340 P3a)" % rr)
+    # That workaround is only free while every 3D texture defines level 0
+    # alone: a level defined after first use re-creates the texture and loses
+    # its contents (counted in gpu_unrouted, caught by nothing else).
+    for p in sorted((root / "engine").rglob("*.c")):
+        if "rust" in p.parts:
+            continue
+        code = strip_c_comments(p.read_text(errors="replace"))
+        for m in re.finditer(r"\bR_TexImage3D\s*\(\s*GL_TEXTURE_3D\s*,\s*[^,]+,\s*([^,]+?)\s*,", code):
+            if m.group(1) != "0":
+                fail("%s:%d: R_TexImage3D (GL_TEXTURE_3D, ...) at level `%s` -- under -gpu a 3D texture "
+                     "gets only the levels it defines before first use (rg_resource.c "
+                     "RGT_CreateLevels, the SDL 3.4.12 defragmenter workaround); a mipped 3D texture "
+                     "needs that revisited first (#340 P3a)"
+                     % (p.relative_to(root), code.count("\n", 0, m.start()) + 1, m.group(1)))
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     ap.add_argument("--root", type=Path, default=ROOT)
@@ -1565,6 +1671,7 @@ def main(argv=None):
     check_stencil(root)
     check_buffers(root)
     check_storage(root)
+    check_translucency(root)
     nfiles = 0
     rg_files = []
     for p in sorted(eng.rglob("*")):
