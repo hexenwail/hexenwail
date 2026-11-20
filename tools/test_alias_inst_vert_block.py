@@ -379,7 +379,7 @@ else:
         # drawn, inside the loop -- in that order, every iteration.
         seq = [m.start() for m in (re.search(r"R_SetInstBase \(batch->first\);", loop),
                                    re.search(r"R_FlushUniforms \(\);", loop),
-                                   re.search(r"glDrawElementsInstanced_fp", loop)) if m]
+                                   re.search(r"R_DrawElementsInstanced", loop)) if m]
         if len(seq) != 3 or seq != sorted(seq):
             errors.append(f"R_DrawAliasInstanced {label} (hazard 4): each batch must R_SetInstBase (batch->first), "
                           "then R_FlushUniforms, then draw")
@@ -397,8 +397,8 @@ else:
             m = re.search(w, loop)
             if not m or (len(seq) == 3 and m.start() > seq[1]):
                 errors.append(f"R_DrawAliasInstanced {label}: {w} must be set per batch before the flush")
-        if re.search(r"glDrawElementsInstanced_fp", loop) and \
-                loop.count("glDrawElementsInstanced_fp") != 1:
+        if re.search(r"R_DrawElementsInstanced", loop) and \
+                loop.count("R_DrawElementsInstanced") != 1:
             errors.append(f"R_DrawAliasInstanced {label}: expected one instanced draw per batch")
         # GitHub #485: GL_MakeAliasModelGPU builds ssbo_pose OR ssbo_pose_md3,
         # never both, so a batch is drawn from whichever its format has, at

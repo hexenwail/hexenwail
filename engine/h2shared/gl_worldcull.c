@@ -223,9 +223,10 @@ void R_BuildWorldCull (void)
 	if (!m || !glDispatchCompute_fp)
 		return;
 #ifdef USE_SDL_GPU
-	/* Compute, P5 of #340, and it draws from world_vao, which -gpu leaves
-	 * at 0 (#340 P2b).  The null table's glDispatchCompute is not NULL, so
-	 * the test above passes under -gpu: say no here. */
+	/* Compute, P5 of #340, and its buffers and its indirect draw from
+	 * world_vao are raw GL the null table swallows.  The null table's
+	 * glDispatchCompute is not NULL, so the test above passes under -gpu:
+	 * say no here, and DrawTextureChains draws the whole world. */
 	if (R_GPU ())
 		return;
 #endif

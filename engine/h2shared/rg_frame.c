@@ -30,11 +30,14 @@
  * gpu_clearcolor, depth and stencil to the last values a clear asked for --
  * so no frame starts from the previous one's contents.
  *
- * GL_ImmEnd's batches are the only draws through P2b: the 2D, and the world,
- * brush and alias models on their immediate-mode fallbacks.  SDL_GPU has no
- * quads and no fans, so quads use a static index buffer (0,1,2, 0,2,3 per
- * quad, as GL_VBO_Init's) and polygons/fans and line loops get indices in
- * the stream.
+ * Two kinds of draw.  GL_ImmEnd's batches (the 2D, alias models, sprites,
+ * everything drawn immediate): SDL_GPU has no quads and no fans, so quads
+ * use a static index buffer (0,1,2, 0,2,3 per quad, as GL_VBO_Init's) and
+ * polygons/fans and line loops get indices in the stream.  And since P2d,
+ * indexed draws from a VAO (R_DrawElements): the world, brush models and the
+ * sky pre-pass, from their static buffers (rg_buffer.c), so only the
+ * constant-attribute record lands in the stream.  Their pipeline is keyed on
+ * the VAO's interned vertex layout (rg_pipeline.c).
  *
  * Every slot a draw's program declares is bound (#340 P2a), because SDL_GPU
  * faults a draw that leaves one empty: each sampler its texture or a typed
@@ -140,11 +143,27 @@ typedef struct {
 	Uint32	ofs, len;	/* in the uniform arena */
 } rgpush_t;
 
+/* Where a draw's indices come from. */
+enum {
+	RGD_ARRAYS,		/* none */
+	RGD_STREAM,		/* 16-bit, in the stream arena at ib_ofs */
+	RGD_QUADS,		/* 16-bit, the static quad buffer */
+	RGD_BUFFER		/* the VAO's element buffer, ib_size wide (#340 P2d) */
+};
+
 typedef struct {
 	SDL_GPUGraphicsPipeline		*pipe;
-	Uint32				vb_ofs;		/* stream arena */
-	Uint32				ib_ofs;		/* stream arena, or 0 into the quad buffer */
-	Uint8				indexed;	/* 0 no, 1 stream indices, 2 quad buffer */
+	/* Vertex buffer slots in layout order; a NULL buffer is the stream
+	 * arena, vb_ofs into it. */
+	Uint8				nvb;
+	SDL_GPUBuffer			*vb[RG_MAX_VBUFS];
+	Uint32				vb_ofs[RG_MAX_VBUFS];
+	Uint32				ib_ofs;		/* RGD_STREAM: stream arena */
+	Uint8				indexed;	/* RGD_* */
+	SDL_GPUBuffer			*ib;		/* RGD_BUFFER */
+	SDL_GPUIndexElementSize		ib_size;
+	Uint32				first_index;	/* RGD_BUFFER */
+	Uint32				instances;
 	Uint32				count;		/* vertices, or indices */
 	int				nvs, nfs;
 	SDL_GPUTextureSamplerBinding	vs[RG_MAX_STAGE_SAMPLERS], fs[RG_MAX_STAGE_SAMPLERS];
@@ -211,6 +230,8 @@ static Uint8			rgf_clear_stencil;
 
 /* Last frame's counts, for renderer_status */
 static int			rgf_last_draws, rgf_last_segments, rgf_frame_draws, rgf_frame_segments;
+static int			rgf_last_indexed, rgf_frame_indexed;	/* RGD_BUFFER draws */
+static Uint32			rgf_last_stream, rgf_frame_stream;	/* stream arena bytes */
 static unsigned long		rgf_frames;
 static unsigned long		rgf_dropped;
 
@@ -361,7 +382,8 @@ void RG_BeginFrame (int width, int height)
 	RGF_EnsureScene (width, height);
 	rgf_active = true;
 	rgf_cleared = false;
-	rgf_frame_draws = rgf_frame_segments = 0;
+	rgf_frame_draws = rgf_frame_segments = rgf_frame_indexed = 0;
+	rgf_frame_stream = 0;
 }
 
 /* Snapshot of block `b` in the open segment's uniform arena. */
@@ -436,6 +458,79 @@ static qboolean RGF_RecordStage (rgdraw_t *d, const rgprog_t *prog, int stage)
 	return true;
 }
 
+/* The draw about to be recorded, with its pipeline and bindings, for the
+ * current viewport and scissor; NULL when it draws nothing (no viewport, an
+ * empty scissor) or cannot be drawn (no pipeline, a stage that cannot be
+ * bound: counted).  The caller fills its geometry, then RGF_CommitDraw. */
+static rgdraw_t *RGF_BeginDraw (const rgprog_t *prog, SDL_GPUPrimitiveType prim, Uint32 layout)
+{
+	rgdraw_t	*d;
+	int		sc_x0, sc_y0, sc_x1, sc_y1;
+
+	if (!rgf_vp_set)
+		RG_SetViewport (0, 0, rgf_w, rgf_h);
+	if (rgf_vp[2] <= 0 || rgf_vp[3] <= 0)
+		return NULL;
+
+	/* GL clamps a scissor box to the target; SDL_GPU requires it.  An
+	 * empty one passes nothing: drop the draw before recording any of it. */
+	sc_x0 = 0; sc_y0 = 0; sc_x1 = rgf_tw; sc_y1 = rgf_th;
+	if (rgf_scissor_on)
+	{
+		sc_x0 = q_max (rgf_scissor[0], 0);
+		sc_y0 = q_max (rgf_scissor[1], 0);
+		sc_x1 = q_min (rgf_scissor[0] + rgf_scissor[2], rgf_tw);
+		sc_y1 = q_min (rgf_scissor[1] + rgf_scissor[3], rgf_th);
+		if (sc_x1 <= sc_x0 || sc_y1 <= sc_y0)
+			return NULL;
+	}
+
+	if (rgf_numdraws == rgf_maxdraws)
+	{
+		rgf_maxdraws = rgf_maxdraws ? rgf_maxdraws * 2 : 256;
+		rgf_draws = (rgdraw_t *) realloc (rgf_draws, rgf_maxdraws * sizeof(rgdraw_t));
+		if (!rgf_draws)
+			Sys_Error ("SDL_GPU: out of memory recording draws");
+	}
+	d = &rgf_draws[rgf_numdraws];
+	memset (d, 0, sizeof(*d));
+	d->pipe = RG_PipelineFor (prog, prim, layout, rgf_color_fmt, rgf_depth_fmt);
+	if (!d->pipe)
+	{
+		rgf_dropped++;
+		return NULL;
+	}
+
+	/* Bindings and uniforms first: a texture realized here may queue
+	 * nothing, but a hazard flush must not split this draw's bytes. */
+	if (!RGF_RecordStage (d, prog, RPROG_STAGE_VERTEX) ||
+	    !RGF_RecordStage (d, prog, RPROG_STAGE_FRAGMENT))
+	{
+		rgf_dropped++;
+		return NULL;
+	}
+	d->instances = 1;
+	d->scissor.x = sc_x0;
+	d->scissor.y = sc_y0;
+	d->scissor.w = sc_x1 - sc_x0;
+	d->scissor.h = sc_y1 - sc_y0;
+	return d;
+}
+
+static void RGF_CommitDraw (rgdraw_t *d, const rpipestate_t *ps)
+{
+	d->vp.x = (float) rgf_vp[0];
+	d->vp.y = (float) rgf_vp[1];
+	d->vp.w = (float) rgf_vp[2];
+	d->vp.h = (float) rgf_vp[3];
+	d->vp.min_depth = (float) ps->depth_near;
+	d->vp.max_depth = (float) ps->depth_far;
+	/* Dynamic state, not in the pipeline key; GL clamps the reference to
+	 * the stencil buffer's 8 bits, a Uint8 cast would wrap it. */
+	d->stencil_ref = (Uint8) CLAMP (0, ps->stencil_ref, 255);
+	rgf_numdraws++;
+}
+
 void RG_DrawImm (GLenum mode, const void *verts, int count, int stride)
 {
 	const rpipestate_t	*ps = R_PipelineState ();
@@ -443,8 +538,8 @@ void RG_DrawImm (GLenum mode, const void *verts, int count, int stride)
 	SDL_GPUPrimitiveType	prim;
 	rgdraw_t		*d;
 	Uint32			nidx = 0;
-	Uint8			indexed = 0;
-	int			i, sc_x0, sc_y0, sc_x1, sc_y1;
+	Uint8			indexed = RGD_ARRAYS;
+	int			i;
 
 	if (count <= 0)
 		return;
@@ -461,13 +556,13 @@ void RG_DrawImm (GLenum mode, const void *verts, int count, int stride)
 	case GL_QUADS:
 		count -= count % 4;
 		prim = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
-		indexed = 2;
+		indexed = RGD_QUADS;
 		nidx = (Uint32)(count / 4) * 6;
 		break;
 	case GL_POLYGON:
 	case GL_TRIANGLE_FAN:
 		prim = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
-		indexed = 1;
+		indexed = RGD_STREAM;
 		nidx = (count >= 3) ? (Uint32)(count - 2) * 3 : 0;
 		break;
 	case GL_TRIANGLES:
@@ -486,7 +581,7 @@ void RG_DrawImm (GLenum mode, const void *verts, int count, int stride)
 		break;
 	case GL_LINE_LOOP:
 		prim = SDL_GPU_PRIMITIVETYPE_LINESTRIP;
-		indexed = 1;
+		indexed = RGD_STREAM;
 		nidx = (count >= 2) ? (Uint32)count + 1 : 0;
 		break;
 	case GL_POINTS:
@@ -496,56 +591,21 @@ void RG_DrawImm (GLenum mode, const void *verts, int count, int stride)
 		RG_NoteUnhandled ("immediate draw in a GL primitive mode with no SDL_GPU equivalent");
 		return;
 	}
-	if (count <= 0 || (indexed && !nidx))
-		return;
-	if (!rgf_vp_set)
-		RG_SetViewport (0, 0, rgf_w, rgf_h);
-	if (rgf_vp[2] <= 0 || rgf_vp[3] <= 0)
+	if (count <= 0 || (indexed != RGD_ARRAYS && !nidx))
 		return;
 
-	/* GL clamps a scissor box to the target; SDL_GPU requires it.  An
-	 * empty one passes nothing: drop the draw before recording any of it. */
-	sc_x0 = 0; sc_y0 = 0; sc_x1 = rgf_tw; sc_y1 = rgf_th;
-	if (rgf_scissor_on)
-	{
-		sc_x0 = q_max (rgf_scissor[0], 0);
-		sc_y0 = q_max (rgf_scissor[1], 0);
-		sc_x1 = q_min (rgf_scissor[0] + rgf_scissor[2], rgf_tw);
-		sc_y1 = q_min (rgf_scissor[1] + rgf_scissor[3], rgf_th);
-		if (sc_x1 <= sc_x0 || sc_y1 <= sc_y0)
-			return;
-	}
-
-	if (rgf_numdraws == rgf_maxdraws)
-	{
-		rgf_maxdraws = rgf_maxdraws ? rgf_maxdraws * 2 : 256;
-		rgf_draws = (rgdraw_t *) realloc (rgf_draws, rgf_maxdraws * sizeof(rgdraw_t));
-		if (!rgf_draws)
-			Sys_Error ("SDL_GPU: out of memory recording draws");
-	}
-	d = &rgf_draws[rgf_numdraws];
-	memset (d, 0, sizeof(*d));
-	d->pipe = RG_PipelineFor (prog, prim, RG_VL_IMM, rgf_color_fmt, rgf_depth_fmt);
-	if (!d->pipe)
-	{
-		rgf_dropped++;
+	d = RGF_BeginDraw (prog, prim, RG_VL_IMM);
+	if (!d)
 		return;
-	}
 
-	/* Bindings and uniforms first: a texture realized here may queue
-	 * nothing, but a hazard flush must not split this draw's bytes. */
-	if (!RGF_RecordStage (d, prog, RPROG_STAGE_VERTEX) ||
-	    !RGF_RecordStage (d, prog, RPROG_STAGE_FRAGMENT))
-	{
-		rgf_dropped++;
-		return;
-	}
-
-	d->vb_ofs = RGF_StreamAlloc ((Uint32)count * stride);
-	memcpy (rgf_stream + d->vb_ofs, verts, (size_t)count * stride);
+	d->nvb = 1;
+	d->vb[0] = NULL;
+	d->vb_ofs[0] = RGF_StreamAlloc ((Uint32)count * stride);
+	memcpy (rgf_stream + d->vb_ofs[0], verts, (size_t)count * stride);
 	d->indexed = indexed;
-	d->count = indexed ? nidx : (Uint32)count;
-	if (indexed == 1)
+	d->ib_size = SDL_GPU_INDEXELEMENTSIZE_16BIT;
+	d->count = (indexed != RGD_ARRAYS) ? nidx : (Uint32)count;
+	if (indexed == RGD_STREAM)
 	{
 		Uint16	*ix;
 
@@ -567,21 +627,120 @@ void RG_DrawImm (GLenum mode, const void *verts, int count, int stride)
 			}
 		}
 	}
+	RGF_CommitDraw (d, ps);
+}
 
-	d->vp.x = (float) rgf_vp[0];
-	d->vp.y = (float) rgf_vp[1];
-	d->vp.w = (float) rgf_vp[2];
-	d->vp.h = (float) rgf_vp[3];
-	d->vp.min_depth = (float) ps->depth_near;
-	d->vp.max_depth = (float) ps->depth_far;
-	d->scissor.x = sc_x0;
-	d->scissor.y = sc_y0;
-	d->scissor.w = sc_x1 - sc_x0;
-	d->scissor.h = sc_y1 - sc_y0;
-	/* Dynamic state, not in the pipeline key; GL clamps the reference to
-	 * the stencil buffer's 8 bits, a Uint8 cast would wrap it. */
-	d->stencil_ref = (Uint8) CLAMP (0, ps->stencil_ref, 255);
-	rgf_numdraws++;
+/* The constant slot's record in the open segment's stream: one FLOAT4 per
+ * constant location, repeated per instance (the slot is instance-rate).  A
+ * single-instance record is reused within a segment while the values hold,
+ * which is every world draw in it (white). */
+static Uint32	rgf_const_ofs, rgf_const_segment;
+static int	rgf_const_n;
+static float	rgf_const_vals[RG_MAX_VATTRS][4];
+
+static Uint32 RGF_ConstRecord (const rgvinput_t *in, Uint32 instances)
+{
+	Uint32	rec = (Uint32)(in->nconst * 4 * sizeof(float)), ofs, i;
+
+	if (instances == 1 && rgf_const_segment == rgf_segment && rgf_const_n == in->nconst &&
+	    !memcmp (rgf_const_vals, in->consts, rec))
+		return rgf_const_ofs;
+	ofs = RGF_StreamAlloc (rec * instances);
+	for (i = 0; i < instances; i++)
+		memcpy (rgf_stream + ofs + i * rec, in->consts, rec);
+	if (instances == 1)
+	{
+		rgf_const_ofs = ofs;
+		rgf_const_segment = rgf_segment;
+		rgf_const_n = in->nconst;
+		memcpy (rgf_const_vals, in->consts, rec);
+	}
+	return ofs;
+}
+
+void RG_DrawIndexed (GLenum mode, GLsizei count, GLenum type, const void *indices, GLsizei instances)
+{
+	const rpipestate_t	*ps = R_PipelineState ();
+	const rgprog_t		*prog = RG_Program (ps->program);
+	SDL_GPUPrimitiveType	prim;
+	rgvinput_t		in;
+	rgdraw_t		*d;
+	Uint32			layout, isize, first;
+	int			s;
+
+	if (count <= 0 || instances <= 0)
+		return;
+	if (!prog || prog->compute)
+	{
+		RG_NoteUnhandled ("indexed draw with no SDL_GPU program bound");
+		return;
+	}
+	switch (mode)
+	{
+	case GL_TRIANGLES:	prim = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST; break;
+	case GL_TRIANGLE_STRIP:	prim = SDL_GPU_PRIMITIVETYPE_TRIANGLESTRIP; break;
+	case GL_LINES:		prim = SDL_GPU_PRIMITIVETYPE_LINELIST; break;
+	case GL_LINE_STRIP:	prim = SDL_GPU_PRIMITIVETYPE_LINESTRIP; break;
+	case GL_POINTS:		prim = SDL_GPU_PRIMITIVETYPE_POINTLIST; break;
+	default:
+		/* Fans, loops and quads would need their indices rewritten, and
+		 * these live in a GPU buffer; no routed path draws one. */
+		RG_NoteUnhandled ("indexed draw in a GL primitive mode with no SDL_GPU equivalent (dropped)");
+		return;
+	}
+	/* GL's type is the index width; SDL_GPU has no 8-bit indices. */
+	switch (type)
+	{
+	case GL_UNSIGNED_SHORT:	isize = 2; break;
+	case GL_UNSIGNED_INT:	isize = 4; break;
+	default:
+		RG_NoteUnhandled ("indexed draw with GL_UNSIGNED_BYTE or an unknown index type (dropped)");
+		return;
+	}
+	/* `indices` is a byte offset into the element buffer; SDL_GPU counts
+	 * indices. */
+	if ((uintptr_t) indices % isize)
+	{
+		RG_NoteUnhandled ("indexed draw at an offset that is not a whole index (dropped)");
+		return;
+	}
+	first = (Uint32)((uintptr_t) indices / isize);
+	if (!rgf_active)
+		RG_BeginFrame (rgf_w, rgf_h);
+	if (!RG_Buf_ForDraw ((int) isize, &in))
+	{
+		rgf_dropped++;
+		return;
+	}
+	/* GL reads past the data store as an error or as zeros (robust
+	 * access); a Vulkan read past the buffer is undefined. */
+	if ((Uint64) first + (Uint64) count > in.ib_count)
+	{
+		RG_NoteUnhandled ("indexed draw past the end of its element buffer (dropped)");
+		rgf_dropped++;
+		return;
+	}
+	layout = RG_LayoutIntern (&in.layout);
+
+	d = RGF_BeginDraw (prog, prim, layout);
+	if (!d)
+		return;
+	RG_Buf_MarkRead (&in);
+	d->nvb = (Uint8) in.layout.num_slots;
+	for (s = 0; s < d->nvb; s++)
+	{
+		d->vb[s] = in.vb[s];
+		d->vb_ofs[s] = in.vb_ofs[s];
+	}
+	if (in.const_slot >= 0)
+		d->vb_ofs[in.const_slot] = RGF_ConstRecord (&in, (Uint32) instances);
+	d->indexed = RGD_BUFFER;
+	d->ib = in.ib;
+	d->ib_size = (isize == 4) ? SDL_GPU_INDEXELEMENTSIZE_32BIT : SDL_GPU_INDEXELEMENTSIZE_16BIT;
+	d->first_index = first;
+	d->count = (Uint32) count;
+	d->instances = (Uint32) instances;
+	RGF_CommitDraw (d, ps);
 }
 
 /* ------------------------------------------------------------------ */
@@ -648,7 +807,8 @@ static qboolean RGF_CopyPass (void)
 	Uint32			quad = rgf_quad_uploaded ? 0 : RG_QUAD_INDICES * sizeof(Uint16);
 	Uint32			ssbo = (rgf_ssbo_uploaded || !rgf_ssbo) ? 0 : RG_SSBO_STANDIN_BYTES;
 	Uint32			tex = RG_Res_PendingBytes ();
-	Uint32			total = stream + quad + ssbo + tex;
+	Uint32			bufs = RG_Buf_PendingBytes ();
+	Uint32			total = stream + quad + ssbo + tex + bufs;
 	Uint8			*map;
 	SDL_GPUCopyPass		*copy;
 	SDL_GPUTransferBufferLocation src;
@@ -695,6 +855,8 @@ static qboolean RGF_CopyPass (void)
 		memset (map + stream + quad, 0, ssbo);
 	if (tex)
 		RG_Res_StageUploads (map + stream + quad + ssbo, stream + quad + ssbo);
+	if (bufs)
+		RG_Buf_StageUploads (map + stream + quad + ssbo + tex, stream + quad + ssbo + tex);
 	SDL_UnmapGPUTransferBuffer (rg_dev, rgf_tbuf);
 
 	copy = SDL_BeginGPUCopyPass (rgf_cmd);
@@ -730,6 +892,8 @@ static qboolean RGF_CopyPass (void)
 	}
 	if (tex)
 		RG_Res_IssueUploads (copy, rgf_tbuf);
+	if (bufs)
+		RG_Buf_IssueUploads (copy, rgf_tbuf);
 	SDL_EndGPUCopyPass (copy);
 	return true;
 }
@@ -747,7 +911,7 @@ static void RGF_Replay (SDL_GPURenderPass *pass)
 	for (i = 0; i < rgf_numdraws; i++)
 	{
 		const rgdraw_t		*d = &rgf_draws[i];
-		SDL_GPUBufferBinding	vb;
+		SDL_GPUBufferBinding	vb[RG_MAX_VBUFS];
 
 		if (d->pipe != pipe)
 		{
@@ -792,20 +956,24 @@ static void RGF_Replay (SDL_GPURenderPass *pass)
 		if (d->nfssbo)
 			SDL_BindGPUFragmentStorageBuffers (pass, 0, rgf_ssbo_slots, d->nfssbo);
 
-		vb.buffer = rgf_vbuf;
-		vb.offset = d->vb_ofs;
-		SDL_BindGPUVertexBuffers (pass, 0, &vb, 1);
-		if (d->indexed)
+		for (k = 0; k < d->nvb; k++)
+		{
+			vb[k].buffer = d->vb[k] ? d->vb[k] : rgf_vbuf;
+			vb[k].offset = d->vb_ofs[k];
+		}
+		SDL_BindGPUVertexBuffers (pass, 0, vb, d->nvb);
+		if (d->indexed != RGD_ARRAYS)
 		{
 			SDL_GPUBufferBinding	ib;
 
-			ib.buffer = (d->indexed == 2) ? rgf_quadbuf : rgf_vbuf;
-			ib.offset = (d->indexed == 2) ? 0 : d->ib_ofs;
-			SDL_BindGPUIndexBuffer (pass, &ib, SDL_GPU_INDEXELEMENTSIZE_16BIT);
-			SDL_DrawGPUIndexedPrimitives (pass, d->count, 1, 0, 0, 0);
+			ib.buffer = (d->indexed == RGD_QUADS) ? rgf_quadbuf :
+				    (d->indexed == RGD_BUFFER) ? d->ib : rgf_vbuf;
+			ib.offset = (d->indexed == RGD_STREAM) ? d->ib_ofs : 0;
+			SDL_BindGPUIndexBuffer (pass, &ib, d->ib_size);
+			SDL_DrawGPUIndexedPrimitives (pass, d->count, d->instances, d->first_index, 0, 0);
 		}
 		else
-			SDL_DrawGPUPrimitives (pass, d->count, 1, 0, 0);
+			SDL_DrawGPUPrimitives (pass, d->count, d->instances, 0, 0);
 	}
 }
 
@@ -822,6 +990,8 @@ static void RGF_ResetSegment (void)
 
 static void RGF_EndSegment (void)
 {
+	int	i;
+
 	if (!RGF_EnsureCmd ())
 	{
 		RGF_ResetSegment ();
@@ -879,7 +1049,10 @@ static void RGF_EndSegment (void)
 		rgf_clear_mask = 0;
 		rgf_frame_draws += rgf_numdraws;
 		rgf_frame_segments++;
+		for (i = 0; i < rgf_numdraws; i++)
+			rgf_frame_indexed += (rgf_draws[i].indexed == RGD_BUFFER);
 	}
+	rgf_frame_stream += rgf_streamlen;
 	RGF_ResetSegment ();
 }
 
@@ -923,6 +1096,7 @@ static void RGF_Submit (void)
 	rgf_cmd = NULL;
 	/* Released now, SDL keeps each alive until the submitted work retires. */
 	RG_Res_EndFrame ();
+	RG_Buf_EndFrame ();
 	while (rgf_numretired_bufs)
 		SDL_ReleaseGPUBuffer (rg_dev, rgf_retired_bufs[--rgf_numretired_bufs]);
 }
@@ -973,6 +1147,8 @@ void RG_Frame_End (qboolean show)
 	rgf_active = false;
 	rgf_last_draws = rgf_frame_draws;
 	rgf_last_segments = rgf_frame_segments;
+	rgf_last_indexed = rgf_frame_indexed;
+	rgf_last_stream = rgf_frame_stream;
 	rgf_frames++;
 }
 
@@ -1076,8 +1252,10 @@ void RG_Frame_Shutdown (void)
 
 void RG_Frame_Status (void)
 {
-	Con_Printf ("[RENDERER] SDL_GPU frame: scene %dx%d, last frame %d draws in %d segments, "
-		    "%d programs, %d pipelines, %lu draws dropped, %lu frames\n",
-		    rgf_tw, rgf_th, rgf_last_draws, rgf_last_segments, RG_ProgramCount (),
-		    RG_PipelineCount (), rgf_dropped, rgf_frames);
+	Con_Printf ("[RENDERER] SDL_GPU frame: scene %dx%d, last frame %d draws (%d from buffers) in "
+		    "%d segments, %u stream bytes, %d programs, %d pipelines, %d vertex layouts, "
+		    "%lu draws dropped, %lu frames\n",
+		    rgf_tw, rgf_th, rgf_last_draws, rgf_last_indexed, rgf_last_segments,
+		    (unsigned int) rgf_last_stream, RG_ProgramCount (), RG_PipelineCount (),
+		    RG_LayoutCount (), rgf_dropped, rgf_frames);
 }

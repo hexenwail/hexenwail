@@ -127,6 +127,24 @@ jobs:
       - name: No texture creation bypasses gl_texcreate.c
         run: python3 tools/test_texture_create_routing.py
 
+      # Vertex and index buffers, vertex-array state and draws go through
+      # gl_buffer.c's seams (GL_BindBuffer, R_GenBuffers, R_BufferData,
+      # R_GenVertexArrays, R_BindVertexArray, R_VertexAttribPointer,
+      # R_VertexAttrib4f, ...) and gl_vbo.c's (R_DrawElements*, GL_ImmEnd),
+      # whose SDL_GPU arms the backend draws from.  No raw glGenBuffers /
+      # glBufferData on a vertex target / glBindVertexArray / glVertexAttrib*
+      # / glDraw* elsewhere, bar a ledger of the paths -gpu does not run yet,
+      # each with an exact count.  GitHub #340 (P2d).
+      - name: No buffer, vertex-array or draw call bypasses the seams
+        run: python3 tools/test_buffer_routing.py
+
+      # The other half: rg_buffer.c's shadow of that state is GL's.  Compiles
+      # the real file against a fake SDL_GPU and frame recorder and checks the
+      # binding rules, uploads and cycling, the segment hazard, name-table
+      # growth and name reuse.  GitHub #340 (P2d).
+      - name: rg_buffer.c shadows GL buffer and vertex-array state
+        run: python3 tools/test_rg_buffer_shadow.py
+
       # Every GPU program is built by id (gl_progid.h) through
       # R_Program_Create, from its row of gl_shader.c's program table: no
       # glCreateShader / glShaderSource / glCompileShader / glCreateProgram /

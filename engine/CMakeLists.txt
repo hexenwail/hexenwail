@@ -388,6 +388,7 @@ if(USE_SDL_GPU)
     endif()
     list(APPEND CLIENT_DEFINITIONS USE_SDL_GPU)
     set(RG_SOURCES
+        ${COMMONDIR}/rg_buffer.c
         ${COMMONDIR}/rg_device.c
         ${COMMONDIR}/rg_frame.c
         ${COMMONDIR}/rg_null.c

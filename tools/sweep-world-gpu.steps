@@ -62,8 +62,8 @@
 # (01 and 11 hold a spinning pickup, which a pause catches at a run-dependent
 # angle.)  The broken builds the gate exists for, same cameras: front face
 # inverted 19.2-24.9 dB, clear depth 1.0 or gl_clipcontrol_able left false
-# 17.8-22.3 dB, the world VBO built under -gpu (world not drawn) 19.7-26.6
-# dB.  So 40 dB: 9 dB under the worst honest camera, 13 dB over the best
+# 17.8-22.3 dB, the world VBO built under -gpu before P2d routed its draws
+# (world not drawn) 19.7-26.6 dB.  So 40 dB: 9 dB under the worst honest camera, 13 dB over the best
 # broken one.  Culling: -gpu 0x vs 1x differs by 9-38 pixels, GL's pair by
 # 9-44; the inverted front face by 23,868-47,236.
 #
@@ -71,6 +71,12 @@
 # Vulkan) against the same llvmpipe GL frames taken with anisotropic
 # filtering still on, the cameras read 39.9-45.2 dB: the 40 dB gate is for
 # the Mesa pair, and a hardware pair needs its own three runs.
+#
+# P2d (2026-11-20): -gpu now draws the world, brush models and sky pre-pass
+# from their VBOs, as GL does.  GL vs -gpu 48.2-52.7 dB over three runs;
+# the static cameras' -gpu frames are pixel-identical to P2c's (the
+# immediate fallback).  renderer_status on the REPORT camera: 278 draws, 240
+# from buffers, 478,080 stream bytes (P2c: 70 draws, 632,400 bytes).
 
 sleep 20
 cmd god

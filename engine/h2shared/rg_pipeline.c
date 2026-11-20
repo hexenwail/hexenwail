@@ -4,7 +4,9 @@
  * engine sets it piece by piece through gl_pipeline.c, whose shadow
  * (R_PipelineState) is therefore the whole of it.  Each draw looks up the
  * pipeline for (shadow, program, primitive, vertex layout, target formats)
- * and creates it on first use.  SDL_GPU has no pipeline cache of its own; a
+ * and creates it on first use.  Vertex layouts are interned here (#340 P2d):
+ * the immediate batches' immvert_t is id 0, and each VAO shape an indexed
+ * draw meets (rg_buffer.c) gets the next; the key holds the id.  SDL_GPU has no pipeline cache of its own; a
  * first-use hitch is acceptable for the 2D set, and pre-warming is decision 7
  * on #340.
  *
@@ -70,6 +72,36 @@ typedef struct {
 	float		poly_factor, poly_units;
 	Uint32		stencil, stencil_func, stencil_mask, sfail, dpfail, dppass;
 } rgpipekey_t;
+
+/* Interned vertex layouts; the id is the index. */
+#define RG_MAX_LAYOUTS	64
+static rgvlayout_t	rg_layouts[RG_MAX_LAYOUTS];
+static int		rg_numlayouts;
+
+Uint32 RG_LayoutIntern (const rgvlayout_t *layout)
+{
+	int	i;
+
+	for (i = 0; i < rg_numlayouts; i++)
+	{
+		if (!memcmp (&rg_layouts[i], layout, sizeof(*layout)))
+			return (Uint32) i;
+	}
+	/* Content decides how many VAO shapes there are: refuse one more (its
+	 * draws find no pipeline and are dropped, counted) rather than quit. */
+	if (rg_numlayouts == RG_MAX_LAYOUTS)
+	{
+		RG_NoteUnhandled ("more vertex layouts than rg_pipeline.c holds (draws dropped)");
+		return (Uint32) RG_MAX_LAYOUTS;
+	}
+	rg_layouts[rg_numlayouts] = *layout;
+	return (Uint32) rg_numlayouts++;
+}
+
+int RG_LayoutCount (void)
+{
+	return rg_numlayouts;
+}
 
 typedef struct rgpipe_s {
 	struct rgpipe_s			*next;
@@ -147,7 +179,7 @@ static SDL_GPUStencilOp RG_StencilOp (GLenum op)
 
 /* The key for the current state; false for a state SDL_GPU cannot draw. */
 static qboolean RG_MakeKey (rgpipekey_t *k, const rgprog_t *prog, SDL_GPUPrimitiveType prim,
-			    rg_vlayout_t layout, SDL_GPUTextureFormat color,
+			    Uint32 layout, SDL_GPUTextureFormat color,
 			    SDL_GPUTextureFormat depth)
 {
 	const rpipestate_t	*s = R_PipelineState ();
@@ -213,33 +245,38 @@ static SDL_GPUGraphicsPipeline *RG_CreatePipeline (const rgpipekey_t *k, const r
 {
 	SDL_GPUGraphicsPipelineCreateInfo	ci;
 	SDL_GPUColorTargetDescription		ct;
-	SDL_GPUVertexBufferDescription		vb;
-	SDL_GPUVertexAttribute			va[4];
+	SDL_GPUVertexBufferDescription		vb[RG_MAX_VBUFS];
+	SDL_GPUVertexAttribute			va[RG_MAX_VATTRS];
+	const rgvlayout_t			*l = &rg_layouts[k->layout];
 	SDL_GPUGraphicsPipeline			*pipe;
+	Uint32					i;
 
 	SDL_zero (ci);
 	SDL_zero (ct);
 	SDL_zero (vb);
+	SDL_zero (va);
 	ci.vertex_shader = prog->vs;
 	ci.fragment_shader = prog->fs;
 
-	/* RG_VL_IMM: immvert_t.  Every attribute is supplied whether or not the
-	 * stage reads it, as the GL VAO enables all four. */
-	vb.slot = 0;
-	vb.pitch = 11 * sizeof(float);
-	vb.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
-	va[0].location = ATTR_POSITION; va[0].buffer_slot = 0;
-	va[0].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3; va[0].offset = 0;
-	va[1].location = ATTR_TEXCOORD; va[1].buffer_slot = 0;
-	va[1].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2; va[1].offset = 3 * sizeof(float);
-	va[2].location = ATTR_LMCOORD; va[2].buffer_slot = 0;
-	va[2].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2; va[2].offset = 5 * sizeof(float);
-	va[3].location = ATTR_COLOR; va[3].buffer_slot = 0;
-	va[3].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4; va[3].offset = 7 * sizeof(float);
-	ci.vertex_input_state.vertex_buffer_descriptions = &vb;
-	ci.vertex_input_state.num_vertex_buffers = 1;
+	/* The vertex input is the key's interned layout, exactly. */
+	for (i = 0; i < l->num_slots; i++)
+	{
+		vb[i].slot = i;
+		vb[i].pitch = l->slot[i].pitch;
+		vb[i].input_rate = l->slot[i].instance ? SDL_GPU_VERTEXINPUTRATE_INSTANCE
+						       : SDL_GPU_VERTEXINPUTRATE_VERTEX;
+	}
+	for (i = 0; i < l->num_attrs; i++)
+	{
+		va[i].location = l->attr[i].location;
+		va[i].buffer_slot = l->attr[i].slot;
+		va[i].format = (SDL_GPUVertexElementFormat) l->attr[i].format;
+		va[i].offset = l->attr[i].offset;
+	}
+	ci.vertex_input_state.vertex_buffer_descriptions = vb;
+	ci.vertex_input_state.num_vertex_buffers = l->num_slots;
 	ci.vertex_input_state.vertex_attributes = va;
-	ci.vertex_input_state.num_vertex_attributes = 4;
+	ci.vertex_input_state.num_vertex_attributes = l->num_attrs;
 
 	ci.primitive_type = (SDL_GPUPrimitiveType) k->prim;
 
@@ -316,14 +353,14 @@ static SDL_GPUGraphicsPipeline *RG_CreatePipeline (const rgpipekey_t *k, const r
 }
 
 SDL_GPUGraphicsPipeline *RG_PipelineFor (const rgprog_t *prog, SDL_GPUPrimitiveType prim,
-					 rg_vlayout_t layout, SDL_GPUTextureFormat color,
+					 Uint32 layout, SDL_GPUTextureFormat color,
 					 SDL_GPUTextureFormat depth)
 {
 	rgpipekey_t	k;
 	rgpipe_t	*p;
 	Uint32		b;
 
-	if (!prog || prog->compute)
+	if (!prog || prog->compute || layout >= (Uint32) rg_numlayouts)
 		return NULL;
 	if (!RG_MakeKey (&k, prog, prim, layout, color, depth))
 		return NULL;
@@ -352,8 +389,32 @@ int RG_PipelineCount (void)
 
 void RG_Pipeline_Init (void)
 {
+	rgvlayout_t	imm;
+
 	memset (rg_pipes, 0, sizeof(rg_pipes));
 	rg_numpipes = 0;
+
+	/* RG_VL_IMM: immvert_t.  Every attribute is supplied whether or not the
+	 * stage reads it, as the GL VAO enables all four. */
+	rg_numlayouts = 0;
+	memset (&imm, 0, sizeof(imm));
+	imm.num_slots = 1;
+	imm.slot[0].pitch = 11 * sizeof(float);
+	imm.num_attrs = 4;
+	imm.attr[0].location = ATTR_POSITION;
+	imm.attr[0].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3;
+	imm.attr[0].offset = 0;
+	imm.attr[1].location = ATTR_TEXCOORD;
+	imm.attr[1].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2;
+	imm.attr[1].offset = 3 * sizeof(float);
+	imm.attr[2].location = ATTR_LMCOORD;
+	imm.attr[2].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2;
+	imm.attr[2].offset = 5 * sizeof(float);
+	imm.attr[3].location = ATTR_COLOR;
+	imm.attr[3].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4;
+	imm.attr[3].offset = 7 * sizeof(float);
+	if (RG_LayoutIntern (&imm) != RG_VL_IMM)
+		Sys_Error ("SDL_GPU: the immediate layout is not layout %u", RG_VL_IMM);
 }
 
 void RG_Pipeline_Shutdown (void)
@@ -373,4 +434,5 @@ void RG_Pipeline_Shutdown (void)
 		rg_pipes[i] = NULL;
 	}
 	rg_numpipes = 0;
+	rg_numlayouts = 0;
 }

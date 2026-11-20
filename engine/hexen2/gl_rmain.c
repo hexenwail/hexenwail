@@ -1603,9 +1603,9 @@ static void GL_DrawAliasSkeletal (entity_t *e, aliashdr_t *paliashdr,
 
 	GL_BindBufferBase (GL_SHADER_STORAGE_BUFFER, 4, gm->ssbo_bones);
 
-	glBindVertexArray_fp (gm->vao);
-	glDrawElements_fp (GL_TRIANGLES, gm->num_indices, GL_UNSIGNED_SHORT, NULL);
-	glBindVertexArray_fp (0);
+	R_BindVertexArray (gm->vao);
+	R_DrawElements (GL_TRIANGLES, gm->num_indices, GL_UNSIGNED_SHORT, NULL);
+	R_BindVertexArray (0);
 
 	GL_BindBufferBase (GL_SHADER_STORAGE_BUFFER, 4, 0);
 	R_UseProgram (0);
@@ -3855,7 +3855,7 @@ static void R_DispatchBrushInstancedPass (
 					run_count += keys[i].count;
 					i++;
 				}
-				glDrawElements_fp(GL_TRIANGLES, run_count, GL_UNSIGNED_INT,
+				R_DrawElements(GL_TRIANGLES, run_count, GL_UNSIGNED_INT,
 				    (void *)((size_t)run_first * sizeof(unsigned int)));
 				c_brush_polys++;
 			}
@@ -3906,8 +3906,8 @@ void R_DrawBrushInstanced (void)
 	 * (drawbridge plank vs. ground, portcullis vs. wall pocket).
 	 * gl_shader_world_opaque shares vert+uniform layout with gl_shader_world
 	 * so the same invariance covers cross-program coplanar joins too. */
-	glBindVertexArray_fp(world_vao);
-	glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
+	R_BindVertexArray(world_vao);
+	R_VertexAttrib4f(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
 	/* Lightmap atlas at TU1, and TU2 seeded with the null fullbright
 	 * sentinel.  R_DispatchBrushInstancedPass rebinds TU2 per (instance,
 	 * texture) group using the per-key fb_tex stored by
@@ -3957,7 +3957,7 @@ void R_DrawBrushInstanced (void)
 		R_SetPolygonOffsetFill (false, 0.0f, 0.0f);
 	}
 
-	glBindVertexArray_fp(0);
+	R_BindVertexArray(0);
 	R_UseProgram (0);
 #endif /* !USE_GLES */
 }
@@ -4659,19 +4659,19 @@ static void R_DrawAliasInstanced (void)
 		R_SetInstBase (batch->first);
 
 		/* Use model's VAO (texcoords + IBO already set up) */
-		glBindVertexArray_fp(gm->vao);
+		R_BindVertexArray(gm->vao);
 
 		/* This batch's blocks.  Free when nothing changed: the shadow only
 		 * re-uploads a block it marked dirty. */
 		R_FlushUniforms ();
 
 		/* Draw! */
-		glDrawElementsInstanced_fp(GL_TRIANGLES, gm->num_indices,
+		R_DrawElementsInstanced(GL_TRIANGLES, gm->num_indices,
 					   GL_UNSIGNED_SHORT, NULL, batch->count);
 	}
 
 	/* Restore state */
-	glBindVertexArray_fp(0);
+	R_BindVertexArray(0);
 	R_UseProgram (0);
 	GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, 0);
 	GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, 0);
@@ -4846,10 +4846,10 @@ static void R_DrawAliasInstanced (void)
 						  gm->poseverttype == PV_MD3 ? 3 : 1, pose_ssbo);
 				R_SetPoseVertType (gm->poseverttype);
 				R_SetInstBase (batch->first);	/* hazard 4 */
-				glBindVertexArray_fp(gm->vao);
+				R_BindVertexArray(gm->vao);
 				R_FlushUniforms ();
 
-				glDrawElementsInstanced_fp(GL_TRIANGLES, gm->num_indices,
+				R_DrawElementsInstanced(GL_TRIANGLES, gm->num_indices,
 							   GL_UNSIGNED_SHORT, NULL, batch->count);
 			}
 
@@ -4862,7 +4862,7 @@ static void R_DrawAliasInstanced (void)
 			 * for whichever flushes next (#450, hazard 3). */
 			R_SetFog (r_fog_density, r_fog_color);
 
-			glBindVertexArray_fp(0);
+			R_BindVertexArray(0);
 			R_UseProgram (0);
 			GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, 0);
 			GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, 0);
@@ -7177,7 +7177,7 @@ static void R_ShowTris_DrawSurfaceRuns (const msurface_t *surfaces, int first,
 		}
 
 		if (run_total > 0)
-			glDrawElements_fp (GL_TRIANGLES, run_total, GL_UNSIGNED_INT,
+			R_DrawElements (GL_TRIANGLES, run_total, GL_UNSIGNED_INT,
 					   (void *)(intptr_t)(run_first * sizeof(unsigned int)));
 
 		if (take)
@@ -7193,7 +7193,7 @@ static void R_ShowTris_DrawSurfaceRuns (const msurface_t *surfaces, int first,
 	}
 
 	if (run_total > 0)
-		glDrawElements_fp (GL_TRIANGLES, run_total, GL_UNSIGNED_INT,
+		R_DrawElements (GL_TRIANGLES, run_total, GL_UNSIGNED_INT,
 				   (void *)(intptr_t)(run_first * sizeof(unsigned int)));
 }
 
@@ -7373,9 +7373,9 @@ static void R_ShowTris (void)
 	}
 	R_SetPolygonMode (GL_LINE);
 
-	glBindVertexArray_fp (world_vao);
+	R_BindVertexArray (world_vao);
 	R_UseProgram (gl_shader_flat.program);
-	glVertexAttrib4f_fp (ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
+	R_VertexAttrib4f (ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
 
 	/* World.  visframe was stamped by this frame's R_RecursiveWorldNode.
 	 * sflat's u_mvp lives in the shared VertParams block, so there is no
@@ -7410,7 +7410,7 @@ static void R_ShowTris (void)
 		R_ShowTris_DrawSurfaceRuns (clmodel->surfaces, clmodel->firstmodelsurface,
 					    clmodel->nummodelsurfaces, -1);
 	}
-	glBindVertexArray_fp (0);
+	R_BindVertexArray (0);
 
 	/* Alias models and sprites, through the immediate path on the flat
 	 * shader: GL_ImmEnd pushes the matrix stack's MVP itself.  GitHub #81. */
@@ -7445,7 +7445,7 @@ static void R_ShowTris (void)
 	{
 		R_SetPolygonOffsetLine (false, 0.0f, 0.0f);
 	}
-	glBindVertexArray_fp (0);
+	R_BindVertexArray (0);
 	R_UseProgram (0);
 	R_SetDepthTest (true);
 }

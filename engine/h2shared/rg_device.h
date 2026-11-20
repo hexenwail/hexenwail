@@ -117,6 +117,31 @@ void	RG_Clear (GLbitfield mask, const float color[4], float depth, int stencil);
  * state.  `mode` is the GL primitive, quads and polygons included. */
 void	RG_DrawImm (GLenum mode, const void *verts, int count, int stride);
 
+/* gl_buffer.c's buffer and vertex-array seams (rg_buffer.c, #340 P2d), with
+ * GL's signatures and GL's binding rules: GL_ARRAY_BUFFER is context state
+ * that a pointer captures, GL_ELEMENT_ARRAY_BUFFER belongs to the bound VAO,
+ * glVertexAttrib4f's values are context state.  `integer` is
+ * glVertexAttribIPointer's flavour of the pointer call. */
+void	RG_GenBuffers (GLsizei n, GLuint *buffers);
+void	RG_DeleteBuffers (GLsizei n, const GLuint *buffers);
+void	RG_BindBuffer (GLenum target, GLuint buffer);
+void	RG_BufferData (GLenum target, GLsizeiptr size, const void *data, GLenum usage);
+void	RG_BufferSubData (GLenum target, GLintptr offset, GLsizeiptr size, const void *data);
+void	RG_GenVertexArrays (GLsizei n, GLuint *arrays);
+void	RG_DeleteVertexArrays (GLsizei n, const GLuint *arrays);
+void	RG_BindVertexArray (GLuint array);
+void	RG_EnableVertexAttribArray (GLuint index, qboolean enable);
+void	RG_VertexAttribPointer (GLuint index, GLint size, GLenum type, GLboolean normalized,
+				qboolean integer, GLsizei stride, const void *pointer);
+void	RG_VertexAttrib4f (GLuint index, GLfloat x, GLfloat y, GLfloat z, GLfloat w);
+
+/* gl_vbo.c R_DrawElements / R_DrawElementsInstanced (rg_frame.c): an
+ * indexed draw from the bound VAO, with the bound program and the current
+ * draw state.  `indices` is the byte offset into the element buffer, as in
+ * GL; `type` the index width. */
+void	RG_DrawIndexed (GLenum mode, GLsizei count, GLenum type, const void *indices,
+			GLsizei instances);
+
 /* gl_vidsdl.c GL_BeginRendering: the frame's render target size. */
 void	RG_BeginFrame (int width, int height);
 

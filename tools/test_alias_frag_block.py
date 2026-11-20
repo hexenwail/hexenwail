@@ -461,7 +461,7 @@ ordered(skel, "GL_DrawAliasSkeletal (hazards 2, 5)", [
     r"R_SetAliasCausticsU \(caustics\[0\], caustics\[1\]\);",
     r"R_SetSoftParams \(0\.0f, 0\.0f, 0\.0f\);", r"R_SetAliasTurb \(0\.0f, 0\.0f\);",
     r"R_SetAliasSpans \(0\.0f\);", r"R_SetAliasMaterialU \(mat\[0\], mat\[1\], mat\[2\]\);",
-    r"R_SetAliasLightDirU \(dir\);", r"R_FlushUniforms \(\);"], r"glDrawElements_fp \(GL_TRIANGLES")
+    r"R_SetAliasLightDirU \(dir\);", r"R_FlushUniforms \(\);"], r"R_DrawElements \(GL_TRIANGLES")
 
 inst_draw = body_of(rmain, r"static void R_DrawAliasInstanced \(void\)\s*\{") or ""
 loop1 = inst_draw.find("for (b = 0; b < num_alias_batches; b++)")
@@ -475,7 +475,7 @@ ordered(main_pre + "\nLOOP\n", "R_DrawAliasInstanced main pass (hazards 1, 3)", 
 ordered(main_loop, "R_DrawAliasInstanced batch loop (hazards 4, 5)", [
     r"R_SetAliasMaterialU \(nrm, gls,", r"R_AliasMaterialLightDirWorld \(dir\);\s*R_SetAliasLightDirU \(dir\);",
     r"else\s*R_SetAliasMaterialU \(0\.0f, 0\.0f, 1\.0f\);", r"R_FlushUniforms \(\);"],
-    r"glDrawElementsInstanced_fp")
+    r"R_DrawElementsInstanced")
 fb = inst_draw[fbi:]
 loop2 = fb.find("for (b = 0; b < num_alias_batches; b++)")
 ordered(fb[:loop2] + "\nLOOP\n", "R_DrawAliasInstanced fullbright pass (hazard 3)", [
@@ -484,7 +484,7 @@ ordered(fb[:loop2] + "\nLOOP\n", "R_DrawAliasInstanced fullbright pass (hazard 3
     r"R_SetSoftParams \(0\.0f, 0\.0f, 0\.0f\);", r"R_SetAliasTurb \(0\.0f, 0\.0f\);",
     r"R_SetAliasSpans \(0\.0f\);", r"R_SetAliasMaterialU \(0\.0f, 0\.0f, 1\.0f\);",
     r"R_FlushUniforms \(\);"], r"\nLOOP\n")
-if not re.search(r"glDrawElementsInstanced_fp.*?R_SetFog \(r_fog_density, r_fog_color\);", strip(fb[loop2:]), re.S):
+if not re.search(r"R_DrawElementsInstanced.*?R_SetFog \(r_fog_density, r_fog_color\);", strip(fb[loop2:]), re.S):
     errors.append("R_DrawAliasInstanced fullbright pass (hazard 3): must put the scene fog back after its draws")
 
 span = body_of(rmain, r"void R_SetSpanCell \(const glprogram_t \*p, float cell\)\s*\{") or ""

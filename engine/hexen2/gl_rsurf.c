@@ -30,9 +30,6 @@
 #include "gl_postprocess.h"
 #include "gl_lightcluster.h"
 #include "r_dlightmark.h"
-#ifdef USE_SDL_GPU
-#include "rg_device.h"	/* R_GPU (): no world VBO under -gpu until P2d (#340) */
-#endif
 
 /* fog globals from gl_fog.c */
 extern float r_fog_density;
@@ -1987,8 +1984,8 @@ void R_BeginBrushBatch (void)
 	/* Brush-batch fast path emits opaque non-special surfaces only — fence
 	 * and underwater fall through to legacy.  Bind the early_fragment_tests
 	 * variant for Hi-Z.  uhexen2-5c6r. */
-	glBindVertexArray_fp(world_vao);
-	glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
+	R_BindVertexArray(world_vao);
+	R_VertexAttrib4f(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
 	R_UseProgram (gl_shader_world_opaque.program);
 	/* No uniforms here: R_DrawBrushModel writes the program's whole block
 	 * set before each of its draws (#450 W1, W2). */
@@ -2002,7 +1999,7 @@ void R_EndBrushBatch (void)
 {
 	if (!brush_batch_active)
 		return;
-	glBindVertexArray_fp(0);
+	R_BindVertexArray(0);
 	R_UseProgram (0);
 	brush_batch_active = false;
 }
@@ -2055,8 +2052,8 @@ static void DrawTextureChains_BindWorldState (void)
 	 * cutout variant explicitly).  Use the early_fragment_tests variant
 	 * here.  uhexen2-5c6r. */
 	glprogram_t *prog = &gl_shader_world_opaque;
-	glBindVertexArray_fp(world_vao);
-	glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
+	R_BindVertexArray(world_vao);
+	R_VertexAttrib4f(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
 	R_UseProgram (prog->program);
 	GL_GetMVP(world_state_mvp);
 	GL_GetModelview(world_state_mv);
@@ -2123,7 +2120,7 @@ static void DrawTextureChains_FlushBatch (qboolean world_state_set, msurface_t *
 		{
 			if (run_first_idx + run_total_idx <= world_num_indices && run_first_idx >= 0 && run_total_idx > 0)
 			{
-				glDrawElements_fp(GL_TRIANGLES,
+				R_DrawElements(GL_TRIANGLES,
 						  run_total_idx,
 						  GL_UNSIGNED_INT,
 						  (void *)((size_t)run_first_idx * sizeof(unsigned int)));
@@ -2136,7 +2133,7 @@ static void DrawTextureChains_FlushBatch (qboolean world_state_set, msurface_t *
 	}
 	if (run_first_idx + run_total_idx <= world_num_indices && run_first_idx >= 0 && run_total_idx > 0)
 	{
-		glDrawElements_fp(GL_TRIANGLES,
+		R_DrawElements(GL_TRIANGLES,
 				  run_total_idx,
 				  GL_UNSIGNED_INT,
 				  (void *)((size_t)run_first_idx * sizeof(unsigned int)));
@@ -2216,7 +2213,7 @@ static void R_EmitSkyStencilRuns (skyrun_t *runs, int n_runs, qboolean *bound)
 	if (!*bound)
 	{
 		float mvp[16];
-		glBindVertexArray_fp(sky_stencil_vao);
+		R_BindVertexArray(sky_stencil_vao);
 		R_UseProgram (gl_shader_flat.program);
 		GL_GetMVP(mvp);
 		/* sflat's u_mvp is a member of the shared VertParams block, so
@@ -2226,7 +2223,7 @@ static void R_EmitSkyStencilRuns (skyrun_t *runs, int n_runs, qboolean *bound)
 		R_SetMVP(mvp);
 		R_FlushUniforms();
 		/* a_color attribute disabled in this VAO -> uses generic value */
-		glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
+		R_VertexAttrib4f(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
 		*bound = true;
 	}
 
@@ -2240,12 +2237,12 @@ static void R_EmitSkyStencilRuns (skyrun_t *runs, int n_runs, qboolean *bound)
 				run_count += runs[j].count;
 				continue;
 			}
-			glDrawElements_fp(GL_TRIANGLES, run_count, GL_UNSIGNED_INT,
+			R_DrawElements(GL_TRIANGLES, run_count, GL_UNSIGNED_INT,
 					  (const void *)(uintptr_t)(run_first * sizeof(unsigned int)));
 			run_first = runs[j].first;
 			run_count = runs[j].count;
 		}
-		glDrawElements_fp(GL_TRIANGLES, run_count, GL_UNSIGNED_INT,
+		R_DrawElements(GL_TRIANGLES, run_count, GL_UNSIGNED_INT,
 				  (const void *)(uintptr_t)(run_first * sizeof(unsigned int)));
 	}
 }
@@ -2343,8 +2340,8 @@ static void DrawTextureChains_DrawDeferred (entity_t *e, msurface_t **deferred, 
 #undef DEF_LESS
 
 			/* Bind world VBO + shader once. */
-			glBindVertexArray_fp(world_vao);
-			glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
+			R_BindVertexArray(world_vao);
+			R_VertexAttrib4f(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
 			R_UseProgram (gl_shader_world.program);
 			GL_GetMVP(mvp);
 			GL_GetModelview(mv);
@@ -2404,7 +2401,7 @@ static void DrawTextureChains_DrawDeferred (entity_t *e, msurface_t **deferred, 
 		if (cur_tex_ && run_total_ > 0) \
 		{ \
 			BIND_TEX_WITH_FB(cur_tex_); \
-			glDrawElements_fp(GL_TRIANGLES, run_total_, GL_UNSIGNED_INT, \
+			R_DrawElements(GL_TRIANGLES, run_total_, GL_UNSIGNED_INT, \
 			    (void *)((size_t)run_first_ * sizeof(unsigned int))); \
 			c_brush_polys += count_run_; \
 		} \
@@ -2416,7 +2413,7 @@ static void DrawTextureChains_DrawDeferred (entity_t *e, msurface_t **deferred, 
 	if (cur_tex_ && run_total_ > 0) \
 	{ \
 		BIND_TEX_WITH_FB(cur_tex_); \
-		glDrawElements_fp(GL_TRIANGLES, run_total_, GL_UNSIGNED_INT, \
+		R_DrawElements(GL_TRIANGLES, run_total_, GL_UNSIGNED_INT, \
 		    (void *)((size_t)run_first_ * sizeof(unsigned int))); \
 		c_brush_polys += count_run_; \
 	} \
@@ -2428,7 +2425,7 @@ static void DrawTextureChains_DrawDeferred (entity_t *e, msurface_t **deferred, 
 
 			/* Tear down */
 			R_SetAlphaToCoverage (false);
-			glBindVertexArray_fp(0);
+			R_BindVertexArray(0);
 			R_UseProgram (0);
 		}
 	}
@@ -2544,7 +2541,7 @@ static void DrawTextureChains (entity_t *e)
 
 			if (sky_bound)
 			{
-				glBindVertexArray_fp(0);
+				R_BindVertexArray(0);
 				R_UseProgram (0);
 				/* Force the chain loop's hoisted world-state bind to redo
 				 * itself; we just stomped on VAO + program. */
@@ -2645,7 +2642,7 @@ static void DrawTextureChains (entity_t *e)
 			{
 				if (world_state_set)
 				{
-					glBindVertexArray_fp(0);
+					R_BindVertexArray(0);
 					R_UseProgram (0);
 					world_state_set = false;
 				}
@@ -2661,7 +2658,7 @@ static void DrawTextureChains (entity_t *e)
 		{
 			if (world_state_set)
 			{
-				glBindVertexArray_fp(0);
+				R_BindVertexArray(0);
 				R_UseProgram (0);
 				world_state_set = false;
 			}
@@ -2685,7 +2682,7 @@ static void DrawTextureChains (entity_t *e)
 			{
 				if (world_state_set)
 				{
-					glBindVertexArray_fp(0);
+					R_BindVertexArray(0);
 					R_UseProgram (0);
 					world_state_set = false;
 				}
@@ -2752,7 +2749,7 @@ static void DrawTextureChains (entity_t *e)
 							 * rest.  The deferred pass binds its own VBO
 							 * state, so re-establish both the world state
 							 * and this chain's diffuse bind afterwards. */
-							glBindVertexArray_fp(0);
+							R_BindVertexArray(0);
 							R_UseProgram (0);
 							world_state_set = false;
 							DrawTextureChains_DrawDeferred (e, world_deferred, world_deferred_count);
@@ -2846,7 +2843,7 @@ static void DrawTextureChains (entity_t *e)
 				if (e == &r_worldentity) rprof_chains_n_imm++;
 				if (world_state_set)
 				{
-					glBindVertexArray_fp(0);
+					R_BindVertexArray(0);
 					R_UseProgram (0);
 					world_state_set = false;
 				}
@@ -2886,7 +2883,7 @@ static void DrawTextureChains (entity_t *e)
 				if (e == &r_worldentity) rprof_chains_n_slow++;
 				if (world_state_set)
 				{
-					glBindVertexArray_fp(0);
+					R_BindVertexArray(0);
 					R_UseProgram (0);
 					world_state_set = false;
 				}
@@ -2914,7 +2911,7 @@ static void DrawTextureChains (entity_t *e)
 	{
 		if (world_state_set)
 		{
-			glBindVertexArray_fp(0);
+			R_BindVertexArray(0);
 			R_UseProgram (0);
 			world_state_set = false;
 		}
@@ -2928,7 +2925,7 @@ static void DrawTextureChains (entity_t *e)
 	/* Final teardown of hoisted world state. */
 	if (world_state_set)
 	{
-		glBindVertexArray_fp(0);
+		R_BindVertexArray(0);
 		R_UseProgram (0);
 		world_state_set = false;
 	}
@@ -3097,7 +3094,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 		 * Fast path emits opaque non-special surfaces only; bind the
 		 * early_fragment_tests variant.  uhexen2-5c6r. */
 		glprogram_t *prog = &gl_shader_world_opaque;
-		glBindVertexArray_fp(world_vao);
+		R_BindVertexArray(world_vao);
 		R_UseProgram (prog->program);
 		R_BindTextureSlot (1, lm_atlas_texture);
 		/* Default fb to null sentinel — brush ent fast path doesn't
@@ -3107,7 +3104,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 		GL_BindMaterialDefaults ();		/* uhexen2-mfql */
 		if (!brush_batch_active)
 		{
-			glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
+			R_VertexAttrib4f(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
 		}
 		/* sworld_opaque_frag's whole set (#450 W2) -- the fog, alpha and
 		 * overbright this path, or R_BeginBrushBatch for it, used to upload
@@ -3176,7 +3173,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 						run_total += batch_surfs[kk]->vbo_numtris * 3;
 					else
 					{
-						glDrawElements_fp(GL_TRIANGLES, run_total,
+						R_DrawElements(GL_TRIANGLES, run_total,
 						    GL_UNSIGNED_INT,
 						    (void *)((size_t)run_first * sizeof(unsigned int)));
 						c_brush_polys += (kk - run_start);
@@ -3185,7 +3182,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 						run_total = batch_surfs[kk]->vbo_numtris * 3;
 					}
 				}
-				glDrawElements_fp(GL_TRIANGLES, run_total,
+				R_DrawElements(GL_TRIANGLES, run_total,
 				    GL_UNSIGNED_INT,
 				    (void *)((size_t)run_first * sizeof(unsigned int)));
 				c_brush_polys += (batch_count - run_start);
@@ -3241,7 +3238,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 						run_total += batch_surfs[kk]->vbo_numtris * 3;
 					else
 					{
-						glDrawElements_fp(GL_TRIANGLES, run_total,
+						R_DrawElements(GL_TRIANGLES, run_total,
 						    GL_UNSIGNED_INT,
 						    (void *)((size_t)run_first * sizeof(unsigned int)));
 						c_brush_polys += (kk - run_start);
@@ -3250,7 +3247,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 						run_total = batch_surfs[kk]->vbo_numtris * 3;
 					}
 				}
-				glDrawElements_fp(GL_TRIANGLES, run_total,
+				R_DrawElements(GL_TRIANGLES, run_total,
 				    GL_UNSIGNED_INT,
 				    (void *)((size_t)run_first * sizeof(unsigned int)));
 				c_brush_polys += (batch_count - run_start);
@@ -3274,7 +3271,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 					run_total += batch_surfs[kk]->vbo_numtris * 3;
 				else
 				{
-					glDrawElements_fp(GL_TRIANGLES, run_total,
+					R_DrawElements(GL_TRIANGLES, run_total,
 					    GL_UNSIGNED_INT,
 					    (void *)((size_t)run_first * sizeof(unsigned int)));
 					c_brush_polys += (kk - run_start);
@@ -3283,7 +3280,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 					run_total = batch_surfs[kk]->vbo_numtris * 3;
 				}
 			}
-			glDrawElements_fp(GL_TRIANGLES, run_total,
+			R_DrawElements(GL_TRIANGLES, run_total,
 			    GL_UNSIGNED_INT,
 			    (void *)((size_t)run_first * sizeof(unsigned int)));
 			c_brush_polys += (batch_count - run_start);
@@ -3293,7 +3290,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 		 * otherwise R_EndBrushBatch handles it after the loop. */
 		if (!brush_batch_active)
 		{
-			glBindVertexArray_fp(0);
+			R_BindVertexArray(0);
 			R_UseProgram (0);
 		}
 
@@ -3504,21 +3501,10 @@ void R_BuildWorldVBO (void)
 		return;
 
 	/* Free old VBO if reloading */
-	if (world_vbo) { glDeleteBuffers_fp(1, &world_vbo); world_vbo = 0; }
-	if (world_ibo) { glDeleteBuffers_fp(1, &world_ibo); world_ibo = 0; }
-	if (world_vao) { glDeleteVertexArrays_fp(1, &world_vao); world_vao = 0; }
+	if (world_vbo) { R_DeleteBuffers(1, &world_vbo); world_vbo = 0; }
+	if (world_ibo) { R_DeleteBuffers(1, &world_ibo); world_ibo = 0; }
+	if (world_vao) { R_DeleteVertexArrays(1, &world_vao); world_vao = 0; }
 	if (world_index_data) { free(world_index_data); world_index_data = NULL; }
-
-#ifdef USE_SDL_GPU
-	/* -gpu has no buffer or indexed-draw seam until P2d (#340), and the
-	 * null table would hand out a VAO name that turns on every
-	 * world_vao path.  Left at 0, the world, brush entities and sky take
-	 * the GL_ImmEnd fallbacks each of those paths keeps for a missing VBO,
-	 * and GL_ImmEnd records them for SDL_GPU (#340 P2b).  No surface's
-	 * vbo_* is read where world_vao is 0. */
-	if (R_GPU ())
-		return;
-#endif
 
 	/* Pass 1: count vertices and triangles from BSP surfaces */
 	for (i = 0; i < m->numsurfaces; i++)
@@ -3626,33 +3612,33 @@ void R_BuildWorldVBO (void)
 	}
 
 	/* Create GPU objects */
-	glGenVertexArrays_fp(1, &world_vao);
-	glBindVertexArray_fp(world_vao);
+	R_GenVertexArrays(1, &world_vao);
+	R_BindVertexArray(world_vao);
 
-	glGenBuffers_fp(1, &world_vbo);
-	glBindBuffer_fp(GL_ARRAY_BUFFER, world_vbo);
-	glBufferData_fp(GL_ARRAY_BUFFER, v_pos * sizeof(worldvert_t),
+	R_GenBuffers(1, &world_vbo);
+	GL_BindBuffer(GL_ARRAY_BUFFER, world_vbo);
+	R_BufferData(GL_ARRAY_BUFFER, v_pos * sizeof(worldvert_t),
 			verts, GL_STATIC_DRAW);
 
 	/* pos = location 0 */
-	glEnableVertexAttribArray_fp(ATTR_POSITION);
-	glVertexAttribPointer_fp(ATTR_POSITION, 3, GL_FLOAT, GL_FALSE,
+	R_EnableVertexAttribArray(ATTR_POSITION);
+	R_VertexAttribPointer(ATTR_POSITION, 3, GL_FLOAT, GL_FALSE,
 				 sizeof(worldvert_t), (void *)0);
 	/* texcoord = location 1 */
-	glEnableVertexAttribArray_fp(ATTR_TEXCOORD);
-	glVertexAttribPointer_fp(ATTR_TEXCOORD, 2, GL_FLOAT, GL_FALSE,
+	R_EnableVertexAttribArray(ATTR_TEXCOORD);
+	R_VertexAttribPointer(ATTR_TEXCOORD, 2, GL_FLOAT, GL_FALSE,
 				 sizeof(worldvert_t), (void *)(3 * sizeof(float)));
 	/* lmcoord = location 2 */
-	glEnableVertexAttribArray_fp(ATTR_LMCOORD);
-	glVertexAttribPointer_fp(ATTR_LMCOORD, 2, GL_FLOAT, GL_FALSE,
+	R_EnableVertexAttribArray(ATTR_LMCOORD);
+	R_VertexAttribPointer(ATTR_LMCOORD, 2, GL_FLOAT, GL_FALSE,
 				 sizeof(worldvert_t), (void *)(5 * sizeof(float)));
 
-	glGenBuffers_fp(1, &world_ibo);
-	glBindBuffer_fp(GL_ELEMENT_ARRAY_BUFFER, world_ibo);
-	glBufferData_fp(GL_ELEMENT_ARRAY_BUFFER, idx_pos * sizeof(unsigned int),
+	R_GenBuffers(1, &world_ibo);
+	GL_BindBuffer(GL_ELEMENT_ARRAY_BUFFER, world_ibo);
+	R_BufferData(GL_ELEMENT_ARRAY_BUFFER, idx_pos * sizeof(unsigned int),
 			indices, GL_STATIC_DRAW);
 
-	glBindVertexArray_fp(0);
+	R_BindVertexArray(0);
 
 	world_num_verts = v_pos;
 	world_num_indices = idx_pos;
@@ -3668,9 +3654,9 @@ void R_BuildWorldVBO (void)
 
 void R_FreeWorldVBO (void)
 {
-	if (world_vbo) { glDeleteBuffers_fp(1, &world_vbo); world_vbo = 0; }
-	if (world_ibo) { glDeleteBuffers_fp(1, &world_ibo); world_ibo = 0; }
-	if (world_vao) { glDeleteVertexArrays_fp(1, &world_vao); world_vao = 0; }
+	if (world_vbo) { R_DeleteBuffers(1, &world_vbo); world_vbo = 0; }
+	if (world_ibo) { R_DeleteBuffers(1, &world_ibo); world_ibo = 0; }
+	if (world_vao) { R_DeleteVertexArrays(1, &world_vao); world_vao = 0; }
 	if (world_index_data) { free(world_index_data); world_index_data = NULL; }
 	if (lm_atlas_texture) { R_DeleteTextures (1, &lm_atlas_texture); lm_atlas_texture = 0; }
 	LM_DeleteStyleLayers ();
@@ -3695,9 +3681,9 @@ int	sky_stencil_total_indices;
 
 void R_FreeSkyStencilVBO (void)
 {
-	if (sky_stencil_vbo) { glDeleteBuffers_fp(1, &sky_stencil_vbo); sky_stencil_vbo = 0; }
-	if (sky_stencil_ibo) { glDeleteBuffers_fp(1, &sky_stencil_ibo); sky_stencil_ibo = 0; }
-	if (sky_stencil_vao) { glDeleteVertexArrays_fp(1, &sky_stencil_vao); sky_stencil_vao = 0; }
+	if (sky_stencil_vbo) { R_DeleteBuffers(1, &sky_stencil_vbo); sky_stencil_vbo = 0; }
+	if (sky_stencil_ibo) { R_DeleteBuffers(1, &sky_stencil_ibo); sky_stencil_ibo = 0; }
+	if (sky_stencil_vao) { R_DeleteVertexArrays(1, &sky_stencil_vao); sky_stencil_vao = 0; }
 	sky_stencil_total_indices = 0;
 }
 
@@ -3712,13 +3698,6 @@ void R_BuildSkyStencilVBO (void)
 	int		total_verts = 0, total_idx = 0;
 
 	R_FreeSkyStencilVBO();
-#ifdef USE_SDL_GPU
-	/* As R_BuildWorldVBO: sky_stencil_vao stays 0, so the sky pre-pass takes
-	 * its GL_ImmEnd fallback (#340 P2b), which -gpu runs since its scene
-	 * target has a stencil (P2c). */
-	if (R_GPU ())
-		return;
-#endif
 
 	if (!cl.worldmodel)
 		return;
@@ -3787,24 +3766,24 @@ void R_BuildSkyStencilVBO (void)
 		}
 	}
 
-	glGenVertexArrays_fp(1, &sky_stencil_vao);
-	glBindVertexArray_fp(sky_stencil_vao);
+	R_GenVertexArrays(1, &sky_stencil_vao);
+	R_BindVertexArray(sky_stencil_vao);
 
-	glGenBuffers_fp(1, &sky_stencil_vbo);
-	glBindBuffer_fp(GL_ARRAY_BUFFER, sky_stencil_vbo);
-	glBufferData_fp(GL_ARRAY_BUFFER, v_pos * 3 * sizeof(float),
+	R_GenBuffers(1, &sky_stencil_vbo);
+	GL_BindBuffer(GL_ARRAY_BUFFER, sky_stencil_vbo);
+	R_BufferData(GL_ARRAY_BUFFER, v_pos * 3 * sizeof(float),
 			verts, GL_STATIC_DRAW);
 
-	glEnableVertexAttribArray_fp(ATTR_POSITION);
-	glVertexAttribPointer_fp(ATTR_POSITION, 3, GL_FLOAT, GL_FALSE,
+	R_EnableVertexAttribArray(ATTR_POSITION);
+	R_VertexAttribPointer(ATTR_POSITION, 3, GL_FLOAT, GL_FALSE,
 				 3 * sizeof(float), (void *)0);
 
-	glGenBuffers_fp(1, &sky_stencil_ibo);
-	glBindBuffer_fp(GL_ELEMENT_ARRAY_BUFFER, sky_stencil_ibo);
-	glBufferData_fp(GL_ELEMENT_ARRAY_BUFFER, idx_pos * sizeof(unsigned int),
+	R_GenBuffers(1, &sky_stencil_ibo);
+	GL_BindBuffer(GL_ELEMENT_ARRAY_BUFFER, sky_stencil_ibo);
+	R_BufferData(GL_ELEMENT_ARRAY_BUFFER, idx_pos * sizeof(unsigned int),
 			indices, GL_STATIC_DRAW);
 
-	glBindVertexArray_fp(0);
+	R_BindVertexArray(0);
 	sky_stencil_total_indices = idx_pos;
 
 	free(verts);

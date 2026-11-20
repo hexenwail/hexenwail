@@ -246,7 +246,8 @@ def stmt_start(text, i):
     the program inside its own call."""
     return max(text.rfind(c, 0, i) for c in ";{}") + 1
 FLUSHES = re.compile(r"\bGL_ImmEnd\s*\(|\bR_FlushUniforms\s*\(")
-RAWDRAW = re.compile(r"\bglDraw\w*\s*\(")
+# R_DrawElements* is gl_vbo.c's indexed-draw seam (#340 P2d): a draw as the glDraw* it wraps.
+RAWDRAW = re.compile(r"\b(?:glDraw\w*|R_DrawElements(?:Instanced)?)\s*\(")
 
 
 def flushes_first(text):
