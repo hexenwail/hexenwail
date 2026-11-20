@@ -45,6 +45,7 @@
 #include "rg_internal.h"
 #include "rg_spirv.h"
 #include "gl_texbind.h"		/* RT_MAX_TEXTURE_UNITS */
+#include "gl_lightcluster.h"	/* LIGHT_SSBO_BINDING */
 
 /* This run's blob source (see the top): a -gpushaders directory, or the
  * embedded table. */
@@ -137,10 +138,12 @@ enum {
 	SPV_OpVariable = 59,
 	SPV_OpDecorate = 71,
 	SPV_DecBlock = 2,
+	SPV_DecBufferBlock = 3,
 	SPV_DecBinding = 33,
 	SPV_DecDescriptorSet = 34,
 	SPV_ScUniformConstant = 0,
 	SPV_ScUniform = 2,
+	SPV_ScStorageBuffer = 12,
 	SPV_Dim2D = 1,
 	SPV_Dim3D = 2,
 	SPV_DimCube = 3
@@ -150,9 +153,40 @@ typedef struct {
 	Uint32		op;		/* the instruction that defines the id */
 	Uint32		a, b, c, d, e;	/* its first operands after the result id */
 	Uint32		set, binding;
-	qboolean	has_set, has_binding, block;
+	qboolean	has_set, has_binding, block, bufblock;
 	const char	*name;
 } spvid_t;
+
+/* Each storage block's GL binding point, by block name (#340 P2e).  The
+ * Vulkan SPIR-V carries only the SDL_GPU slot (VERT_SSBO / FRAG_SSBO's `vk`
+ * in layout.inc); the point is the `gl` beside it, which the C side binds
+ * with GL_BindBufferBase / Range.  A name keeps one point in every stage
+ * that declares it, so the name is the key: tools/test_rg_sources.py holds
+ * this table to every storage block in engine/shaders. */
+static const struct {
+	const char	*block;
+	int		point;
+} rg_storage_points[] = {
+	{ "InstanceBuffer",	0 },	/* R_DrawAliasInstanced's GL_Upload */
+	{ "PoseBuffer",		1 },	/* gl_mesh.c ssbo_pose */
+	{ "ShadeDots",		2 },	/* gl_shader.c ubo_shadedots */
+	{ "MD3PoseBuffer",	3 },	/* gl_mesh.c ssbo_pose_md3 */
+	{ "BoneBuffer",		4 },	/* gl_mesh.c ssbo_bones */
+	{ "GpuParticleBuffer",	0 },	/* r_part.c, never drawn */
+	{ "LightBuffer",	LIGHT_SSBO_BINDING },	/* gl_lightcluster.c, compute: P5 */
+};
+
+int RG_StoragePoint (const char *block)
+{
+	size_t	i;
+
+	for (i = 0; i < sizeof(rg_storage_points) / sizeof(rg_storage_points[0]); i++)
+	{
+		if (!strcmp (rg_storage_points[i].block, block))
+			return rg_storage_points[i].point;
+	}
+	return -1;
+}
 
 /* An OpTypeImage's Dim and Arrayed operands as the texture kind a unit
  * holds.  Anything else (1D, rect, buffer) reads as 2D; no stage in
@@ -173,6 +207,7 @@ static qboolean RG_Reflect (const Uint32 *w, size_t nwords, int sampler_set, int
 	spvid_t		*ids;
 	Uint32		bound, id;
 	size_t		p;
+	int		nssbo = 0;
 
 	memset (out, 0, sizeof(*out));
 	if (nwords < 5 || w[0] != 0x07230203u)
@@ -206,6 +241,8 @@ static qboolean RG_Reflect (const Uint32 *w, size_t nwords, int sampler_set, int
 
 				if (w[p + 2] == SPV_DecBlock)
 					d->block = true;
+				else if (w[p + 2] == SPV_DecBufferBlock)
+					d->bufblock = true;
 				else if (w[p + 2] == SPV_DecBinding && wc >= 4)
 					d->binding = w[p + 3], d->has_binding = true;
 				else if (w[p + 2] == SPV_DecDescriptorSet && wc >= 4)
@@ -305,6 +342,30 @@ static qboolean RG_Reflect (const Uint32 *w, size_t nwords, int sampler_set, int
 			else
 				s->unit = RG_UNIT_NONE;
 		}
+		else if (ty->op == SPV_OpTypeStruct &&
+			 ((v->b == SPV_ScStorageBuffer && ty->block) || (v->b == SPV_ScUniform && ty->bufblock)))
+		{
+			/* A storage block: StorageBuffer + Block from SPIR-V 1.3, Uniform
+			 * + BufferBlock before.  Only the read-only set's (the samplers'
+			 * set) are bound by slot here; a compute stage's read-write set
+			 * is P5's.  `slot` holds the raw binding until RG_CheckStage
+			 * knows how many textures come first. */
+			rgssbo_t	*sb;
+
+			if (!v->has_binding || (int)v->set != sampler_set)
+				continue;
+			if (nssbo == RG_MAX_STAGE_SSBOS || v->binding > 255)
+			{
+				Con_Printf ("SDL_GPU: %s: more than %d storage blocks, or a binding past 255\n",
+					    blob, RG_MAX_STAGE_SSBOS);
+				free (ids);
+				return false;
+			}
+			sb = &out->ssbos[nssbo++];
+			q_strlcpy (sb->name, ty->name ? ty->name : "", sizeof(sb->name));
+			sb->slot = (Uint8) v->binding;
+			sb->point = RG_StoragePoint (sb->name);
+		}
 		else if (v->b == SPV_ScUniform && ty->op == SPV_OpTypeStruct && ty->block)
 		{
 			rgubo_t		*u;
@@ -324,6 +385,7 @@ static qboolean RG_Reflect (const Uint32 *w, size_t nwords, int sampler_set, int
 		}
 	}
 	free (ids);
+	out->num_ssbos = nssbo;
 	/* SDL_GPU numbers each class densely from 0, and the recorder indexes
 	 * its binding arrays with these: a hole or a repeat would hand SDL a
 	 * NULL texture or write past the array. */
@@ -406,12 +468,39 @@ static qboolean RG_CheckStage (rprog_id_t id, int stage, const void *code, size_
 	}
 	if (!RG_Reflect ((const Uint32 *) code, size / 4, sampler_set, ubo_set, out, blob))
 		return false;
-	out->num_ssbos = refl->ro_storage_buffers;
-	if (out->num_ssbos > RG_MAX_STAGE_SSBOS)
+	if (refl->ro_storage_buffers > RG_MAX_STAGE_SSBOS)
 	{
 		Con_Printf ("SDL_GPU: %s has %d read-only storage buffers, the backend binds %d\n",
-			    blob, out->num_ssbos, RG_MAX_STAGE_SSBOS);
+			    blob, refl->ro_storage_buffers, RG_MAX_STAGE_SSBOS);
 		return false;
+	}
+	if (out->num_ssbos != refl->ro_storage_buffers)
+	{
+		Con_Printf ("SDL_GPU: %s.vk.spv from %s has %d read-only storage blocks, this build "
+			    "expects %d\n", blob, rg_spvsource, out->num_ssbos, refl->ro_storage_buffers);
+		return false;
+	}
+	/* In the read-only set the storage buffers follow the sampled and the
+	 * storage textures: the SDL_GPU slot is the binding past those, and
+	 * the slots are 0..n-1, each once, like every other class. */
+	{
+		Uint32	seen = 0;
+		int	i, first = refl->samplers + refl->ro_storage_textures;
+
+		for (i = 0; i < out->num_ssbos; i++)
+		{
+			int	slot = (int) out->ssbos[i].slot - first;
+
+			if (slot < 0 || slot >= out->num_ssbos || (seen & (1u << slot)))
+			{
+				Con_Printf ("SDL_GPU: %s: storage block %s at binding %d is not one of slots "
+					    "0..%d after the %d textures\n", blob, out->ssbos[i].name,
+					    out->ssbos[i].slot, out->num_ssbos - 1, first);
+				return false;
+			}
+			seen |= 1u << slot;
+			out->ssbos[i].slot = (Uint8) slot;
+		}
 	}
 	if (out->num_samplers != refl->samplers || out->num_ubos != refl->uniform_buffers)
 	{

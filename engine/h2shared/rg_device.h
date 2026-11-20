@@ -135,6 +135,19 @@ void	RG_VertexAttribPointer (GLuint index, GLint size, GLenum type, GLboolean no
 				qboolean integer, GLsizei stride, const void *pointer);
 void	RG_VertexAttrib4f (GLuint index, GLfloat x, GLfloat y, GLfloat z, GLfloat w);
 
+/* gl_buffer.c's indexed-binding and streaming seams (rg_buffer.c, #340 P2e).
+ * A GL_SHADER_STORAGE_BUFFER binding point is what a draw binds to the
+ * storage slot its program's reflection maps that point to; uniform-buffer
+ * points reach nothing, since gl_uniforms.c's mirrors are pushed instead.
+ * As in GL, both binds also set the target's generic binding.  RG_Upload is
+ * GL_Upload: storage data streamed for this frame, handed back as a buffer
+ * of its own at offset 0, because SDL_GPU binds a storage buffer whole. */
+void	RG_BindBufferBase (GLenum target, GLuint index, GLuint buffer);
+void	RG_BindBufferRange (GLenum target, GLuint index, GLuint buffer, GLintptr offset,
+			    GLsizeiptr size);
+void	RG_Upload (GLenum target, const void *data, size_t numbytes, GLuint *outbuf,
+		   GLintptr *outofs);
+
 /* gl_vbo.c R_DrawElements / R_DrawElementsInstanced (rg_frame.c): an
  * indexed draw from the bound VAO, with the bound program and the current
  * draw state.  `indices` is the byte offset into the element buffer, as in

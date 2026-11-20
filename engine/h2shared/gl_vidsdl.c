@@ -2067,6 +2067,13 @@ static void GL_Init_NullGL (void)
 	memset (&gl_renderer_caps, 0, sizeof(gl_renderer_caps));
 	gl_renderer_caps.profile = GL_RENDERER_DESKTOP_43;
 	gl_renderer_caps.profile_name = "SDL_GPU";
+	/* Read-only storage buffers in graphics stages (#340 P2e): rg_buffer.c
+	 * binds each GL binding point at its block's slot, so instanced alias
+	 * models and skeletal skinning draw as on GL.  Compute (the light
+	 * cluster, culling, SSAO, GPU particles) is P5 and stays off: it tests
+	 * compute_shaders, which stays false. */
+	gl_renderer_caps.shader_storage = true;
+	gl_renderer_caps.skeletal_animation = true;
 	Con_SafeDPrintf ("[RENDERER] Profile: %s\n", gl_renderer_caps.profile_name);
 	gl_max_anisotropy = 1;
 

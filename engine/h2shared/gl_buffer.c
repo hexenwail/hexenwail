@@ -31,6 +31,10 @@
 
 #include "quakedef.h"
 
+#ifdef USE_SDL_GPU
+#include "rg_device.h"
+#endif
+
 #ifndef USE_GLES
 
 #include "glheader.h"
@@ -66,11 +70,20 @@ static bufferrange_t ubo_ranges[CACHED_BUFFER_RANGES];
  * vertex target would write a null-table name into rg_buffer.c's array or
  * element binding (#340 P2d). */
 
+/* Under -gpu the storage binding points are rg_buffer.c's (#340 P2e), ahead
+ * of the cache, which shadows the GL context only. */
 void GL_BindBufferRange (GLenum target, GLuint index,
 			 GLuint buffer, GLintptr offset, GLsizeiptr size)
 {
 	bufferrange_t *cache = NULL;
 
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_BindBufferRange (target, index, buffer, offset, size);
+		return;
+	}
+#endif
 	if (target == GL_SHADER_STORAGE_BUFFER && index < CACHED_BUFFER_RANGES)
 		cache = &ssbo_ranges[index];
 	else if (target == GL_UNIFORM_BUFFER && index < CACHED_BUFFER_RANGES)
@@ -96,6 +109,13 @@ void GL_BindBufferBase (GLenum target, GLuint index, GLuint buffer)
 {
 	bufferrange_t *cache = NULL;
 
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_BindBufferBase (target, index, buffer);
+		return;
+	}
+#endif
 	if (target == GL_SHADER_STORAGE_BUFFER && index < CACHED_BUFFER_RANGES)
 		cache = &ssbo_ranges[index];
 	else if (target == GL_UNIFORM_BUFFER && index < CACHED_BUFFER_RANGES)
@@ -125,6 +145,14 @@ void GL_BindBuffersRange (GLenum target, GLuint first, GLsizei count,
 {
 	GLsizei i;
 
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		for (i = 0; i < count; i++)
+			RG_BindBufferRange (target, first + i, buffers[i], offsets[i], sizes[i]);
+		return;
+	}
+#endif
 	if (gl_multi_bind_able)
 	{
 		bufferrange_t *cache = NULL;
@@ -434,6 +462,15 @@ void GL_Upload (GLenum target, const void *data, size_t numbytes,
 	size_t align;
 	frameres_t *frame;
 
+	/* -gpu streams storage data through rg_buffer.c, a buffer per upload
+	 * (#340 P2e); the ring below is GL's. */
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_Upload (target, data, numbytes, outbuf, outofs);
+		return;
+	}
+#endif
 	align = (target == GL_UNIFORM_BUFFER) ? gl_ubo_align : gl_ssbo_align;
 	if (align < 1)
 		align = 1;
@@ -513,6 +550,13 @@ void GL_BindBufferRange (GLenum target, GLuint index,
 
 void GL_BindBufferBase (GLenum target, GLuint index, GLuint buffer)
 {
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_BindBufferBase (target, index, buffer);
+		return;
+	}
+#endif
 	glBindBufferBase_fp (target, index, buffer);
 }
 
@@ -552,10 +596,6 @@ void GL_DeleteParticleResources (GLuint ssbo, GLuint vao)
  *  The draws that read them are gl_vbo.c's R_DrawElements pair.
  * ---------------------------------------------------------------------- */
 
-#ifdef USE_SDL_GPU
-#include "rg_device.h"
-#endif
-
 /* The generic (non-indexed) binding point is deliberately NOT cached.
  *
  * It used to be, and skipping the "redundant" bind is what produced the
@@ -582,10 +622,13 @@ void GL_DeleteParticleResources (GLuint ssbo, GLuint vao)
  * glBindBufferBase_fp / glBindBufferRange_fp call exists outside this file;
  * the one remaining way to stale that cache is deleting a buffer and having
  * GL hand the name back out, which GL_ForgetBuffer covers.
+ * (gl_mesh.c and gl_shader.c bind through this wrapper since #340 P2e;
+ * the compute files still bind raw, so the argument stands.)
  *
  * Under -gpu the element and array bindings are what a VAO and a pointer
- * capture (rg_buffer.c); the uniform and storage targets reach nothing
- * there (gl_uniforms.c mirrors the blocks, storage is P5). */
+ * capture (rg_buffer.c), and the storage target is what glBufferData fills
+ * a storage buffer through (#340 P2e); the uniform target reaches nothing
+ * there (gl_uniforms.c mirrors the blocks). */
 void GL_BindBuffer (GLenum target, GLuint buffer)
 {
 #ifdef USE_SDL_GPU

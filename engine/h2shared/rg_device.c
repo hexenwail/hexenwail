@@ -330,8 +330,9 @@ void RG_Status (void)
 	Con_Printf ("[RENDERER] SDL_GPU driver=%s device=%s present=%s swapchain=%s\n",
 		    RG_DriverName (), name, RG_PresentModeName (rg_present_mode),
 		    rg_dev ? "SDR" : "none");
-	Con_Printf ("[RENDERER] SDL_GPU P2d: 2D, world, brush and alias models and the stencilled sky drawn, the world, "
-		    "brush models and sky pre-pass from their vertex buffers; GL runs against "
+	Con_Printf ("[RENDERER] SDL_GPU P2e: 2D, world, brush and alias models and the stencilled sky drawn, the world, "
+		    "brush models, sky pre-pass and alias meshes from their vertex buffers, instanced and "
+		    "skeletal alias models from their storage buffers; GL runs against "
 		    "the null table (%lu calls into %d entry points, see gpu_unrouted)\n", total, hit);
 	Con_Printf ("[RENDERER] SDL_GPU shaders from %s\n", RG_ShaderSource () ? RG_ShaderSource () : "nowhere");
 	if (rg_dev)

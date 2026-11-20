@@ -25,13 +25,27 @@
  * pass runs ahead of its segment's draws, so an upload into a buffer that a
  * draw already recorded in the open segment reads would change what that
  * draw sees: the upload first ends the segment (RG_Frame_Flush), as
- * rg_resource.c does for textures.  Every buffer is created with vertex and
- * index usage: GL does not say which a name will be until it is drawn from.
+ * rg_resource.c does for textures.  Every buffer is created with vertex,
+ * index and graphics storage-read usage: GL does not say which a name will
+ * be until it is drawn from.
+ *
+ * Storage (#340 P2e).  GL_SHADER_STORAGE_BUFFER's generic binding is
+ * context state glBufferData fills through, as GL_ARRAY_BUFFER is; its
+ * indexed binding points (glBindBufferBase / Range) are context state a
+ * draw reads: rg_frame.c binds each storage slot of the program to the
+ * buffer at the GL point its block names (RG_StoragePoint), or the zeroed
+ * stand-in when that point holds nothing.  SDL_GPU binds a storage buffer
+ * whole, with no offset, so a range bind is honoured only at offset 0 --
+ * which is every one the engine makes under -gpu, because GL_Upload's arm
+ * here (RG_Upload) hands each streamed upload a buffer of its own rather
+ * than a range of GL's ring.  The alternative, copying each range into a
+ * buffer of its own at draw time, is the same buffer per range plus a
+ * GPU copy, for ranges that are only ever whole uploads.
  *
  * Names.  Buffer and vertex-array names are tagged (RGB_NAME_TAG): the
- * calls P2d leaves raw (gl_mesh.c's alias meshes, the compute and storage
- * buffers; tools/test_buffer_routing.py's ledger) still take names from the
- * null table, and a tag means one of those reaching a draw is reported as
+ * calls still raw (the compute, post-process and shadow buffers;
+ * tools/test_buffer_routing.py's ledger) still take names from the null
+ * table, and a tag means one of those reaching a draw is reported as
  * unknown rather than mistaken for a buffer of ours.
  *
  * The draw (RG_Buf_ForDraw, for rg_frame.c's RG_DrawIndexed).  The bound
@@ -44,8 +58,9 @@
  * rg_frame.c puts in the stream -- one record for one instance, so every
  * vertex reads it, and a copy per instance for an instanced draw.  A
  * zero-pitch vertex-rate slot would be smaller, but Metal (P7) has no
- * zero stride.  Locations past 3 have no such fallback: every routed path
- * feeds exactly 0-3, and the alias meshes that use more are P2e.
+ * zero stride.  Locations past 3 have no such fallback: the one VAO that
+ * uses more, the skeletal mesh's (bone indices at 4), enables every input
+ * its program reads.
  *
  * Copyright (C) 2026  Contributors of the uHexen2 project
  *
@@ -69,6 +84,16 @@
 #ifndef GL_ELEMENT_ARRAY_BUFFER
 #define GL_ELEMENT_ARRAY_BUFFER		0x8893
 #endif
+#ifndef GL_UNIFORM_BUFFER
+#define GL_UNIFORM_BUFFER		0x8A11
+#endif
+#ifndef GL_SHADER_STORAGE_BUFFER
+#define GL_SHADER_STORAGE_BUFFER	0x90D2
+#endif
+
+/* GL_SHADER_STORAGE_BUFFER binding points shadowed: the engine's highest is
+ * LIGHT_SSBO_BINDING, 8, past GL 4.3's minimum of 8 in all. */
+#define RGB_SSBO_POINTS	16
 
 #define RGB_NAME_TAG	0x40000000u
 #define RGB_NAME_MASK	0x3FFFFFFFu
@@ -125,7 +150,22 @@ static rgnames_t	rgb_vaonames = { NULL, sizeof(rgvao_t), 0, 0, NULL, 0, 0 };
 #define RGB_VAOS	((rgvao_t *) rgb_vaonames.items)
 
 static GLuint		rgb_array_buffer;	/* GL_ARRAY_BUFFER */
+static GLuint		rgb_storage_buffer;	/* GL_SHADER_STORAGE_BUFFER, the generic binding */
 static GLuint		rgb_vao;		/* GL_VERTEX_ARRAY_BINDING */
+
+/* The indexed GL_SHADER_STORAGE_BUFFER binding points, context state as in
+ * GL.  size 0 is glBindBufferBase: the whole buffer. */
+typedef struct {
+	GLuint		buffer;
+	GLintptr	offset;
+	GLsizeiptr	size;
+} rgbpoint_t;
+static rgbpoint_t	rgb_points[RGB_SSBO_POINTS];
+
+/* RG_Upload's buffers: one per upload in a frame, reused from the next
+ * frame on with cycling, so a draw still in flight keeps its bytes. */
+static GLuint		*rgb_stream;
+static int		rgb_nstream, rgb_maxstream, rgb_stream_used, rgb_stream_last;
 /* VAO 0: GL core has none to draw from, but binding an element buffer or
  * setting a pointer with nothing bound still has to land somewhere. */
 static rgvao_t		rgb_vao0;
@@ -138,6 +178,9 @@ static int		rgb_numretired, rgb_maxretired;
 
 static Uint32		rgb_pending_bytes;
 static unsigned long	rgb_created, rgb_uploads, rgb_upload_bytes;
+static unsigned long	rgb_streamed, rgb_streamed_bytes;
+
+static void RGB_Stamp (rgbuf_t *b);
 
 /* ------------------------------------------------------------------ */
 /* Names                                                               */
@@ -337,6 +380,14 @@ void RG_DeleteBuffers (GLsizei n, const GLuint *buffers)
 		 * buffers, so the GL difference is never seen. */
 		if (rgb_array_buffer == buffers[i])
 			rgb_array_buffer = 0;
+		if (rgb_storage_buffer == buffers[i])
+			rgb_storage_buffer = 0;
+		/* and every indexed binding point it occupied goes back to 0 */
+		for (k = 0; k < RGB_SSBO_POINTS; k++)
+		{
+			if (rgb_points[k].buffer == buffers[i])
+				memset (&rgb_points[k], 0, sizeof(rgb_points[k]));
+		}
 		RGB_Detach (&rgb_vao0, buffers[i]);
 		for (k = 1; k <= rgb_vaonames.used; k++)
 		{
@@ -351,12 +402,15 @@ void RG_BindBuffer (GLenum target, GLuint buffer)
 {
 	rgvao_t	*v;
 
-	/* Uniform and storage targets are not routed (gl_uniforms.c mirrors
-	 * the blocks; storage is P5): nothing here reads them. */
+	/* The uniform target is not routed: gl_uniforms.c mirrors the blocks,
+	 * and nothing here reads it. */
 	switch (target)
 	{
 	case GL_ARRAY_BUFFER:
 		rgb_array_buffer = buffer;
+		break;
+	case GL_SHADER_STORAGE_BUFFER:
+		rgb_storage_buffer = buffer;
 		break;
 	case GL_ELEMENT_ARRAY_BUFFER:
 		v = RGB_Vao (rgb_vao);
@@ -376,6 +430,8 @@ static rgbuf_t *RGB_Bound (GLenum target, const char *what)
 
 	if (target == GL_ARRAY_BUFFER)
 		name = rgb_array_buffer;
+	else if (target == GL_SHADER_STORAGE_BUFFER)
+		name = rgb_storage_buffer;
 	else if (target == GL_ELEMENT_ARRAY_BUFFER)
 	{
 		v = RGB_Vao (rgb_vao);
@@ -392,11 +448,38 @@ static rgbuf_t *RGB_Bound (GLenum target, const char *what)
 	return b;
 }
 
+/* b's SDL_GPUBuffer, made `size` bytes now; the old one retired.  Every
+ * buffer can be drawn from as vertices, indices and read-only storage: GL
+ * does not say which a name will be until it is bound (#340 P2e). */
+static qboolean RGB_Create (rgbuf_t *b, Uint32 size)
+{
+	SDL_GPUBufferCreateInfo	ci;
+
+	RGB_Retire (b->buf);
+	b->buf = NULL;
+	b->size = 0;
+	if (!size)
+		return true;
+	SDL_zero (ci);
+	ci.usage = SDL_GPU_BUFFERUSAGE_VERTEX | SDL_GPU_BUFFERUSAGE_INDEX |
+		   SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
+	ci.size = size;
+	b->buf = SDL_CreateGPUBuffer (rg_dev, &ci);
+	if (!b->buf)
+	{
+		Con_Printf ("SDL_GPU: cannot create a %u-byte buffer (%s)\n",
+			    (unsigned int) size, SDL_GetError ());
+		return false;
+	}
+	b->size = size;
+	rgb_created++;
+	return true;
+}
+
 void RG_BufferData (GLenum target, GLsizeiptr size, const void *data, GLenum usage)
 {
 	rgbuf_t			*b = RGB_Bound (target, "glBufferData on a target other than "
-						"GL_ARRAY_BUFFER / GL_ELEMENT_ARRAY_BUFFER (dropped)");
-	SDL_GPUBufferCreateInfo	ci;
+						"GL_ARRAY_BUFFER / ELEMENT_ARRAY / SHADER_STORAGE (dropped)");
 
 	(void) usage;	/* SDL_GPU has no usage hint; the cycling below is the stream case */
 	if (!b)
@@ -410,27 +493,8 @@ void RG_BufferData (GLenum target, GLsizeiptr size, const void *data, GLenum usa
 	 * would read are both replaced. */
 	RGB_FlushIfRead (b);
 	RGB_DropUploads (b);
-	if (!b->buf || b->size != (Uint32) size)
-	{
-		RGB_Retire (b->buf);
-		b->buf = NULL;
-		b->size = 0;
-		if (size > 0)
-		{
-			SDL_zero (ci);
-			ci.usage = SDL_GPU_BUFFERUSAGE_VERTEX | SDL_GPU_BUFFERUSAGE_INDEX;
-			ci.size = (Uint32) size;
-			b->buf = SDL_CreateGPUBuffer (rg_dev, &ci);
-			if (!b->buf)
-			{
-				Con_Printf ("SDL_GPU: cannot create a %u-byte buffer (%s)\n",
-					    (unsigned int) size, SDL_GetError ());
-				return;
-			}
-			b->size = (Uint32) size;
-			rgb_created++;
-		}
-	}
+	if ((!b->buf || b->size != (Uint32) size) && !RGB_Create (b, (Uint32) size))
+		return;
 	if (data && size > 0)
 		RGB_Queue (b, 0, (Uint32) size, data, true);
 }
@@ -438,7 +502,7 @@ void RG_BufferData (GLenum target, GLsizeiptr size, const void *data, GLenum usa
 void RG_BufferSubData (GLenum target, GLintptr offset, GLsizeiptr size, const void *data)
 {
 	rgbuf_t	*b = RGB_Bound (target, "glBufferSubData on a target other than "
-				"GL_ARRAY_BUFFER / GL_ELEMENT_ARRAY_BUFFER (dropped)");
+				"GL_ARRAY_BUFFER / ELEMENT_ARRAY / SHADER_STORAGE (dropped)");
 
 	if (!b || size <= 0 || !data)
 		return;
@@ -450,6 +514,136 @@ void RG_BufferSubData (GLenum target, GLintptr offset, GLsizeiptr size, const vo
 	}
 	RGB_FlushIfRead (b);
 	RGB_Queue (b, (Uint32) offset, (Uint32) size, data, false);
+}
+
+/* ------------------------------------------------------------------ */
+/* Storage binding points and the stream (#340 P2e)                    */
+/* ------------------------------------------------------------------ */
+
+/* Both set the indexed point and, as GL does, the generic binding.  The
+ * uniform target reaches nothing: gl_uniforms.c's CPU mirrors are what a
+ * draw pushes. */
+void RG_BindBufferRange (GLenum target, GLuint index, GLuint buffer, GLintptr offset,
+			 GLsizeiptr size)
+{
+	if (target == GL_UNIFORM_BUFFER)
+		return;
+	if (target != GL_SHADER_STORAGE_BUFFER)
+	{
+		RG_NoteUnhandled ("indexed buffer binding on a target other than GL_SHADER_STORAGE_BUFFER "
+				  "/ GL_UNIFORM_BUFFER (dropped)");
+		return;
+	}
+	rgb_storage_buffer = buffer;
+	if (index >= RGB_SSBO_POINTS)
+	{
+		RG_NoteUnhandled ("storage binding point past 15 (dropped)");
+		return;
+	}
+	rgb_points[index].buffer = buffer;
+	rgb_points[index].offset = buffer ? offset : 0;
+	rgb_points[index].size = buffer ? size : 0;
+}
+
+void RG_BindBufferBase (GLenum target, GLuint index, GLuint buffer)
+{
+	RG_BindBufferRange (target, index, buffer, 0, 0);
+}
+
+/* GL_Upload's -gpu arm.  GL streams into one ring buffer per frame and
+ * binds each upload as a range of it; SDL_GPU binds a storage buffer whole,
+ * with no offset, so each upload in a frame gets a buffer of its own and is
+ * handed back at offset 0.  The buffers are kept and reused in order the
+ * next frame, grown to a power of two so a count that drifts does not
+ * re-create one every frame, and each upload cycles: the previous frame's
+ * draws may still be reading the old bytes.  Uniform data is never streamed
+ * under -gpu (gl_uniforms.c's mirrors are pushed), so only storage is. */
+void RG_Upload (GLenum target, const void *data, size_t numbytes, GLuint *outbuf,
+		GLintptr *outofs)
+{
+	rgbuf_t	*b;
+	Uint32	cap;
+	GLuint	name;
+
+	*outbuf = 0;
+	*outofs = 0;
+	if (target != GL_SHADER_STORAGE_BUFFER)
+	{
+		RG_NoteUnhandled ("GL_Upload to a target other than GL_SHADER_STORAGE_BUFFER (dropped)");
+		return;
+	}
+	if (!numbytes || numbytes > 0x40000000u)
+	{
+		if (numbytes)
+			RG_NoteUnhandled ("GL_Upload of more than 1 GB (dropped)");
+		return;
+	}
+	if (rgb_stream_used == rgb_nstream)
+	{
+		if (rgb_nstream == rgb_maxstream)
+		{
+			rgb_maxstream = rgb_maxstream ? rgb_maxstream * 2 : 8;
+			rgb_stream = (GLuint *) realloc (rgb_stream, rgb_maxstream * sizeof(GLuint));
+			if (!rgb_stream)
+				Sys_Error ("SDL_GPU: out of memory for the storage stream");
+		}
+		RG_GenBuffers (1, &rgb_stream[rgb_nstream++]);
+	}
+	b = RGB_Buf (rgb_stream[rgb_stream_used]);
+	if (!b)
+		return;
+	for (cap = 256; cap < (Uint32) numbytes; cap <<= 1)
+		;
+	if ((!b->buf || b->size < (Uint32) numbytes || b->size / 4 > cap) && !RGB_Create (b, cap))
+		return;
+	/* Taken before queueing: a queue past 64 MB flushes, and outside a frame
+	 * that ends the frame and rewinds the stream. */
+	name = rgb_stream[rgb_stream_used++];
+	RGB_FlushIfRead (b);
+	RGB_Queue (b, 0, (Uint32) numbytes, data, true);
+	*outbuf = name;
+	rgb_streamed++;
+	rgb_streamed_bytes += numbytes;
+}
+
+SDL_GPUBuffer *RG_Buf_Storage (int point, void **read)
+{
+	const rgbpoint_t	*p;
+	rgbuf_t			*b;
+
+	*read = NULL;
+	p = (point >= 0 && point < RGB_SSBO_POINTS) ? &rgb_points[point] : NULL;
+	if (!p || !p->buffer)
+	{
+		RG_NoteUnhandled ("read-only storage buffer with nothing bound at its GL binding point "
+				  "(stand-in bound)");
+		return NULL;
+	}
+	b = RGB_Buf (p->buffer);
+	if (!b || !b->buf)
+	{
+		RG_NoteUnhandled ("storage binding point holds no SDL_GPU buffer with data (stand-in bound)");
+		return NULL;
+	}
+	if (p->offset != 0)
+	{
+		RG_NoteUnhandled ("storage range at a non-zero offset: SDL_GPU binds whole buffers "
+				  "(stand-in bound)");
+		return NULL;
+	}
+	if (p->size < 0 || (Uint64) p->size > b->size)
+	{
+		RG_NoteUnhandled ("storage range past the end of its buffer (stand-in bound)");
+		return NULL;
+	}
+	*read = b;
+	return b->buf;
+}
+
+void RG_Buf_StampRead (void *read)
+{
+	if (read)
+		RGB_Stamp ((rgbuf_t *) read);
 }
 
 /* ------------------------------------------------------------------ */
@@ -652,8 +846,7 @@ qboolean RG_Buf_ForDraw (int index_bytes, rgvinput_t *in)
 	in->const_slot = -1;
 	if (!v)
 	{
-		RG_NoteUnhandled (rgb_vao ? "indexed draw from a VAO SDL_GPU never made (dropped; P2e for "
-					    "the alias meshes)"
+		RG_NoteUnhandled (rgb_vao ? "indexed draw from a VAO SDL_GPU never made (dropped)"
 					  : "indexed draw with no VAO bound (dropped)");
 		return false;
 	}
@@ -834,6 +1027,11 @@ void RG_Buf_EndFrame (void)
 	for (i = 0; i < rgb_numretired; i++)
 		SDL_ReleaseGPUBuffer (rg_dev, rgb_retired[i]);
 	rgb_numretired = 0;
+	/* the frame's draws are submitted: its stream buffers are free to
+	 * take the next frame's uploads, cycled */
+	if (rgb_stream_used)
+		rgb_stream_last = rgb_stream_used;
+	rgb_stream_used = 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -845,6 +1043,8 @@ void RG_Buf_Init (void)
 	int	i;
 
 	rgb_array_buffer = 0;
+	rgb_storage_buffer = 0;
+	memset (rgb_points, 0, sizeof(rgb_points));
 	rgb_vao = 0;
 	memset (&rgb_vao0, 0, sizeof(rgb_vao0));
 	rgb_vao0.alive = true;
@@ -881,6 +1081,8 @@ void RG_Buf_Shutdown (void)
 	free (rgb_retired); rgb_retired = NULL;
 	rgb_numretired = rgb_maxretired = 0;
 	rgb_pending_bytes = 0;
+	free (rgb_stream); rgb_stream = NULL;
+	rgb_nstream = rgb_maxstream = rgb_stream_used = rgb_stream_last = 0;
 }
 
 void RG_Buf_Status (void)
@@ -905,4 +1107,6 @@ void RG_Buf_Status (void)
 		    "%d vertex arrays, %lu uploads / %lu KB, %u bytes queued\n",
 		    alive, made, (unsigned long)(bytes / 1024), rgb_created, vaos,
 		    rgb_uploads, rgb_upload_bytes / 1024, (unsigned int) rgb_pending_bytes);
+	Con_Printf ("[RENDERER] SDL_GPU storage: %d stream buffers (%d used last frame), %lu streamed "
+		    "/ %lu KB\n", rgb_nstream, rgb_stream_last, rgb_streamed, rgb_streamed_bytes / 1024);
 }
