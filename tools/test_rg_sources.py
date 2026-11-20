@@ -94,6 +94,25 @@ Checked, from the sources (stock python3, lint.yml):
       world_ibo and sky_stencil_vao stay 0), and so does R_BuildWorldCull
       before its programs; alias instancing and GL_DrawAliasSkeletal need
       gl_renderer_caps.shader_storage, which GL_Init_NullGL leaves false.
+  stencil under -gpu (#340 P2c), which tools/sweep-skybox-gpu.steps checks
+  frame by frame:
+    * GL_Init_NullGL sets have_stencil = RG_DepthHasStencil () and nothing
+      else, and that is RG_FormatHasStencil (rgf_depth_fmt): the two packed
+      formats, which rg_frame.c tries first, in that order, for the scene's
+      depth target;
+    * the stencil seam's GL arms are the bare calls, RP_GL (glEnable_fp /
+      glDisable_fp (GL_STENCIL_TEST)), RP_GL (glStencilFunc_fp (func, ref,
+      mask)), RP_GL (glStencilOp_fp (sfail, dpfail, dppass)), and
+      gl_pipeline.c never calls glStencilMask or a *Separate (the -gpu arm
+      writes glStencilMask's default 0xFF to both faces; every other file is
+      kept off all stencil state by tools/test_draw_state_routing.py);
+    * rg_pipeline.c maps every GL compare func and stencil op to its own
+      SDL_GPU value, keys func, ops and compare mask from the shadow only
+      where the depth format has stencil, never keys the reference, and
+      builds one SDL_GPUStencilOpState for both faces; rg_frame.c records
+      the shadow's reference per draw and sets it with
+      SDL_SetGPUStencilReference, and a stencil clear becomes the pass's
+      stencil load op with RG_Clear's value.
 
 Usage: test_rg_sources.py [--root DIR]
 """
@@ -898,7 +917,7 @@ def body_named(root, rel, name, nth=0):
     code = strip_c_comments((root / rel).read_text(errors="replace"))
     found = [code[b:e] for n, b, e in functions(code) if n == name]
     if len(found) <= nth:
-        fail("%s: no %s -- the #340 P2b check that pins it has nothing to read" % (rel, name))
+        fail("%s: no %s -- the #340 check that pins it has nothing to read" % (rel, name))
         return None
     return found[nth]
 
@@ -1025,6 +1044,176 @@ def check_world_imm(root):
     return 0
 
 
+def norm(s):
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def case_map(body, prefix):
+    """{GL_X: SDL_..._Y} from `case GL_X: return <prefix>Y;` lines."""
+    return dict(re.findall(r"case\s+(GL_\w+)\s*:\s*return\s+(" + prefix + r"\w+)\s*;", body))
+
+
+COMPARE_MAP = {
+    "GL_NEVER": "SDL_GPU_COMPAREOP_NEVER", "GL_LESS": "SDL_GPU_COMPAREOP_LESS",
+    "GL_EQUAL": "SDL_GPU_COMPAREOP_EQUAL", "GL_LEQUAL": "SDL_GPU_COMPAREOP_LESS_OR_EQUAL",
+    "GL_GREATER": "SDL_GPU_COMPAREOP_GREATER", "GL_NOTEQUAL": "SDL_GPU_COMPAREOP_NOT_EQUAL",
+    "GL_GEQUAL": "SDL_GPU_COMPAREOP_GREATER_OR_EQUAL", "GL_ALWAYS": "SDL_GPU_COMPAREOP_ALWAYS",
+}
+STENCIL_OP_MAP = {
+    "GL_KEEP": "SDL_GPU_STENCILOP_KEEP", "GL_ZERO": "SDL_GPU_STENCILOP_ZERO",
+    "GL_REPLACE": "SDL_GPU_STENCILOP_REPLACE", "GL_INCR": "SDL_GPU_STENCILOP_INCREMENT_AND_CLAMP",
+    "GL_DECR": "SDL_GPU_STENCILOP_DECREMENT_AND_CLAMP", "GL_INVERT": "SDL_GPU_STENCILOP_INVERT",
+    "GL_INCR_WRAP": "SDL_GPU_STENCILOP_INCREMENT_AND_WRAP",
+    "GL_DECR_WRAP": "SDL_GPU_STENCILOP_DECREMENT_AND_WRAP",
+}
+STENCIL_FORMATS = ["SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT", "SDL_GPU_TEXTUREFORMAT_D32_FLOAT_S8_UINT"]
+
+
+def check_stencil(root):
+    """#340 P2c: stencil under -gpu -- have_stencil, the scene's depth
+    format, the seam's GL arms, and the -gpu arm's pipeline key, reference
+    and clear."""
+    vid = "engine/h2shared/gl_vidsdl.c"
+    b = body_named(root, vid, "GL_Init_NullGL")
+    if b is not None:
+        hs = [norm(v) for v in re.findall(r"\bhave_stencil\s*=\s*([^;=][^;]*);", b)]
+        if hs != ["RG_DepthHasStencil ()"]:
+            fail("%s: GL_Init_NullGL must set have_stencil = RG_DepthHasStencil () and nothing else "
+                 "(found %s) -- without it -gpu skips the sky pre-pass and draws the skybox over "
+                 "whatever sky brushes hide (#340 P2c)" % (vid, hs or "none"))
+
+    rf = "engine/h2shared/rg_frame.c"
+    frame = strip_c_comments((root / rf).read_text())
+    b = body_named(root, rf, "RG_FormatHasStencil")
+    if b is not None:
+        named = re.findall(r"SDL_GPU_TEXTUREFORMAT_\w+", b)
+        if sorted(named) != sorted(STENCIL_FORMATS):
+            fail("%s: RG_FormatHasStencil must name exactly the packed formats %s (found %s) (#340 P2c)"
+                 % (rf, " and ".join(STENCIL_FORMATS), named))
+    b = body_named(root, rf, "RG_DepthHasStencil")
+    if b is not None and not re.search(r"\breturn\s+rg_dev\s*!=\s*NULL\s*&&\s*RG_FormatHasStencil\s*\(\s*"
+                                       r"rgf_depth_fmt\s*\)\s*;", b):
+        fail("%s: RG_DepthHasStencil must be `return rg_dev != NULL && RG_FormatHasStencil "
+             "(rgf_depth_fmt);` -- the format the scene's depth target is made in (#340 P2c)" % rf)
+    m = re.search(r"\brgf_depth_formats\s*\[\s*\]\s*=\s*\{([^}]*)\}", frame)
+    if not m or [x.strip() for x in m.group(1).split(",") if x.strip()][:2] != STENCIL_FORMATS:
+        fail("%s: rgf_depth_formats must try %s first, in that order: SDL guarantees one of them, "
+             "and the sky needs the scene's stencil (#340 P2c)" % (rf, " then ".join(STENCIL_FORMATS)))
+    b = body_named(root, rf, "RG_Frame_Init")
+    if b is not None and not re.search(r"\brgf_depth_fmt\s*=\s*rgf_depth_formats\s*\[\s*i\s*\]\s*;", b):
+        fail("%s: RG_Frame_Init must take the scene's depth format from rgf_depth_formats (#340 P2c)" % rf)
+    b = body_named(root, rf, "RGF_EnsureScene")
+    if b is not None and not re.search(r"\brgf_depth\s*=\s*RGF_MakeTarget\s*\(\s*rgf_depth_fmt\s*,", b):
+        fail("%s: RGF_EnsureScene must make the depth target in rgf_depth_fmt (#340 P2c)" % rf)
+    b = body_named(root, rf, "RG_DrawImm")
+    if b is not None and not re.search(r"\bd->stencil_ref\s*=\s*\(Uint8\)\s*CLAMP\s*\(\s*0\s*,\s*ps->stencil_ref\s*,"
+                                       r"\s*255\s*\)\s*;", b):
+        fail("%s: RG_DrawImm must record the shadow's reference, `d->stencil_ref = (Uint8) CLAMP (0, "
+             "ps->stencil_ref, 255);` -- GL clamps it to the buffer's 8 bits (#340 P2c)" % rf)
+    b = body_named(root, rf, "RGF_Replay")
+    if b is not None and not re.search(r"if\s*\(\s*d->stencil_ref\s*!=\s*ref\s*\)\s*\{\s*ref\s*=\s*d->stencil_ref\s*;"
+                                       r"\s*SDL_SetGPUStencilReference\s*\(\s*pass\s*,\s*\(Uint8\)\s*ref\s*\)\s*;", b):
+        fail("%s: RGF_Replay must set each draw's reference, SDL_SetGPUStencilReference (pass, "
+             "(Uint8) ref) whenever d->stencil_ref changes -- the pipeline does not carry it (#340 P2c)" % rf)
+    b = body_named(root, rf, "RGF_EndSegment")
+    if b is not None:
+        if not re.search(r"\bds\.stencil_load_op\s*=\s*\(\s*\(\s*rgf_clear_mask\s*&\s*GL_STENCIL_BUFFER_BIT\s*\)\s*"
+                         r"\|\|\s*!\s*rgf_cleared\s*\)\s*\?\s*SDL_GPU_LOADOP_CLEAR\s*:\s*SDL_GPU_LOADOP_LOAD\s*;", b):
+            fail("%s: the stencil load op must clear when a clear asked for stencil or the frame has not "
+                 "started, `ds.stencil_load_op = ((rgf_clear_mask & GL_STENCIL_BUFFER_BIT) || "
+                 "!rgf_cleared) ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;` (#340 P2c)" % rf)
+        if [norm(v) for v in re.findall(r"\bclear_stencil\s*=\s*([^;]+);", b)] != ["rgf_clear_stencil"]:
+            fail("%s: the render pass must clear stencil to what RG_Clear was handed, "
+                 "`ds.clear_stencil = rgf_clear_stencil;` alone (#340 P2c)" % rf)
+        if not re.search(r"\bds\.stencil_store_op\s*=\s*SDL_GPU_STOREOP_STORE\s*;", b):
+            fail("%s: the stencil must be stored, ds.stencil_store_op = SDL_GPU_STOREOP_STORE -- the "
+                 "pre-pass and the skybox can land in different passes (#340 P2c)" % rf)
+    b = body_named(root, rf, "RG_Clear")
+    if b is not None:
+        km = re.search(r"\bmask\s*&=\s*([^;]*);", b)
+        if not km or "GL_STENCIL_BUFFER_BIT" not in km.group(1):
+            fail("%s: RG_Clear must keep GL_STENCIL_BUFFER_BIT in the mask it records (#340 P2c)" % rf)
+        if not re.search(r"if\s*\(\s*mask\s*&\s*GL_STENCIL_BUFFER_BIT\s*\)\s*rgf_clear_stencil\s*=\s*"
+                         r"\(Uint8\)\s*stencil\s*;", b):
+            fail("%s: RG_Clear must take the stencil value it is handed, `if (mask & "
+                 "GL_STENCIL_BUFFER_BIT) rgf_clear_stencil = (Uint8) stencil;` (#340 P2c)" % rf)
+
+    gp = "engine/h2shared/gl_pipeline.c"
+    arms = {
+        "R_SetStencilTest": [r"RP_GL\s*\(\s*glEnable_fp\s*\(\s*GL_STENCIL_TEST\s*\)\s*\)\s*;",
+                             r"RP_GL\s*\(\s*glDisable_fp\s*\(\s*GL_STENCIL_TEST\s*\)\s*\)\s*;"],
+        "R_SetStencilFunc": [r"RP_GL\s*\(\s*glStencilFunc_fp\s*\(\s*func\s*,\s*ref\s*,\s*mask\s*\)\s*\)\s*;"],
+        "R_SetStencilOp": [r"RP_GL\s*\(\s*glStencilOp_fp\s*\(\s*sfail\s*,\s*dpfail\s*,\s*dppass\s*\)\s*\)\s*;"],
+    }
+    for fn, rxs in arms.items():
+        b = body_named(root, gp, fn)
+        if b is None:
+            continue
+        if len(re.findall(r"\bgl\w+_fp\s*\(", b)) != len(rxs) or not all(re.search(r, b) for r in rxs):
+            fail("%s: %s's GL arm must be the bare call%s, %s (#340 P2c)"
+                 % (gp, fn, "s" if len(rxs) > 1 else "", " / ".join(r.replace("\\s*", "") for r in rxs)))
+    shadow = {"R_SetStencilFunc": (("stencil_func", "func"), ("stencil_ref", "ref"), ("stencil_mask", "mask")),
+              "R_SetStencilOp": (("stencil_sfail", "sfail"), ("stencil_dpfail", "dpfail"),
+                                 ("stencil_dppass", "dppass"))}
+    for fn, pairs in shadow.items():
+        b = body_named(root, gp, fn)
+        if b is None:
+            continue
+        for f, a in pairs:
+            if not re.search(r"\brp\.%s\s*=\s*%s\s*;" % (f, a), b):
+                fail("%s: %s must shadow rp.%s = %s -- the shadow is the -gpu arm's whole draw state "
+                     "(#340 P2c)" % (gp, fn, f, a))
+    gpc = strip_c_comments((root / gp).read_text())
+    m = re.search(r"\bglStencil(?:Mask|FuncSeparate|OpSeparate)\w*\s*\(", gpc)
+    if m:
+        fail("%s: %s -- the -gpu arm writes glStencilMask's default 0xFF to both faces; a write mask "
+             "or a per-face stencil needs its own shadow and key first (#340 P2c)" % (gp, m.group(0)))
+
+    rp = "engine/h2shared/rg_pipeline.c"
+    for fn, want, prefix in (("RG_CompareOp", COMPARE_MAP, "SDL_GPU_COMPAREOP_"),
+                             ("RG_StencilOp", STENCIL_OP_MAP, "SDL_GPU_STENCILOP_")):
+        b = body_named(root, rp, fn)
+        if b is None:
+            continue
+        got = case_map(b, prefix)
+        if got != want:
+            bad = sorted(set(want.items()) ^ set(got.items()))
+            fail("%s: %s must map each GL value to its own SDL_GPU one; differs at %s (#340 P2c)"
+                 % (rp, fn, bad[:4]))
+    pipe = strip_c_comments((root / rp).read_text())
+    km = re.search(r"typedef\s+struct\s*\{([^}]*)\}\s*rgpipekey_t\s*;", pipe)
+    if not km or re.search(r"\b\w*ref\b", km.group(1)):
+        fail("%s: rgpipekey_t must not carry the stencil reference -- it is dynamic state "
+             "(SDL_SetGPUStencilReference), and keying it would multiply the pipelines (#340 P2c)" % rp)
+    b = body_named(root, rp, "RG_MakeKey")
+    if b is not None:
+        if not re.search(r"if\s*\(\s*s->stencil_test\s*&&\s*RG_FormatHasStencil\s*\(\s*depth\s*\)\s*\)", b):
+            fail("%s: RG_MakeKey must key the stencil when the shadow tests it and the depth format has "
+                 "stencil, `if (s->stencil_test && RG_FormatHasStencil (depth))` (#340 P2c)" % rp)
+        for f, src in (("stencil_func", r"s->stencil_func"), ("stencil_mask", r"s->stencil_mask\s*&\s*0xFF"),
+                       ("sfail", r"s->stencil_sfail"), ("dpfail", r"s->stencil_dpfail"),
+                       ("dppass", r"s->stencil_dppass")):
+            if len(re.findall(r"\bk->%s\s*=" % f, b)) != 1 or not re.search(r"\bk->%s\s*=\s*%s\s*;" % (f, src), b):
+                fail("%s: RG_MakeKey must set k->%s from the shadow, once (#340 P2c)" % (rp, f))
+    b = body_named(root, rp, "RG_CreatePipeline")
+    if b is not None:
+        need = [
+            (r"\bst\.compare_op\s*=\s*RG_CompareOp\s*\(\s*k->stencil_func\s*\)\s*;", "st.compare_op = RG_CompareOp (k->stencil_func)"),
+            (r"\bst\.fail_op\s*=\s*RG_StencilOp\s*\(\s*k->sfail\s*\)\s*;", "st.fail_op = RG_StencilOp (k->sfail)"),
+            (r"\bst\.depth_fail_op\s*=\s*RG_StencilOp\s*\(\s*k->dpfail\s*\)\s*;", "st.depth_fail_op = RG_StencilOp (k->dpfail)"),
+            (r"\bst\.pass_op\s*=\s*RG_StencilOp\s*\(\s*k->dppass\s*\)\s*;", "st.pass_op = RG_StencilOp (k->dppass)"),
+            (r"\bfront_stencil_state\s*=\s*st\s*;", "ci.depth_stencil_state.front_stencil_state = st"),
+            (r"\bback_stencil_state\s*=\s*st\s*;", "ci.depth_stencil_state.back_stencil_state = st"),
+            (r"\benable_stencil_test\s*=\s*true\s*;", "ci.depth_stencil_state.enable_stencil_test = true"),
+            (r"\bcompare_mask\s*=\s*\(Uint8\)\s*k->stencil_mask\s*;", "ci.depth_stencil_state.compare_mask = (Uint8) k->stencil_mask"),
+            (r"\bwrite_mask\s*=\s*0xFF\s*;", "ci.depth_stencil_state.write_mask = 0xFF"),
+        ]
+        for rx, what in need:
+            if not re.search(rx, b):
+                fail("%s: RG_CreatePipeline must set `%s;` (#340 P2c)" % (rp, what))
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     ap.add_argument("--root", type=Path, default=ROOT)
@@ -1039,6 +1228,7 @@ def main(argv=None):
     check_flake_glslang(root)
     check_blob_source(root)
     check_world_imm(root)
+    check_stencil(root)
     nfiles = 0
     rg_files = []
     for p in sorted(eng.rglob("*")):

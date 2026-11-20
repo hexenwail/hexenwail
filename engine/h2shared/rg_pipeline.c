@@ -34,6 +34,11 @@
  *     skeleton overlay, the pointfile, a mod's in-view menu panel) therefore
  *     clamp where GL clips: geometry nearer than the near plane or past the
  *     far plane is drawn.  The x/y planes still clip what is behind the eye.
+ *   - stencil (#340 P2c).  glStencilFunc / glStencilOp set both faces, so
+ *     one SDL_GPUStencilOpState serves front and back.  The reference is
+ *     dynamic state (SDL_SetGPUStencilReference, rg_frame.c's replay), so a
+ *     ref change costs no pipeline; func, ops and compare mask are keyed.
+ *     GL_INCR / GL_DECR clamp and the _WRAP pair wraps, as in GL.
  *
  * Copyright (C) 2026  Contributors of the uHexen2 project
  *
@@ -182,8 +187,18 @@ static qboolean RG_MakeKey (rgpipekey_t *k, const rgprog_t *prog, SDL_GPUPrimiti
 		k->poly_factor = s->poly_factor;
 		k->poly_units = s->poly_units;
 	}
-	if (s->stencil_test)
+	/* GL runs the stencil test only where there is a stencil buffer: on a
+	 * target without one it passes and writes nothing, so it is left out. */
+	if (s->stencil_test && RG_FormatHasStencil (depth))
 	{
+		if (RG_CompareOp (s->stencil_func) == SDL_GPU_COMPAREOP_INVALID ||
+		    RG_StencilOp (s->stencil_sfail) == SDL_GPU_STENCILOP_INVALID ||
+		    RG_StencilOp (s->stencil_dpfail) == SDL_GPU_STENCILOP_INVALID ||
+		    RG_StencilOp (s->stencil_dppass) == SDL_GPU_STENCILOP_INVALID)
+		{
+			RG_NoteUnhandled ("stencil func or op with no SDL_GPU equivalent");
+			return false;
+		}
 		k->stencil = 1;
 		k->stencil_func = s->stencil_func;
 		k->stencil_mask = s->stencil_mask & 0xFF;
@@ -259,6 +274,7 @@ static SDL_GPUGraphicsPipeline *RG_CreatePipeline (const rgpipekey_t *k, const r
 		ci.depth_stencil_state.back_stencil_state = st;
 		ci.depth_stencil_state.enable_stencil_test = true;
 		ci.depth_stencil_state.compare_mask = (Uint8) k->stencil_mask;
+		/* glStencilMask's default; the engine never changes it. */
 		ci.depth_stencil_state.write_mask = 0xFF;
 	}
 

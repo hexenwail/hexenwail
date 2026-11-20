@@ -316,5 +316,7 @@ void	RG_Frame_End (qboolean show);	/* RG_EndFrame's body */
 void	RG_Frame_Status (void);
 /* The block rg_frame.c registered under `name`, -1 if none. */
 int	RG_Frame_BlockIndex (const char *name);
+/* A depth format with a stencil aspect (D24S8 / D32S8). */
+qboolean RG_FormatHasStencil (SDL_GPUTextureFormat fmt);
 
 #endif /* RG_INTERNAL_H */

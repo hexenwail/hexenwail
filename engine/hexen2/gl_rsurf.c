@@ -3714,8 +3714,8 @@ void R_BuildSkyStencilVBO (void)
 	R_FreeSkyStencilVBO();
 #ifdef USE_SDL_GPU
 	/* As R_BuildWorldVBO: sky_stencil_vao stays 0, so the sky pre-pass takes
-	 * its GL_ImmEnd fallback (#340 P2b; the pre-pass itself waits on the
-	 * stencil, P2c). */
+	 * its GL_ImmEnd fallback (#340 P2b), which -gpu runs since its scene
+	 * target has a stencil (P2c). */
 	if (R_GPU ())
 		return;
 #endif
