@@ -141,6 +141,28 @@ Checked, from the sources (stock python3, lint.yml):
       submit (BUFFER_PINS).  tools/test_buffer_routing.py keeps every other
       file off the raw calls; tools/test_rg_buffer_shadow.py runs
       rg_buffer.c itself against a fake SDL_GPU.
+  storage buffers under -gpu (#340 P2e), what instanced and skeletal alias
+  models read, which tools/sweep-alias-gpu.steps draws:
+    * gl_buffer.c's GL_BindBufferBase, GL_BindBufferRange,
+      GL_BindBuffersRange and GL_Upload have an SDL_GPU arm ahead of every
+      GL call (SEAMS);
+    * rg_shader.c's block-name table (RG_StoragePoint) is exactly the GL
+      binding point of every storage block a graphics stage in
+      engine/shaders declares -- VERT_SSBO / FRAG_SSBO's `gl`, or a plain
+      layout(std430, binding = N) -- each name one point everywhere, and
+      no entry without a declaration; RG_CheckStage numbers each block's
+      slot past the stage's sampled and storage textures;
+    * rg_buffer.c makes every buffer with graphics storage-read usage,
+      refuses a storage range at a non-zero offset (SDL_GPU binds whole
+      buffers) and hands GL_Upload's arm back at offset 0, queued with
+      cycling on; rg_frame.c binds each storage slot to RG_Buf_Storage's
+      buffer for the block's point, or the stand-in, and replays the
+      draw's own slots;
+    * GL_Init_NullGL turns on shader_storage and skeletal_animation and no
+      other capability: compute_shaders stays false, so the light cluster,
+      culling, SSAO and GPU particles (P5) stay off;
+    * GL_DrawAliasSkeletal and use_instancing test shader_storage alone,
+      with no -gpu note left behind.
 
 Usage: test_rg_sources.py [--root DIR]
 """
@@ -404,12 +426,16 @@ SEAMS = {
                                     "R_ProgramSamplerUnit"},
     # The rest of gl_buffer.c is the GL 4.3 frame ring and the indexed
     # binding cache, which -gpu leaves on the null table; the buffer and
-    # vertex-array entry points (#340 P2d) are the seam.
+    # vertex-array entry points (#340 P2d), the indexed bindings and
+    # GL_Upload (P2e) are the seam.
     "engine/h2shared/gl_buffer.c": {"GL_BindBuffer", "R_GenBuffers", "R_DeleteBuffers", "R_BufferData",
                                     "R_BufferSubData", "R_GenVertexArrays", "R_DeleteVertexArrays",
                                     "R_BindVertexArray", "R_EnableVertexAttribArray",
                                     "R_DisableVertexAttribArray", "R_VertexAttribPointer",
-                                    "R_VertexAttribIPointer", "R_VertexAttrib4f"},
+                                    "R_VertexAttribIPointer", "R_VertexAttrib4f",
+                                    # the indexed bindings and the stream (#340 P2e)
+                                    "GL_BindBufferBase", "GL_BindBufferRange", "GL_BindBuffersRange",
+                                    "GL_Upload"},
 }
 # Functions that make GL calls with no arm, and why that is safe under -gpu.
 UNARMED_OK = {
@@ -1084,14 +1110,18 @@ def check_world_imm(root):
         terms = [t.strip() for t in e.split("&&")] if "||" not in e else []
     if "gl_renderer_caps.shader_storage" not in terms:
         fail("%s: use_instancing must require gl_renderer_caps.shader_storage -- instanced alias "
-             "models read storage buffers, which -gpu does not have until P2e (#340 P2b)" % rm)
+             "models read storage buffers (#340 P2b)" % rm)
     b = body_named(root, rm, "GL_DrawAliasSkeletal")
     if b is not None:
-        g = re.search(r"if\s*\(\s*!\s*gl_renderer_caps\.shader_storage\s*\)\s*\{[^{}]*\breturn\s*;\s*\}", b)
+        g = re.search(r"if\s*\(\s*!\s*gl_renderer_caps\.shader_storage\s*\)\s*"
+                      r"(?:return\s*;|\{[^{}]*\breturn\s*;\s*\})", b)
         f = re.search(r"\bGL_GetAliasGPUMesh\s*\(", b)
         if not g or not f or g.start() > f.start():
             fail("%s: GL_DrawAliasSkeletal must return without shader storage before it touches the "
                  "mesh -- its bones are a storage buffer (#340 P2b)" % rm)
+        if re.search(r"\bRG_NoteUnhandled\s*\(", b):
+            fail("%s: GL_DrawAliasSkeletal still notes skeletal models as undrawn -- -gpu draws them "
+                 "since P2e" % rm)
     return 0
 
 
@@ -1409,6 +1439,115 @@ def check_buffers(root):
     return 0
 
 
+# Storage blocks: VERT_SSBO / FRAG_SSBO (layout.inc), or a plain std430
+# block with its GL binding spelled (spart_gpu_vert.glsl).
+SSBO_DECL = re.compile(r"\b(?:VERT_SSBO|FRAG_SSBO)\s*\(\s*(\w+)\s*,\s*\w+\s*\)[^;{]*?\bbuffer\s+(\w+)\s*\{")
+SSBO_PLAIN = re.compile(r"layout\s*\(\s*std430\s*,\s*binding\s*=\s*(\w+)\s*\)[^;{]*?\bbuffer\s+(\w+)\s*\{")
+STORAGE_PINS = (
+    ("rg_buffer.c", "RGB_Create", r"\bci\.usage\s*=\s*SDL_GPU_BUFFERUSAGE_VERTEX\s*\|\s*SDL_GPU_BUFFERUSAGE_INDEX\s*\|"
+     r"\s*SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ\s*;",
+     "every buffer is made with vertex, index and graphics storage-read usage: GL does not say which a "
+     "name will be, and a storage slot bound to a buffer without it is a validation error"),
+    ("rg_buffer.c", "RG_Buf_Storage", r"if\s*\(\s*p->offset\s*!=\s*0\s*\)\s*\{[^{}]*\breturn\s+NULL\s*;\s*\}",
+     "a storage range at a non-zero offset is refused: SDL_GPU binds the buffer whole, and the "
+     "shader would read from its start"),
+    ("rg_buffer.c", "RG_Buf_Storage", r"\*read\s*=\s*b\s*;\s*return\s+b->buf\s*;",
+     "a binding point's buffer is what the slot gets, and what the draw stamps as read"),
+    ("rg_buffer.c", "RG_Upload", r"\bname\s*=\s*rgb_stream\[rgb_stream_used\+\+\]\s*;.*"
+     r"\bRGB_Queue\s*\(\s*b\s*,\s*0\s*,\s*\(Uint32\)\s*numbytes\s*,\s*data\s*,\s*true\s*\)\s*;"
+     r"\s*\*outbuf\s*=\s*name\s*;",
+     "each upload lands at offset 0 of a buffer of its own, cycled: last frame's draws keep their bytes"),
+    ("rg_buffer.c", "RG_BindBufferRange", r"\brgb_points\[index\]\.buffer\s*=\s*buffer\s*;\s*"
+     r"rgb_points\[index\]\.offset\s*=\s*buffer\s*\?\s*offset\s*:\s*0\s*;",
+     "the binding point records the buffer and the offset it was bound at"),
+    ("rg_frame.c", "RGF_RecordStage", r"\bSDL_GPUBuffer\s*\*buf\s*=\s*RG_Buf_Storage\s*\(\s*sb->point\s*,\s*&read\s*\)\s*;"
+     r".*\bslots\[sb->slot\]\s*=\s*buf\s*;.*\bslots\[sb->slot\]\s*=\s*rgf_ssbo\s*;",
+     "each storage slot gets the buffer at its block's GL binding point, the stand-in when none"),
+    ("rg_frame.c", "RGF_Replay", r"\bSDL_BindGPUVertexStorageBuffers\s*\(\s*pass\s*,\s*0\s*,\s*d->vssbo\s*,\s*d->nvssbo\s*\)\s*;"
+     r".*\bSDL_BindGPUFragmentStorageBuffers\s*\(\s*pass\s*,\s*0\s*,\s*d->fssbo\s*,\s*d->nfssbo\s*\)\s*;",
+     "the replay binds the draw's own storage slots"),
+    ("rg_frame.c", "RGF_CommitDraw", r"\bRG_Buf_StampRead\s*\(",
+     "a committed draw stamps the storage buffers it reads, so an upload into one ends the segment"),
+    ("rg_shader.c", "RG_CheckStage", r"\bfirst\s*=\s*refl->samplers\s*\+\s*refl->ro_storage_textures\s*;.*"
+     r"\bslot\s*=\s*\(int\)\s*out->ssbos\[i\]\.slot\s*-\s*first\s*;.*"
+     r"\bout->ssbos\[i\]\.slot\s*=\s*\(Uint8\)\s*slot\s*;",
+     "a storage block's slot is its binding past the stage's sampled and storage textures, and that "
+     "is what the stage keeps (a fragment stage's raw binding counts its samplers)"),
+)
+
+
+def check_storage(root):
+    """#340 P2e: storage buffers for instanced and skeletal alias models."""
+    # The block-name table against every graphics stage's declarations.
+    defs = {}
+    for h in ("engine/h2shared/gl_lightcluster.h",):
+        for m in re.finditer(r"^\s*#\s*define\s+(\w+)\s+(\d+)\b", (root / h).read_text(), re.M):
+            defs[m.group(1)] = int(m.group(2))
+
+    def value(tok, where):
+        if tok.isdigit():
+            return int(tok)
+        if tok in defs:
+            return defs[tok]
+        fail("%s: storage binding %s is neither a number nor a gl_lightcluster.h #define" % (where, tok))
+        return None
+    declared = {}
+    for p in sorted((root / "engine/shaders").glob("*")):
+        if p.suffix not in (".glsl", ".inc") or p.name.endswith("_comp.glsl"):
+            continue
+        code = strip_c_comments(p.read_text(errors="replace"))
+        code = re.sub(r"^\s*#\s*define\b.*$", "", code, flags=re.M)
+        for rx in (SSBO_DECL, SSBO_PLAIN):
+            for m in rx.finditer(code):
+                v = value(m.group(1), p.name)
+                prev = declared.setdefault(m.group(2), (v, p.name))
+                if prev[0] != v:
+                    fail("engine/shaders: storage block %s is GL binding %s in %s and %s in %s -- the "
+                         "SDL_GPU backend finds the point by name (#340 P2e)"
+                         % (m.group(2), prev[0], prev[1], v, p.name))
+    if not declared:
+        fail("engine/shaders: no storage block found -- the P2e table check has nothing to hold")
+    rs = "engine/h2shared/rg_shader.c"
+    code = strip_c_comments((root / rs).read_text(errors="replace"))
+    m = re.search(r"\brg_storage_points\s*\[\s*\]\s*=\s*\{(.*?)\};", code, re.S)
+    table = {}
+    if not m:
+        fail("%s: no rg_storage_points[] table (#340 P2e)" % rs)
+    else:
+        for e in re.finditer(r"\{\s*\"(\w+)\"\s*,\s*(\w+)\s*\}", m.group(1)):
+            table[e.group(1)] = value(e.group(2), rs)
+    for name, (v, where) in sorted(declared.items()):
+        if name not in table:
+            fail("%s: rg_storage_points has no %s (%s, GL binding %s) -- under -gpu its slot reads the "
+                 "zeroed stand-in (#340 P2e)" % (rs, name, where, v))
+        elif table[name] != v:
+            fail("%s: rg_storage_points maps %s to %s, %s binds it at %s -- under -gpu the slot would "
+                 "read another block's buffer (#340 P2e)" % (rs, name, table[name], where, v))
+    for name in sorted(set(table) - set(declared)):
+        fail("%s: rg_storage_points names %s, which no graphics stage declares -- drop it" % (rs, name))
+
+    # Capabilities: storage on, compute off.
+    b = body_named(root, "engine/h2shared/gl_vidsdl.c", "GL_Init_NullGL")
+    if b is not None:
+        on = sorted(set(re.findall(r"\bgl_renderer_caps\.(\w+)\s*=\s*true\s*;", b)))
+        if on != ["shader_storage", "skeletal_animation"]:
+            fail("engine/h2shared/gl_vidsdl.c: GL_Init_NullGL turns on %s; under -gpu exactly "
+                 "shader_storage and skeletal_animation are real (#340 P2e) -- compute_shaders would "
+                 "run the light cluster, culling and SSAO against the null table (P5)" % (on or "nothing"))
+        other = [c for c in re.findall(r"\bgl_renderer_caps\.(\w+)\s*=\s*([^;]+);", b)
+                 if c[1].strip() not in ("true", "false", "GL_RENDERER_DESKTOP_43", '"SDL_GPU"')]
+        if other:
+            fail("engine/h2shared/gl_vidsdl.c: GL_Init_NullGL sets %s from an expression -- every "
+                 "capability there is a constant (#340 P2e)" % ", ".join(c[0] for c in other))
+
+    for f, fn, rx, why in STORAGE_PINS:
+        rel = "engine/h2shared/" + f
+        body = body_named(root, rel, fn)
+        if body is not None and not re.search(rx, body, re.S):
+            fail("%s: %s: %s (#340 P2e)" % (rel, fn, why))
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     ap.add_argument("--root", type=Path, default=ROOT)
@@ -1425,6 +1564,7 @@ def main(argv=None):
     check_world_imm(root)
     check_stencil(root)
     check_buffers(root)
+    check_storage(root)
     nfiles = 0
     rg_files = []
     for p in sorted(eng.rglob("*")):

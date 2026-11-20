@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Vertex and index buffers, vertex-array state and draws go through the
-seams (GitHub #340, phase P2d).
+"""Vertex, index and storage buffers, vertex-array state and draws go
+through the seams (GitHub #340, phases P2d and P2e).
 
 GL keeps vertex input in objects the call names only by binding: a buffer is
 filled through whatever is bound to its target, a VAO records whatever
@@ -25,11 +25,17 @@ So, outside gl_buffer.c and gl_vbo.c, none of these, whatever the file:
     glCopyBufferSubData, glCopyNamedBufferSubData, glClearBuffer{Data,
     SubData}, glInvalidateBuffer{Data,SubData};
   * glBindBuffer, glBufferData and glBufferSubData, unless the first
-    argument is a literal target other than GL_ARRAY_BUFFER and
-    GL_ELEMENT_ARRAY_BUFFER: a uniform block, storage, indirect or pixel
-    buffer is another phase's (uniform blocks are mirrored by
-    gl_uniforms.c, storage is P5).  A first argument that is not a literal
-    GL_* name counts as a vertex target;
+    argument is a literal target other than GL_ARRAY_BUFFER,
+    GL_ELEMENT_ARRAY_BUFFER and GL_SHADER_STORAGE_BUFFER: a uniform block,
+    indirect or pixel buffer is another phase's (uniform blocks are
+    mirrored by gl_uniforms.c).  Storage counts since P2e, which routes
+    the storage buffers a graphics stage reads.  A first argument that is
+    not a literal GL_* name counts as a vertex target;
+  * indexed buffer bindings, whatever the target: glBindBufferBase,
+    glBindBufferRange, glBindBuffersBase, glBindBuffersRange.  A storage
+    binding point is what -gpu binds a draw's storage slot to (#340 P2e),
+    and gl_buffer.c's GL_BindBufferBase / Range keep a cache of every
+    point that a raw bind would leave stale;
   * vertex-array state: glGenVertexArrays, glCreateVertexArrays,
     glDeleteVertexArrays, glBindVertexArray, glVertexAttribPointer,
     glVertexAttribIPointer, glVertexAttribLPointer,
@@ -57,7 +63,9 @@ Allowed outside the two seam files:
     entry -- and so does an entry matching nothing, so the list cannot
     outlive the code.  The world, brush-model and sky paths
     (engine/hexen2/gl_rsurf.c, gl_rmain.c) have no entry: every call there
-    is routed.
+    is routed.  Nor, since P2e, do the alias meshes (gl_mesh.c: the MDL /
+    MD3 VAOs, the skeletal VAO, the pose and bone storage buffers) or the
+    instanced alias programs' ShadeDots buffer (gl_shader.c).
   * engine/h2shared/gl_func.h, the loader table, which declares them;
   * engine/h2shared/rg_null.c, the generated null table, which stubs them;
   * engine/h2shared/web_canvas_gl2.c, the software renderer's WebGL2
@@ -79,6 +87,7 @@ ROOT = Path(__file__).resolve().parents[1]
 OWNERS = {
     "engine/h2shared/gl_buffer.c": {
         "GL_BindBuffer", "R_GenBuffers", "R_DeleteBuffers", "R_BufferData", "R_BufferSubData",
+        "GL_BindBufferBase", "GL_BindBufferRange", "GL_BindBuffersRange",
         "R_GenVertexArrays", "R_DeleteVertexArrays", "R_BindVertexArray", "R_EnableVertexAttribArray",
         "R_DisableVertexAttribArray", "R_VertexAttribPointer", "R_VertexAttribIPointer", "R_VertexAttrib4f",
         # the GL 4.3 frame ring and the particle SSBO: GL-only, -gpu leaves them on the null table
@@ -108,8 +117,10 @@ BUFFERS = (
     "ClearBufferData", "ClearBufferSubData", "ClearNamedBufferData", "ClearNamedBufferSubData",
     "InvalidateBufferData", "InvalidateBufferSubData",
 )
-# Flagged only for a vertex target (or one that is not a literal).
+# Flagged only for a vertex or storage target (or one that is not a literal).
 TARGETED = ("BindBuffer", "BufferData", "BufferSubData")
+# Indexed bindings: flagged whatever the target.
+INDEXED = ("BindBufferBase", "BindBufferRange", "BindBuffersBase", "BindBuffersRange")
 VERTEX_STATE = (
     "GenVertexArrays", "CreateVertexArrays", "DeleteVertexArrays", "BindVertexArray",
     "VertexAttribPointer", "VertexAttribIPointer", "VertexAttribLPointer",
@@ -139,8 +150,6 @@ DRAWS = (
 
 # (file, function without gl/_fp/suffix) -> (times it appears, why it may
 # stay there).
-_MESH = ("the alias / MD3 / IQM GPU meshes: instanced and skeletal alias models need shader "
-         "storage, which -gpu has none of until P2e, so these VAOs are never drawn there")
 _CULL = "GPU world culling and Hi-Z: compute, P5 (R_BuildWorldCull returns under -gpu)"
 _LC = "the clustered-light froxel grid: compute and storage, P5"
 _PP = "the post-process chain's fullscreen passes: P4"
@@ -148,25 +157,17 @@ _SSAO = "SSAO: compute and its composite pass, P4/P5"
 _SHADOW = "dlight shadow maps: P6 (gated off by R_LightCluster_Available under -gpu)"
 _UBO = ("uniform-block buffers: -gpu pushes gl_uniforms.c's CPU mirrors instead "
         "(RG_UniformBlockRegister), so the GL buffers behind them are never read there")
-_SHADEDOTS = ("the instanced alias programs' ShadeDots block: shader storage, P2e, and "
-              "-gpu never builds those draws")
 ALLOWED = {
-    ("engine/h2shared/gl_mesh.c", "BindVertexArray"): (4, _MESH),
-    ("engine/h2shared/gl_mesh.c", "BufferData"): (4, _MESH),
-    ("engine/h2shared/gl_mesh.c", "BindBuffer"): (4, _MESH),
-    ("engine/h2shared/gl_mesh.c", "DeleteBuffers"): (6, _MESH),
-    ("engine/h2shared/gl_mesh.c", "DeleteVertexArrays"): (1, _MESH),
-    ("engine/h2shared/gl_mesh.c", "EnableVertexAttribArray"): (6, _MESH),
-    ("engine/h2shared/gl_mesh.c", "GenBuffers"): (7, _MESH),
-    ("engine/h2shared/gl_mesh.c", "GenVertexArrays"): (2, _MESH),
-    ("engine/h2shared/gl_mesh.c", "VertexAttribIPointer"): (1, _MESH),
-    ("engine/h2shared/gl_mesh.c", "VertexAttribPointer"): (5, _MESH),
-    ("engine/h2shared/gl_worldcull.c", "BindBuffer"): (3, _CULL),
+    ("engine/h2shared/gl_worldcull.c", "BindBuffer"): (10, _CULL),
+    ("engine/h2shared/gl_worldcull.c", "BufferData"): (6, _CULL),
+    ("engine/h2shared/gl_worldcull.c", "BufferSubData"): (1, _CULL),
     ("engine/h2shared/gl_worldcull.c", "BindVertexArray"): (2, _CULL),
     ("engine/h2shared/gl_worldcull.c", "DeleteBuffers"): (7, _CULL),
     ("engine/h2shared/gl_worldcull.c", "DrawElementsIndirect"): (1, _CULL),
     ("engine/h2shared/gl_worldcull.c", "GenBuffers"): (7, _CULL),
     ("engine/h2shared/gl_worldcull.c", "VertexAttrib4f"): (1, _CULL),
+    ("engine/h2shared/gl_lightcluster.c", "BufferData"): (1, _LC),
+    ("engine/h2shared/gl_lightcluster.c", "BufferSubData"): (2, _LC),
     ("engine/h2shared/gl_lightcluster.c", "DeleteBuffers"): (1, _LC),
     ("engine/h2shared/gl_lightcluster.c", "GenBuffers"): (1, _LC),
     ("engine/h2shared/gl_postprocess.c", "BindVertexArray"): (4, _PP),
@@ -190,11 +191,9 @@ ALLOWED = {
     ("engine/h2shared/gl_shadow.c", "MultiDrawElements"): (2, _SHADOW),
     ("engine/h2shared/gl_uniforms.c", "DeleteBuffers"): (6, _UBO),
     ("engine/h2shared/gl_uniforms.c", "GenBuffers"): (6, _UBO),
-    ("engine/h2shared/gl_shader.c", "DeleteBuffers"): (2, _SHADEDOTS),
-    ("engine/h2shared/gl_shader.c", "GenBuffers"): (1, _SHADEDOTS),
 }
 
-NAMES = "|".join(sorted(BUFFERS + TARGETED + VERTEX_STATE + DRAWS, key=len, reverse=True))
+NAMES = "|".join(sorted(BUFFERS + TARGETED + INDEXED + VERTEX_STATE + DRAWS, key=len, reverse=True))
 NAME = r"\b(gl(" + NAMES + r")(?:ARB|EXT|OES|KHR|NV|AMD)?(?:_fp)?)\b"
 CALL_RE = re.compile(NAME + r"\s*\)?\s*\(([^()]*\))?")
 BARE_RE = re.compile(NAME + r"(?!\s*\)?\s*\()(?!\s*[!=]=)")
@@ -212,7 +211,7 @@ BLANK_RE = re.compile(
 # buffer.  Listed rather than "anything but the two vertex targets", so a
 # _ARB / _EXT spelling or a #define'd alias of a vertex target still counts.
 OTHER_TARGET_RE = re.compile(r"\s*\)?\s*\(\s*(GL_\w+)\s*,")
-OTHER_TARGETS = {"GL_UNIFORM_BUFFER", "GL_SHADER_STORAGE_BUFFER", "GL_DRAW_INDIRECT_BUFFER",
+OTHER_TARGETS = {"GL_UNIFORM_BUFFER", "GL_DRAW_INDIRECT_BUFFER",
                  "GL_DISPATCH_INDIRECT_BUFFER", "GL_COPY_READ_BUFFER", "GL_COPY_WRITE_BUFFER",
                  "GL_PIXEL_PACK_BUFFER", "GL_PIXEL_UNPACK_BUFFER", "GL_TEXTURE_BUFFER",
                  "GL_QUERY_BUFFER", "GL_ATOMIC_COUNTER_BUFFER", "GL_TRANSFORM_FEEDBACK_BUFFER"}
@@ -258,7 +257,7 @@ def scan(rel, text, used, owner=None):
         if name in TARGETED:
             t = OTHER_TARGET_RE.match(text, m.end(1))
             if t and t.group(1) in OTHER_TARGETS:
-                continue	# a uniform, storage, indirect or pixel buffer: not P2d's
+                continue	# a uniform, indirect or pixel buffer: not P2d's or P2e's
         if owner is not None and owned(m.start()):
             continue
         key = (rel, name)
@@ -312,7 +311,7 @@ def main():
         sys.exit("FAIL:\n  " + "\n  ".join(errors))
     left = sum(want for want, _why in ALLOWED.values())
     print(f"PASS no buffer, vertex-array or draw GL call outside gl_buffer.c / gl_vbo.c in {files} "
-          f"files, {left} allowlisted in {len(ALLOWED)} entries (#340 P2d)")
+          f"files, {left} allowlisted in {len(ALLOWED)} entries (#340 P2d, P2e)")
 
 
 if __name__ == "__main__":

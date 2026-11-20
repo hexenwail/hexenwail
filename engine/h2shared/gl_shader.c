@@ -912,11 +912,11 @@ static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p, rprog_id_t id)
 
 	/* Create and fill shadedots SSBO (static data, upload once).
 	 * Uses binding=2 to match the non-instanced GPU alias shader. */
-	glGenBuffers_fp(1, &p->ubo_shadedots);
-	glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, p->ubo_shadedots);
-	glBufferData_fp(GL_SHADER_STORAGE_BUFFER, 16 * 256 * sizeof(float),
+	R_GenBuffers (1, &p->ubo_shadedots);
+	GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, p->ubo_shadedots);
+	R_BufferData (GL_SHADER_STORAGE_BUFFER, 16 * 256 * sizeof(float),
 			r_avertexnormal_dots, GL_STATIC_DRAW);
-	glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, 0);
+	GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, 0);
 
 	Sys_Printf("  %s: OK (prog=%u, ubo=%u)\n", name, prog, p->ubo_shadedots);
 	return true;
@@ -939,13 +939,13 @@ void GL_AliasInst_Shutdown (void)
 		glDeleteProgram_fp(gl_shader_alias_inst.program);
 	if (gl_shader_alias_inst.ubo_shadedots)
 		GL_ForgetBuffer(gl_shader_alias_inst.ubo_shadedots);
-		glDeleteBuffers_fp(1, &gl_shader_alias_inst.ubo_shadedots);
+		R_DeleteBuffers (1, &gl_shader_alias_inst.ubo_shadedots);
 	memset(&gl_shader_alias_inst, 0, sizeof(gl_shader_alias_inst));
 	if (gl_shader_alias_inst_np.program)
 		glDeleteProgram_fp(gl_shader_alias_inst_np.program);
 	if (gl_shader_alias_inst_np.ubo_shadedots)
 		GL_ForgetBuffer(gl_shader_alias_inst_np.ubo_shadedots);
-		glDeleteBuffers_fp(1, &gl_shader_alias_inst_np.ubo_shadedots);
+		R_DeleteBuffers (1, &gl_shader_alias_inst_np.ubo_shadedots);
 	memset(&gl_shader_alias_inst_np, 0, sizeof(gl_shader_alias_inst_np));
 }
 

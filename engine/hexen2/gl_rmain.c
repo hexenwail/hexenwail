@@ -30,9 +30,6 @@
 #include "gl_vbo.h"
 #include "gl_matrix.h"
 #include "gl_postprocess.h"
-#ifdef USE_SDL_GPU
-#include "rg_device.h"	/* RG_NoteUnhandled: skeletal models undrawn under -gpu (#340 P2b) */
-#endif
 
 /* ES 3.0 compatibility */
 #ifdef USE_GLES
@@ -1492,14 +1489,10 @@ static void GL_DrawAliasSkeletal (entity_t *e, aliashdr_t *paliashdr,
 	extern float		r_fog_color[3];
 
 	/* The bones are a storage buffer, and there is no CPU skinning path:
-	 * without shader storage (-gpu until P2e, #340) nothing is drawn. */
+	 * without shader storage nothing is drawn.  -gpu has it since #340 P2e
+	 * (rg_buffer.c binds ssbo_bones at the BoneBuffer slot). */
 	if (!gl_renderer_caps.shader_storage)
-	{
-#ifdef USE_SDL_GPU
-		RG_NoteUnhandled ("skeletal (IQM) mesh not drawn: its bones need shader storage (P2e)");
-#endif
 		return;
-	}
 
 	gm = GL_GetAliasGPUMesh (paliashdr);
 	if (!gm || !gm->valid || !gm->ssbo_bones || !gm->num_indices)
@@ -5223,8 +5216,8 @@ static void R_DrawEntitiesOnList (void)
 
 	/* Instanced alias rendering: collect and batch-draw opaque alias
 	 * models via SSBO before the per-entity loop.  Without shader storage
-	 * (-gpu until P2e, #340) every alias model takes the CPU path below,
-	 * through GL_ImmEnd. */
+	 * every alias model takes the CPU path below, through GL_ImmEnd; -gpu
+	 * has it since #340 P2e. */
 	use_instancing = (r_alias_gpu.integer >= 1 && gl_shader_alias_inst.program &&
 			  gl_renderer_caps.shader_storage);
 	if (use_instancing)

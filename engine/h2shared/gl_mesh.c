@@ -397,15 +397,15 @@ alias_gpu_mesh_t *GL_GetAliasGPUMesh (aliashdr_t *hdr)
 
 static void GL_FreeAliasGPUMesh (alias_gpu_mesh_t *gm)
 {
-	if (gm->vao)           { glDeleteVertexArrays_fp(1, &gm->vao); }
-	if (gm->vbo_verts)     { glDeleteBuffers_fp(1, &gm->vbo_verts); }
-	if (gm->vbo_tc)        { glDeleteBuffers_fp(1, &gm->vbo_tc); }
-	if (gm->ibo)           { glDeleteBuffers_fp(1, &gm->ibo); }
+	if (gm->vao)           { R_DeleteVertexArrays (1, &gm->vao); }
+	if (gm->vbo_verts)     { R_DeleteBuffers (1, &gm->vbo_verts); }
+	if (gm->vbo_tc)        { R_DeleteBuffers (1, &gm->vbo_tc); }
+	if (gm->ibo)           { R_DeleteBuffers (1, &gm->ibo); }
 	/* SSBOs sit in the indexed-binding cache; forget the name before
 	 * GL recycles it into a different buffer.  uhexen2 #203. */
-	if (gm->ssbo_pose)     { GL_ForgetBuffer(gm->ssbo_pose);     glDeleteBuffers_fp(1, &gm->ssbo_pose); }
-	if (gm->ssbo_pose_md3) { GL_ForgetBuffer(gm->ssbo_pose_md3); glDeleteBuffers_fp(1, &gm->ssbo_pose_md3); }
-	if (gm->ssbo_bones)    { GL_ForgetBuffer(gm->ssbo_bones);    glDeleteBuffers_fp(1, &gm->ssbo_bones); }
+	if (gm->ssbo_pose)     { GL_ForgetBuffer(gm->ssbo_pose);     R_DeleteBuffers (1, &gm->ssbo_pose); }
+	if (gm->ssbo_pose_md3) { GL_ForgetBuffer(gm->ssbo_pose_md3); R_DeleteBuffers (1, &gm->ssbo_pose_md3); }
+	if (gm->ssbo_bones)    { GL_ForgetBuffer(gm->ssbo_bones);    R_DeleteBuffers (1, &gm->ssbo_bones); }
 	if (gm->tex_pose)      { R_DeleteTextures (1, &gm->tex_pose); }
 	memset(gm, 0, sizeof(*gm));
 }
@@ -659,24 +659,24 @@ void GL_MakeAliasGPUMesh (aliashdr_t *hdr)
 	memset(gm, 0, sizeof(*gm));
 	gm->poseverttype = hdr->poseverttype;
 
-	glGenVertexArrays_fp(1, &gm->vao);
-	glBindVertexArray_fp(gm->vao);
+	R_GenVertexArrays (1, &gm->vao);
+	R_BindVertexArray (gm->vao);
 
 	/* Texcoord VBO — bound to ATTR_TEXCOORD (location 1) */
-	glGenBuffers_fp(1, &gm->vbo_tc);
-	glBindBuffer_fp(GL_ARRAY_BUFFER, gm->vbo_tc);
-	glBufferData_fp(GL_ARRAY_BUFFER, hdr->poseverts * 2 * sizeof(float),
+	R_GenBuffers (1, &gm->vbo_tc);
+	GL_BindBuffer (GL_ARRAY_BUFFER, gm->vbo_tc);
+	R_BufferData (GL_ARRAY_BUFFER, hdr->poseverts * 2 * sizeof(float),
 			texcoords, GL_STATIC_DRAW);
-	glEnableVertexAttribArray_fp(ATTR_TEXCOORD);
-	glVertexAttribPointer_fp(ATTR_TEXCOORD, 2, GL_FLOAT, GL_FALSE, 0, NULL);
+	R_EnableVertexAttribArray (ATTR_TEXCOORD);
+	R_VertexAttribPointer (ATTR_TEXCOORD, 2, GL_FLOAT, GL_FALSE, 0, NULL);
 
 	/* Index buffer */
-	glGenBuffers_fp(1, &gm->ibo);
-	glBindBuffer_fp(GL_ELEMENT_ARRAY_BUFFER, gm->ibo);
-	glBufferData_fp(GL_ELEMENT_ARRAY_BUFFER, vi * sizeof(unsigned short),
+	R_GenBuffers (1, &gm->ibo);
+	GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, gm->ibo);
+	R_BufferData (GL_ELEMENT_ARRAY_BUFFER, vi * sizeof(unsigned short),
 			indices, GL_STATIC_DRAW);
 
-	glBindVertexArray_fp(0);
+	R_BindVertexArray (0);
 
 	/* Pose data upload: format-dependent path */
 	if (hdr->poseverttype == PV_IQM)
@@ -688,49 +688,49 @@ iqm_gpu_setup:
 		gm->poseverttype = PV_IQM;
 		gm->numbones = hdr->numbones;
 
-		glGenVertexArrays_fp(1, &gm->vao);
-		glBindVertexArray_fp(gm->vao);
+		R_GenVertexArrays (1, &gm->vao);
+		R_BindVertexArray (gm->vao);
 
 		/* Upload vertex data (iqmvert_t: 32 bytes per vertex) */
 #ifndef USE_GLES
-		glGenBuffers_fp(1, &gm->vbo_verts);
-		glBindBuffer_fp(GL_ARRAY_BUFFER, gm->vbo_verts);
-		glBufferData_fp(GL_ARRAY_BUFFER, hdr->poseverts * sizeof(iqmvert_t),
+		R_GenBuffers (1, &gm->vbo_verts);
+		GL_BindBuffer (GL_ARRAY_BUFFER, gm->vbo_verts);
+		R_BufferData (GL_ARRAY_BUFFER, hdr->poseverts * sizeof(iqmvert_t),
 				(byte *)hdr + hdr->posedata, GL_STATIC_DRAW);
 
 		/* Vertex attributes for skeletal format */
-		glEnableVertexAttribArray_fp(0); /* position */
-		glVertexAttribPointer_fp(0, 3, GL_FLOAT, GL_FALSE, sizeof(iqmvert_t), (void *)0);
+		R_EnableVertexAttribArray (0); /* position */
+		R_VertexAttribPointer (0, 3, GL_FLOAT, GL_FALSE, sizeof(iqmvert_t), (void *)0);
 
-		glEnableVertexAttribArray_fp(1); /* normal */
-		glVertexAttribPointer_fp(1, 4, GL_BYTE, GL_TRUE, sizeof(iqmvert_t), (void *)12);
+		R_EnableVertexAttribArray (1); /* normal */
+		R_VertexAttribPointer (1, 4, GL_BYTE, GL_TRUE, sizeof(iqmvert_t), (void *)12);
 
-		glEnableVertexAttribArray_fp(2); /* texcoord */
-		glVertexAttribPointer_fp(2, 2, GL_FLOAT, GL_FALSE, sizeof(iqmvert_t), (void *)16);
+		R_EnableVertexAttribArray (2); /* texcoord */
+		R_VertexAttribPointer (2, 2, GL_FLOAT, GL_FALSE, sizeof(iqmvert_t), (void *)16);
 
-		glEnableVertexAttribArray_fp(3); /* bone weights */
-		glVertexAttribPointer_fp(3, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(iqmvert_t), (void *)24);
+		R_EnableVertexAttribArray (3); /* bone weights */
+		R_VertexAttribPointer (3, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(iqmvert_t), (void *)24);
 
-		glEnableVertexAttribArray_fp(4); /* bone indices */
+		R_EnableVertexAttribArray (4); /* bone indices */
 		/* uvec4 in the skeletal shader: must use the integer path, or the
 		 * indices arrive int-to-float converted and select the wrong bones. */
-		glVertexAttribIPointer_fp(4, 4, GL_UNSIGNED_BYTE, sizeof(iqmvert_t), (void *)28);
+		R_VertexAttribIPointer (4, 4, GL_UNSIGNED_BYTE, sizeof(iqmvert_t), (void *)28);
 
 		/* Index buffer */
-		glGenBuffers_fp(1, &gm->ibo);
-		glBindBuffer_fp(GL_ELEMENT_ARRAY_BUFFER, gm->ibo);
-		glBufferData_fp(GL_ELEMENT_ARRAY_BUFFER, vi * sizeof(unsigned short),
+		R_GenBuffers (1, &gm->ibo);
+		GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, gm->ibo);
+		R_BufferData (GL_ELEMENT_ARRAY_BUFFER, vi * sizeof(unsigned short),
 				indices, GL_STATIC_DRAW);
 
-		glBindVertexArray_fp(0);
+		R_BindVertexArray (0);
 
 		/* Upload bone pose matrices as SSBO */
-		glGenBuffers_fp(1, &gm->ssbo_bones);
-		glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, gm->ssbo_bones);
-		glBufferData_fp(GL_SHADER_STORAGE_BUFFER,
+		R_GenBuffers (1, &gm->ssbo_bones);
+		GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, gm->ssbo_bones);
+		R_BufferData (GL_SHADER_STORAGE_BUFFER,
 				hdr->numposes * hdr->numbones * sizeof(bonepose_t),
 				(byte *)hdr + hdr->boneposedata, GL_DYNAMIC_DRAW);
-		glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, 0);
+		GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, 0);
 #endif
 
 	/* Refuse a mesh with no pose data.  Everything downstream indexes the
@@ -780,24 +780,24 @@ iqm_gpu_setup:
 		 * MD3 data is in hdr->posedata, packs as short[3] + ubyte[2]
 		 */
 #ifndef USE_GLES
-		glGenBuffers_fp(1, &gm->ssbo_pose_md3);
-		glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, gm->ssbo_pose_md3);
-		glBufferData_fp(GL_SHADER_STORAGE_BUFFER,
+		R_GenBuffers (1, &gm->ssbo_pose_md3);
+		GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, gm->ssbo_pose_md3);
+		R_BufferData (GL_SHADER_STORAGE_BUFFER,
 				hdr->numposes * hdr->poseverts * sizeof(md3Vertex_t),
 				(byte *)hdr + hdr->posedata, GL_STATIC_DRAW);
-		glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, 0);
+		GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, 0);
 #endif
 	}
 	else
 	{
 		/* PV_QUAKE1: standard path */
 #ifndef USE_GLES
-		glGenBuffers_fp(1, &gm->ssbo_pose);
-		glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, gm->ssbo_pose);
-		glBufferData_fp(GL_SHADER_STORAGE_BUFFER,
+		R_GenBuffers (1, &gm->ssbo_pose);
+		GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, gm->ssbo_pose);
+		R_BufferData (GL_SHADER_STORAGE_BUFFER,
 				hdr->numposes * hdr->poseverts * sizeof(unsigned int),
 				pose_packed, GL_STATIC_DRAW);
-		glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, 0);
+		GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, 0);
 #endif
 
 		/* Pose texture (ES 3.0 compatible) — R32UI, width=poseverts, height=numposes.

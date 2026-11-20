@@ -56,7 +56,8 @@ python3 plus a C compiler (lint.yml):
       bind; the placeholder formats are the classes they stand for;
     * RGF_RecordStage notes an unmapped sampler at draw time, and every
       read-only storage-buffer slot a stage's reflection row declares is
-      bound to the stand-in at replay.
+      bound at replay: to the buffer at its block's GL binding point since
+      P2e (tools/test_rg_sources.py), else to the stand-in.
 
 Usage:  test_rg_sampler_units.py [--root DIR] [-v]
 """
@@ -613,6 +614,8 @@ static void Sys_Error (const char *fmt, ...) { fprintf (stderr, "Sys_Error %s\n"
 static size_t q_strlcpy (char *d, const char *s, size_t n) { snprintf (d, n, "%s", s); return strlen (s); }
 #define q_max(a, b) ((a) > (b) ? (a) : (b))
 #define q_min(a, b) ((a) < (b) ? (a) : (b))
+/* the storage blocks' GL points (#340 P2e) are tools/test_rg_sources.py's */
+static int RG_StoragePoint (const char *block) { (void) block; return -1; }
 """
 
 HARNESS = r"""
@@ -811,7 +814,7 @@ def check_backend(root, verbose):
             fail("rg_internal.h: no %s" % d)
         else:
             parts.append(m.group(0))
-    for t in ("rgsampler_t", "rgubo_t", "rgstage_t"):
+    for t in ("rgsampler_t", "rgubo_t", "rgssbo_t", "rgstage_t"):
         m = re.search(r"typedef struct \{[^{}]*\} %s;" % t, rgi)
         if not m:
             fail("rg_internal.h: cannot lift %s" % t)
@@ -1013,19 +1016,21 @@ def check_backend(root, verbose):
     rp = lift(rgf, r"^static void RGF_Replay \(", "RGF_Replay")
     for st in ("Vertex", "Fragment"):
         f = st[0].lower()
-        if not re.search(r"if \(d->n%sssbo\)\s*SDL_BindGPU%sStorageBuffers \(pass, 0, rgf_ssbo_slots, d->n%sssbo\);"
-                         % (f, st, f), rp):
-            fail("RGF_Replay must bind the %s stage's storage-buffer slots to the stand-in" % st.lower())
+        if not re.search(r"if \(d->n%sssbo\)\s*SDL_BindGPU%sStorageBuffers \(pass, 0, d->%sssbo, d->n%sssbo\);"
+                         % (f, st, f, f), rp):
+            fail("RGF_Replay must bind every one of the %s stage's storage-buffer slots, each the "
+                 "buffer or stand-in RGF_RecordStage put there (#340 P2e)" % st.lower())
+    if "slots[sb->slot] = rgf_ssbo;" not in rs:
+        fail("RGF_RecordStage must bind the stand-in to a storage slot with nothing at its GL point")
     init = lift(rgf, r"^void RG_Frame_Init \(", "RG_Frame_Init")
-    if not re.search(r"ci\.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;\s*ci\.size = RG_SSBO_STANDIN_BYTES;", init) \
-            or not re.search(r"rgf_ssbo_slots\[i\] = rgf_ssbo;", init):
-        fail("RG_Frame_Init must create the RG_SSBO_STANDIN_BYTES stand-in and point every slot at it")
+    if not re.search(r"ci\.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;\s*ci\.size = RG_SSBO_STANDIN_BYTES;", init):
+        fail("RG_Frame_Init must create the RG_SSBO_STANDIN_BYTES stand-in")
     cps = lift(rgf, r"^static qboolean RGF_CopyPass \(", "RGF_CopyPass")
     if "memset (map + stream + quad, 0, ssbo);" not in cps or "rgf_ssbo_uploaded = true;" not in cps:
         fail("RGF_CopyPass must upload the stand-in's zeros once")
     ck = lift(rgs, r"^static qboolean RG_CheckStage \(", "RG_CheckStage")
-    if "out->num_ssbos = refl->ro_storage_buffers;" not in ck:
-        fail("RG_CheckStage must take each stage's storage-buffer count from its reflection row")
+    if "if (out->num_ssbos != refl->ro_storage_buffers)" not in ck:
+        fail("RG_CheckStage must hold each stage's reflected storage blocks to its reflection row's count")
 
 
 def main(argv=None):

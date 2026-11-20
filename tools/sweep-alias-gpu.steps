@@ -1,0 +1,130 @@
+# sweep-alias-gpu.steps -- alias models on their GPU paths through the
+# SDL_GPU backend (-gpu) against GL (#340 P2e): instanced alias models
+# (r_alias_gpu 1: per-frame instance storage streamed by GL_Upload, the pose
+# and shadedots storage buffers, one instanced draw per model and skin) and,
+# with the replacement models below, skeletal (IQM / MD5) and MD3 meshes.
+#
+# Run the SAME binary both ways, with identical settings:
+#
+#   A="-fsaa 0 +gamma 1 +map demo1"
+#   STEPS=tools/sweep-alias-gpu.steps ENGINE=$E ./tools/headless-drive.sh script /tmp/a-gl  ~/hexen2 $A
+#   VK_ICD_FILENAMES=<lvp_icd json> STEPS=tools/sweep-alias-gpu.steps ENGINE=$E \
+#       ./tools/headless-drive.sh script /tmp/a-gpu ~/hexen2 -gpu +gpu_allow_software 1 $A
+#
+# then, as tools/sweep-world-gpu.steps: GL against -gpu every frame,
+#
+#   PSNR_MIN=40 ./tools/shot-diff.sh /tmp/a-gl /tmp/a-gpu 200x24+100+576
+#
+# no "Validation Error" with the validation layers on (+gpu_debug 1), and
+# between REPORT-ALIAS-BEGIN and REPORT-ALIAS-END in /tmp/a-gpu/qconsole.log
+# gpu_unrouted counts 0 calls into the GL entry points, and renderer_status
+# reports storage slots bound to buffers (the instanced batches' instance,
+# pose and shadedots buffers), the rest the zeroed stand-in (each world and
+# alias fragment stage's LightBuffer: the light cluster is compute, P5).
+#
+# The cameras look at demo1's graveyard by the start: tombstn1.mdl (4 of
+# them), tombstn2.mdl (2), the angel statue and tree2.mdl, all opaque, so
+# all instanced; the view model stays on the per-entity path (GL_ImmEnd).
+#
+# SKELETAL AND MD3.  The Hexen II data has no skeletal or MD3 model, so the
+# check builds a basedir that has: data1 copied whole (headless-drive.sh's
+# sandbox binds the basedir alone, so a symlink out of it does not resolve)
+# and a game directory whose models replace the tombstones through
+# r_enhancedmodels (gl_model.c), written by tools/mk-alias-testgame.py:
+#
+#   B=<scratch>/skelbase; mkdir -p $B; cp -a ~/hexen2/data1 $B/
+#   python3 tools/mk-alias-testgame.py $B          # writes $B/skel/models
+#
+# and runs the same sweep with "-game skel" on both sides.  Every tombstn1
+# is then a PV_IQM box, drawn by GL_DrawAliasSkeletal from its VAO (normals
+# GL_BYTE normalized, weights GL_UNSIGNED_BYTE normalized, bone indices
+# integer) and the bones storage buffer at BoneBuffer's slot; every tombstn2
+# an MD3 box, a PV_MD3 batch of the instanced path, its poses at
+# MD3PoseBuffer's slot.  The tombstones stand at frame 0, which the
+# generator poses (the top joint bent 40 degrees): a wrong bone index or
+# weight bends the box elsewhere, and the zeroed stand-in in place of the
+# bones collapses it to the origin.
+#
+# Measured 2026-11-20, 800x600, llvmpipe GL against lavapipe -gpu (Mesa
+# 26.2), PSNR in dB, masked, three runs each side:
+#
+#   camera             retail GL vs -gpu    -game skel GL vs -gpu
+#   01-tombs-sw        51.81 (all three)    50.37
+#   02-tombs-n         52.64                50.24
+#   03-angel           49.74-50.35          45.06-45.54 (spinning pickup:
+#                                           GL vs GL 49.3-50.4 there)
+#   04-tombs-e         53.08                51.18
+#   11-tombs-shadows   51.77                50.29
+#
+# the other cameras identical run to run on each side.  Broken builds, same
+# cameras, against GL: PoseBuffer's point mapped to 3 (the instanced poses
+# read the stand-in) 26.8-33.6 dB on retail; BoneBuffer's mapped to 5
+# 27.2-28.8 and a normalized byte normal read as UBYTE4_NORM 35.8-37.3 with
+# the replacements (03 has no skeletal box in view).  Buffers made without
+# storage-read usage draw the same on lavapipe and log 10 validation errors:
+# that one is the validation layer's to catch, so run 1 keeps +gpu_debug 1.
+#
+# Settings as tools/sweep-world-gpu.steps, bar r_alias_gpu: what -gpu does
+# not draw yet is off on both sides (post-process, compute lighting,
+# particles, fog, MSAA, anisotropy), and setpos cameras with the game paused
+# make each frame repeatable.  The 200x24+100+576 mask is the health counter.
+
+sleep 20
+cmd god
+cmd notarget
+cmd viewsize 120
+cmd crosshair 0
+cmd showpause 0
+cmd r_skyspeed_back 0
+cmd r_skyspeed_front 0
+cmd r_flatlightstyles 1
+cmd r_dynamic 0
+cmd r_gpulightstyles 0
+cmd r_ssao 0
+cmd r_bloom 0
+cmd r_dlight_occlusion 0
+cmd r_alias_gpu 1
+cmd r_particles 0
+cmd fog 0
+cmd gl_texture_anisotropy 1
+sleep 2
+
+cmd setpos -960 -1960 40 10 225 0
+sleep 2
+cmd pause
+shot 01-tombs-sw
+cmd pause
+cmd setpos -1000 -1900 40 5 110 0
+sleep 2
+cmd pause
+shot 02-tombs-n
+cmd pause
+cmd setpos -860 -1990 30 0 40 0
+sleep 2
+cmd pause
+shot 03-angel
+cmd pause
+cmd setpos -1300 -1950 60 15 0 0
+sleep 2
+cmd pause
+shot 04-tombs-e
+cmd pause
+
+# --- the alias frame's unrouted calls and storage slots, on the last camera ---
+cmd gpu_unrouted reset
+sleep 2
+cmd echo REPORT-ALIAS-BEGIN
+cmd gpu_unrouted
+cmd renderer_status
+cmd echo REPORT-ALIAS-END
+sleep 1
+
+# --- r_shadows: the instanced path's per-entity blob shadow pass, after the
+# batches, through GL_ImmEnd with the stencil ---
+cmd r_shadows 1
+cmd setpos -960 -1960 40 10 225 0
+sleep 2
+cmd pause
+shot 11-tombs-shadows
+cmd pause
+cmd r_shadows 0

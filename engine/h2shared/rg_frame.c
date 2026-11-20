@@ -41,8 +41,10 @@
  *
  * Every slot a draw's program declares is bound (#340 P2a), because SDL_GPU
  * faults a draw that leaves one empty: each sampler its texture or a typed
- * placeholder (rg_resource.c), each read-only storage buffer the zeroed
- * stand-in below until P5 routes the real ones.
+ * placeholder (rg_resource.c), each read-only storage buffer the buffer
+ * bound to its GL binding point (rg_buffer.c, since P2e: the alias poses,
+ * shadedots, instances and skeletal bones) or, where that holds nothing
+ * SDL_GPU can bind, the zeroed stand-in below.
  *
  * Copyright (C) 2026  Contributors of the uHexen2 project
  *
@@ -167,7 +169,8 @@ typedef struct {
 	Uint32				count;		/* vertices, or indices */
 	int				nvs, nfs;
 	SDL_GPUTextureSamplerBinding	vs[RG_MAX_STAGE_SAMPLERS], fs[RG_MAX_STAGE_SAMPLERS];
-	Uint8				nvssbo, nfssbo;	/* storage-buffer slots, all the stand-in */
+	Uint8				nvssbo, nfssbo;	/* storage-buffer slots */
+	SDL_GPUBuffer			*vssbo[RG_MAX_STAGE_SSBOS], *fssbo[RG_MAX_STAGE_SSBOS];
 	int				npush;
 	rgpush_t			push[2 * RG_MAX_STAGE_UBOS];
 	SDL_GPUViewport			vp;
@@ -201,9 +204,8 @@ static SDL_GPUBuffer		*rgf_vbuf;	/* the stream, vertex + index usage */
 static Uint32			rgf_vbuf_size;
 static SDL_GPUBuffer		*rgf_quadbuf;	/* static quad indices */
 static qboolean			rgf_quad_uploaded;
-/* RG_SSBO_STANDIN_BYTES of zeros, every read-only storage-buffer slot's */
+/* RG_SSBO_STANDIN_BYTES of zeros, for a storage slot with nothing bound */
 static SDL_GPUBuffer		*rgf_ssbo;
-static SDL_GPUBuffer		*rgf_ssbo_slots[RG_MAX_STAGE_SSBOS];
 static qboolean			rgf_ssbo_uploaded;
 static SDL_GPUTransferBuffer	*rgf_tbuf;
 static Uint32			rgf_tbuf_size;
@@ -232,6 +234,14 @@ static Uint8			rgf_clear_stencil;
 static int			rgf_last_draws, rgf_last_segments, rgf_frame_draws, rgf_frame_segments;
 static int			rgf_last_indexed, rgf_frame_indexed;	/* RGD_BUFFER draws */
 static Uint32			rgf_last_stream, rgf_frame_stream;	/* stream arena bytes */
+/* Storage slots bound per frame: to a GL binding point's buffer, and to the
+ * stand-in (#340 P2e) */
+static int			rgf_last_ssbo, rgf_frame_ssbo, rgf_last_standin, rgf_frame_standin;
+
+/* The storage buffers the draw being recorded reads, stamped once it is
+ * committed (RG_Buf_StampRead), so an upload into one ends the segment. */
+static void			*rgf_pending_reads[2 * RG_MAX_STAGE_SSBOS];
+static int			rgf_npending_reads, rgf_pending_ssbo, rgf_pending_standin;
 static unsigned long		rgf_frames;
 static unsigned long		rgf_dropped;
 
@@ -384,6 +394,7 @@ void RG_BeginFrame (int width, int height)
 	rgf_cleared = false;
 	rgf_frame_draws = rgf_frame_segments = rgf_frame_indexed = 0;
 	rgf_frame_stream = 0;
+	rgf_frame_ssbo = rgf_frame_standin = 0;
 }
 
 /* Snapshot of block `b` in the open segment's uniform arena. */
@@ -429,8 +440,31 @@ static qboolean RGF_RecordStage (rgdraw_t *d, const rgprog_t *prog, int stage)
 	else
 		d->nfs = n;
 
-	if (st->num_ssbos > 0)
-		RG_NoteUnhandled ("read-only storage buffer read as the zeroed stand-in (routing is P5)");
+	/* Each storage slot gets the buffer at its block's GL binding point,
+	 * as the GL program would read it; none bound, the zeroed stand-in. */
+	{
+		SDL_GPUBuffer	**slots = (stage == RPROG_STAGE_VERTEX) ? d->vssbo : d->fssbo;
+
+		for (i = 0; i < st->num_ssbos; i++)
+		{
+			const rgssbo_t	*sb = &st->ssbos[i];
+			void		*read;
+			SDL_GPUBuffer	*buf = RG_Buf_Storage (sb->point, &read);
+
+			/* RG_Buf_Storage notes why when it has nothing */
+			if (buf)
+			{
+				slots[sb->slot] = buf;
+				rgf_pending_reads[rgf_npending_reads++] = read;
+				rgf_pending_ssbo++;
+			}
+			else
+			{
+				slots[sb->slot] = rgf_ssbo;
+				rgf_pending_standin++;
+			}
+		}
+	}
 	if (stage == RPROG_STAGE_VERTEX)
 		d->nvssbo = (Uint8) st->num_ssbos;
 	else
@@ -494,6 +528,7 @@ static rgdraw_t *RGF_BeginDraw (const rgprog_t *prog, SDL_GPUPrimitiveType prim,
 	}
 	d = &rgf_draws[rgf_numdraws];
 	memset (d, 0, sizeof(*d));
+	rgf_npending_reads = rgf_pending_ssbo = rgf_pending_standin = 0;
 	d->pipe = RG_PipelineFor (prog, prim, layout, rgf_color_fmt, rgf_depth_fmt);
 	if (!d->pipe)
 	{
@@ -529,6 +564,11 @@ static void RGF_CommitDraw (rgdraw_t *d, const rpipestate_t *ps)
 	 * the stencil buffer's 8 bits, a Uint8 cast would wrap it. */
 	d->stencil_ref = (Uint8) CLAMP (0, ps->stencil_ref, 255);
 	rgf_numdraws++;
+	while (rgf_npending_reads > 0)
+		RG_Buf_StampRead (rgf_pending_reads[--rgf_npending_reads]);
+	rgf_frame_ssbo += rgf_pending_ssbo;
+	rgf_frame_standin += rgf_pending_standin;
+	rgf_pending_ssbo = rgf_pending_standin = 0;
 }
 
 void RG_DrawImm (GLenum mode, const void *verts, int count, int stride)
@@ -952,9 +992,9 @@ static void RGF_Replay (SDL_GPURenderPass *pass)
 		if (d->nfs)
 			SDL_BindGPUFragmentSamplers (pass, 0, d->fs, d->nfs);
 		if (d->nvssbo)
-			SDL_BindGPUVertexStorageBuffers (pass, 0, rgf_ssbo_slots, d->nvssbo);
+			SDL_BindGPUVertexStorageBuffers (pass, 0, d->vssbo, d->nvssbo);
 		if (d->nfssbo)
-			SDL_BindGPUFragmentStorageBuffers (pass, 0, rgf_ssbo_slots, d->nfssbo);
+			SDL_BindGPUFragmentStorageBuffers (pass, 0, d->fssbo, d->nfssbo);
 
 		for (k = 0; k < d->nvb; k++)
 		{
@@ -1149,6 +1189,8 @@ void RG_Frame_End (qboolean show)
 	rgf_last_segments = rgf_frame_segments;
 	rgf_last_indexed = rgf_frame_indexed;
 	rgf_last_stream = rgf_frame_stream;
+	rgf_last_ssbo = rgf_frame_ssbo;
+	rgf_last_standin = rgf_frame_standin;
 	rgf_frames++;
 }
 
@@ -1203,7 +1245,6 @@ void RG_Frame_Init (void)
 	rgf_quad_uploaded = false;
 	{
 		SDL_GPUBufferCreateInfo	ci;
-		int			i;
 
 		SDL_zero (ci);
 		ci.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
@@ -1211,8 +1252,6 @@ void RG_Frame_Init (void)
 		rgf_ssbo = SDL_CreateGPUBuffer (rg_dev, &ci);
 		if (!rgf_ssbo)
 			Sys_Error ("SDL_GPU: cannot create the storage-buffer stand-in (%s)", SDL_GetError ());
-		for (i = 0; i < RG_MAX_STAGE_SSBOS; i++)
-			rgf_ssbo_slots[i] = rgf_ssbo;
 		rgf_ssbo_uploaded = false;
 	}
 }
@@ -1234,7 +1273,6 @@ void RG_Frame_Shutdown (void)
 	if (rgf_quadbuf) SDL_ReleaseGPUBuffer (rg_dev, rgf_quadbuf);
 	if (rgf_ssbo)	SDL_ReleaseGPUBuffer (rg_dev, rgf_ssbo);
 	rgf_ssbo = NULL;
-	memset (rgf_ssbo_slots, 0, sizeof(rgf_ssbo_slots));
 	if (rgf_tbuf)	SDL_ReleaseGPUTransferBuffer (rg_dev, rgf_tbuf);
 	if (rgf_color)	SDL_ReleaseGPUTexture (rg_dev, rgf_color);
 	if (rgf_depth)	SDL_ReleaseGPUTexture (rg_dev, rgf_depth);
@@ -1258,4 +1296,6 @@ void RG_Frame_Status (void)
 		    rgf_tw, rgf_th, rgf_last_draws, rgf_last_indexed, rgf_last_segments,
 		    (unsigned int) rgf_last_stream, RG_ProgramCount (), RG_PipelineCount (),
 		    RG_LayoutCount (), rgf_dropped, rgf_frames);
+	Con_Printf ("[RENDERER] SDL_GPU storage slots last frame: %d bound to a buffer, %d to the "
+		    "stand-in\n", rgf_last_ssbo, rgf_last_standin);
 }

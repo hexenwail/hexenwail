@@ -18,8 +18,10 @@ Checks the pieces that have to move together:
     non-opaque uniform, puts its bones on VERT_SSBO(4, 0) -- GL binding 4,
     which GL_DrawAliasSkeletal binds, and Vulkan set 0 index 0, since the
     stage samples no texture -- and gives every input an explicit VERT_IN
-    equal to the slot, width and integer-ness of the IQM VAO in gl_mesh.c,
-    which is NOT the ATTR_* contract the other programs share, and its
+    equal to the slot, width and integer-ness of the IQM VAO in gl_mesh.c
+    (built through gl_buffer.c's seams, #340 P2e, with every byte or short
+    a float input reads normalized), which is NOT the ATTR_* contract the
+    other programs share, and its
     BonePose and main match a pinned token stream (GOLDEN);
   * the literal, GL_SpliceDefines and the GLSL_ALIAS_DLIGHT_VS_* splices are
     gone, all four skeletal programs' program-table rows (#340 P1b) compile
@@ -361,12 +363,48 @@ decl_in = re.findall(r"^\s*(?:VERT_IN\((\d+)\)\s+)?in\s+(\w+)\s+(\w+)\s*;", vcod
 if not decl_in:
     errors.append("sskeletal_vert.glsl: no vertex inputs found")
 iqm = mesh[mesh.find("iqm_gpu_setup:"):] if "iqm_gpu_setup:" in mesh else ""
-iqm = iqm[:iqm.find("glBindVertexArray_fp(0);")] if "glBindVertexArray_fp(0);" in iqm else ""
+# Through gl_buffer.c's seams since #340 P2e, so -gpu builds the same VAO.
+iqm = iqm[:iqm.find("R_BindVertexArray (0);")] if "R_BindVertexArray (0);" in iqm else ""
 vao = {int(i): (int(n), bool(isint)) for isint, i, n in
-       re.findall(r"glVertexAttrib(I?)Pointer_fp\((\d+), (\d+),", strip(iqm))}
-enabled = {int(i) for i in re.findall(r"glEnableVertexAttribArray_fp\((\d+)\)", strip(iqm))}
+       re.findall(r"\bR_VertexAttrib(I?)Pointer \((\d+), (\d+),", strip(iqm))}
+enabled = {int(i) for i in re.findall(r"\bR_EnableVertexAttribArray \((\d+)\)", strip(iqm))}
 if len(vao) != 5 or enabled != set(vao):
     errors.append(f"cannot read the IQM VAO's five attributes from gl_mesh.c (pointers {vao}, enabled {enabled})")
+# A float input fed from bytes or shorts must be normalized: un-normalized,
+# GL hands the shader 0..255 where it wants 0..1 (weights) or -1..1 (normals),
+# and SDL_GPU has no such vertex format, so -gpu drops the draw (#340 P2e).
+for i, typ, norm in re.findall(r"\bR_VertexAttribPointer \((\d+), \d+, (GL_\w+), (GL_\w+),", strip(iqm)):
+    if typ in ("GL_BYTE", "GL_UNSIGNED_BYTE", "GL_SHORT", "GL_UNSIGNED_SHORT") and norm != "GL_TRUE":
+        errors.append(f"the IQM VAO's attribute {i} is {typ} read as a float without normalizing")
+# Attribute k reads iqmvert_t's k-th member: its GL type, its count, its
+# offset (natural alignment), and the struct's size as the stride.  A pointer
+# at the wrong offset still links and draws -- a mesh with indices for
+# weights -- so the offsets are held here, not left to the frames.
+model_h = strip(read("engine/h2shared/gl_model.h"))
+mi = re.search(r"typedef struct \{([^{}]*)\} iqmvert_t;", model_h)
+CTYPE = {"float": ("GL_FLOAT", 4), "int8_t": ("GL_BYTE", 1), "uint8_t": ("GL_UNSIGNED_BYTE", 1),
+         "signed char": ("GL_BYTE", 1), "unsigned char": ("GL_UNSIGNED_BYTE", 1)}
+members, off, align = [], 0, 1
+for ctype, n in re.findall(r"((?:signed |unsigned )?\w+)\s+\w+\[(\d+)\]\s*;", mi.group(1) if mi else ""):
+    gl, size = CTYPE.get(ctype, (None, 0))
+    if not gl:
+        errors.append(f"iqmvert_t member type {ctype} has no GL type here")
+        continue
+    off = (off + size - 1) // size * size
+    members.append((gl, int(n), off))
+    off += size * int(n)
+    align = max(align, size)
+stride = (off + align - 1) // align * align
+ptrs = {int(i): (n, t, int(o)) for i, n, t, o in re.findall(
+    r"\bR_VertexAttribI?Pointer \((\d+), (\d+), (GL_\w+),[^;]*?sizeof\(iqmvert_t\), \(void \*\)(\d+)\)", strip(iqm))}
+if len(members) != 5 or len(ptrs) != 5:
+    errors.append(f"cannot pair iqmvert_t's members ({len(members)}) with the VAO's pointers ({len(ptrs)})")
+for k, (gl, n, o) in enumerate(members):
+    if k in ptrs and ptrs[k] != (str(n), gl, o):
+        errors.append(f"the IQM VAO's attribute {k} is ({ptrs[k][0]}, {ptrs[k][1]}, offset {ptrs[k][2]}); "
+                      f"iqmvert_t's member {k} is ({n}, {gl}, offset {o})")
+if stride != 32:
+    errors.append(f"iqmvert_t is {stride} bytes, not the 32 the skeletal VAO and its comment state")
 seen = set()
 for loc, typ, name in decl_in:
     if not loc:

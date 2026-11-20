@@ -193,11 +193,14 @@ typedef enum {
  * placeholder (R_ProgramSamplerUnit, gl_shader.c). */
 #define RG_UNIT_NONE	0xFF
 
-/* The zeroed buffer every read-only storage-buffer slot of a graphics stage
- * is bound to until P5 routes the real ones.  Big enough for the fixed part
- * of every such block in engine/shaders -- the largest is salias_inst_vert's
- * ShadeDots, float[4096]; the others end in runtime arrays, whose minimum is
- * empty.  tools/test_sdlgpu_bindings.py holds every blob to it. */
+/* The zeroed buffer a read-only storage-buffer slot of a graphics stage is
+ * bound to when its GL binding point holds nothing SDL_GPU can bind (since
+ * P2e; before it, every slot): LightBuffer while the light cluster is
+ * compute (P5), an instanced batch's pose buffer of the format it is not.
+ * Big enough for the fixed part of every such block in engine/shaders --
+ * the largest is salias_inst_vert's ShadeDots, float[4096]; the others end
+ * in runtime arrays, whose minimum is empty.  tools/test_sdlgpu_bindings.py
+ * holds every blob to it. */
 #define RG_SSBO_STANDIN_BYTES	16384
 
 void	RG_Res_Init (void);
@@ -253,12 +256,23 @@ typedef struct {
 	int		block;		/* rg_frame.c's registered block, -1 none */
 } rgubo_t;
 
+/* A read-only storage block (#340 P2e).  GL binds it by binding point and
+ * SDL_GPU by slot, and the Vulkan SPIR-V keeps only the slot: the point is
+ * found from the block's name (RG_StoragePoint), the convention every
+ * engine/shaders stage keeps, as u_textureN's is for samplers. */
+typedef struct {
+	char		name[32];
+	Uint8		slot;		/* the SDL_GPU storage-buffer slot */
+	int		point;		/* the GL_SHADER_STORAGE_BUFFER binding point, -1 none */
+} rgssbo_t;
+
 typedef struct {
 	int		num_samplers;
 	rgsampler_t	samplers[RG_MAX_STAGE_SAMPLERS];
 	int		num_ubos;
 	rgubo_t		ubos[RG_MAX_STAGE_UBOS];
 	int		num_ssbos;	/* read-only storage buffers, the reflection row's */
+	rgssbo_t	ssbos[RG_MAX_STAGE_SSBOS];
 } rgstage_t;
 
 typedef struct {
@@ -278,6 +292,9 @@ void	RG_Shader_Shutdown (void);
 const char *RG_ShaderSource (void);
 const rgprog_t *RG_Program (GLuint name);
 int	RG_ProgramCount (void);
+/* The GL_SHADER_STORAGE_BUFFER binding point the engine binds storage block
+ * `block` to (GL_BindBufferBase / Range), -1 for a block it never binds. */
+int	RG_StoragePoint (const char *block);
 
 /* ------------------------------------------------------------------ */
 /* rg_pipeline.c                                                       */
@@ -352,6 +369,13 @@ qboolean RG_Buf_ForDraw (int index_bytes, rgvinput_t *in);
 void	RG_Buf_MarkRead (const rgvinput_t *in);
 /* Queued buffer uploads, as RG_Res_PendingBytes / StageUploads /
  * IssueUploads, and the buffers retired during the frame. */
+/* The buffer bound to GL_SHADER_STORAGE_BUFFER binding point `point`, for
+ * a draw's storage slot; NULL, and counted, when there is none SDL_GPU can
+ * bind whole (nothing bound, no data, a range at a non-zero offset or past
+ * the buffer): the slot keeps the zeroed stand-in.  *read is what
+ * RG_Buf_StampRead takes once the draw is recorded (#340 P2e). */
+SDL_GPUBuffer *RG_Buf_Storage (int point, void **read);
+void	RG_Buf_StampRead (void *read);
 Uint32	RG_Buf_PendingBytes (void);
 void	RG_Buf_StageUploads (Uint8 *dst, Uint32 base);
 void	RG_Buf_IssueUploads (SDL_GPUCopyPass *copy, SDL_GPUTransferBuffer *tb);

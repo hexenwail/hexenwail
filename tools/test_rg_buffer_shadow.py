@@ -29,7 +29,20 @@ the RG_* entry points the gl_buffer.c seams call and checks, case by case:
     into the moved table);
   * a deleted buffer's name, handed out again, is not drawn from by a VAO
     that still named the old one;
-  * names are tagged: a name the null GL table made is not one of ours.
+  * names are tagged: a name the null GL table made is not one of ours;
+  * the skeletal mesh's VAO (#340 P2e): iqmvert_t's five attributes in one
+    slot, the normal GL_BYTE normalized (BYTE4_NORM), the weights
+    GL_UNSIGNED_BYTE normalized (UBYTE4_NORM), the bone indices integer
+    (UBYTE4, glVertexAttribIPointer), and no constant slot;
+  * storage (#340 P2e): every buffer is made with graphics storage-read
+    usage; glBufferData fills one through GL_SHADER_STORAGE_BUFFER; a
+    binding point's buffer is what a draw's storage slot gets, a range
+    only at offset 0 and inside the buffer (SDL_GPU binds whole buffers),
+    nothing for a uniform-target bind, nothing once the buffer is deleted;
+    GL_Upload's arm hands each upload of a frame its own buffer at offset
+    0, reuses them in order the next frame with cycling on, refuses a
+    uniform target; an upload into a storage buffer a recorded draw of the
+    open segment reads ends the segment.
 
 Stock python3 and a C compiler (cc / gcc / clang); lint.yml.
 """
@@ -80,6 +93,7 @@ typedef intptr_t GLsizeiptr;
 #define GL_FLOAT 0x1406
 #define GL_HALF_FLOAT 0x140B
 #define GL_UNIFORM_BUFFER 0x8A11
+#define GL_SHADER_STORAGE_BUFFER 0x90D2
 void Sys_Error (const char *fmt, ...);
 void Con_Printf (const char *fmt, ...);
 '''
@@ -91,6 +105,7 @@ typedef enum { %(formats)s } SDL_GPUVertexElementFormat;
 typedef Uint32 SDL_GPUBufferUsageFlags;
 #define SDL_GPU_BUFFERUSAGE_VERTEX 1u
 #define SDL_GPU_BUFFERUSAGE_INDEX 2u
+#define SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ 4u
 typedef struct SDL_GPUDevice SDL_GPUDevice;
 typedef struct SDL_GPUBuffer { Uint32 size, usage; Uint8 *data; int released, cycles; } SDL_GPUBuffer;
 typedef struct SDL_GPUTransferBuffer { Uint8 *data; } SDL_GPUTransferBuffer;
@@ -121,6 +136,11 @@ void RG_EnableVertexAttribArray (GLuint index, qboolean enable);
 void RG_VertexAttribPointer (GLuint index, GLint size, GLenum type, GLboolean normalized,
 			     qboolean integer, GLsizei stride, const void *pointer);
 void RG_VertexAttrib4f (GLuint index, GLfloat x, GLfloat y, GLfloat z, GLfloat w);
+void RG_BindBufferBase (GLenum target, GLuint index, GLuint buffer);
+void RG_BindBufferRange (GLenum target, GLuint index, GLuint buffer, GLintptr offset,
+			 GLsizeiptr size);
+void RG_Upload (GLenum target, const void *data, size_t numbytes, GLuint *outbuf,
+		GLintptr *outofs);
 /* the real header's layout and draw-input types, copied verbatim */
 %(types)s
 '''
@@ -369,6 +389,139 @@ static void stale_name (void)
 	EndFrame ();
 }
 
+typedef struct { float pos[3]; signed char n[4]; float st[2]; Uint8 w[4], ix[4]; } iqmv_t;
+
+static void skeletal_layout (void)
+{
+	GLuint vao, vb, ib;
+	rgvinput_t in;
+	iqmv_t v[3];
+	unsigned short ix[3] = { 0, 1, 2 };
+	int i, seen = 0;
+
+	memset (v, 0, sizeof(v));
+	RG_GenVertexArrays (1, &vao);
+	RG_GenBuffers (1, &vb);
+	RG_GenBuffers (1, &ib);
+	RG_BindVertexArray (vao);
+	RG_BindBuffer (GL_ARRAY_BUFFER, vb);
+	RG_BufferData (GL_ARRAY_BUFFER, sizeof(v), v, 0);
+	/* gl_mesh.c's skeletal VAO, call for call */
+	RG_EnableVertexAttribArray (0, true);
+	RG_VertexAttribPointer (0, 3, GL_FLOAT, GL_FALSE, false, sizeof(iqmv_t), (void *) 0);
+	RG_EnableVertexAttribArray (1, true);
+	RG_VertexAttribPointer (1, 4, GL_BYTE, GL_TRUE, false, sizeof(iqmv_t), (void *) 12);
+	RG_EnableVertexAttribArray (2, true);
+	RG_VertexAttribPointer (2, 2, GL_FLOAT, GL_FALSE, false, sizeof(iqmv_t), (void *) 16);
+	RG_EnableVertexAttribArray (3, true);
+	RG_VertexAttribPointer (3, 4, GL_UNSIGNED_BYTE, GL_TRUE, false, sizeof(iqmv_t), (void *) 24);
+	RG_EnableVertexAttribArray (4, true);
+	RG_VertexAttribPointer (4, 4, GL_UNSIGNED_BYTE, GL_FALSE, true, sizeof(iqmv_t), (void *) 28);
+	RG_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, ib);
+	RG_BufferData (GL_ELEMENT_ARRAY_BUFFER, sizeof(ix), ix, 0);
+	CHECK (Draw (2, &in), "the skeletal VAO draws");
+	CHECK (in.layout.num_slots == 1 && in.const_slot < 0, "one slot, every standard input enabled: no constants");
+	CHECK (in.layout.slot[0].pitch == 32, "iqmvert_t's 32-byte stride");
+	for (i = 0; i < (int) in.layout.num_attrs; i++)
+	{
+		const rgvattr_t *a = &in.layout.attr[i];
+		static const Uint32 fmt[5] = { SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, SDL_GPU_VERTEXELEMENTFORMAT_BYTE4_NORM,
+			SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, SDL_GPU_VERTEXELEMENTFORMAT_UBYTE4_NORM,
+			SDL_GPU_VERTEXELEMENTFORMAT_UBYTE4 };
+		static const Uint32 ofs[5] = { 0, 12, 16, 24, 28 };
+
+		if (a->location > 4)
+			continue;
+		seen |= 1 << a->location;
+		CHECK (a->format == fmt[a->location], "each skeletal input's SDL_GPU format");
+		CHECK (a->offset == ofs[a->location] && a->slot == 0, "each skeletal input's offset in the one slot");
+	}
+	CHECK (seen == 0x1F, "all five skeletal inputs");
+	RG_DeleteVertexArrays (1, &vao);
+	RG_DeleteBuffers (1, &vb);
+	RG_DeleteBuffers (1, &ib);
+	EndFrame ();
+}
+
+static void storage (void)
+{
+	GLuint sb, other, n1, n2, n3;
+	GLintptr o1 = 99, o2 = 99;
+	Uint8 bytes[64], more[80];
+	SDL_GPUBuffer *g, *g1;
+	void *read;
+	int i, f0, c0;
+
+	for (i = 0; i < 64; i++) bytes[i] = (Uint8)(i * 3);
+	for (i = 0; i < 80; i++) more[i] = (Uint8)(250 - i);
+	RG_GenBuffers (1, &sb);
+	RG_BindBuffer (GL_SHADER_STORAGE_BUFFER, sb);
+	RG_BufferData (GL_SHADER_STORAGE_BUFFER, 64, bytes, 0);
+	RG_BindBuffer (GL_SHADER_STORAGE_BUFFER, 0);
+	CopyPass ();
+	CHECK (!RG_Buf_Storage (4, &read) && !read, "nothing bound at the point: no buffer");
+	RG_BindBufferBase (GL_SHADER_STORAGE_BUFFER, 4, sb);
+	g = RG_Buf_Storage (4, &read);
+	CHECK (g && read, "a base bind is what the draw's slot gets");
+	CHECK (g && (g->usage & SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ), "made with storage-read usage");
+	CHECK (g && !memcmp (g->data, bytes, 64), "glBufferData through the storage target filled it");
+	CHECK (!RG_Buf_Storage (3, &read), "the other points are untouched");
+	unhandled = 0;
+	RG_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 4, sb, 16, 32);
+	CHECK (!RG_Buf_Storage (4, &read) && unhandled == 1,
+	       "a range at a non-zero offset is refused, not bound whole from 0");
+	RG_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 4, sb, 0, 32);
+	CHECK (RG_Buf_Storage (4, &read) == g, "a range at offset 0 binds the buffer");
+	RG_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 4, sb, 0, 128);
+	CHECK (!RG_Buf_Storage (4, &read), "a range past the buffer is refused");
+	RG_BindBufferBase (GL_SHADER_STORAGE_BUFFER, 4, sb);
+	RG_BindBufferBase (GL_UNIFORM_BUFFER, 4, 0);
+	CHECK (RG_Buf_Storage (4, &read) == g, "a uniform-target bind leaves the storage point alone");
+
+	/* the hazard: a recorded draw read it in the open segment */
+	f0 = flushes;
+	RG_Buf_StampRead (read);
+	draws++;
+	RG_BindBuffer (GL_SHADER_STORAGE_BUFFER, sb);
+	RG_BufferSubData (GL_SHADER_STORAGE_BUFFER, 0, 16, more);
+	CHECK (flushes == f0 + 1, "a storage upload a recorded draw reads ends the segment first");
+
+	/* GL deletes a buffer out of every binding point */
+	RG_DeleteBuffers (1, &sb);
+	CHECK (!RG_Buf_Storage (4, &read), "a deleted buffer leaves its binding point");
+	/* and the name, handed straight back out, is not read through the point */
+	RG_GenBuffers (1, &other);
+	CHECK (other == sb, "the free list hands the name back");
+	RG_BindBuffer (GL_SHADER_STORAGE_BUFFER, other);
+	RG_BufferData (GL_SHADER_STORAGE_BUFFER, 64, bytes, 0);
+	CHECK (!RG_Buf_Storage (4, &read), "the point does not read the buffer that inherited the name");
+	RG_DeleteBuffers (1, &other);
+	EndFrame ();
+
+	/* GL_Upload: a buffer per upload, at offset 0 */
+	RG_Upload (GL_SHADER_STORAGE_BUFFER, bytes, 64, &n1, &o1);
+	RG_Upload (GL_SHADER_STORAGE_BUFFER, more, 80, &n2, &o2);
+	CHECK (n1 && n2 && n1 != n2, "two uploads in a frame, two buffers");
+	CHECK (o1 == 0 && o2 == 0, "every upload at offset 0");
+	RG_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, n1, o1, 64);
+	g1 = RG_Buf_Storage (0, &read);
+	CopyPass ();
+	CHECK (g1 && !memcmp (g1->data, bytes, 64), "the upload is in its buffer");
+	CHECK (g1 && (g1->usage & SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ), "a stream buffer is storage too");
+	EndFrame ();
+	c0 = g1 ? g1->cycles : 0;
+	RG_Upload (GL_SHADER_STORAGE_BUFFER, more, 80, &n3, &o1);
+	CHECK (n3 == n1, "the next frame's first upload reuses the first buffer");
+	CopyPass ();
+	CHECK (g1 && g1->cycles == c0 + 1 && !memcmp (g1->data, more, 80),
+	       "reused with cycling on: the last frame's draws keep their bytes");
+	unhandled = 0;
+	RG_Upload (GL_UNIFORM_BUFFER, bytes, 64, &n3, &o1);
+	CHECK (n3 == 0 && unhandled == 1, "uniform data is not streamed under -gpu");
+	RG_BindBufferBase (GL_SHADER_STORAGE_BUFFER, 0, 0);
+	EndFrame ();
+}
+
 int main (void)
 {
 	RG_Buf_Init ();
@@ -376,6 +529,8 @@ int main (void)
 	uploads_and_hazard ();
 	table_growth ();
 	stale_name ();
+	skeletal_layout ();
+	storage ();
 	RG_Buf_Shutdown ();
 	if (failures)
 		return 1;
@@ -391,7 +546,7 @@ def types_block():
     b = h.index("} rgvlayout_t;") + len("} rgvlayout_t;")
     c = h.index("typedef struct {\n\trgvlayout_t\tlayout;")
     d = h.index("} rgvinput_t;") + len("} rgvinput_t;")
-    decl = re.findall(r"^(?:qboolean|void|Uint32)\s+RG_Buf_\w+\s*\([^;]*\);", h, re.M)
+    decl = re.findall(r"^(?:qboolean|void|Uint32|SDL_GPUBuffer\s*\*)\s*RG_Buf_\w+\s*\([^;]*\);", h, re.M)
     return h[a:b] + "\n" + h[c:d] + "\n" + "\n".join(decl) + "\n"
 
 
@@ -420,7 +575,8 @@ def main():
         if r.returncode:
             sys.exit("FAIL: rg_buffer.c's shadow disagrees with GL:\n" + (r.stdout + r.stderr)[-3000:])
     print("PASS rg_buffer.c's buffer and vertex-array shadow keeps GL's binding rules, uploads, the "
-          "segment hazard, table growth and name reuse (#340 P2d)")
+          "segment hazard, table growth and name reuse (#340 P2d), the skeletal layout, storage "
+          "binding points and the upload stream (#340 P2e)")
 
 
 if __name__ == "__main__":
