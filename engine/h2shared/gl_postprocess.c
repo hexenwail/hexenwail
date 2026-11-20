@@ -1705,6 +1705,13 @@ static qboolean OIT_CreateFBO (int width, int height, GLuint depth_stencil_rb, G
 	GLenum drawbufs[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
 	GLenum textarget = (samples > 1) ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D;
 
+#ifdef USE_SDL_GPU
+	/* OIT is P6 of #340.  Its twins read the targets through sampler2DMS,
+	 * which -gpu drops, so once P4 turns post-process on under -gpu,
+	 * r_oit 1 would lose every translucent: -gpu stays on sorted blending. */
+	if (R_GPU ())
+		return false;
+#endif
 	OIT_DeleteFBO();
 #ifdef USE_GLES
 	/* ES 3.0 and WebGL2 have no multisample textures, so the two OIT
@@ -1873,6 +1880,10 @@ void OIT_BeginTranslucency (void)
 	static const float zeroes[4] = {0.f, 0.f, 0.f, 0.f};
 	static const float ones[4] = {1.f, 1.f, 1.f, 1.f};
 
+#ifdef USE_SDL_GPU
+	if (R_GPU ())	/* P6, see OIT_CreateFBO */
+		return;
+#endif
 	if (!oit_available || !r_oit.integer || !HW_OIT_HAS_BLEND_FUNCI)
 		return;
 
@@ -1955,6 +1966,10 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 	qboolean cull_was_on, mboit;
 	GLint saved_viewport[4];
 
+#ifdef USE_SDL_GPU
+	if (R_GPU ())	/* P6, see OIT_CreateFBO */
+		return;
+#endif
 	if (!oit_available || !r_oit.integer || !HW_OIT_HAS_BLEND_FUNCI)
 		return;
 
@@ -2071,6 +2086,10 @@ qboolean OIT_Active (void)
 	 * uhexen2-a5nn.34 */
 	if (map_checks.integer)
 		return false;
+#ifdef USE_SDL_GPU
+	if (R_GPU ())	/* P6, see OIT_CreateFBO */
+		return false;
+#endif
 	return oit_available && r_oit.integer && HW_OIT_HAS_BLEND_FUNCI;
 }
 
@@ -2110,6 +2129,14 @@ void GL_SoftDepth_Capture (void)
 
 	soft_depth_valid = false;
 
+#ifdef USE_SDL_GPU
+	/* The capture is FBOs and a depth blit, which -gpu routes at P4.  The
+	 * null glBlitFramebuffer is not NULL, so without this the snapshot
+	 * would be marked valid and sprites would fade against a texture
+	 * nothing wrote. */
+	if (R_GPU ())
+		return;
+#endif
 	if (!r_softparticles.integer || !glBlitFramebuffer_fp || w <= 0 || h <= 0)
 		return;
 

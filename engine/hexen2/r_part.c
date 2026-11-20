@@ -29,6 +29,9 @@
 #include "gl_vbo.h"
 #include "gl_matrix.h"
 #include "gl_postprocess.h"
+#ifdef USE_SDL_GPU
+#include "rg_device.h"	/* R_GPU(): -gpu makes no GPU particle buffers */
+#endif
 
 /* ------------------------------------------------------------------ */
 /* GPU particle SSBO rendering                                         */
@@ -59,6 +62,12 @@ static GLuint           gpu_particle_vao;
 
 static void R_GPU_Particles_Init (void)
 {
+#ifdef USE_SDL_GPU
+	/* Nothing draws from these on any tier, and under -gpu they would be
+	 * raw GL into the null table (#340 P3a). */
+	if (R_GPU ())
+		return;
+#endif
 	GL_CreateParticleResources (&gpu_particle_ssbo, &gpu_particle_vao,
 				    GPU_MAX_PARTICLES * sizeof(gpu_particle_t));
 

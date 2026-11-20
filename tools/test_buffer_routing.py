@@ -90,7 +90,8 @@ OWNERS = {
         "GL_BindBufferBase", "GL_BindBufferRange", "GL_BindBuffersRange",
         "R_GenVertexArrays", "R_DeleteVertexArrays", "R_BindVertexArray", "R_EnableVertexAttribArray",
         "R_DisableVertexAttribArray", "R_VertexAttribPointer", "R_VertexAttribIPointer", "R_VertexAttrib4f",
-        # the GL 4.3 frame ring and the particle SSBO: GL-only, -gpu leaves them on the null table
+        # the GL 4.3 frame ring and the particle SSBO: GL-only.  -gpu leaves the ring on the null
+        # table and never makes the SSBO (r_part.c's R_GPU_Particles_Init returns, #340 P3a)
         "GL_CreateParticleResources", "GL_DeleteParticleResources", "GL_AddGarbageBufferTo",
         "GL_DrainGarbage", "GL_AllocFrameHostBuffers", "GL_DeleteFrameResources", "GL_Upload",
     },
