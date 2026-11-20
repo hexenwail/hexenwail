@@ -412,6 +412,47 @@ void R_SetViewport (int x, int y, int width, int height)
 	glViewport_fp (x, y, width, height);
 }
 
+/* The values glClear writes, GL's defaults until set.  Not draw state, so
+ * nothing is folded: every GL arm below is the bare call the call site used
+ * to make.  Under -gpu they are what the next render pass clears to
+ * (#340 P2b). */
+static float	rp_clear_color[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+static double	rp_clear_depth = 1.0;
+static GLint	rp_clear_stencil = 0;
+
+void R_SetClearColor (float r, float g, float b, float a)
+{
+	rp_clear_color[0] = r;
+	rp_clear_color[1] = g;
+	rp_clear_color[2] = b;
+	rp_clear_color[3] = a;
+	RP_GL (glClearColor_fp (r, g, b, a));
+}
+
+void R_SetClearDepth (double depth)
+{
+	rp_clear_depth = depth;
+	RP_GL (glClearDepth_fp (depth));
+}
+
+void R_SetClearStencil (GLint s)
+{
+	rp_clear_stencil = s;
+	RP_GL (glClearStencil_fp (s));
+}
+
+void R_ClearBuffers (GLbitfield mask)
+{
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_Clear (mask, rp_clear_color, (float) rp_clear_depth, rp_clear_stencil);
+		return;
+	}
+#endif
+	glClear_fp (mask);
+}
+
 void GL_SetScissor (int x, int y, int width, int height)
 {
 	/* Coordinates are GL-native (origin bottom-left); the caller flips from

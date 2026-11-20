@@ -20,13 +20,21 @@
  * Every frame draws into one SCENE target, not the swapchain: the Vulkan
  * stages flip y so render targets hold GL's rows in GL's order (VK_FLIP_Y,
  * layout.inc), and the present is the one place that flips back, blitting
- * the scene into the swapchain upside down (SDL_FLIP_VERTICAL).  The scene
- * is cleared to gpu_clearcolor at the start of each frame; the world (P2)
- * is not drawn yet, so that colour is what a map's 3D view shows for now.
+ * the scene into the swapchain upside down (SDL_FLIP_VERTICAL).
  *
- * GL_ImmEnd's batches are the only draws in P1c.  SDL_GPU has no quads and
- * no fans, so quads use a static index buffer (0,1,2, 0,2,3 per quad, as
- * GL_VBO_Init's) and polygons/fans and line loops get indices in the stream.
+ * Clears (#340 P2b).  SDL_GPU has no clear command: a render pass begins by
+ * clearing or loading each target, so a glClear (gl_pipeline.c
+ * R_ClearBuffers -> RG_Clear) becomes the load op of the next pass, and a
+ * clear after draws ends the segment so that those draws land first.  The
+ * first pass of a frame clears every aspect nothing asked for -- colour to
+ * gpu_clearcolor, depth and stencil to the last values a clear asked for --
+ * so no frame starts from the previous one's contents.
+ *
+ * GL_ImmEnd's batches are the only draws through P2b: the 2D, and the world,
+ * brush and alias models on their immediate-mode fallbacks.  SDL_GPU has no
+ * quads and no fans, so quads use a static index buffer (0,1,2, 0,2,3 per
+ * quad, as GL_VBO_Init's) and polygons/fans and line loops get indices in
+ * the stream.
  *
  * Every slot a draw's program declares is bound (#340 P2a), because SDL_GPU
  * faults a draw that leaves one empty: each sampler its texture or a typed
@@ -188,6 +196,16 @@ static qboolean			rgf_vp_set;
 static int			rgf_vp[4];
 static qboolean			rgf_scissor_on;
 static int			rgf_scissor[4];
+
+/* The clear the next render pass begins with (RG_Clear): the
+ * GL_*_BUFFER_BIT aspects asked for since the last pass, and the values.
+ * Depth and stencil outlive the request -- they are what a frame's first
+ * pass clears to when nothing asked.  Depth starts at 0, reversed-Z's far
+ * plane: -gpu always runs reversed-Z (GL_Init_NullGL). */
+static GLbitfield		rgf_clear_mask;
+static float			rgf_clear_rgba[4];
+static float			rgf_clear_depth = 0.0f;
+static Uint8			rgf_clear_stencil;
 
 #define RG_QUAD_INDICES	((GL_IMM_MAX_VERTS / 4) * 6)
 
@@ -811,7 +829,7 @@ static void RGF_EndSegment (void)
 		rgf_numdraws = 0;	/* nothing to read; drawing would fault */
 	RG_Res_ClearPlaceholders (rgf_cmd);
 
-	if (rgf_active && (rgf_numdraws || !rgf_cleared))
+	if (rgf_active && (rgf_numdraws || !rgf_cleared || rgf_clear_mask))
 	{
 		SDL_GPUColorTargetInfo		ct;
 		SDL_GPUDepthStencilTargetInfo	ds;
@@ -820,20 +838,35 @@ static void RGF_EndSegment (void)
 
 		SDL_zero (ct);
 		ct.texture = rgf_color;
-		ct.load_op = rgf_cleared ? SDL_GPU_LOADOP_LOAD : SDL_GPU_LOADOP_CLEAR;
 		ct.store_op = SDL_GPU_STOREOP_STORE;
-		ct.clear_color.r = cc[0];
-		ct.clear_color.g = cc[1];
-		ct.clear_color.b = cc[2];
-		ct.clear_color.a = 1.0f;
+		if (rgf_clear_mask & GL_COLOR_BUFFER_BIT)
+		{
+			ct.load_op = SDL_GPU_LOADOP_CLEAR;
+			ct.clear_color.r = rgf_clear_rgba[0];
+			ct.clear_color.g = rgf_clear_rgba[1];
+			ct.clear_color.b = rgf_clear_rgba[2];
+			ct.clear_color.a = rgf_clear_rgba[3];
+		}
+		else if (!rgf_cleared)
+		{
+			ct.load_op = SDL_GPU_LOADOP_CLEAR;
+			ct.clear_color.r = cc[0];
+			ct.clear_color.g = cc[1];
+			ct.clear_color.b = cc[2];
+			ct.clear_color.a = 1.0f;
+		}
+		else
+			ct.load_op = SDL_GPU_LOADOP_LOAD;
 		SDL_zero (ds);
 		ds.texture = rgf_depth;
-		ds.load_op = rgf_cleared ? SDL_GPU_LOADOP_LOAD : SDL_GPU_LOADOP_CLEAR;
+		ds.load_op = ((rgf_clear_mask & GL_DEPTH_BUFFER_BIT) || !rgf_cleared)
+				? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
 		ds.store_op = SDL_GPU_STOREOP_STORE;
-		ds.stencil_load_op = ds.load_op;
+		ds.stencil_load_op = ((rgf_clear_mask & GL_STENCIL_BUFFER_BIT) || !rgf_cleared)
+				? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
 		ds.stencil_store_op = SDL_GPU_STOREOP_STORE;
-		ds.clear_depth = 1.0f;
-		ds.clear_stencil = 0;
+		ds.clear_depth = rgf_clear_depth;
+		ds.clear_stencil = rgf_clear_stencil;
 		pass = SDL_BeginGPURenderPass (rgf_cmd, &ct, 1, &ds);
 		if (pass)
 		{
@@ -841,10 +874,44 @@ static void RGF_EndSegment (void)
 			SDL_EndGPURenderPass (pass);
 		}
 		rgf_cleared = true;
+		rgf_clear_mask = 0;
 		rgf_frame_draws += rgf_numdraws;
 		rgf_frame_segments++;
 	}
 	RGF_ResetSegment ();
+}
+
+void RG_Clear (GLbitfield mask, const float color[4], float depth, int stencil)
+{
+	const rpipestate_t	*ps = R_PipelineState ();
+
+	/* glClear writes through the depth and colour masks. */
+	mask &= GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT;
+	if (!ps->depth_mask)
+		mask &= ~GL_DEPTH_BUFFER_BIT;
+	if (!ps->color_mask[0] && !ps->color_mask[1] && !ps->color_mask[2] && !ps->color_mask[3])
+		mask &= ~GL_COLOR_BUFFER_BIT;
+	else if ((mask & GL_COLOR_BUFFER_BIT) &&
+		 !(ps->color_mask[0] && ps->color_mask[1] && ps->color_mask[2] && ps->color_mask[3]))
+		RG_NoteUnhandled ("glClear under a partial colour mask (every channel cleared)");
+	if (!mask)
+		return;
+	/* A load op covers the whole target. */
+	if (rgf_scissor_on)
+		RG_NoteUnhandled ("glClear inside a scissor box (the whole target cleared)");
+	if (!rgf_active)
+		RG_BeginFrame (rgf_w, rgf_h);
+	/* The pass clears before its first draw, so what this segment has
+	 * recorded already has to go out in a pass of its own. */
+	if (rgf_numdraws)
+		RGF_EndSegment ();
+	rgf_clear_mask |= mask;
+	if (mask & GL_COLOR_BUFFER_BIT)
+		memcpy (rgf_clear_rgba, color, sizeof(rgf_clear_rgba));
+	if (mask & GL_DEPTH_BUFFER_BIT)
+		rgf_clear_depth = depth;
+	if (mask & GL_STENCIL_BUFFER_BIT)
+		rgf_clear_stencil = (Uint8) stencil;
 }
 
 static void RGF_Submit (void)
@@ -921,6 +988,7 @@ void RG_Frame_Init (void)
 	rgf_active = false;
 	rgf_vp_set = false;
 	rgf_scissor_on = false;
+	rgf_clear_mask = 0;
 	rgf_quad_uploaded = false;
 	{
 		SDL_GPUBufferCreateInfo	ci;

@@ -222,6 +222,13 @@ void R_BuildWorldCull (void)
 
 	if (!m || !glDispatchCompute_fp)
 		return;
+#ifdef USE_SDL_GPU
+	/* Compute, P5 of #340, and it draws from world_vao, which -gpu leaves
+	 * at 0 (#340 P2b).  The null table's glDispatchCompute is not NULL, so
+	 * the test above passes under -gpu: say no here. */
+	if (R_GPU ())
+		return;
+#endif
 
 	R_FreeWorldCull();
 

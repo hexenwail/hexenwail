@@ -15,6 +15,12 @@
 # Requires ImageMagick:
 #   nix shell nixpkgs#imagemagick --command ./tools/shot-diff.sh ...
 #
+# PSNR_MIN=<dB> compares by PSNR instead, for two renderers that are meant to
+# agree but not to the bit (GL against the SDL_GPU backend, #340): a frame
+# passes at PSNR >= PSNR_MIN, and identical frames read "inf".  The same rule
+# below holds for the threshold -- take it from three runs, see
+# tools/sweep-world-gpu.steps.
+#
 # WHY THE MASK EXISTS.  Menu frames look bit-deterministic and are not.  The
 # main-menu cursor is an animated sprite, so two runs agree only when they
 # happen to sample the same animation phase — measured: runs A and B agreed on
@@ -58,6 +64,15 @@ for f in "$REF"/*.png; do
 	n=$(basename "$f")
 	[ -f "$NEW/$n" ] || { printf '%-24s MISSING in %s\n' "$n" "$NEW"; rc=1; continue; }
 
+	# compare reads two frames of different sizes as identical, and a frame
+	# it cannot read as a number it cannot compare: both are failures.
+	sa=$(magick identify -format '%wx%h' "$f" 2>/dev/null)
+	sb=$(magick identify -format '%wx%h' "$NEW/$n" 2>/dev/null)
+	if [ -z "$sa" ] || [ "$sa" != "$sb" ]; then
+		printf '%-24s DIFF  (size %s vs %s)\n' "$n" "${sa:-unreadable}" "${sb:-unreadable}"
+		rc=1; continue
+	fi
+
 	a=$(mktemp --suffix=.png); b=$(mktemp --suffix=.png)
 	if [ ${#mask_args[@]} -gt 0 ]; then
 		magick "$f"       "${mask_args[@]}" "$a"
@@ -67,6 +82,20 @@ for f in "$REF"/*.png; do
 	fi
 
 	ae=$(magick compare -metric AE "$a" "$b" null: 2>&1 | awk '{print $1}')
+	if [ -n "${PSNR_MIN:-}" ]; then
+		# "37.01 (0.3701)"; identical frames read 120 (IM 7.1) or "inf".
+		# Anything else -- an error message -- fails.
+		ps=$(magick compare -metric PSNR "$a" "$b" null: 2>&1 | awk '{print $1}')
+		rm -f "$a" "$b"
+		if awk -v p="$ps" -v m="$PSNR_MIN" \
+			'BEGIN { exit !(p == "inf" || (p ~ /^[0-9]+(\.[0-9]+)?$/ && p + 0 >= m + 0)) }'; then
+			printf '%-24s OK    (PSNR %s dB, %s differing pixels)\n' "$n" "$ps" "$ae"
+		else
+			printf '%-24s DIFF  (PSNR %s dB < %s, %s differing pixels)\n' "$n" "$ps" "$PSNR_MIN" "$ae"
+			rc=1
+		fi
+		continue
+	fi
 	rm -f "$a" "$b"
 
 	# AE is a float ("26.2078"); anything non-zero is a difference.

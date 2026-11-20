@@ -30,6 +30,9 @@
 #include "gl_vbo.h"
 #include "gl_matrix.h"
 #include "gl_postprocess.h"
+#ifdef USE_SDL_GPU
+#include "rg_device.h"	/* RG_NoteUnhandled: skeletal models undrawn under -gpu (#340 P2b) */
+#endif
 
 /* ES 3.0 compatibility */
 #ifdef USE_GLES
@@ -1487,6 +1490,16 @@ static void GL_DrawAliasSkeletal (entity_t *e, aliashdr_t *paliashdr,
 	byte			ColorShade;
 	extern float		r_fog_density;
 	extern float		r_fog_color[3];
+
+	/* The bones are a storage buffer, and there is no CPU skinning path:
+	 * without shader storage (-gpu until P2e, #340) nothing is drawn. */
+	if (!gl_renderer_caps.shader_storage)
+	{
+#ifdef USE_SDL_GPU
+		RG_NoteUnhandled ("skeletal (IQM) mesh not drawn: its bones need shader storage (P2e)");
+#endif
+		return;
+	}
 
 	gm = GL_GetAliasGPUMesh (paliashdr);
 	if (!gm || !gm->valid || !gm->ssbo_bones || !gm->num_indices)
@@ -5209,8 +5222,11 @@ static void R_DrawEntitiesOnList (void)
 		return;
 
 	/* Instanced alias rendering: collect and batch-draw opaque alias
-	 * models via SSBO before the per-entity loop. */
-	use_instancing = (r_alias_gpu.integer >= 1 && gl_shader_alias_inst.program);
+	 * models via SSBO before the per-entity loop.  Without shader storage
+	 * (-gpu until P2e, #340) every alias model takes the CPU path below,
+	 * through GL_ImmEnd. */
+	use_instancing = (r_alias_gpu.integer >= 1 && gl_shader_alias_inst.program &&
+			  gl_renderer_caps.shader_storage);
 	if (use_instancing)
 	{
 		double _t0c = (r_speeds.integer >= 2) ? Sys_DoubleTime() : 0;
@@ -5437,7 +5453,7 @@ static void R_DrawEntitiesOnList (void)
 	}
 
 	/* Clean up GPU alias state left bound across entities */
-	glBindVertexArray_fp(0);
+	GL_UnbindVertexArray ();
 	R_UseProgram (0);
 }
 
@@ -5593,7 +5609,7 @@ static void R_DrawTransEntitiesOnList (qboolean inwater)
 		R_SetDepthMask (true);
 
 	/* Clean up GPU alias state left bound across entities */
-	glBindVertexArray_fp(0);
+	GL_UnbindVertexArray ();
 	R_UseProgram (0);
 }
 
@@ -6496,9 +6512,9 @@ static void R_Clear (void)
 	if (r_mirroralpha.value != 1.0)
 	{
 		if (gl_clear.integer)
-			glClear_fp (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+			R_ClearBuffers (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 		else
-			glClear_fp (GL_DEPTH_BUFFER_BIT);
+			R_ClearBuffers (GL_DEPTH_BUFFER_BIT);
 		/* Mirror split: primary view occupies the "near" half of the
 		 * window-Z range, mirror reflection the "far" half. Reversed-Z
 		 * inverts which half is near (1.0 is near), so the splits flip. */
@@ -6517,9 +6533,9 @@ static void R_Clear (void)
 	else
 	{
 		if (gl_clear.integer)
-			glClear_fp (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+			R_ClearBuffers (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 		else
-			glClear_fp (GL_DEPTH_BUFFER_BIT);
+			R_ClearBuffers (GL_DEPTH_BUFFER_BIT);
 		gldepthmin = 0;
 		gldepthmax = 1;
 		R_SetDepthFunc (dfunc);
@@ -6529,8 +6545,8 @@ static void R_Clear (void)
 
 	if (have_stencil)
 	{
-		glClearStencil_fp(0);
-		glClear_fp(GL_STENCIL_BUFFER_BIT);
+		R_SetClearStencil (0);
+		R_ClearBuffers (GL_STENCIL_BUFFER_BIT);
 	}
 }
 

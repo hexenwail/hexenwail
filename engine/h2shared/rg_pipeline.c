@@ -10,17 +10,30 @@
  *
  * Mapping notes:
  *   - front face.  Every Vulkan vertex stage negates gl_Position.y
- *     (VK_FLIP_Y, layout.inc), which reverses winding: GL's counter-clockwise
- *     front is SDL_GPU's clockwise.  GL's glFrontFace is never changed from
- *     GL_CCW in this engine.
+ *     (VK_FLIP_Y, layout.inc), and SDL_GPU's Vulkan backend draws with a
+ *     negative-height viewport (y = top + h, height = -h) to give its NDC
+ *     +y up.  Together they put a vertex at framebuffer row y_w, GL's window
+ *     row, and Vulkan measures winding in framebuffer space with the
+ *     opposite sign to GL's window space: GL's counter-clockwise front is
+ *     SDL_GPU's clockwise.  GL's glFrontFace is never changed from GL_CCW in
+ *     this engine.  tools/sweep-world-gpu.steps checks it with culling on
+ *     (#340 P2b): gl_cull 1 must draw what gl_cull 0 draws.
  *   - GL_FRONT_AND_BACK culling draws nothing in GL and has no SDL_GPU mode,
  *     so it returns NULL and the draw is dropped, as GL drops it.
  *   - blend.  The effective funcs (blend_eff_*), never the shadow's
  *     RP_ENUM_UNKNOWN after R_SetBlend(true): that sentinel models a driver
  *     quirk for the redundancy filter, not the state a draw sees.
- *   - depth clip.  GL clips to [-1,1] NDC depth and SDL_GPU to [0,1]; with
- *     clipping off SDL_GPU clamps instead, which keeps the 2D canvas's z = 0
- *     (GL_Ortho -99999..99999) inside.  Fixing 3D depth to [0,1] is P2.
+ *   - depth clip.  SDL_GPU clips to [0,1] NDC depth, which is GL's clip
+ *     space under glClipControl(GL_ZERO_TO_ONE): -gpu runs the reversed-Z
+ *     path (gl_clipcontrol_able, GL_Init_NullGL), so GL_Frustum emits [0,1]
+ *     and the 3D view clips at the near and far planes as GL's does.  Clip
+ *     follows the depth test (#340 P2b): a draw that tests depth is 3D and
+ *     clips; one that does not -- the 2D canvas, GL_Ortho -99999..99999 --
+ *     is clamped instead, which keeps its z inside whatever the projection.
+ *     The few 3D draws made with the depth test off (r_showbboxes, the
+ *     skeleton overlay, the pointfile, a mod's in-view menu panel) therefore
+ *     clamp where GL clips: geometry nearer than the near plane or past the
+ *     far plane is drawn.  The x/y planes still clip what is behind the eye.
  *
  * Copyright (C) 2026  Contributors of the uHexen2 project
  *
@@ -226,7 +239,7 @@ static SDL_GPUGraphicsPipeline *RG_CreatePipeline (const rgpipekey_t *k, const r
 		ci.rasterizer_state.depth_bias_constant_factor = k->poly_units;
 		ci.rasterizer_state.depth_bias_slope_factor = k->poly_factor;
 	}
-	ci.rasterizer_state.enable_depth_clip = false;
+	ci.rasterizer_state.enable_depth_clip = k->depth_test ? true : false;
 
 	ci.multisample_state.sample_count = SDL_GPU_SAMPLECOUNT_1;
 

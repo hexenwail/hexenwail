@@ -26,6 +26,7 @@
 #include "hashindex.h"
 #include "img_load.h"
 #include "gl_sky.h"
+#include "gl_pipeline.h"	/* R_SetClearColor */
 #include "r_dlightvis.h"
 #include "r_dlightmark.h"
 
@@ -235,7 +236,7 @@ static void R_SetClearColor_f (cvar_t *var)
 {
 	int s = var->integer & 0xFF;
 	byte *rgb = (byte *)(d_8to24table + s);
-	glClearColor_fp(rgb[0]/255.0, rgb[1]/255.0, rgb[2]/255.0, 0);
+	R_SetClearColor (rgb[0]/255.0, rgb[1]/255.0, rgb[2]/255.0, 0);
 }
 
 /*

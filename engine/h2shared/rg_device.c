@@ -328,8 +328,8 @@ void RG_Status (void)
 	Con_Printf ("[RENDERER] SDL_GPU driver=%s device=%s present=%s swapchain=%s\n",
 		    RG_DriverName (), name, RG_PresentModeName (rg_present_mode),
 		    rg_dev ? "SDR" : "none");
-	Con_Printf ("[RENDERER] SDL_GPU P1c: 2D drawn; GL runs against the null table "
-		    "(%lu calls into %d entry points, see gpu_unrouted)\n", total, hit);
+	Con_Printf ("[RENDERER] SDL_GPU P2b: 2D, world, brush and alias models drawn; GL runs against "
+		    "the null table (%lu calls into %d entry points, see gpu_unrouted)\n", total, hit);
 	Con_Printf ("[RENDERER] SDL_GPU shaders from %s\n", RG_ShaderSource () ? RG_ShaderSource () : "nowhere");
 	if (rg_dev)
 	{

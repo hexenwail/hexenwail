@@ -30,7 +30,10 @@
  * Exceptions, all deliberate: context-wide switches set at context or
  * allocation time and never per draw -- debug output, multisample and clip
  * control in gl_vidsdl.c GL_Init, seamless cube sampling when gl_shadow.c
- * allocates its maps; viewport and clear values, which are not draw state; and the web_canvas_gl2.c presentation canvas (a separate
+ * allocates its maps; viewport and clears, which are not draw state (both
+ * pass through here unshadowed, R_SetViewport and R_ClearBuffers, for the
+ * SDL_GPU backend; tools/test_rg_sources.py holds the clears to it, #340
+ * P2b); and the web_canvas_gl2.c presentation canvas (a separate
  * renderer path, raw GLES by design).  tools/test_draw_state_routing.py holds
  * that list and fails on any other draw-state call outside this module.
  * GitHub #337.
@@ -145,6 +148,17 @@ void	GL_SetPointSize (float size);
  * and the 3D view set it here.  GL-native coordinates, origin bottom-left.
  * #340 P1c. */
 void	R_SetViewport (int x, int y, int width, int height);
+/* glClear and the values it clears to.  Unshadowed for GL like the viewport
+ * (each GL arm is the bare call), but SDL_GPU has no clear command: a clear
+ * is the load op of the render pass after it, so the values are kept here
+ * for the SDL_GPU arm to hand over with the mask.  That arm honours the
+ * depth mask and an all-off colour mask as glClear does; a scissor or a
+ * partial colour mask it cannot honour (a load op clears the whole target,
+ * every channel) and counts in gpu_unrouted instead.  #340 P2b. */
+void	R_SetClearColor (float r, float g, float b, float a);
+void	R_SetClearDepth (double depth);
+void	R_SetClearStencil (GLint s);
+void	R_ClearBuffers (GLbitfield mask);
 void	GL_SetScissor (int x, int y, int width, int height);
 void	GL_ResetScissor (void);
 void	GL_SetSampleShading (float frac);	/* <= 0 turns it off */

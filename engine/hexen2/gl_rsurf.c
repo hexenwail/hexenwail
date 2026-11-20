@@ -30,6 +30,9 @@
 #include "gl_postprocess.h"
 #include "gl_lightcluster.h"
 #include "r_dlightmark.h"
+#ifdef USE_SDL_GPU
+#include "rg_device.h"	/* R_GPU (): no world VBO under -gpu until P2d (#340) */
+#endif
 
 /* fog globals from gl_fog.c */
 extern float r_fog_density;
@@ -3506,6 +3509,17 @@ void R_BuildWorldVBO (void)
 	if (world_vao) { glDeleteVertexArrays_fp(1, &world_vao); world_vao = 0; }
 	if (world_index_data) { free(world_index_data); world_index_data = NULL; }
 
+#ifdef USE_SDL_GPU
+	/* -gpu has no buffer or indexed-draw seam until P2d (#340), and the
+	 * null table would hand out a VAO name that turns on every
+	 * world_vao path.  Left at 0, the world, brush entities and sky take
+	 * the GL_ImmEnd fallbacks each of those paths keeps for a missing VBO,
+	 * and GL_ImmEnd records them for SDL_GPU (#340 P2b).  No surface's
+	 * vbo_* is read where world_vao is 0. */
+	if (R_GPU ())
+		return;
+#endif
+
 	/* Pass 1: count vertices and triangles from BSP surfaces */
 	for (i = 0; i < m->numsurfaces; i++)
 	{
@@ -3698,6 +3712,13 @@ void R_BuildSkyStencilVBO (void)
 	int		total_verts = 0, total_idx = 0;
 
 	R_FreeSkyStencilVBO();
+#ifdef USE_SDL_GPU
+	/* As R_BuildWorldVBO: sky_stencil_vao stays 0, so the sky pre-pass takes
+	 * its GL_ImmEnd fallback (#340 P2b; the pre-pass itself waits on the
+	 * stencil, P2c). */
+	if (R_GPU ())
+		return;
+#endif
 
 	if (!cl.worldmodel)
 		return;

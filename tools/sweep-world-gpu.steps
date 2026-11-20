@@ -1,0 +1,168 @@
+# sweep-world-gpu.steps -- the 3D world through the SDL_GPU backend (-gpu)
+# against GL (#340 P2b): the world, brush entities, alias models (the
+# viewmodel) and the classic scrolling sky, on retail demo1.
+#
+# Run the SAME binary both ways, with identical settings:
+#
+#   A="-fsaa 0 +gamma 1 +map demo1"
+#   STEPS=tools/sweep-world-gpu.steps ENGINE=$E ./tools/headless-drive.sh script /tmp/w-gl  ~/hexen2 $A
+#   VK_ICD_FILENAMES=<lvp_icd json> STEPS=tools/sweep-world-gpu.steps ENGINE=$E \
+#       ./tools/headless-drive.sh script /tmp/w-gpu ~/hexen2 -gpu +gpu_allow_software 1 $A
+#
+# then the three checks:
+#
+#   1. GL against -gpu, every frame:
+#        PSNR_MIN=40 ./tools/shot-diff.sh /tmp/w-gl /tmp/w-gpu 200x24+100+576
+#   2. Front faces: -gpu with culling on (0x) draws what -gpu with it off (1x)
+#      draws, bar the handful of pixels GL's own pair differs by (back faces
+#      peeking through at silhouettes): AE under 240 (0.05%) per pair:
+#        for f in /tmp/w-gpu/1*.png; do b=$(basename $f); \
+#          magick compare -metric AE /tmp/w-gpu/0${b#1} $f null:; echo " $b"; done
+#      Were rg_pipeline.c's front face inverted, gl_cull 1 would cull every
+#      wall the camera faces -- the world (already backface-culled on the CPU)
+#      goes blank and only some alias models remain.  This pair cannot see a
+#      backend that ignored culling altogether; check 1 does.
+#   3. The world frame reached nothing unrouted: between REPORT-WORLD-BEGIN and
+#      REPORT-WORLD-END in /tmp/w-gpu/qconsole.log, gpu_unrouted lists no
+#      glDrawElements*, glBindVertexArray, glVertexAttrib4f or glClear, and
+#      renderer_status reports the segments per frame.
+#
+# With the Vulkan validation layers on (VK_LAYER_PATH=<vulkan-validation-layers>
+# /share/vulkan/explicit_layer.d, +gpu_debug 1) the -gpu run must log no
+# "Validation Error".
+#
+# The settings below turn off what -gpu does not draw yet, on BOTH sides, so
+# the comparison is of the same draw paths: the post-process chain (gamma 1 on
+# the command line, r_bloom, r_ssao: P4), compute and storage-buffer lighting
+# (r_gpulightstyles, r_dlight_occlusion, r_dynamic: P5), alias instancing
+# (r_alias_gpu: needs shader storage, P2e -- off here so GL draws the CPU path
+# -gpu takes), particles (P3, and random), fog (P3), MSAA (-fsaa 0: P6),
+# anisotropic filtering (GL_Init_NullGL leaves gl_max_anisotropy at 1).  The
+# rest make a frame repeatable: setpos cameras (a timed turn lands on a
+# different yaw each run, see sweep-worldcull.steps), the game paused before
+# each shot, flat lightstyles, a still sky (it scrolls with realtime, which a
+# pause does not stop), and no crosshair.
+#
+# The 200x24+100+576 mask is the mini status bar's health: the player takes a
+# knock at spawn before god is on, by a run-dependent amount.
+#
+# THE THRESHOLD.  shot-diff.sh's header: a gate calibrated on one lucky pair
+# is worthless, so it comes from three runs.  Measured 2026-11-19, 800x600,
+# llvmpipe GL against lavapipe -gpu (Mesa 26.2), PSNR in dB, masked:
+#
+#   camera          GL vs -gpu, runs 1/2/3    GL vs GL    -gpu vs -gpu
+#   01-statue-sky   50.52  50.47  50.70       62.1 64.1   61.6 identical
+#   02-arch         51.51  51.51  51.51       identical   identical
+#   03-tree         51.36  51.36  51.36       identical   identical
+#   04-cross        52.47  52.47  52.47       identical   identical
+#   05-wall         51.76  51.76  51.76       identical   identical
+#   06-courtyard    52.30  52.30  52.30       identical   identical
+#   11..16          49.13 (11) .. 52.47       53.5 on 11  56.9 on 11
+#
+# (01 and 11 hold a spinning pickup, which a pause catches at a run-dependent
+# angle.)  The broken builds the gate exists for, same cameras: front face
+# inverted 19.2-24.9 dB, clear depth 1.0 or gl_clipcontrol_able left false
+# 17.8-22.3 dB, the world VBO built under -gpu (world not drawn) 19.7-26.6
+# dB.  So 40 dB: 9 dB under the worst honest camera, 13 dB over the best
+# broken one.  Culling: -gpu 0x vs 1x differs by 9-38 pixels, GL's pair by
+# 9-44; the inverted front face by 23,868-47,236.
+#
+# llvmpipe and lavapipe share Mesa's rasterizer.  On a Tesla P4 (NVIDIA
+# Vulkan) against the same llvmpipe GL frames taken with anisotropic
+# filtering still on, the cameras read 39.9-45.2 dB: the 40 dB gate is for
+# the Mesa pair, and a hardware pair needs its own three runs.
+
+sleep 20
+cmd god
+cmd notarget
+cmd viewsize 120
+cmd crosshair 0
+cmd showpause 0
+cmd r_skyspeed_back 0
+cmd r_skyspeed_front 0
+cmd r_flatlightstyles 1
+cmd r_dynamic 0
+cmd r_gpulightstyles 0
+cmd r_ssao 0
+cmd r_bloom 0
+cmd r_dlight_occlusion 0
+cmd r_alias_gpu 0
+cmd r_particles 0
+cmd fog 0
+cmd gl_texture_anisotropy 1
+sleep 2
+
+# --- culling on (gl_cull 1, the default) ---
+cmd setpos -918 -2034 0 -20 45 0
+sleep 2
+cmd pause
+shot 01-statue-sky
+cmd pause
+cmd setpos -918 -2034 0 0 135 0
+sleep 2
+cmd pause
+shot 02-arch
+cmd pause
+cmd setpos -918 -2034 0 0 225 0
+sleep 2
+cmd pause
+shot 03-tree
+cmd pause
+cmd setpos -918 -2034 0 0 315 0
+sleep 2
+cmd pause
+shot 04-cross
+cmd pause
+cmd setpos -700 -1700 0 -10 90 0
+sleep 2
+cmd pause
+shot 05-wall
+cmd pause
+cmd setpos -1100 -1800 100 -30 0 0
+sleep 2
+cmd pause
+shot 06-courtyard
+cmd pause
+
+# --- the world frame's unrouted calls, on the last camera ---
+cmd gpu_unrouted reset
+sleep 2
+cmd echo REPORT-WORLD-BEGIN
+cmd gpu_unrouted
+cmd renderer_status
+cmd echo REPORT-WORLD-END
+sleep 1
+
+# --- culling off: the same cameras ---
+cmd gl_cull 0
+cmd setpos -918 -2034 0 -20 45 0
+sleep 2
+cmd pause
+shot 11-statue-sky
+cmd pause
+cmd setpos -918 -2034 0 0 135 0
+sleep 2
+cmd pause
+shot 12-arch
+cmd pause
+cmd setpos -918 -2034 0 0 225 0
+sleep 2
+cmd pause
+shot 13-tree
+cmd pause
+cmd setpos -918 -2034 0 0 315 0
+sleep 2
+cmd pause
+shot 14-cross
+cmd pause
+cmd setpos -700 -1700 0 -10 90 0
+sleep 2
+cmd pause
+shot 15-wall
+cmd pause
+cmd setpos -1100 -1800 100 -30 0 0
+sleep 2
+cmd pause
+shot 16-courtyard
+cmd pause
+cmd gl_cull 1
