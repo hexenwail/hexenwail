@@ -578,7 +578,9 @@ void RG_DrawImm (GLenum mode, const void *verts, int count, int stride)
 	d->scissor.y = sc_y0;
 	d->scissor.w = sc_x1 - sc_x0;
 	d->scissor.h = sc_y1 - sc_y0;
-	d->stencil_ref = (Uint8) ps->stencil_ref;
+	/* Dynamic state, not in the pipeline key; GL clamps the reference to
+	 * the stencil buffer's 8 bits, a Uint8 cast would wrap it. */
+	d->stencil_ref = (Uint8) CLAMP (0, ps->stencil_ref, 255);
 	rgf_numdraws++;
 }
 
@@ -978,12 +980,45 @@ void RG_Frame_End (qboolean show)
 /* Life cycle                                                          */
 /* ------------------------------------------------------------------ */
 
+/* The scene's depth target, stencil first (#340 P2c): GL's visual asks for
+ * 24 depth bits and 8 of stencil (SDL_GL_STENCIL_SIZE), and SDL guarantees
+ * one of the two packed formats.  The stencil-less ones behind them are for
+ * a device that broke that promise: -gpu then runs with have_stencil false,
+ * as GL does on a visual with no stencil bits (RG_DepthHasStencil). */
+static const SDL_GPUTextureFormat rgf_depth_formats[] = {
+	SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT,
+	SDL_GPU_TEXTUREFORMAT_D32_FLOAT_S8_UINT,
+	SDL_GPU_TEXTUREFORMAT_D24_UNORM,
+	SDL_GPU_TEXTUREFORMAT_D32_FLOAT
+};
+
+qboolean RG_FormatHasStencil (SDL_GPUTextureFormat fmt)
+{
+	return fmt == SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT ||
+	       fmt == SDL_GPU_TEXTUREFORMAT_D32_FLOAT_S8_UINT;
+}
+
+qboolean RG_DepthHasStencil (void)
+{
+	return rg_dev != NULL && RG_FormatHasStencil (rgf_depth_fmt);
+}
+
 void RG_Frame_Init (void)
 {
-	rgf_depth_fmt = SDL_GPUTextureSupportsFormat (rg_dev, SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT,
-						      SDL_GPU_TEXTURETYPE_2D,
-						      SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET)
-			? SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT : SDL_GPU_TEXTUREFORMAT_D32_FLOAT_S8_UINT;
+	int	i;
+
+	rgf_depth_fmt = SDL_GPU_TEXTUREFORMAT_D16_UNORM;	/* universally supported */
+	for (i = 0; i < (int)(sizeof(rgf_depth_formats) / sizeof(rgf_depth_formats[0])); i++)
+	{
+		if (SDL_GPUTextureSupportsFormat (rg_dev, rgf_depth_formats[i], SDL_GPU_TEXTURETYPE_2D,
+						  SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET))
+		{
+			rgf_depth_fmt = rgf_depth_formats[i];
+			break;
+		}
+	}
+	if (!RG_FormatHasStencil (rgf_depth_fmt))
+		Con_SafePrintf ("SDL_GPU: no depth format with stencil; skyboxes are drawn unmasked\n");
 	SDL_GetWindowSizeInPixels (rg_win, &rgf_w, &rgf_h);
 	rgf_active = false;
 	rgf_vp_set = false;

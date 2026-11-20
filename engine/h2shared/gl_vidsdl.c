@@ -2042,11 +2042,13 @@ static void GL_Init_NullGL (void)
 {
 	RG_NullGL_Install();
 
-	/* The swapchain's colour format; depth and stencil are offscreen
-	 * targets the backend will own, none of which exist at P0. */
+	/* The swapchain's colour format; depth and stencil are the backend's
+	 * offscreen scene target (rg_frame.c).  Its stencil turns on the sky
+	 * depth+stencil pre-pass and the stencilled skybox, as a GL visual's
+	 * stencil bits do in GL_Init (#340 P2c). */
 	memset (&vid_attribs, 0, sizeof(attributes_t));
 	vid_attribs.red = vid_attribs.green = vid_attribs.blue = vid_attribs.alpha = 8;
-	have_stencil = false;
+	have_stencil = RG_DepthHasStencil ();
 
 	gl_vendor = (const char *)glGetString_fp (GL_VENDOR);
 	gl_renderer = (const char *)glGetString_fp (GL_RENDERER);

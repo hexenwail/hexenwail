@@ -120,4 +120,9 @@ void	RG_DrawImm (GLenum mode, const void *verts, int count, int stride);
 /* gl_vidsdl.c GL_BeginRendering: the frame's render target size. */
 void	RG_BeginFrame (int width, int height);
 
+/* gl_vidsdl.c GL_Init_NullGL: the scene's depth target has a stencil
+ * aspect, so have_stencil is true and the sky pre-pass and the stencilled
+ * skybox run as on GL (#340 P2c).  The GL arm reads the visual's bits. */
+qboolean RG_DepthHasStencil (void);
+
 #endif /* RG_DEVICE_H */

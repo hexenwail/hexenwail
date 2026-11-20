@@ -1,0 +1,98 @@
+# sweep-skybox-gpu.steps -- the stencilled skybox through the SDL_GPU backend
+# (-gpu) against GL (#340 P2c), on the Shadow of Tremor mod's egypt
+# (worldspawn "sky" "dunes_").  No retail map has a skybox, so this needs the
+# mod in <basedir>/sot.
+#
+# What it is for.  On a skybox map the sky brushes are not drawn: the
+# depth+stencil pre-pass in gl_rsurf.c writes their depth and marks stencil
+# 1, and Sky_DrawSky fills the box only where stencil is still 1.  Without a
+# stencil (have_stencil false, which is what -gpu was before P2c) there is no
+# pre-pass, so whatever lies behind a sky brush is drawn and the box fills
+# around it.  Each camera below looks through a sky brush at open space
+# behind it, found by marching rays through egypt's BSP (empty -> sky ->
+# empty).  On 04-battlement the wall behind the near one shows its
+# crenellations above the sky line when the stencil is missing.
+#
+# Run the SAME binary both ways, with identical settings, three times each:
+#
+#   A="-fsaa 0 +gamma 1 -game sot +map egypt"
+#   STEPS=tools/sweep-skybox-gpu.steps ENGINE=$E ./tools/headless-drive.sh script /tmp/s-gl  ~/hexen2 $A
+#   VK_ICD_FILENAMES=<lvp_icd json> STEPS=tools/sweep-skybox-gpu.steps ENGINE=$E \
+#       ./tools/headless-drive.sh script /tmp/s-gpu ~/hexen2 -gpu +gpu_allow_software 1 $A
+#   PSNR_MIN=40 ./tools/shot-diff.sh /tmp/s-gl /tmp/s-gpu 200x24+100+576
+#
+# and between REPORT-WORLD-BEGIN and REPORT-WORLD-END in the -gpu
+# qconsole.log, gpu_unrouted lists no GL entry point.  With the Vulkan
+# validation layers on (+gpu_debug 1) the -gpu run logs no "Validation Error".
+# Settings, the HUD mask and the reasons for both are sweep-world-gpu.steps'.
+#
+# THE THRESHOLD, measured 2026-11-19, 800x600, llvmpipe GL against lavapipe
+# -gpu (Mesa 26.2), masked PSNR in dB, the P2b binary (no stencil under -gpu)
+# beside it:
+#
+#   camera           GL vs -gpu, runs 1/2/3   GL vs GL   P2b binary   Tesla P4
+#   01-north         51.5  52.3  58.7          54.7       51.1         46.5
+#   02-north-mid     54.0  55.4  55.1          55.9       50.9         47.4
+#   03-courtyard     51.2  52.0  52.0          58.6       48.7         49.5
+#   04-battlement    54.6  56.9  56.9          58.6       38.6         49.1
+#
+# 40 dB is sweep-world-gpu.steps' gate, and it holds here with 11 dB to
+# spare.  The P2b column is the build before this sweep existed, no stencil
+# under -gpu: 04-battlement fails at 38.6 dB, the leak described above.  The
+# other three gain 1-3 dB and pass either way: from those cameras the space
+# behind the sky holds little that is drawn.  The Tesla P4 column (NVIDIA
+# Vulkan against the same llvmpipe GL frames) passes too, but its runs log
+# 10 vkCmdCopyImage validation errors on a 32x32x32 3D texture's mips, the
+# same 10 with the P2b binary: a resource bug that predates the stencil.
+
+sleep 25
+cmd god
+cmd notarget
+cmd viewsize 120
+cmd crosshair 0
+cmd showpause 0
+cmd r_flatlightstyles 1
+cmd r_dynamic 0
+cmd r_gpulightstyles 0
+cmd r_ssao 0
+cmd r_bloom 0
+cmd r_dlight_occlusion 0
+cmd r_alias_gpu 0
+cmd r_particles 0
+cmd r_skybox_speed 0
+cmd fog 0
+cmd gl_texture_anisotropy 1
+sleep 2
+
+# The first command after the map loads can be lost while the engine is
+# still busy; a throwaway camera and a wait take that hit instead.
+cmd setpos 784 1760 236 -40 180 0
+sleep 3
+cmd setpos 784 1760 236 -40 180 0
+sleep 2
+cmd pause
+shot 01-north
+cmd pause
+cmd setpos 784 1440 236 -40 180 0
+sleep 2
+cmd pause
+shot 02-north-mid
+cmd pause
+cmd setpos 688 528 152 -40 180 0
+sleep 2
+cmd pause
+shot 03-courtyard
+cmd pause
+cmd setpos 688 912 152 -40 180 0
+sleep 2
+cmd pause
+shot 04-battlement
+cmd pause
+
+cmd gpu_unrouted reset
+sleep 2
+cmd echo REPORT-WORLD-BEGIN
+cmd gpu_unrouted
+cmd renderer_status
+cmd echo REPORT-WORLD-END
+sleep 1

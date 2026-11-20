@@ -166,3 +166,20 @@ cmd pause
 shot 16-courtyard
 cmd pause
 cmd gl_cull 1
+
+# --- r_shadows (#340 P2c): the projected blob shadows test stencil EQUAL 1
+# under compare mask 2 and INCR on pass, so each pixel darkens at most twice;
+# under -gpu that needs the stencil and the compare mask in the pipeline key.
+# Same camera as 01, which holds a pickup.  Measured 2026-11-19 as the rest:
+# GL vs -gpu 49.0 / 50.1 / 51.5 dB, GL vs GL 55.6 / 49.7, Tesla P4 48.1.  The
+# blob is small, so this camera checks that the stencil-tested shadow
+# pipelines build and draw without a validation error more than it checks
+# the stencil arithmetic: the P2b binary, which draws the shadow unmasked,
+# also passes it (48.9 dB).
+cmd r_shadows 1
+cmd setpos -918 -2034 0 -20 45 0
+sleep 2
+cmd pause
+shot 21-shadows
+cmd pause
+cmd r_shadows 0
