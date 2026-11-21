@@ -1,5 +1,6 @@
-/* spart -- textured triangles with per-vertex color (particle program).
- * Submitted through GL_ImmEnd(&gl_shader_particle) from r_part.c.
+/* spart -- textured triangles with per-vertex color (particle program), and
+ * gl_particles 0's square points.  Submitted through
+ * GL_ImmEnd(&gl_shader_particle) from r_part.c.
  *
  * u_mvp and u_modelview are VertParams members u_mvpm / u_modelviewm; the
  * fog uniforms live in the fragment stage.  Attributes and varyings carry
@@ -29,5 +30,13 @@ void main() {
     vec4 eyepos = u_modelview * vec4(a_position, 1.0);
     v_fogdist = length(eyepos.xyz);
     gl_Position = u_mvp * vec4(a_position, 1.0);
+#ifdef VULKAN
+    /* gl_particles 0 draws GL_POINTS at GL_SetPointSize (2.0f) (r_part.c),
+     * which SDL_GPU has no state for: a point-list pipeline takes its size
+     * from here, and Vulkan requires the write.  GL keeps glPointSize, its
+     * preprocessed program unchanged, and the triangles ignore the size.
+     * #340 P3b; tools/test_rg_sources.py holds the two sizes together. */
+    gl_PointSize = 2.0;
+#endif
     VK_FLIP_Y()
 }

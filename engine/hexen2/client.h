@@ -668,6 +668,7 @@ void V_RestoreState (const byte **cur);
 void CL_DemoKeyframe (void);
 void CL_DemoKeys_Clear (void);
 void CL_InitDemo (void);
+qboolean CL_TestFixtureAllowed (void);	/* testparticles, testentity: #340 P3b */
 void CL_ParseTEnt (void);
 void CL_ParseTEntType (int type);	/* CL_ParseTEnt after its type byte */
 qboolean CL_CreateStream (int type, int ent, int flags, int tag, float duration,

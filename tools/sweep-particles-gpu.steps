@@ -1,0 +1,191 @@
+# sweep-particles-gpu.steps -- particles, sprites and glows through the
+# SDL_GPU backend (-gpu) against GL (#340 P3b): round particles
+# (gl_particles 1) and square ones (gl_particles 0, GL_POINTS), opaque and
+# translucent sprites, one of them flush with a wall, and the torch glows.
+# All of it draws through GL_ImmEnd; what P3b changes is the point size,
+# which SDL_GPU has no state for, so spart_vert.glsl writes it for Vulkan
+# (see tools/test_rg_sources.py).
+#
+# Run the SAME binary both ways, with identical settings:
+#
+#   A="-fsaa 0 +gamma 1 +map demo1"
+#   STEPS=tools/sweep-particles-gpu.steps ENGINE=$E ./tools/headless-drive.sh script /tmp/p-gl  ~/hexen2 $A
+#   VK_ICD_FILENAMES=<lvp_icd json> STEPS=tools/sweep-particles-gpu.steps ENGINE=$E \
+#       ./tools/headless-drive.sh script /tmp/p-gpu ~/hexen2 -gpu +gpu_allow_software 1 $A
+#
+# then the checks, all in one script (it says what each one is):
+#
+#   ./tools/particles-diff.sh /tmp/p-gl /tmp/p-gpu
+#
+# and, between each REPORT-<name>-BEGIN and -END in /tmp/p-gpu/qconsole.log,
+# gpu_unrouted counts 0 calls into the GL entry points.  With the Vulkan
+# validation layers on (VK_LAYER_PATH=<vulkan-validation-layers>
+# /share/vulkan/explicit_layer.d, +gpu_debug 1) the -gpu run must log no
+# "Validation Error".
+#
+# FIXED CONTENT.  Every effect in the game spawns its particles from rand ()
+# and the frame time, so no two runs see the same ones.  A recorded demo does
+# not fix that: rand () is never seeded, so where its sequence stands at a
+# spawn is however many calls the run made before it, which follows the
+# frame count, which follows the wall clock -- and demoseek clears the
+# particles anyway (CL_DemoSeek_f), and the retail data has no demo to play.
+# So the content comes from two cheat-gated commands (noclip's conditions --
+# no deathmatch or coop, skill 2 or under -- plus a server in this process):
+#   testparticles [<distance>]   r_part.c: one fixed set on the view plane --
+#                                the palette, the translucent table, snow at
+#                                its four atlas sizes, rain streaks, and an
+#                                overlapping cluster -- clearing whatever
+#                                particles were live, and spawned while
+#                                paused, so snow and rain stand still
+#   testentity <model> <x y z> [<pitch yaw roll> [<frame> [<drawflags>]]]
+#                                cl_main.c: a sprite or alias model, static
+#                                until the next map
+#
+# SETTINGS.  On top of tools/sweep-liquid-gpu.steps' list, on BOTH sides:
+# r_drawentities 0 for the particles (no entity moves in front of them), 1
+# for the sprites and glows, which are entities; gl_glows 1 on the glow
+# camera alone, gl_missile_glows and gl_other_glows 0.  Entities that move
+# are out of shot; torch flames are not, and their animation frame is
+# whatever a pause catches, run by run: the one down the corridor behind the
+# sprites sets that camera's GL-vs-GL floor, and the glow check leaves the
+# flames out.
+#
+# CAMERAS.
+#   01-03  demo1's graveyard, the set 80 units ahead (testparticles 80):
+#          r_drawparticles 0, then round, then square
+#   04-05  its west wall: an oriented blood spot (models/bldspot1.spr) flush
+#          with the wall, so the sprite's polygon offset alone decides it; a
+#          sprite 2 units off the wall, half of it behind the wall plane; one
+#          in mid air; and a translucent explosion frame (drawflags 128,
+#          r_wateralpha's alpha): r_wateralpha 0.33, then 1
+#   06-07  the torch room by demo1's pools, three light_flame_large_yellow
+#          in view (two near, one at the far wall): gl_glows 1, then 0
+#
+# THE THRESHOLDS.  From three runs a side, as shot-diff.sh's header asks --
+# here two sets of three, on the binary before and after review fixes that
+# touched no draw path.  Measured 2026-11-20, 800x600, llvmpipe GL against
+# lavapipe -gpu (Mesa 26.2), ImageMagick 7.1.2, masked:
+#
+#   check                       GL vs -gpu, runs 1/2/3    GL vs GL       Tesla P4
+#   01-noparticles PSNR         51.51, x6                 identical      49.57 53.99
+#   02-round PSNR               51.01 .. 51.13            89.99 .. 98.41 48.27 53.10
+#   04/05-sprites PSNR          50.61 .. 52.01            53.62 .. 58.13 49.42 51.70
+#   06/07 torch room PSNR       32.16 .. 34.71            32.52 .. 33.85 34.10 49.90
+#   03-square pixels changed    1180 / 1180, x6           identical      1180
+#   03-square summed change     977.1 / 979.4, x6         identical      979.1
+#   06-glows added, PSNR        identical, x6             identical      78.76 82.09
+#     pixels left out           3131 .. 5209              2727 .. 4737   2146 2648
+#   r_wateralpha pixels changed 11782 / 11782, x6         identical      11794
+#
+# What each check exists to catch, by proxy -- the -gpu frame with one thing
+# dropped, against the GL frame that has it: round particles dropped 31.6 dB,
+# round drawn square 30.4; the translucent sprite drawn opaque 30.6 (and its
+# pixel count 0); square particles dropped, 0 pixels changed; glows dropped,
+# 45.9-47.2 dB; the torch room black, 17.9; and the real thing, this tree with
+# spart_vert.glsl's gl_PointSize taken out: lavapipe draws the points at one
+# pixel, 295 pixels changed against GL's 1180, and the validation layers log
+# VUID-VkGraphicsPipelineCreateInfo-topology-08773.  Its whole frame reads
+# 37.5 dB against GL, HIGHER than the fixed binary's 37.0 -- Mesa's GL
+# rasterizes a 2-pixel point one column right of Vulkan (lavapipe and the
+# P4 alike), so PSNR cannot gate square particles and the count does.  So:
+# PSNR 42 (8.6 dB under the worst honest frame, 10 over the best broken one);
+# 28 on the torch room, whose flames animate (4 under, 10 over); 10% on the
+# square counts (honest 0.2%, broken 75%); and 60 dB on what the glows add
+# (the P4's 78.8 is its worst honest reading, 47.2 the best broken one), with at
+# most 20000 pixels left out (3.8x the most an honest run left out).  The gate
+# is for the Mesa pair; a hardware pair needs its own three runs.
+
+sleep 20
+cmd god
+cmd notarget
+cmd noclip
+cmd viewsize 120
+cmd crosshair 0
+cmd showpause 0
+cmd r_skyspeed_back 0
+cmd r_skyspeed_front 0
+cmd r_flatlightstyles 1
+cmd r_dynamic 0
+cmd r_gpulightstyles 0
+cmd r_ssao 0
+cmd r_bloom 0
+cmd r_dlight_occlusion 0
+cmd r_alias_gpu 0
+cmd fog 0
+cmd gl_texture_anisotropy 1
+cmd r_oit 0
+cmd r_waterwarp 0
+cmd r_softparticles 0
+cmd r_softemu 0
+cmd r_scale 1
+cmd gl_waterwarp_speed 0
+cmd r_caustics 0
+cmd r_drawviewmodel 0
+cmd r_drawentities 0
+cmd r_drawparticles 1
+cmd gl_particles 1
+cmd gl_glows 0
+cmd gl_missile_glows 0
+cmd gl_other_glows 0
+cmd r_wateralpha 0.33
+sleep 2
+
+# --- the particle set, in front of the graveyard's far wall ---
+cmd setpos -918 -2034 0 0 135 0
+sleep 2
+cmd pause
+sleep 1
+cmd testparticles 80
+cmd r_drawparticles 0
+shot 01-noparticles
+cmd r_drawparticles 1
+shot 02-round
+cmd gl_particles 0
+shot 03-square
+cmd gl_particles 1
+cmd pause
+
+# --- report, square particles then round, on the same camera ---
+cmd gpu_unrouted reset
+cmd gl_particles 0
+sleep 2
+cmd gl_particles 1
+sleep 2
+cmd echo REPORT-PARTICLES-BEGIN
+cmd gpu_unrouted
+cmd renderer_status
+cmd echo REPORT-PARTICLES-END
+sleep 1
+
+# --- sprites, by the graveyard's west wall ---
+cmd r_drawentities 1
+cmd testentity models/bldspot1.spr -1320 -1640 60 0 180 0
+cmd testentity models/s_light.spr -1250 -1770 60
+cmd testentity models/s_light.spr -1318 -1700 40
+cmd testentity models/s_explod.spr -1270 -1850 40 0 0 0 3 128
+cmd setpos -1150 -1800 0 0 170 0
+sleep 2
+cmd pause
+shot 04-sprites
+cmd r_wateralpha 1
+shot 05-sprites-wa1
+cmd r_wateralpha 0.33
+cmd pause
+
+# --- torch glows ---
+cmd setpos -1536 1900 -450 0 90 0
+sleep 2
+cmd pause
+cmd gl_glows 1
+shot 06-glows
+cmd gl_glows 0
+shot 07-noglows
+cmd gl_glows 1
+cmd pause
+cmd gpu_unrouted reset
+sleep 2
+cmd echo REPORT-GLOWS-BEGIN
+cmd gpu_unrouted
+cmd renderer_status
+cmd echo REPORT-GLOWS-END
+sleep 1
