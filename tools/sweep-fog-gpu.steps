@@ -1,0 +1,427 @@
+# sweep-fog-gpu.steps -- global fog through the SDL_GPU backend (-gpu)
+# against GL (#340 P3c), over every program that reads it.
+#
+# Fog is uniforms only: Fog_SetupFrame (gl_fog.c) fills r_fog_density /
+# r_fog_color and the sky fog, and every draw path hands them to FragParams
+# (u_ffogv, u_fskyfog) through R_SetFog, R_SetWorldFrag or R_SetSkyFog; under
+# -gpu R_FlushUniforms gives SDL_GPU the same block.  The rest is CPU-side and
+# backend-blind: the skybox's and the two-pass sky's flat fog passes, the
+# r_fastsky colour, the glows' attenuation, the black fog of additive passes.
+# tools/test_rg_sources.py (check_fog) holds that it stays that way; this
+# sweep is the frame-by-frame proof.  The consumers and where they are seen:
+#   world (sworld_frag / sworld_opaque_frag)        every frame
+#   classic sky, single pass (ssky_layers u_skyfog) 01-04, r_skyfog 0.5 / 0 / 1
+#   classic sky, two pass (r_skyalpha < 1)          06
+#   r_fastsky (the fog colour)                      07
+#   water, opaque and translucent, and lava         10-16, 50-52
+#   alias models, CPU path and instanced            20-28 (salias_frag)
+#   skeletal models (IQM)                           25-28 under -game skel
+#   particles (spart_frag), round and square        31-34
+#   sprites (salias_frag)                           40-43
+#   glows (attenuated on the CPU)                   44-47
+#   the stencilled skybox and its flat fog pass     60-69, r_skyfog 0.5 / 0 / 1
+# Not in any frame: the additive passes' black fog (Fog_StartAdditive and the
+# instanced fullbright pass's R_SetFog with black) -- no fullbright alias
+# model is in view; r_softemu's far noise (gated on u_fog_density > 0), off on
+# both sides with the rest of post-process; and a fog fade, only its end
+# state.  check_fog pins the code those would exercise.
+#
+# Run the SAME binary both ways, with identical settings, three times each:
+#
+#   A="-fsaa 0 +gamma 1 +map demo1"
+#   STEPS=tools/sweep-fog-gpu.steps ENGINE=$E ./tools/headless-drive.sh script /tmp/f-gl  ~/hexen2 $A
+#   VK_ICD_FILENAMES=<lvp_icd json> STEPS=tools/sweep-fog-gpu.steps ENGINE=$E \
+#       ./tools/headless-drive.sh script /tmp/f-gpu ~/hexen2 -gpu +gpu_allow_software 1 $A
+#   ./tools/fog-diff.sh /tmp/f-gl /tmp/f-gpu
+#
+# The basedir needs the Shadow of Tremor mod in <basedir>/sot for 60-69 (as
+# tools/sweep-skybox-gpu.steps: no retail map has a skybox); the sweep
+# switches to it with "game sot" after castle4 (a runtime game switch under
+# -gpu, TexMgr_NewGame and Draw_ReInit included, which no other sweep takes).
+# Between each REPORT-<x>-BEGIN and -END in /tmp/f-gpu/qconsole.log
+# (PARTICLES and DEMO1 on demo1, EGYPT; castle4 has none) gpu_unrouted counts
+# 0 calls, and with the Vulkan validation layers on (+gpu_debug 1) the -gpu
+# run logs no "Validation Error".  For skeletal models run both sides once
+# more with "-game skel" on a basedir made as tools/sweep-alias-gpu.steps
+# says (every tombstn1 an IQM box) and compare 20-28 alone:
+#   FRAMES="20-alias 21-alias-fogb 22-alias-nofog 23-alias-inst \
+#     24-alias-inst-fogb 25-tombs 26-tombs-fogb 27-tombs-nofog 28-tombs-inst-fogb" \
+#     ./tools/fog-diff.sh /tmp/k-gl /tmp/k-gpu
+# There the game switch finds no sot, the console is left the other way up,
+# and everything after castle4 is noise.
+#
+# SETTINGS.  tools/sweep-liquid-gpu.steps' list, on BOTH sides, plus:
+#   r_drawentities       0 but for the alias, sprite and glow cameras
+#   r_skyalpha 1, r_fastsky 0   except 06 and 07, which set them
+#   r_skyfog 0 then 0.5  0.5 is the default, but its callback is what clears
+#                        a worldspawn skyfog key, and it only runs on a change
+#   fog A = "fog 0.5 0.4 0.4 0.4", fog B = "fog 0.15 0.6 0.3 0.1" (thinner,
+#   coloured), and "fog 0".  Fog A is thick: past ~300 units everything is
+#   the fog colour, so the near consumers (particles at 80 units, the alias
+#   statue, the liquids underfoot) carry its frames, and fog B the far ones.
+#   A map load resets fog to the worldspawn's (Fog_NewMap), so fog A is set
+#   again after each "map" and after the game switch.
+# The game switch execs the mod's config and autoexec, so the settings that
+# matter to 60-69 are set again after it -- not all: the mod's config.cfg
+# leaves r_wateralpha 0.5 and gl_texturemode GL_NEAREST (no liquid in view;
+# both sides take the same); +gamma 1 is not re-run, but the mod's own
+# autoexec.cfg sets gamma 1.  The
+# mod's autoexec starts its menu demo, and the switch
+# leaves the console in the opposite state to a map load's: hence the 60 s
+# wait (the demo's map has to finish loading, or the next key is lost) and
+# the bare "console" before "map egypt".
+#
+# THE THRESHOLDS -- see tools/fog-diff.sh for the checks.  Measured
+# 2026-11-20, 800x600, llvmpipe GL against lavapipe -gpu (Mesa 26.2), three
+# runs a side, PSNR in dB, masked:
+#
+#   check                          GL vs -gpu      GL vs GL     gate   broken
+#   whole frame, 01-43 and 50-69   44.9 .. inf     47.9 .. inf  42     10.6 .. 41.3
+#     (34-square 44.9-45.0, Mesa's point column; 12-pools-nofog
+#      46.6-51.5, the animated glyphs P3a describes; the rest 49.6 .. inf)
+#   torch room 44-47 (floor)       32.8 .. 54.7    32.8 .. 73.0 28     --
+#   what the particles add (31/30) 68.2 .. 68.6    --           55     42.8
+#   what the sprites add (40/43)   98.9            --           55     27.6
+#   what the glows add, fog B      106.7 .. inf    --           60     51.7
+#   square particles, summed       398.0 vs 397.9  identical    10%    671.0 vs 397.9
+#   what the fog adds (8 pairs)    47.6 .. 66.9    --           42     16.6 .. 38.4
+#
+# "Broken" is a build that drops fog under VULKAN alone in salias_frag,
+# spart_frag and ssky_layers_frag, skips the skybox's flat fog pass and the
+# glows' attenuation under -gpu, and leaves the world (sworld) fogged: every
+# consumer it breaks fails at least one check -- the classic sky (01 28.9),
+# liquids (10 28.2, 13 24.4), alias models (20 18.8, the instanced path
+# too), the tombs (25 18.2), particles (whole frame 39.4, what they add
+# 42.8, the square ones' summed change 69% high), sprites (what they add
+# 27.6), lava (50 14.9), the skybox (60 17.9, 62 10.6), the glows (51.7) --
+# and the frames it should not touch pass (02 and 05, skyfog and fog off;
+# 06 and 07, the two-pass and fast sky, whose fog it leaves alone).  A
+# particles-only fog drop would read ~42.8 whole-frame, at the 42 gate,
+# which is why what each consumer adds is checked on its own.  The
+# neighbour proxies -- the -gpu frame of the next setting against GL's --
+# read 11.0 (fog dropped) to 28.9 (r_skyfog 0.5 drawn as 0).  The 42 gate is
+# 4.6 dB under the worst honest whole frame bar 34-square, 2.9 under that.
+#
+# Tesla P4 (NVIDIA Vulkan) against the same llvmpipe GL frames: every check
+# passes (whole frame 44.9 .. inf, the torch room 33.1 at worst), 0
+# validation errors, gpu_unrouted 0.  -game skel: 20-28 pass (46.3 .. 54.4),
+# and its tombs differ from the retail run's by 33.3 dB under fog B (28.9
+# unfogged), so the IQM path is what those frames hold.
+
+sleep 20
+cmd god
+cmd notarget
+cmd noclip
+cmd viewsize 120
+cmd crosshair 0
+cmd showpause 0
+cmd r_skyspeed_back 0
+cmd r_skyspeed_front 0
+cmd r_skybox_speed 0
+cmd r_flatlightstyles 1
+cmd r_dynamic 0
+cmd r_gpulightstyles 0
+cmd r_ssao 0
+cmd r_bloom 0
+cmd r_dlight_occlusion 0
+cmd r_alias_gpu 0
+cmd r_particles 0
+cmd gl_texture_anisotropy 1
+cmd r_oit 0
+cmd r_waterwarp 0
+cmd r_softparticles 0
+cmd r_softemu 0
+cmd r_scale 1
+cmd gl_waterwarp_speed 0
+cmd r_caustics 0
+cmd gl_glows 0
+cmd gl_missile_glows 0
+cmd gl_other_glows 0
+cmd r_drawviewmodel 0
+cmd r_drawentities 0
+cmd r_drawparticles 0
+cmd gl_particles 1
+cmd r_wateralpha 0.33
+cmd r_lavaalpha 0
+cmd r_water_pixel_warp 0
+cmd r_skyalpha 1
+cmd r_fastsky 0
+cmd r_skyfog 0
+cmd r_skyfog 0.5
+cmd fog 0.5 0.4 0.4 0.4
+sleep 2
+
+# --- demo1: the classic scrolling sky ---
+cmd setpos -918 -2034 0 -20 45 0
+sleep 2
+cmd pause
+shot 01-sky
+cmd r_skyfog 0
+shot 02-sky-skyfog0
+cmd r_skyfog 1
+shot 03-sky-skyfog1
+cmd r_skyfog 0.5
+cmd fog 0.15 0.6 0.3 0.1
+shot 04-sky-fogb
+cmd fog 0
+shot 05-sky-nofog
+cmd fog 0.5 0.4 0.4 0.4
+cmd r_skyalpha 0.5
+shot 06-sky-twopass
+cmd r_skyalpha 1
+cmd r_fastsky 1
+shot 07-sky-fast
+cmd r_fastsky 0
+cmd pause
+
+# --- demo1: both pools (translucent *rtex078, opaque *rtex346) ---
+cmd setpos -1007 2200 -442 25 152 0
+sleep 2
+cmd pause
+shot 10-pools
+cmd fog 0.15 0.6 0.3 0.1
+shot 11-pools-fogb
+cmd fog 0
+shot 12-pools-nofog
+cmd fog 0.5 0.4 0.4 0.4
+cmd pause
+
+# --- demo1: *lowlight, from above and from under it ---
+cmd setpos -1800 1700 -330 45 200 0
+sleep 2
+cmd pause
+shot 13-lowlight
+cmd fog 0.15 0.6 0.3 0.1
+shot 14-lowlight-fogb
+cmd fog 0.5 0.4 0.4 0.4
+cmd pause
+cmd gl_cshiftpercent_contents 0
+cmd setpos -2000 1600 -520 -50 90 0
+sleep 2
+cmd pause
+shot 15-under
+cmd fog 0.15 0.6 0.3 0.1
+shot 16-under-fogb
+cmd fog 0.5 0.4 0.4 0.4
+cmd pause
+cmd gl_cshiftpercent_contents 100
+
+# --- demo1: alias models, the CPU path and the instanced one ---
+cmd r_drawentities 1
+cmd setpos -860 -1990 30 0 40 0
+sleep 2
+cmd pause
+shot 20-alias
+cmd fog 0.15 0.6 0.3 0.1
+shot 21-alias-fogb
+cmd fog 0
+shot 22-alias-nofog
+cmd fog 0.5 0.4 0.4 0.4
+cmd r_alias_gpu 1
+shot 23-alias-inst
+cmd fog 0.15 0.6 0.3 0.1
+shot 24-alias-inst-fogb
+cmd fog 0.5 0.4 0.4 0.4
+cmd r_alias_gpu 0
+cmd pause
+cmd setpos -960 -1960 40 10 225 0
+sleep 2
+cmd pause
+shot 25-tombs
+cmd fog 0.15 0.6 0.3 0.1
+shot 26-tombs-fogb
+cmd fog 0
+shot 27-tombs-nofog
+cmd fog 0.15 0.6 0.3 0.1
+cmd r_alias_gpu 1
+shot 28-tombs-inst-fogb
+cmd r_alias_gpu 0
+cmd fog 0.5 0.4 0.4 0.4
+cmd pause
+cmd r_drawentities 0
+
+# --- demo1: particles (testparticles, fixed content) ---
+cmd setpos -918 -2034 0 0 135 0
+sleep 2
+cmd pause
+sleep 1
+cmd testparticles 80
+shot 30-noparticles
+cmd r_drawparticles 1
+shot 31-particles
+cmd fog 0.15 0.6 0.3 0.1
+shot 32-particles-fogb
+cmd fog 0
+shot 33-particles-nofog
+cmd fog 0.5 0.4 0.4 0.4
+cmd gl_particles 0
+shot 34-square
+cmd gl_particles 1
+cmd pause
+
+cmd gpu_unrouted reset
+cmd gl_particles 0
+sleep 2
+cmd gl_particles 1
+sleep 2
+cmd echo REPORT-PARTICLES-BEGIN
+cmd gpu_unrouted
+cmd renderer_status
+cmd echo REPORT-PARTICLES-END
+sleep 1
+cmd r_drawparticles 0
+
+# --- demo1: sprites (testentity) ---
+cmd r_drawentities 1
+cmd testentity models/bldspot1.spr -1320 -1640 60 0 180 0
+cmd testentity models/s_light.spr -1250 -1770 60
+cmd testentity models/s_light.spr -1318 -1700 40
+cmd testentity models/s_explod.spr -1270 -1850 40 0 0 0 3 128
+cmd setpos -1150 -1800 0 0 170 0
+sleep 2
+cmd pause
+shot 40-sprites
+cmd fog 0.15 0.6 0.3 0.1
+shot 41-sprites-fogb
+cmd fog 0
+shot 42-sprites-nofog
+cmd fog 0.5 0.4 0.4 0.4
+cmd r_drawentities 0
+shot 43-nosprites
+cmd r_drawentities 1
+cmd pause
+
+# --- demo1: the torch glows ---
+cmd setpos -1536 1900 -450 0 90 0
+sleep 2
+cmd pause
+cmd gl_glows 1
+shot 44-glows
+cmd fog 0.15 0.6 0.3 0.1
+shot 45-glows-fogb
+cmd fog 0
+shot 46-glows-nofog
+cmd fog 0.15 0.6 0.3 0.1
+cmd gl_glows 0
+shot 47-noglows-fogb
+cmd fog 0.5 0.4 0.4 0.4
+cmd pause
+cmd gl_glows 1
+cmd gpu_unrouted reset
+sleep 2
+cmd echo REPORT-DEMO1-BEGIN
+cmd gpu_unrouted
+cmd renderer_status
+cmd echo REPORT-DEMO1-END
+sleep 1
+cmd gl_glows 0
+cmd r_drawentities 0
+
+# --- castle4: the lava pit, opaque and translucent ---
+cmd map castle4
+sleep 20
+console
+sleep 1
+cmd god
+cmd notarget
+cmd noclip
+cmd fog 0.5 0.4 0.4 0.4
+cmd setpos 1652 1496 -646 20 88 0
+sleep 2
+cmd pause
+shot 50-c4-lava
+cmd r_lavaalpha 0.5
+shot 51-c4-lava-la05
+cmd fog 0.15 0.6 0.3 0.1
+shot 52-c4-lava-la05-fogb
+cmd fog 0.5 0.4 0.4 0.4
+cmd r_lavaalpha 0
+cmd pause
+
+# --- egypt (the Shadow of Tremor mod): the stencilled skybox ---
+# The game switch re-execs the mod's own config and autoexec, so every
+# setting above is set again after it.
+cmd game sot
+sleep 60
+console
+sleep 2
+cmd map egypt
+sleep 25
+console
+sleep 1
+cmd god
+cmd notarget
+cmd noclip
+cmd viewsize 120
+cmd crosshair 0
+cmd showpause 0
+cmd r_skyspeed_back 0
+cmd r_skyspeed_front 0
+cmd r_skybox_speed 0
+cmd r_flatlightstyles 1
+cmd r_dynamic 0
+cmd r_gpulightstyles 0
+cmd r_ssao 0
+cmd r_bloom 0
+cmd r_dlight_occlusion 0
+cmd r_alias_gpu 0
+cmd r_particles 0
+cmd gl_texture_anisotropy 1
+cmd r_oit 0
+cmd r_waterwarp 0
+cmd r_softparticles 0
+cmd r_softemu 0
+cmd r_scale 1
+cmd gl_waterwarp_speed 0
+cmd r_caustics 0
+cmd gl_glows 0
+cmd gl_missile_glows 0
+cmd gl_other_glows 0
+cmd r_drawviewmodel 0
+cmd r_drawentities 0
+cmd r_drawparticles 0
+cmd r_skyalpha 1
+cmd r_fastsky 0
+cmd r_skyfog 0
+cmd r_skyfog 0.5
+cmd fog 0.5 0.4 0.4 0.4
+sleep 2
+cmd setpos 784 1760 236 -40 180 0
+sleep 3
+cmd setpos 784 1760 236 -40 180 0
+sleep 2
+cmd pause
+shot 60-box-north
+cmd r_skyfog 0
+shot 61-box-north-skyfog0
+cmd r_skyfog 1
+shot 62-box-north-skyfog1
+cmd r_skyfog 0.5
+cmd fog 0.15 0.6 0.3 0.1
+shot 63-box-north-fogb
+cmd fog 0
+shot 64-box-north-nofog
+cmd fog 0.5 0.4 0.4 0.4
+cmd pause
+cmd setpos 688 912 152 -40 180 0
+sleep 2
+cmd pause
+shot 65-box-battlement
+cmd r_skyfog 0
+shot 66-box-battlement-skyfog0
+cmd r_skyfog 1
+shot 67-box-battlement-skyfog1
+cmd r_skyfog 0.5
+cmd fog 0.15 0.6 0.3 0.1
+shot 68-box-battlement-fogb
+cmd fog 0
+shot 69-box-battlement-nofog
+cmd fog 0.5 0.4 0.4 0.4
+cmd pause
+cmd gpu_unrouted reset
+sleep 2
+cmd echo REPORT-EGYPT-BEGIN
+cmd gpu_unrouted
+cmd renderer_status
+cmd echo REPORT-EGYPT-END
+sleep 1
