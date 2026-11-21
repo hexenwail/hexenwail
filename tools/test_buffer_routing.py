@@ -153,7 +153,12 @@ DRAWS = (
 # stay there).
 _CULL = "GPU world culling and Hi-Z: compute, P5 (R_BuildWorldCull returns under -gpu)"
 _LC = "the clustered-light froxel grid: compute and storage, P5"
-_PP = "the post-process chain's fullscreen passes: P4"
+_PP_OIT = "the OIT resolve: P6 (OIT_InitShader and the resolve are gated off under -gpu)"
+_PP_DRAW = ("bloom's three bufferless draws (R_DrawArrays is P4e) and the OIT resolve's (P6); "
+            "the bloom VAO goes through R_GenVertexArrays / R_BindVertexArray (P4a-1)")
+_PP_UBO = ("the post-process uniform buffers: under -gpu PpVert / PpParams are mirrors "
+           "(P4a-1), BloomParams has no buffer until P4e, OitParams is P6; the deletes are "
+           "shutdown's, under `if (*_ubo)`")
 _SSAO = "SSAO: compute and its composite pass, P4/P5"
 _SHADOW = "dlight shadow maps: P6 (gated off by R_LightCluster_Available under -gpu)"
 _UBO = ("uniform-block buffers: -gpu pushes gl_uniforms.c's CPU mirrors instead "
@@ -171,11 +176,11 @@ ALLOWED = {
     ("engine/h2shared/gl_lightcluster.c", "BufferSubData"): (2, _LC),
     ("engine/h2shared/gl_lightcluster.c", "DeleteBuffers"): (1, _LC),
     ("engine/h2shared/gl_lightcluster.c", "GenBuffers"): (1, _LC),
-    ("engine/h2shared/gl_postprocess.c", "BindVertexArray"): (4, _PP),
-    ("engine/h2shared/gl_postprocess.c", "DeleteBuffers"): (4, _PP),
-    ("engine/h2shared/gl_postprocess.c", "DrawArrays"): (4, _PP),
-    ("engine/h2shared/gl_postprocess.c", "GenBuffers"): (4, _PP),
-    ("engine/h2shared/gl_postprocess.c", "GenVertexArrays"): (2, _PP),
+    ("engine/h2shared/gl_postprocess.c", "BindVertexArray"): (2, _PP_OIT),
+    ("engine/h2shared/gl_postprocess.c", "DeleteBuffers"): (4, _PP_UBO),
+    ("engine/h2shared/gl_postprocess.c", "DrawArrays"): (4, _PP_DRAW),
+    ("engine/h2shared/gl_postprocess.c", "GenBuffers"): (4, _PP_UBO),
+    ("engine/h2shared/gl_postprocess.c", "GenVertexArrays"): (1, _PP_OIT),
     ("engine/h2shared/gl_ssao.c", "BindVertexArray"): (2, _SSAO),
     ("engine/h2shared/gl_ssao.c", "DeleteBuffers"): (1, _SSAO),
     ("engine/h2shared/gl_ssao.c", "DeleteVertexArrays"): (1, _SSAO),

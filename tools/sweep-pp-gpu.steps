@@ -1,0 +1,293 @@
+# sweep-pp-gpu.steps -- the post-process chain (gamma, contrast, r_scale,
+# FXAA, the native-resolution 2D, bloom, soft particles, the water warp and
+# r_softemu) on demo1, castle4 and the Shadow of Tremor mod's egypt (#340 P4).
+# Needs the retail data in <basedir>/data1 and the mod in <basedir>/sot.
+#
+# P4a-1 (this file's first use) routes the chain's GL calls through seams
+# whose GL arm is the bare call, with post-process still off under -gpu.  So
+# the check is GL against GL: the binary before the change and the one after,
+# frame for frame, AE 0 on every frame:
+#
+#   A="-fsaa 0 +gamma 1 +map demo1"
+#   STEPS=tools/sweep-pp-gpu.steps ENGINE=$OLD ./tools/headless-drive.sh script /tmp/pp-old ~/hexen2 $A
+#   STEPS=tools/sweep-pp-gpu.steps ENGINE=$NEW ./tools/headless-drive.sh script /tmp/pp-new ~/hexen2 $A
+#   ./tools/shot-diff.sh /tmp/pp-old /tmp/pp-new
+#
+# and once more with -fsaa 4 in A, which puts the scene FBO in PP_CreateFBO's
+# MSAA branch and End3D / EndFrame's resolves.  With -gpu the same file gives
+# the boot count (REPORT-BOOT, before anything is reset) and gpu_unrouted 0
+# in every shot state (REPORT-DEMO1 / -CASTLE4 / -EGYPT); its frames are the
+# P2/P3 path, post-process being off there until P4a-2 lifts the gate, which
+# is when GL against -gpu on these frames becomes the check (P4a-2 adds the
+# gates and tools/pp-diff.sh).
+#
+# THE FRAMES.  01-08 the graveyard (sweep-world-gpu.steps' 01 camera): PP off,
+# the identity chain (r_waterwarp 1 above water wakes the chain and changes
+# nothing), gamma 0.7, gamma 1.4 with contrast 1.5, r_scale 0.5 and 0.75,
+# FXAA, and the three together.  09 the pools (sweep-liquid-gpu.steps' 01,
+# translucent water into the scene FBO) and 13 the same with r_oit 1, which
+# under -gpu must equal 09 (OIT is P6, gated off: a removed gate loses the
+# water).  12 the console, drawn into the native FBO.  20-29
+# reach the code P4b-P4e route: bloom on the graveyard and the torch room,
+# soft particles on testentity sprites flush with the west wall with
+# post-process off (the fb0 depth snapshot) and on (pp_fbo's), the water warp
+# from under the water, and r_softemu 1/2/3.  10 castle4's lava and 11 egypt's
+# north camera (the stencil in pp_fbo's depth texture) at gamma 1.2.
+#
+# 25-underwater-warp is not repeatable: the warp's phase is realtime, which
+# pause does not stop (P4c adds r_pp_time).  Compare it against the run-to-run
+# spread of one binary, not against AE 0.
+#
+# Settings as sweep-liquid-gpu.steps, for the same reasons, plus
+# con_notifytime 0: each `cmd` echoes into the notify lines at the top of the
+# screen for three seconds of realtime, which made 02 differ from 01 in text,
+# not in rendering.  The HUD is not masked because both sides of the P4a-1
+# check are GL.  12-console's input cursor blinks on realtime
+# (sweep-2d.steps' second trap), so that frame can differ in one small box.
+
+sleep 20
+cmd echo REPORT-BOOT-BEGIN
+cmd gpu_unrouted
+cmd echo REPORT-BOOT-END
+cmd god
+cmd notarget
+cmd noclip
+cmd con_notifytime 0
+cmd viewsize 120
+cmd crosshair 0
+cmd showpause 0
+cmd r_skyspeed_back 0
+cmd r_skyspeed_front 0
+cmd r_flatlightstyles 1
+cmd r_dynamic 0
+cmd r_gpulightstyles 0
+cmd r_ssao 0
+cmd r_bloom 0
+cmd r_dlight_occlusion 0
+cmd r_alias_gpu 0
+cmd r_particles 0
+cmd fog 0
+cmd gl_texture_anisotropy 1
+cmd r_oit 0
+cmd r_waterwarp 0
+cmd r_motionblur 0
+cmd r_softparticles 0
+cmd r_softemu 0
+cmd r_scale 1
+cmd gl_fxaa 0
+cmd contrast 1
+cmd gl_waterwarp_speed 0
+cmd r_caustics 0
+cmd gl_glows 0
+cmd r_drawviewmodel 0
+cmd r_drawentities 0
+cmd r_wateralpha 0.33
+cmd r_lavaalpha 0
+cmd r_water_pixel_warp 0
+sleep 2
+
+# --- the graveyard: the chain core ---
+cmd setpos -918 -2034 0 -20 45 0
+sleep 2
+cmd pause
+shot 01-gy-ppoff
+cmd r_waterwarp 1
+shot 02-gy-identity
+cmd r_waterwarp 0
+cmd gamma 0.7
+shot 03-gy-gamma07
+cmd gamma 1.4
+cmd contrast 1.5
+shot 04-gy-g14-c15
+cmd gamma 1
+cmd contrast 1
+cmd r_scale 0.5
+shot 05-gy-scale050
+cmd r_scale 0.75
+shot 06-gy-scale075
+cmd r_scale 1
+cmd gl_fxaa 1
+shot 07-gy-fxaa
+cmd gamma 1.2
+cmd r_scale 0.5
+shot 08-gy-combo
+cmd r_scale 1
+cmd gl_fxaa 0
+cmd r_softemu 1
+shot 26-gy-softemu1
+cmd r_softemu 2
+shot 27-gy-softemu2
+cmd r_softemu 3
+shot 28-gy-softemu3
+cmd r_softemu 0
+cmd r_bloom 1
+cmd r_bloom_threshold 0.5
+shot 20-gy-bloom
+cmd r_bloom 0
+cmd r_bloom_threshold 1
+cmd gamma 1
+cmd pause
+
+# --- the pools, translucent water into the scene FBO; then r_oit 1 ---
+cmd setpos -1007 2200 -442 25 152 0
+sleep 2
+cmd pause
+cmd gamma 1.2
+shot 09-pools
+cmd r_oit 1
+shot 13-pools-oit
+cmd r_oit 0
+cmd gamma 1
+cmd pause
+
+# --- 2D into the native FBO: the console over the pools ---
+cmd gamma 1.2
+console
+sleep 1
+shot 12-console
+console
+sleep 1
+cmd gamma 1
+
+# --- soft particles on sprites by the graveyard's west wall ---
+cmd r_drawentities 1
+cmd testentity models/bldspot1.spr -1320 -1640 60 0 180 0
+cmd testentity models/s_light.spr -1250 -1770 60
+cmd testentity models/s_light.spr -1318 -1700 40
+cmd testentity models/s_explod.spr -1270 -1850 40 0 0 0 3 128
+cmd setpos -1150 -1800 0 0 170 0
+sleep 2
+cmd pause
+shot 24-sprites-hard
+cmd r_softparticles 1
+shot 22-sprites-soft-ppoff
+cmd gamma 1.2
+shot 23-sprites-soft-pp
+cmd r_softparticles 0
+cmd gamma 1
+cmd pause
+cmd r_drawentities 0
+
+# --- bloom in the torch room ---
+cmd setpos -1536 1900 -450 0 90 0
+sleep 2
+cmd pause
+cmd gl_glows 1
+cmd r_bloom 1
+cmd r_bloom_threshold 0.5
+shot 21-torch-bloom
+cmd r_bloom 0
+cmd r_bloom_threshold 1
+cmd gl_glows 0
+cmd pause
+
+# --- the water warp, from under the water (not repeatable, see above) ---
+cmd setpos -2000 1600 -520 -50 90 0
+sleep 2
+cmd pause
+cmd r_waterwarp 1
+shot 25-underwater-warp
+cmd r_waterwarp 0
+cmd pause
+
+# --- report: the demo1 shot states once more, counted ---
+cmd gpu_unrouted reset
+cmd setpos -918 -2034 0 -20 45 0
+cmd gamma 1.2
+cmd gl_fxaa 1
+cmd r_scale 0.5
+sleep 2
+cmd r_scale 1
+cmd gl_fxaa 0
+cmd r_softparticles 1
+cmd r_oit 1
+sleep 2
+cmd r_oit 0
+cmd r_softparticles 0
+cmd gamma 1
+sleep 1
+cmd echo REPORT-DEMO1-BEGIN
+cmd gpu_unrouted
+cmd renderer_status
+cmd echo REPORT-DEMO1-END
+sleep 1
+
+# --- castle4: the lava pit ---
+cmd map castle4
+sleep 20
+console
+sleep 1
+cmd god
+cmd notarget
+cmd noclip
+cmd setpos 1652 1496 -646 20 88 0
+sleep 2
+cmd pause
+cmd gamma 1.2
+cmd gpu_unrouted reset
+shot 10-c4-lava
+cmd echo REPORT-CASTLE4-BEGIN
+cmd gpu_unrouted
+cmd echo REPORT-CASTLE4-END
+cmd gamma 1
+cmd pause
+
+# --- egypt (the Shadow of Tremor mod): the stencilled skybox in pp_fbo ---
+# The game switch re-execs the mod's own config and autoexec, so every
+# setting above is set again after it.
+cmd game sot
+sleep 60
+console
+sleep 2
+cmd map egypt
+sleep 45
+console
+sleep 1
+cmd god
+cmd notarget
+cmd noclip
+cmd con_notifytime 0
+cmd viewsize 120
+cmd crosshair 0
+cmd showpause 0
+cmd r_skyspeed_back 0
+cmd r_skyspeed_front 0
+cmd r_skybox_speed 0
+cmd r_flatlightstyles 1
+cmd r_dynamic 0
+cmd r_gpulightstyles 0
+cmd r_ssao 0
+cmd r_bloom 0
+cmd r_dlight_occlusion 0
+cmd r_alias_gpu 0
+cmd r_particles 0
+cmd fog 0
+cmd gl_texture_anisotropy 1
+cmd r_oit 0
+cmd r_waterwarp 0
+cmd r_motionblur 0
+cmd r_softparticles 0
+cmd r_softemu 0
+cmd r_scale 1
+cmd gl_fxaa 0
+cmd contrast 1
+cmd gl_waterwarp_speed 0
+cmd r_caustics 0
+cmd gl_glows 0
+cmd r_drawviewmodel 0
+cmd r_drawentities 0
+sleep 2
+cmd setpos 784 1760 236 -40 180 0
+sleep 3
+cmd setpos 784 1760 236 -40 180 0
+sleep 2
+cmd pause
+cmd gamma 1.2
+cmd gpu_unrouted reset
+shot 11-egypt-north
+cmd echo REPORT-EGYPT-BEGIN
+cmd gpu_unrouted
+cmd echo REPORT-EGYPT-END
+cmd gamma 1
+cmd pause
+sleep 1

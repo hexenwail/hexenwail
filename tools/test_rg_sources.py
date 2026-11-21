@@ -208,6 +208,30 @@ Checked, from the sources (stock python3, lint.yml):
   colour, the glows' attenuation, the additive black fog, every R_SetFog /
   R_SetWorldFrag caller) names the backend or is compiled under a backend
   conditional.
+  the post-process chain's GL calls through seams (#340 P4a-1,
+  check_postprocess), the chain still off under -gpu:
+    * gl_fbo.c is a seam (SEAMS), in the client's source list beside
+      gl_texbind.c, each of its GL arms is the one bare call it is named
+      for, its parameters passed through in order, and each SDL_GPU arm notes
+      the call and answers neutrally until P4a-2 (zero names,
+      GL_FRAMEBUFFER_UNSUPPORTED, false, 0);
+    * no gl*_fp call is left in gl_postprocess.c outside the OIT functions
+      (P6) and the GPU palette-LUT builder (compute, P5), except where an
+      SDL_GPU arm excludes it and PP_RAW_OK's few, each counted: MSAA's
+      multisampled storage (P6), bloom's bufferless draws (P4e), and
+      shutdown's program and buffer deletes; a function GPU_GATES gates whole
+      gets no credit for its gate, so GL_SoftDepth_Capture is routed for P4b;
+    * the gates: PP_NeedsPostProcess still returns false under -gpu (P4a-2
+      lifts it with the backend), OIT_InitShader returns false (GPU_GATES),
+      PP_CreateFBO forces 0 samples after the gl_max_samples clamp and before
+      the MSAA branch, and an FBO failure under -gpu returns from BeginFrame
+      before the copyback fallback turns post-process on; the soft-particle
+      snapshot is valid only if R_BlitFramebuffer says the copy was made;
+    * PpVert (pp_vert_mvp, float[16]) and PpParams (pp_params) are registered
+      as mirrors in PP_InitShader's SDL_GPU arm, PP_PushParams flushes both
+      after GL_GetMVP and returns, PP_BindUniformBlock returns under -gpu
+      before any GL call, and the blocks registered engine-wide leave room
+      under RG_MAX_BLOCKS for P4e's BloomParams.
 
 Usage: test_rg_sources.py [--root DIR]
 """
@@ -461,6 +485,8 @@ def check_cmake(root):
 SEAMS = {
     "engine/h2shared/gl_texcreate.c": None,
     "engine/h2shared/gl_texbind.c": None,
+    # framebuffers and renderbuffers (#340 P4a-1)
+    "engine/h2shared/gl_fbo.c": None,
     "engine/h2shared/gl_pipeline.c": None,
     "engine/h2shared/gl_uniforms.c": None,
     "engine/h2shared/gl_vbo.c": None,
@@ -511,6 +537,20 @@ def stmt_end(s, i):
     """End of the statement starting at s[i]: a balanced block, or up to the
     first `;` outside parentheses."""
     i = skip_ws_pp(s, i)
+    # `if (...) stmt [else stmt]`, as an arm's else often is: the whole
+    # statement, not up to the first `;` inside its body.
+    m = re.match(r"if\s*\(", s[i:])
+    if m:
+        depth, j = 0, i + m.end() - 1
+        for j in range(j, len(s)):
+            depth += {"(": 1, ")": -1}.get(s[j], 0)
+            if depth == 0:
+                break
+        e = stmt_end(s, j + 1)
+        k = skip_ws_pp(s, e)
+        if re.match(r"else\b", s[k:]):
+            e = stmt_end(s, k + 4)
+        return e
     if i < len(s) and s[i] == "{":
         depth = 0
         for j in range(i, len(s)):
@@ -1608,8 +1648,17 @@ GPU_GATES = (
     ("engine/h2shared/gl_postprocess.c", "OIT_Active", "false",
      r"\breturn\s+oit_available\b", None,
      "OIT is P6: callers must see sorted blending under -gpu"),
+    ("engine/h2shared/gl_postprocess.c", "OIT_InitShader", "false",
+     r"\bR_Program_Create\s*\(|\bgl\w+_fp\s*\(|\bPP_BindUniformBlock\s*\(", None,
+     "OIT is P6: the null glBlendFunci is not NULL, so every -gpu boot reached it, and it is raw GL "
+     "for a resolve -gpu never draws (#340 P4a-1)"),
+    ("engine/h2shared/gl_postprocess.c", "PP_NeedsPostProcess", "false",
+     r"\bv_gamma\b|\bPP_Contrast\s*\(", r"\bif\s*\(\s*!\s*pp_initialized\s*\)\s*return\s+false\s*;",
+     "the chain's calls go through seams (P4a-1) whose -gpu arms are not built yet: P4a-2 lifts this "
+     "with the backend, and this row with it"),
     ("engine/h2shared/gl_postprocess.c", "GL_SoftDepth_Capture", "",
-     r"\bR_GenTextures\s*\(|\bgl\w+_fp\s*\(|\bsoft_depth_valid\s*=\s*true\b",
+     r"\bR_GenTextures\s*\(|\bgl\w+_fp\s*\(|\bR_\w*(?:Framebuffer|Renderbuffer|DrawBuffers)\w*\s*\("
+     r"|\bsoft_depth_valid\s*=\s*true\b",
      r"\bsoft_depth_valid\s*=\s*false\s*;",
      "soft particles are P4: the null glBlitFramebuffer is not NULL, so the snapshot would be marked "
      "valid and sprites would sample a texture nothing wrote"),
@@ -2213,6 +2262,208 @@ def check_mirror(root):
         fail("%s: missing -- the #340 P3d mirror pin has nothing to read" % rp)
 
 
+# gl_postprocess.c functions that stay raw GL, and why.
+PP_RAW_FUNCS = {
+    "PP_BuildPaletteLUT_GPU": "the compute LUT builder, off under -gpu through compute_shaders (P5)",
+    "PP_FreePaletteGPU": "its program; 0 under -gpu, where the builder never links it (P5)",
+}
+# (function, GL entry point) -> (calls, why) that stay raw in the rest.
+PP_RAW_OK = {
+    ("PP_CreateFBO", "glRenderbufferStorageMultisample"):
+        (2, "the MSAA branch's storage, P6: -gpu forces 0 samples ahead of it"),
+    ("GL_PostProcess_EndFrame", "glDrawArrays"):
+        (3, "bloom's bufferless fullscreen triangles: R_DrawArrays is P4e"),
+    ("GL_PostProcess_Shutdown", "glDeleteProgram"):
+        (3, "programs at shutdown, restart-only under -gpu (P4 decision 9)"),
+    ("GL_PostProcess_Shutdown", "glDeleteBuffers"):
+        (4, "each under `if (*_ubo)`: -gpu creates none of the four"),
+}
+# The GL entry point each gl_fbo.c seam is the bare call to.
+FBO_SEAMS = ("GenFramebuffers", "DeleteFramebuffers", "BindFramebuffer", "FramebufferTexture2D",
+             "FramebufferRenderbuffer", "CheckFramebufferStatus", "DrawBuffers",
+             "GenRenderbuffers", "DeleteRenderbuffers", "BindRenderbuffer",
+             "RenderbufferStorage", "BlitFramebuffer")
+
+
+def gl_arm(body):
+    """A seam body with its `#ifdef USE_SDL_GPU ... #endif` blanked."""
+    return re.sub(r"#\s*ifdef\s+USE_SDL_GPU\b.*?#\s*endif", " ", body, flags=re.S)
+
+
+def check_fbo_seam(root):
+    rel = "engine/h2shared/gl_fbo.c"
+    path = root / rel
+    if not path.is_file():
+        fail("%s: missing -- the #340 P4a-1 FBO seam" % rel)
+        return
+    code = strip_c_comments(path.read_text(errors="replace"))
+    heads = {m.group(1): m.group(2) for m in
+             re.finditer(r"^\w[\w \t\*]*?\b(R_\w+)\s*\(([^;{}]*)\)\s*\{", code, re.M)}
+    bodies = {n: code[b:e + 1] for n, b, e in functions(code)}
+    for name in FBO_SEAMS + ("FramebufferBinding",):
+        fn = "R_" + name
+        if fn not in bodies or fn not in heads:
+            fail("%s: no %s -- gl_fbo.h's seam is gone" % (rel, fn))
+            continue
+        params = [re.findall(r"\w+", a)[-1] for a in heads[fn].split(",") if a.strip()]
+        got = re.sub(r"\s+", "", gl_arm(bodies[fn]))
+        if name == "FramebufferBinding":
+            want = "{GLintfbo=0;glGetIntegerv_fp(pname,&fbo);return(GLuint)fbo;}"
+        else:
+            call = "gl%s_fp(%s);" % (name, ",".join(params))
+            want = {"CheckFramebufferStatus": "{return%s}" % call,
+                    "BlitFramebuffer": "{%sreturntrue;}" % call}.get(name, "{%s}" % call)
+        if got != want:
+            fail("%s: %s's GL arm must be exactly the bare call, its parameters in order: want `%s`, "
+                 "found `%s` (whitespace dropped; #340 P4a-1)" % (rel, fn, want, got))
+        arm = re.search(r"#\s*ifdef\s+USE_SDL_GPU\b(.*?)#\s*endif", bodies[fn], re.S)
+        arm = re.sub(r"\s+", "", arm.group(1)) if arm else ""
+        note = r'RG_NoteUnhandled\("%s\(rendertargetsareP4a-2\)"\);' % fn
+        tail = {"GenFramebuffers": r"RG_FboZeroNames\(n,fbos\);return;",
+                "GenRenderbuffers": r"RG_FboZeroNames\(n,rbs\);return;",
+                "CheckFramebufferStatus": r"returnGL_FRAMEBUFFER_UNSUPPORTED;",
+                "BlitFramebuffer": r"returnfalse;",
+                "FramebufferBinding": r"return0;"}.get(name, r"return;")
+        if not re.fullmatch(r"if\(R_GPU\(\)\)\{%s%s\}" % (note, tail), arm):
+            fail("%s: %s's SDL_GPU arm must note the call and answer neutrally until P4a-2 builds "
+                 "rg_target.c -- zero names, GL_FRAMEBUFFER_UNSUPPORTED, false, 0 -- found `%s` "
+                 "(#340 P4a-1)" % (rel, fn, arm))
+    zb = bodies.get("RG_FboZeroNames", "")
+    if not re.search(r"for\s*\(\s*i\s*=\s*0\s*;\s*i\s*<\s*n\s*;\s*i\+\+\s*\)\s*names\s*\[\s*i\s*\]\s*=\s*0\s*;", zb):
+        fail("%s: RG_FboZeroNames must zero all n names (#340 P4a-1)" % rel)
+    cm = (root / "engine/CMakeLists.txt").read_text()
+    if not re.search(r"\$\{COMMONDIR\}/gl_texbind\.c\s*\n\s*\$\{COMMONDIR\}/gl_fbo\.c\b", cm):
+        fail("engine/CMakeLists.txt: gl_fbo.c must follow gl_texbind.c in the client's source list (#340 P4a-1)")
+
+
+def check_postprocess(root):
+    """#340 P4a-1: the chain names no GL entry point the seams cover."""
+    check_fbo_seam(root)
+    rel = "engine/h2shared/gl_postprocess.c"
+    if not (root / rel).is_file():
+        fail("%s: missing -- the #340 P4a-1 pins have nothing to read" % rel)
+        return
+    code = strip_c_comments((root / rel).read_text(errors="replace"))
+    gated = {name for r, name, *_ in GPU_GATES if r == rel}
+    seen = {}
+    names = set()
+    for name, b, e in functions(code):
+        if not name:
+            continue
+        names.add(name)
+        if name.startswith("OIT_") or name in PP_RAW_FUNCS:
+            continue
+        body = code[b:e + 1]
+        arms = [] if name in gated else gpu_arms(body)
+        for m in re.finditer(r"\b(gl[A-Z]\w*)_fp\s*\(", body):
+            if arms and excluded(body, arms, m.start()):
+                continue
+            key = (name, m.group(1))
+            if key in PP_RAW_OK:
+                seen[key] = seen.get(key, 0) + 1
+                if key[1] == "glDeleteBuffers" and not in_name_guard(body, m.start(), r"\w+_ubo"):
+                    fail("%s: %s calls glDeleteBuffers outside an `if (*_ubo)` guard" % (rel, name))
+                continue
+            ln = code.count("\n", 0, b + m.start()) + 1
+            fail("%s:%d: %s calls %s_fp raw -- the post-process chain goes through gl_fbo.h, "
+                 "R_SetViewport, R_ProgramSamplerLoc / R_ProgramSamplerUnit and the VAO seams, or an "
+                 "SDL_GPU arm excludes the call (#340 P4a-1)" % (rel, ln, name, m.group(1)))
+    for f in PP_RAW_FUNCS:
+        if f not in names:
+            fail("%s: PP_RAW_FUNCS names %s, which is gone -- drop the entry" % (rel, f))
+    for key, (n, why) in PP_RAW_OK.items():
+        if seen.get(key, 0) != n:
+            fail("%s: %s makes %d raw %s calls, PP_RAW_OK expects %d (%s) -- route the new one or fix "
+                 "the count" % (rel, key[0], seen.get(key, 0), key[1], n, why))
+
+    def body(name):
+        return body_named(root, rel, name)
+
+    gate = r"#\s*ifdef\s+USE_SDL_GPU\s*\n\s*if\s*\(\s*R_GPU\s*\(\s*\)\s*\)\s*%s\s*#\s*endif"
+    b = body("PP_CreateFBO")
+    if b is not None:
+        g = re.search(gate % r"samples\s*=\s*0\s*;", b)
+        clamp = re.search(r"samples\s*=\s*gl_max_samples\s*;", b)
+        msaa = re.search(r"\bif\s*\(\s*samples\s*>\s*1\b", b)
+        if not (g and clamp and msaa and clamp.end() < g.start() < msaa.start()):
+            fail("%s: PP_CreateFBO needs `#ifdef USE_SDL_GPU / if (R_GPU ()) samples = 0; / #endif` "
+                 "after the gl_max_samples clamp and before the MSAA branch -- MSAA targets are P6, and "
+                 "gl_max_samples being 0 under -gpu is an accident to lean on (#340 P4a-1)" % rel)
+        elif b[:g.start()].count("{") - b[:g.start()].count("}") != 1:
+            fail("%s: PP_CreateFBO's samples gate must sit at the body's own level" % rel)
+    b = body("GL_PostProcess_BeginFrame")
+    if b is not None:
+        m = re.search(r"\bif\s*\(\s*pp_fbo_failed\s*\)\s*\{", b)
+        blk = b[m.end() - 1:stmt_end(b, m.end() - 1)] if m else ""
+        on = re.search(r"\bpp_active\s*=\s*true\b", blk)
+        # an `if (R_GPU ())` whose body always returns, under #ifdef USE_SDL_GPU,
+        # at the block's own level, ahead of the copyback turning the chain on
+        g = [(st, tb, te) for st, neg, (tb, te), els in gpu_arms(blk)
+             if not neg and returns_always(blk, tb, te)
+             and re.search(r"#\s*ifdef\s+USE_SDL_GPU\s*$", blk[:st].rstrip())
+             and blk[:st].count("{") - blk[:st].count("}") == 1]
+        if not (m and g and on and g[0][2] <= on.start()):
+            fail("%s: GL_PostProcess_BeginFrame's `if (pp_fbo_failed)` block needs `#ifdef "
+                 "USE_SDL_GPU / if (R_GPU ()) { ... return; } / #endif` at its own level before "
+                 "`pp_active = true` -- the copyback reads the framebuffer, which -gpu does not do "
+                 "(#340 P4a-1)" % rel)
+    b = body("GL_SoftDepth_Capture")
+    if b is not None and (not re.search(r"\bsoft_depth_valid\s*=\s*R_BlitFramebuffer\s*\(", b)
+                          or re.search(r"\bsoft_depth_valid\s*=\s*true\b", b)):
+        fail("%s: GL_SoftDepth_Capture must set soft_depth_valid from R_BlitFramebuffer's result and "
+             "nowhere to true -- a blit the -gpu arm declines must not leave sprites sampling a "
+             "snapshot nothing wrote (P4b lifts the gate; #340 P4a-1)" % rel)
+    decl = re.search(r"\bstatic\s+float\s+pp_vert_mvp\s*\[\s*16\s*\]\s*;", code)
+    if not decl:
+        fail("%s: pp_vert_mvp is not `static float pp_vert_mvp[16];` -- PpVert's mirror is 64 bytes"
+             % rel)
+    b = body("PP_InitShader")
+    if b is not None:
+        reg = [(m.start(), m.group(1), re.sub(r"\s+", "", m.group(2)), re.sub(r"\s+", "", m.group(3)))
+               for m in re.finditer(r"\bRG_UniformBlockRegister\s*\(\s*\"(\w+)\"\s*,\s*([^,]+),\s*"
+                                    r"sizeof\s*\(([^)]*)\)\s*\)", b)]
+        want = {("PpVert", "pp_vert_mvp", "pp_vert_mvp"), ("PpParams", "&pp_params", "pp_params")}
+        arms = gpu_arms(b)
+        inarm = all(any(not neg and tb <= pos < te for _, neg, (tb, te), _ in arms)
+                    for pos, *_ in reg)
+        if {r[1:] for r in reg} != want or len(reg) != 2 or not inarm:
+            fail("%s: PP_InitShader must register exactly RG_UniformBlockRegister (\"PpVert\", "
+                 "pp_vert_mvp, sizeof(pp_vert_mvp)) and (\"PpParams\", &pp_params, sizeof(pp_params)) "
+                 "inside its `if (R_GPU ())` arm (#340 P4a-1)" % rel)
+    b = body("PP_PushParams")
+    if b is not None:
+        arm = re.search(r"#\s*ifdef\s+USE_SDL_GPU\s*\n\s*if\s*\(\s*R_GPU\s*\(\s*\)\s*\)\s*\{\s*"
+                        r"RG_UniformBlockFlushed\s*\(\s*\"PpVert\"\s*\)\s*;\s*"
+                        r"RG_UniformBlockFlushed\s*\(\s*\"PpParams\"\s*\)\s*;\s*return\s*;\s*\}\s*#\s*endif", b)
+        mvp = re.search(r"\bGL_GetMVP\s*\(\s*pp_vert_mvp\s*\)", b)
+        if not (arm and mvp and mvp.end() <= arm.start()):
+            fail("%s: PP_PushParams needs GL_GetMVP (pp_vert_mvp) and then `#ifdef USE_SDL_GPU / if "
+                 "(R_GPU ()) { RG_UniformBlockFlushed (\"PpVert\"); RG_UniformBlockFlushed "
+                 "(\"PpParams\"); return; } / #endif` -- a flush before the MVP is written pushes last "
+                 "draw's matrix (#340 P4a-1)" % rel)
+    b = body("PP_BindUniformBlock")
+    if b is not None and not gpu_return_before(b, r"\bgl\w+_fp\s*\("):
+        fail("%s: PP_BindUniformBlock must return under R_GPU () before any GL call: the program's "
+             "reflection fixes the slots, and the null glGetUniformBlockIndex answers 0, so its size "
+             "query warned at every -gpu boot (#340 P4a-1)" % rel)
+    # RG_MAX_BLOCKS: what is registered, and room for P4e's BloomParams.
+    fr = (root / "engine/h2shared/rg_frame.c").read_text(errors="replace")
+    mx = re.search(r"#\s*define\s+RG_MAX_BLOCKS\s+(\d+)", fr)
+    blocks = set()
+    for pth in sorted((root / "engine").rglob("*.c")):
+        if "rust" in pth.parts or pth.name.startswith("rg_"):
+            continue
+        for m in re.finditer(r"\bRG_UniformBlockRegister\s*\(\s*([^,]+?)\s*,",
+                             strip_c_comments(pth.read_text(errors="replace"))):
+            blocks.add(m.group(1))
+    if not mx:
+        fail("rg_frame.c: no #define RG_MAX_BLOCKS")
+    elif len(blocks) < 9 or len(blocks) + 1 > int(mx.group(1)):
+        fail("RG_MAX_BLOCKS is %s and %d distinct blocks are registered (%s): it needs room for P4e's "
+             "BloomParams, and fewer than 9 means the scan is broken (#340 P4a-1)"
+             % (mx.group(1), len(blocks), ", ".join(sorted(blocks))))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     ap.add_argument("--root", type=Path, default=ROOT)
@@ -2234,6 +2485,7 @@ def main(argv=None):
     check_points(root)
     check_fog(root)
     check_mirror(root)
+    check_postprocess(root)
     nfiles = 0
     rg_files = []
     for p in sorted(eng.rglob("*")):

@@ -22,8 +22,9 @@
 #include "gl_pipeline.h"
 #include "gl_vbo.h"
 #include "draw.h"
+#include "gl_fbo.h"	/* framebuffers and renderbuffers, through the seam (#340 P4a-1) */
 #ifdef USE_SDL_GPU
-#include "rg_device.h"	/* R_GPU(): under -gpu the FBO entry points stay stubbed */
+#include "rg_device.h"	/* R_GPU(): the chain's -gpu gates and uniform mirrors */
 #endif
 
 /* GL defines that may be missing on some platforms (MinGW, ES3) */
@@ -504,11 +505,11 @@ static void PP_FormatChanged (cvar_t *var)
 static void PP_DeleteFBO (void)
 {
 	if (pp_color_tex)   { R_DeleteTextures (1, &pp_color_tex); pp_color_tex = 0; }
-	if (pp_color_rb)    { glDeleteRenderbuffers_fp(1, &pp_color_rb); pp_color_rb = 0; }
-	if (pp_depth_rb)    { glDeleteRenderbuffers_fp(1, &pp_depth_rb); pp_depth_rb = 0; }
+	if (pp_color_rb)    { R_DeleteRenderbuffers(1, &pp_color_rb); pp_color_rb = 0; }
+	if (pp_depth_rb)    { R_DeleteRenderbuffers(1, &pp_depth_rb); pp_depth_rb = 0; }
 	if (pp_depth_tex)   { R_DeleteTextures (1, &pp_depth_tex); pp_depth_tex = 0; }
-	if (pp_resolve_fbo) { glDeleteFramebuffers_fp(1, &pp_resolve_fbo); pp_resolve_fbo = 0; }
-	if (pp_fbo)         { glDeleteFramebuffers_fp(1, &pp_fbo); pp_fbo = 0; }
+	if (pp_resolve_fbo) { R_DeleteFramebuffers(1, &pp_resolve_fbo); pp_resolve_fbo = 0; }
+	if (pp_fbo)         { R_DeleteFramebuffers(1, &pp_fbo); pp_fbo = 0; }
 	PP_DeleteBloomFBOs();
 	pp_width = pp_height = pp_samples = 0;
 }
@@ -516,8 +517,8 @@ static void PP_DeleteFBO (void)
 static void PP_DeleteNativeFBO (void)
 {
 	if (pp_native_color_tex) { R_DeleteTextures (1, &pp_native_color_tex); pp_native_color_tex = 0; }
-	if (pp_native_depth_rb)  { glDeleteRenderbuffers_fp(1, &pp_native_depth_rb); pp_native_depth_rb = 0; }
-	if (pp_native_fbo)       { glDeleteFramebuffers_fp(1, &pp_native_fbo); pp_native_fbo = 0; }
+	if (pp_native_depth_rb)  { R_DeleteRenderbuffers(1, &pp_native_depth_rb); pp_native_depth_rb = 0; }
+	if (pp_native_fbo)       { R_DeleteFramebuffers(1, &pp_native_fbo); pp_native_fbo = 0; }
 	pp_native_w = pp_native_h = 0;
 	pp_native_fmt = 0;
 }
@@ -527,7 +528,7 @@ static void PP_DeleteBloomFBOs (void)
 	int i;
 	for (i = 0; i < BLOOM_LEVELS; i++) {
 		if (bloom_tex[i]) { R_DeleteTextures (1, &bloom_tex[i]); bloom_tex[i] = 0; }
-		if (bloom_fbo[i]) { glDeleteFramebuffers_fp(1, &bloom_fbo[i]); bloom_fbo[i] = 0; }
+		if (bloom_fbo[i]) { R_DeleteFramebuffers(1, &bloom_fbo[i]); bloom_fbo[i] = 0; }
 		bloom_w[i] = bloom_h[i] = 0;
 	}
 }
@@ -556,20 +557,20 @@ static qboolean PP_CreateNativeFBO (int width, int height)
 	R_TexSetWrap(GL_TEXTURE_2D, pp_native_color_tex, GL_CLAMP_TO_EDGE);
 	R_BindTextureForEdit (GL_TEXTURE_2D, 0);
 
-	glGenRenderbuffers_fp(1, &pp_native_depth_rb);
-	glBindRenderbuffer_fp(GL_RENDERBUFFER, pp_native_depth_rb);
-	glRenderbufferStorage_fp(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, width, height);
-	glBindRenderbuffer_fp(GL_RENDERBUFFER, 0);
+	R_GenRenderbuffers(1, &pp_native_depth_rb);
+	R_BindRenderbuffer(GL_RENDERBUFFER, pp_native_depth_rb);
+	R_RenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, width, height);
+	R_BindRenderbuffer(GL_RENDERBUFFER, 0);
 
-	glGenFramebuffers_fp(1, &pp_native_fbo);
-	glBindFramebuffer_fp(GL_FRAMEBUFFER, pp_native_fbo);
-	glFramebufferTexture2D_fp(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-				  GL_TEXTURE_2D, pp_native_color_tex, 0);
-	glFramebufferRenderbuffer_fp(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
-				     GL_RENDERBUFFER, pp_native_depth_rb);
+	R_GenFramebuffers(1, &pp_native_fbo);
+	R_BindFramebuffer(GL_FRAMEBUFFER, pp_native_fbo);
+	R_FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+			       GL_TEXTURE_2D, pp_native_color_tex, 0);
+	R_FramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
+				  GL_RENDERBUFFER, pp_native_depth_rb);
 
-	status = glCheckFramebufferStatus_fp(GL_FRAMEBUFFER);
-	glBindFramebuffer_fp(GL_FRAMEBUFFER, 0);
+	status = R_CheckFramebufferStatus(GL_FRAMEBUFFER);
+	R_BindFramebuffer(GL_FRAMEBUFFER, 0);
 
 	if (status != GL_FRAMEBUFFER_COMPLETE)
 	{
@@ -621,13 +622,13 @@ static qboolean PP_CreateBloomFBOs (int width, int height)
 		R_BindTextureForEdit (GL_TEXTURE_2D, 0);
 
 		/* Bloom FBO */
-		glGenFramebuffers_fp(1, &bloom_fbo[i]);
-		glBindFramebuffer_fp(GL_FRAMEBUFFER, bloom_fbo[i]);
-		glFramebufferTexture2D_fp(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-					  GL_TEXTURE_2D, bloom_tex[i], 0);
+		R_GenFramebuffers(1, &bloom_fbo[i]);
+		R_BindFramebuffer(GL_FRAMEBUFFER, bloom_fbo[i]);
+		R_FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+				       GL_TEXTURE_2D, bloom_tex[i], 0);
 
-		status = glCheckFramebufferStatus_fp(GL_FRAMEBUFFER);
-		glBindFramebuffer_fp(GL_FRAMEBUFFER, 0);
+		status = R_CheckFramebufferStatus(GL_FRAMEBUFFER);
+		R_BindFramebuffer(GL_FRAMEBUFFER, 0);
 
 		if (status != GL_FRAMEBUFFER_COMPLETE)
 		{
@@ -659,6 +660,12 @@ static qboolean PP_CreateFBO (int width, int height)
 	 * would only risk the two clamps drifting apart. */
 	if (samples > gl_max_samples)
 		samples = gl_max_samples;
+#ifdef USE_SDL_GPU
+	/* MSAA targets are P6 of #340.  gl_max_samples is 0 under -gpu today,
+	 * which already says the same; this does not depend on it. */
+	if (R_GPU ())
+		samples = 0;
+#endif
 	if (samples < 2)
 		samples = 0;
 
@@ -679,44 +686,44 @@ static qboolean PP_CreateFBO (int width, int height)
 	if (samples > 1 && glRenderbufferStorageMultisample_fp && glBlitFramebuffer_fp)
 	{
 		/* multisampled render FBO */
-		glGenRenderbuffers_fp(1, &pp_color_rb);
-		glBindRenderbuffer_fp(GL_RENDERBUFFER, pp_color_rb);
+		R_GenRenderbuffers(1, &pp_color_rb);
+		R_BindRenderbuffer(GL_RENDERBUFFER, pp_color_rb);
 		glRenderbufferStorageMultisample_fp(GL_RENDERBUFFER, samples, color_fmt, width, height);
 
-		glGenRenderbuffers_fp(1, &pp_depth_rb);
-		glBindRenderbuffer_fp(GL_RENDERBUFFER, pp_depth_rb);
+		R_GenRenderbuffers(1, &pp_depth_rb);
+		R_BindRenderbuffer(GL_RENDERBUFFER, pp_depth_rb);
 		glRenderbufferStorageMultisample_fp(GL_RENDERBUFFER, samples, GL_DEPTH24_STENCIL8, width, height);
-		glBindRenderbuffer_fp(GL_RENDERBUFFER, 0);
+		R_BindRenderbuffer(GL_RENDERBUFFER, 0);
 
-		glGenFramebuffers_fp(1, &pp_fbo);
-		glBindFramebuffer_fp(GL_FRAMEBUFFER, pp_fbo);
-		glFramebufferRenderbuffer_fp(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-					     GL_RENDERBUFFER, pp_color_rb);
-		glFramebufferRenderbuffer_fp(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
-					     GL_RENDERBUFFER, pp_depth_rb);
+		R_GenFramebuffers(1, &pp_fbo);
+		R_BindFramebuffer(GL_FRAMEBUFFER, pp_fbo);
+		R_FramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+					  GL_RENDERBUFFER, pp_color_rb);
+		R_FramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
+					  GL_RENDERBUFFER, pp_depth_rb);
 
-		status = glCheckFramebufferStatus_fp(GL_FRAMEBUFFER);
+		status = R_CheckFramebufferStatus(GL_FRAMEBUFFER);
 		if (status != GL_FRAMEBUFFER_COMPLETE)
 		{
 			Con_Printf("PostProcess: MSAA FBO incomplete (status 0x%x), falling back\n", status);
 			/* clean up only MSAA resources, keep pp_color_tex for non-MSAA fallback */
-			glBindFramebuffer_fp(GL_FRAMEBUFFER, 0);
-			if (pp_fbo)       { glDeleteFramebuffers_fp(1, &pp_fbo); pp_fbo = 0; }
-			if (pp_color_rb)  { glDeleteRenderbuffers_fp(1, &pp_color_rb); pp_color_rb = 0; }
-			if (pp_depth_rb)  { glDeleteRenderbuffers_fp(1, &pp_depth_rb); pp_depth_rb = 0; }
+			R_BindFramebuffer(GL_FRAMEBUFFER, 0);
+			if (pp_fbo)       { R_DeleteFramebuffers(1, &pp_fbo); pp_fbo = 0; }
+			if (pp_color_rb)  { R_DeleteRenderbuffers(1, &pp_color_rb); pp_color_rb = 0; }
+			if (pp_depth_rb)  { R_DeleteRenderbuffers(1, &pp_depth_rb); pp_depth_rb = 0; }
 			samples = 0;
 			/* fall through to non-MSAA path below */
 		}
 		else
 		{
 			/* resolve FBO (non-multisampled texture) */
-			glGenFramebuffers_fp(1, &pp_resolve_fbo);
-			glBindFramebuffer_fp(GL_FRAMEBUFFER, pp_resolve_fbo);
-			glFramebufferTexture2D_fp(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-						  GL_TEXTURE_2D, pp_color_tex, 0);
+			R_GenFramebuffers(1, &pp_resolve_fbo);
+			R_BindFramebuffer(GL_FRAMEBUFFER, pp_resolve_fbo);
+			R_FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+					       GL_TEXTURE_2D, pp_color_tex, 0);
 
-			status = glCheckFramebufferStatus_fp(GL_FRAMEBUFFER);
-			glBindFramebuffer_fp(GL_FRAMEBUFFER, 0);
+			status = R_CheckFramebufferStatus(GL_FRAMEBUFFER);
+			R_BindFramebuffer(GL_FRAMEBUFFER, 0);
 
 			if (status != GL_FRAMEBUFFER_COMPLETE)
 			{
@@ -751,15 +758,15 @@ static qboolean PP_CreateFBO (int width, int height)
 	 * raw depth value rather than a comparison result. */
 	R_BindTextureForEdit (GL_TEXTURE_2D, 0);
 
-	glGenFramebuffers_fp(1, &pp_fbo);
-	glBindFramebuffer_fp(GL_FRAMEBUFFER, pp_fbo);
-	glFramebufferTexture2D_fp(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-				  GL_TEXTURE_2D, pp_color_tex, 0);
-	glFramebufferTexture2D_fp(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
-				  GL_TEXTURE_2D, pp_depth_tex, 0);
+	R_GenFramebuffers(1, &pp_fbo);
+	R_BindFramebuffer(GL_FRAMEBUFFER, pp_fbo);
+	R_FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+			       GL_TEXTURE_2D, pp_color_tex, 0);
+	R_FramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
+			       GL_TEXTURE_2D, pp_depth_tex, 0);
 
-	status = glCheckFramebufferStatus_fp(GL_FRAMEBUFFER);
-	glBindFramebuffer_fp(GL_FRAMEBUFFER, 0);
+	status = R_CheckFramebufferStatus(GL_FRAMEBUFFER);
+	R_BindFramebuffer(GL_FRAMEBUFFER, 0);
 
 	if (status != GL_FRAMEBUFFER_COMPLETE)
 	{
@@ -795,6 +802,11 @@ static void PP_BindUniformBlock (GLuint prog, const char *block, GLuint binding,
 	GLuint	blk;
 	GLint	size = 0;
 
+#ifdef USE_SDL_GPU
+	/* The program's reflection fixes each block's slot under -gpu. */
+	if (R_GPU ())
+		return;
+#endif
 	if (!prog || !glGetUniformBlockIndex_fp || !glUniformBlockBinding_fp)
 		return;
 	blk = glGetUniformBlockIndex_fp(prog, block);
@@ -831,6 +843,13 @@ static void PP_PushBloomParams (float rcp_w, float rcp_h, float threshold)
 	bp.p[1] = rcp_h;
 	bp.p[2] = threshold;
 	bp.p[3] = 0.0f;
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_NoteUnhandled ("PP_PushBloomParams (BloomParams is P4e)");
+		return;
+	}
+#endif
 	GL_BindBuffer(GL_UNIFORM_BUFFER, bloom_ubo);
 	glBufferSubData_fp(GL_UNIFORM_BUFFER, 0, sizeof(bp), &bp);
 	GL_BindBuffer(GL_UNIFORM_BUFFER, 0);
@@ -842,6 +861,15 @@ static void PP_PushBloomParams (float rcp_w, float rcp_h, float threshold)
 static void PP_PushParams (void)
 {
 	GL_GetMVP(pp_vert_mvp);
+#ifdef USE_SDL_GPU
+	/* The mirrors PP_InitShader registered are the blocks under -gpu. */
+	if (R_GPU ())
+	{
+		RG_UniformBlockFlushed ("PpVert");
+		RG_UniformBlockFlushed ("PpParams");
+		return;
+	}
+#endif
 	GL_BindBuffer(GL_UNIFORM_BUFFER, pp_vert_ubo);
 	glBufferSubData_fp(GL_UNIFORM_BUFFER, 0, sizeof(pp_vert_mvp), pp_vert_mvp);
 	GL_BindBuffer(GL_UNIFORM_BUFFER, pp_frag_ubo);
@@ -853,18 +881,24 @@ static void PP_PushParams (void)
 
 static qboolean PP_InitShader (void)
 {
-	GLint loc;
-
 	pp_program = R_Program_Create(RPROG_POSTPROCESS);
 	if (!pp_program) return false;
 
-	pp_loc_scene = glGetUniformLocation_fp(pp_program, "scene");
-	pp_loc_paletteLUT = glGetUniformLocation_fp(pp_program, "paletteLUT");
+	pp_loc_scene = R_ProgramSamplerLoc(pp_program, "scene");
+	pp_loc_paletteLUT = R_ProgramSamplerLoc(pp_program, "paletteLUT");
 	PP_BindUniformBlock(pp_program, "PpVert", PP_VERT_UBO_BINDING, sizeof(pp_vert_mvp));
 	PP_BindUniformBlock(pp_program, "PpParams", PP_FRAG_UBO_BINDING, sizeof(pp_params_t));
 	/* A fresh program starts with every loose uniform at zero; so does the
 	 * shadow that replaced them. */
 	memset(&pp_params, 0, sizeof(pp_params));
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_UniformBlockRegister ("PpVert", pp_vert_mvp, sizeof(pp_vert_mvp));
+		RG_UniformBlockRegister ("PpParams", &pp_params, sizeof(pp_params));
+	}
+	else
+#endif
 	if (!pp_vert_ubo)
 	{
 		glGenBuffers_fp(1, &pp_vert_ubo);
@@ -878,41 +912,45 @@ static qboolean PP_InitShader (void)
 
 	/* bind samplers once */
 	R_UseProgram (pp_program);
-	loc = pp_loc_scene;
-	if (loc >= 0) glUniform1i_fp(loc, 0);	/* texture unit 0 */
-	loc = pp_loc_paletteLUT;
-	if (loc >= 0) glUniform1i_fp(loc, 1);	/* texture unit 1 */
-	pp_loc_bloom_tex = glGetUniformLocation_fp(pp_program, "u_bloom");
-	if (pp_loc_bloom_tex >= 0) glUniform1i_fp(pp_loc_bloom_tex, 2);	/* texture unit 2 */
+	R_ProgramSamplerUnit(pp_program, pp_loc_scene, "scene", 0);
+	R_ProgramSamplerUnit(pp_program, pp_loc_paletteLUT, "paletteLUT", 1);
+	pp_loc_bloom_tex = R_ProgramSamplerLoc(pp_program, "u_bloom");
+	R_ProgramSamplerUnit(pp_program, pp_loc_bloom_tex, "u_bloom", 2);
 	R_UseProgram (0);
 
 	/* Bloom shaders; bloom is optional, so a failure still returns true */
 	bloom_bright_prog = R_Program_Create(RPROG_BLOOM_BRIGHT);
 	if (!bloom_bright_prog) return true;
 
-	bloom_bright_loc_scene = glGetUniformLocation_fp(bloom_bright_prog, "u_scene");
+	bloom_bright_loc_scene = R_ProgramSamplerLoc(bloom_bright_prog, "u_scene");
 	PP_BindUniformBlock(bloom_bright_prog, "BloomParams", BLOOM_PARAMS_UBO_BINDING, sizeof(bloom_params_t));
 
 	bloom_down_prog = R_Program_Create(RPROG_BLOOM_DOWN);
 	if (!bloom_down_prog) return true;
 
-	bloom_down_loc_scene = glGetUniformLocation_fp(bloom_down_prog, "u_scene");
+	bloom_down_loc_scene = R_ProgramSamplerLoc(bloom_down_prog, "u_scene");
 	PP_BindUniformBlock(bloom_down_prog, "BloomParams", BLOOM_PARAMS_UBO_BINDING, sizeof(bloom_params_t));
 
 	bloom_up_prog = R_Program_Create(RPROG_BLOOM_UP);
 	if (!bloom_up_prog) return true;
 
-	bloom_up_loc_scene = glGetUniformLocation_fp(bloom_up_prog, "u_scene");
+	bloom_up_loc_scene = R_ProgramSamplerLoc(bloom_up_prog, "u_scene");
 	PP_BindUniformBlock(bloom_up_prog, "BloomParams", BLOOM_PARAMS_UBO_BINDING, sizeof(bloom_params_t));
 
 	/* GL 4.3 core profile requires a VAO bound for any draw call. */
-	glGenVertexArrays_fp(1, &bloom_dummy_vao);
+	R_GenVertexArrays(1, &bloom_dummy_vao);
 
-	/* BloomParams storage; same lifetime as the programs and VAO above. */
-	glGenBuffers_fp(1, &bloom_ubo);
-	GL_BindBuffer(GL_UNIFORM_BUFFER, bloom_ubo);
-	glBufferData_fp(GL_UNIFORM_BUFFER, sizeof(bloom_params_t), NULL, GL_DYNAMIC_DRAW);
-	GL_BindBuffer(GL_UNIFORM_BUFFER, 0);
+	/* BloomParams storage; same lifetime as the programs and VAO above.
+	 * Under -gpu it becomes a mirror at P4e: no buffer until then. */
+#ifdef USE_SDL_GPU
+	if (!R_GPU ())
+#endif
+	{
+		glGenBuffers_fp(1, &bloom_ubo);
+		GL_BindBuffer(GL_UNIFORM_BUFFER, bloom_ubo);
+		glBufferData_fp(GL_UNIFORM_BUFFER, sizeof(bloom_params_t), NULL, GL_DYNAMIC_DRAW);
+		GL_BindBuffer(GL_UNIFORM_BUFFER, 0);
+	}
 
 	return true;
 }
@@ -1838,6 +1876,13 @@ static qboolean OIT_InitShader (void)
 {
 	GLuint prog;
 
+#ifdef USE_SDL_GPU
+	/* OIT is P6 (see OIT_CreateFBO).  Gated here as well because this runs
+	 * at every -gpu boot: the null glBlendFunci is not NULL, so
+	 * HW_OIT_HAS_BLEND_FUNCI lets it in, and all it would do is raw GL. */
+	if (R_GPU ())
+		return false;
+#endif
 	prog = R_Program_Create(RPROG_OIT_RESOLVE);
 	if (!prog)
 		return false;
@@ -2038,7 +2083,7 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 	 * between R_RenderScene and those passes, none of which set a viewport of
 	 * their own.  Queried rather than recomputed so a caller that arrives with
 	 * some other viewport gets its own back. */
-	glViewport_fp(0, 0, pp_width, pp_height);
+	R_SetViewport(0, 0, pp_width, pp_height);
 	R_SetColorMask (true, true, true, true);
 
 	/* The resolve triangle is counter-clockwise in NDC, i.e. front-facing,
@@ -2068,7 +2113,7 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 	if (cull_was_on)
 		R_SetCull (true);
 
-	glViewport_fp(saved_viewport[0], saved_viewport[1],
+	R_SetViewport(saved_viewport[0], saved_viewport[1],
 		      saved_viewport[2], saved_viewport[3]);
 
 	R_BindTextureTarget (1, textarget, 0);
@@ -2115,7 +2160,7 @@ GLuint GL_PostProcess_GetSceneDepthTex (void)
 static void PP_DeleteSoftDepth (void)
 {
 	if (soft_depth_tex) { R_DeleteTextures (1, &soft_depth_tex); soft_depth_tex = 0; }
-	if (soft_depth_fbo) { glDeleteFramebuffers_fp(1, &soft_depth_fbo); soft_depth_fbo = 0; }
+	if (soft_depth_fbo) { R_DeleteFramebuffers(1, &soft_depth_fbo); soft_depth_fbo = 0; }
 	soft_depth_w = soft_depth_h = 0;
 	soft_depth_fmt = 0;
 	soft_depth_valid = false;
@@ -2124,7 +2169,7 @@ static void PP_DeleteSoftDepth (void)
 void GL_SoftDepth_Capture (void)
 {
 	GLenum	fmt, attach, status;
-	GLint	prev_draw = 0, prev_read = 0;
+	GLuint	prev_draw = 0, prev_read = 0;
 	int	w = glwidth, h = glheight;	/* pp rebinds these to the scaled scene size */
 
 	soft_depth_valid = false;
@@ -2171,19 +2216,19 @@ void GL_SoftDepth_Capture (void)
 	R_TexSetWrap(GL_TEXTURE_2D, soft_depth_tex, GL_CLAMP_TO_EDGE);
 	R_BindTextureForEdit (GL_TEXTURE_2D, 0);
 
-	glGetIntegerv_fp(GL_DRAW_FRAMEBUFFER_BINDING, &prev_draw);
-	glGenFramebuffers_fp(1, &soft_depth_fbo);
-	glBindFramebuffer_fp(GL_DRAW_FRAMEBUFFER, soft_depth_fbo);
-	glFramebufferTexture2D_fp(GL_DRAW_FRAMEBUFFER, attach,
-				  GL_TEXTURE_2D, soft_depth_tex, 0);
+	prev_draw = R_FramebufferBinding(GL_DRAW_FRAMEBUFFER_BINDING);
+	R_GenFramebuffers(1, &soft_depth_fbo);
+	R_BindFramebuffer(GL_DRAW_FRAMEBUFFER, soft_depth_fbo);
+	R_FramebufferTexture2D(GL_DRAW_FRAMEBUFFER, attach,
+			       GL_TEXTURE_2D, soft_depth_tex, 0);
 	/* Depth-only FBO needs DRAW_BUFFER = NONE for completeness on strict
 	 * drivers; it is only ever a blit destination. */
 	{
 		GLenum none = GL_NONE;
-		glDrawBuffers_fp(1, &none);
+		R_DrawBuffers(1, &none);
 	}
-	status = glCheckFramebufferStatus_fp(GL_DRAW_FRAMEBUFFER);
-	glBindFramebuffer_fp(GL_DRAW_FRAMEBUFFER, (GLuint)prev_draw);
+	status = R_CheckFramebufferStatus(GL_DRAW_FRAMEBUFFER);
+	R_BindFramebuffer(GL_DRAW_FRAMEBUFFER, prev_draw);
 	if (status != GL_FRAMEBUFFER_COMPLETE)
 	{
 		Con_DPrintf("Soft particles: depth FBO incomplete (0x%x)\n", status);
@@ -2199,16 +2244,14 @@ blit:
 	/* Read from whatever the scene is currently drawing into — pp_fbo when
 	 * postprocess is up, the default framebuffer otherwise, and either one
 	 * again on the mirror pass.  GL_NEAREST is the only legal depth filter. */
-	glGetIntegerv_fp(GL_DRAW_FRAMEBUFFER_BINDING, &prev_draw);
-	glGetIntegerv_fp(GL_READ_FRAMEBUFFER_BINDING, &prev_read);
-	glBindFramebuffer_fp(GL_READ_FRAMEBUFFER, (GLuint)prev_draw);
-	glBindFramebuffer_fp(GL_DRAW_FRAMEBUFFER, soft_depth_fbo);
-	glBlitFramebuffer_fp(0, 0, w, h, 0, 0, w, h,
-			     GL_DEPTH_BUFFER_BIT, GL_NEAREST);
-	glBindFramebuffer_fp(GL_DRAW_FRAMEBUFFER, (GLuint)prev_draw);
-	glBindFramebuffer_fp(GL_READ_FRAMEBUFFER, (GLuint)prev_read);
-
-	soft_depth_valid = true;
+	prev_draw = R_FramebufferBinding(GL_DRAW_FRAMEBUFFER_BINDING);
+	prev_read = R_FramebufferBinding(GL_READ_FRAMEBUFFER_BINDING);
+	R_BindFramebuffer(GL_READ_FRAMEBUFFER, prev_draw);
+	R_BindFramebuffer(GL_DRAW_FRAMEBUFFER, soft_depth_fbo);
+	soft_depth_valid = R_BlitFramebuffer(0, 0, w, h, 0, 0, w, h,
+					     GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+	R_BindFramebuffer(GL_DRAW_FRAMEBUFFER, prev_draw);
+	R_BindFramebuffer(GL_READ_FRAMEBUFFER, prev_read);
 }
 
 GLuint GL_SoftDepth_GetTex (void)
@@ -2476,6 +2519,19 @@ void GL_PostProcess_BeginFrame (void)
 	if (pp_fbo_failed)
 	{
 		static qboolean warned;
+#ifdef USE_SDL_GPU
+		/* The copyback reads the framebuffer back (R_TexCopySubImage2D),
+		 * which -gpu does not do: with no FBO, no post-process. */
+		if (R_GPU ())
+		{
+			if (!warned)
+			{
+				Con_Printf("PostProcess: FBO failed, post-process off under -gpu\n");
+				warned = true;
+			}
+			return;
+		}
+#endif
 		if (!warned)
 		{
 			Con_Printf("PostProcess: FBO failed, using copyback fallback for gamma/contrast\n");
@@ -2502,7 +2558,7 @@ void GL_PostProcess_BeginFrame (void)
 	glheight = h;
 
 	/* bind scene FBO */
-	glBindFramebuffer_fp(GL_FRAMEBUFFER, pp_fbo);
+	R_BindFramebuffer(GL_FRAMEBUFFER, pp_fbo);
 	PP_ApplySampleShading ();
 	pp_active = true;
 }
@@ -2639,8 +2695,8 @@ void GL_PostProcess_End3D (void)
 			R_TexCopySubImage2D(GL_TEXTURE_2D, pp_copyback_tex, 0, 0, 0, 0, 0, w, h);
 
 			/* Apply warp+blur, writing the processed 3D back into the default framebuffer */
-			glBindFramebuffer_fp(GL_FRAMEBUFFER, 0);
-			glViewport_fp(0, 0, w, h);
+			R_BindFramebuffer(GL_FRAMEBUFFER, 0);
+			R_SetViewport(0, 0, w, h);
 			scale = r_scale.value;
 			if (scale < 0.25f) scale = 0.25f;
 			if (scale > 1.0f)  scale = 1.0f;
@@ -2656,11 +2712,11 @@ void GL_PostProcess_End3D (void)
 	/* Resolve MSAA render buffer → pp_color_tex so the shader can sample it */
 	if (pp_samples > 1)
 	{
-		glBindFramebuffer_fp(GL_READ_FRAMEBUFFER, pp_fbo);
-		glBindFramebuffer_fp(GL_DRAW_FRAMEBUFFER, pp_resolve_fbo);
-		glBlitFramebuffer_fp(0, 0, pp_width, pp_height,
-				      0, 0, pp_width, pp_height,
-				      GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		R_BindFramebuffer(GL_READ_FRAMEBUFFER, pp_fbo);
+		R_BindFramebuffer(GL_DRAW_FRAMEBUFFER, pp_resolve_fbo);
+		R_BlitFramebuffer(0, 0, pp_width, pp_height,
+				   0, 0, pp_width, pp_height,
+				   GL_COLOR_BUFFER_BIT, GL_NEAREST);
 	}
 
 	/* Scene depth is final and pp_depth_tex is sampler-readable: build the
@@ -2679,13 +2735,13 @@ void GL_PostProcess_End3D (void)
 	if (!PP_CreateNativeFBO(native_w, native_h))
 	{
 		pp_active = false;
-		glBindFramebuffer_fp(GL_FRAMEBUFFER, 0);
+		R_BindFramebuffer(GL_FRAMEBUFFER, 0);
 		return;
 	}
 
 	/* Bind composite FBO — 2D will draw into this after we return */
-	glBindFramebuffer_fp(GL_FRAMEBUFFER, pp_native_fbo);
-	glViewport_fp(0, 0, native_w, native_h);
+	R_BindFramebuffer(GL_FRAMEBUFFER, pp_native_fbo);
+	R_SetViewport(0, 0, native_w, native_h);
 
 	/* Compute 3D-only effect strengths */
 	warp = 0.0f;
@@ -2708,12 +2764,12 @@ void GL_PostProcess_End3D (void)
 	{
 		/* Simple blit: upscale (or same-size copy) with no shader overhead */
 		GLuint src = (pp_samples > 1) ? pp_resolve_fbo : pp_fbo;
-		glBindFramebuffer_fp(GL_READ_FRAMEBUFFER, src);
-		glBindFramebuffer_fp(GL_DRAW_FRAMEBUFFER, pp_native_fbo);
-		glBlitFramebuffer_fp(0, 0, pp_width, pp_height,
-				      0, 0, native_w, native_h,
-				      GL_COLOR_BUFFER_BIT, GL_NEAREST);
-		glBindFramebuffer_fp(GL_FRAMEBUFFER, pp_native_fbo);
+		R_BindFramebuffer(GL_READ_FRAMEBUFFER, src);
+		R_BindFramebuffer(GL_DRAW_FRAMEBUFFER, pp_native_fbo);
+		R_BlitFramebuffer(0, 0, pp_width, pp_height,
+				   0, 0, native_w, native_h,
+				   GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		R_BindFramebuffer(GL_FRAMEBUFFER, pp_native_fbo);
 	}
 
 	/* pp_native_fbo is now bound; 2D draws will composite on top of the 3D scene.
@@ -2773,11 +2829,11 @@ void GL_PostProcess_EndFrame (void)
 	else if (pp_samples > 1)
 	{
 		/* MSAA: resolve to pp_color_tex */
-		glBindFramebuffer_fp(GL_READ_FRAMEBUFFER, pp_fbo);
-		glBindFramebuffer_fp(GL_DRAW_FRAMEBUFFER, pp_resolve_fbo);
-		glBlitFramebuffer_fp(0, 0, pp_width, pp_height,
-				      0, 0, pp_width, pp_height,
-				      GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		R_BindFramebuffer(GL_READ_FRAMEBUFFER, pp_fbo);
+		R_BindFramebuffer(GL_DRAW_FRAMEBUFFER, pp_resolve_fbo);
+		R_BlitFramebuffer(0, 0, pp_width, pp_height,
+				   0, 0, pp_width, pp_height,
+				   GL_COLOR_BUFFER_BIT, GL_NEAREST);
 		blit_tex = pp_color_tex;
 		blit_w = pp_width;
 		blit_h = pp_height;
@@ -2802,25 +2858,25 @@ void GL_PostProcess_EndFrame (void)
 		int i;
 
 		/* GL 4.3 core profile requires a VAO bound for glDrawArrays. */
-		glBindVertexArray_fp(bloom_dummy_vao);
+		R_BindVertexArray(bloom_dummy_vao);
 
 		/* Bright pass: extract overbright pixels */
-		glViewport_fp(0, 0, bloom_w[0], bloom_h[0]);
-		glBindFramebuffer_fp(GL_FRAMEBUFFER, bloom_fbo[0]);
+		R_SetViewport(0, 0, bloom_w[0], bloom_h[0]);
+		R_BindFramebuffer(GL_FRAMEBUFFER, bloom_fbo[0]);
 		R_UseProgram (bloom_bright_prog);
 		R_BindTextureSlot (0, bloom_src);
-		if (bloom_bright_loc_scene >= 0) glUniform1i_fp(bloom_bright_loc_scene, 0);
+		R_ProgramSamplerUnit(bloom_bright_prog, bloom_bright_loc_scene, "u_scene", 0);
 		PP_PushBloomParams(1.0f / bloom_src_w, 1.0f / bloom_src_h, r_bloom_threshold.value);
 		glDrawArrays_fp(GL_TRIANGLES, 0, 3);
 
 		/* Downsample chain: level 0 → 1 → 2 → 3 */
 		for (i = 1; i < BLOOM_LEVELS; i++)
 		{
-			glViewport_fp(0, 0, bloom_w[i], bloom_h[i]);
-			glBindFramebuffer_fp(GL_FRAMEBUFFER, bloom_fbo[i]);
+			R_SetViewport(0, 0, bloom_w[i], bloom_h[i]);
+			R_BindFramebuffer(GL_FRAMEBUFFER, bloom_fbo[i]);
 			R_UseProgram (bloom_down_prog);
 			R_BindTextureSlot (0, bloom_tex[i-1]);
-			if (bloom_down_loc_scene >= 0) glUniform1i_fp(bloom_down_loc_scene, 0);
+			R_ProgramSamplerUnit(bloom_down_prog, bloom_down_loc_scene, "u_scene", 0);
 			PP_PushBloomParams(1.0f / bloom_w[i-1], 1.0f / bloom_h[i-1], 0.0f);
 			glDrawArrays_fp(GL_TRIANGLES, 0, 3);
 		}
@@ -2835,26 +2891,26 @@ void GL_PostProcess_EndFrame (void)
 		R_SetBlendFunc (GL_ONE, GL_ONE);
 		for (i = BLOOM_LEVELS - 2; i >= 0; i--)
 		{
-			glViewport_fp(0, 0, bloom_w[i], bloom_h[i]);
-			glBindFramebuffer_fp(GL_FRAMEBUFFER, bloom_fbo[i]);
+			R_SetViewport(0, 0, bloom_w[i], bloom_h[i]);
+			R_BindFramebuffer(GL_FRAMEBUFFER, bloom_fbo[i]);
 			R_UseProgram (bloom_up_prog);
 			R_BindTextureSlot (0, bloom_tex[i + 1]);
-			if (bloom_up_loc_scene >= 0) glUniform1i_fp(bloom_up_loc_scene, 0);
+			R_ProgramSamplerUnit(bloom_up_prog, bloom_up_loc_scene, "u_scene", 0);
 			PP_PushBloomParams(1.0f / bloom_w[i+1], 1.0f / bloom_h[i+1], 0.0f);
 			glDrawArrays_fp(GL_TRIANGLES, 0, 3);
 		}
 		R_SetBlend (false);
 
-		glBindVertexArray_fp(0);
+		R_BindVertexArray(0);
 		/* bloom_tex[0] now contains the final bloom result at 1/2 scene res */
 	}
 
 	/* unbind scene FBO -- render to default framebuffer */
-	glBindFramebuffer_fp(GL_FRAMEBUFFER, 0);
+	R_BindFramebuffer(GL_FRAMEBUFFER, 0);
 
 apply_shader:
 	/* set full viewport for the blit */
-	glViewport_fp(0, 0, glwidth, glheight);
+	R_SetViewport(0, 0, glwidth, glheight);
 
 	/* Before anything is bound: this may dispatch a compute pass and will
 	 * clobber unit 0.  No-op unless the metric actually changed. */
@@ -2976,7 +3032,7 @@ apply_shader:
 	if (pp_loc_bloom_tex >= 0)
 	{
 		R_BindTextureSlot (2, (r_bloom.integer && bloom_tex[0]) ? bloom_tex[0] : 0);
-		glUniform1i_fp(pp_loc_bloom_tex, 2);
+		R_ProgramSamplerUnit(pp_program, pp_loc_bloom_tex, "u_bloom", 2);
 	}
 	pp_params.p3[2] = r_bloom.integer ? r_bloom_intensity.value : 0.0f;	/* u_bloom_strength */
 	PP_PushParams();

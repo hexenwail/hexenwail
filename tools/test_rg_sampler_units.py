@@ -18,13 +18,17 @@ python3 plus a C compiler (lint.yml):
       #ifdef USE_SDL_GPU / if (R_GPU ()) and calls RG_ProgramSampler /
       RG_ProgramSamplerUnit with the same arguments.
     * no other glGetUniformLocation or glUniform1i call in the engine,
-      except gl_postprocess.c and gl_ssao.c, raw GL until P4 and P5 route
-      their programs (RAW_OK, each must still have such calls);
+      except gl_postprocess.c's OIT resolve (P6) and gl_ssao.c (P5), raw GL
+      until those phases route their programs (RAW_OK, by function where it
+      names them; each entry must still have such calls);
   the call sites
     * each R_ProgramSamplerUnit (prog, loc, "name", unit) names the sampler
       its location was looked up for -- `p->u_x` was assigned from
       R_ProgramSamplerLoc (..., "u_x"), a local from the nearest lookup
-      before it in the function -- and its unit is the constant that sampler
+      before it in the function, or a file-scope location the same file
+      assigned from R_ProgramSamplerLoc (same program, same "u_x") once at
+      set-up, which a per-frame re-set may then name -- and its unit is the
+      constant that sampler
       is bound at (CANON: u_textureN literally N, u_lightgrid LIGHT_GRID_TMU,
       the lightstyle layers LMSTYLE_TMU + k, the MBOIT targets MBOIT_TMU_*,
       the shadow maps DLSHADOW_TMU, u_soft_depth 1), each in 0..15;
@@ -41,7 +45,7 @@ python3 plus a C compiler (lint.yml):
     * every name a set-up function assigns is a sampler of one of its
       programs, so a misspelt name cannot pass as "not declared here";
     * a graphics program with samplers and no set-up function is one of
-      RAW_OK's (P4 / P5);
+      RAW_PROGRAMS (P5 / P6);
   the backend (rg_shader.c, rg_resource.c, rg_frame.c), compiled and run
     * RG_Reflect, lifted with a stub prelude and fed SPIR-V assembled here:
       each sampler's dimensionality (cube arrays included), sampled class
@@ -87,13 +91,17 @@ SCAN_DIRS = ("engine/h2shared", "engine/hexen2", "engine/hexenworld")
 NOT_SITES = {"engine/h2shared/gl_func.h", "engine/h2shared/gl_vidsdl.c",
              "engine/h2shared/rg_null.c", "engine/h2shared/web_canvas_gl2.c"}
 # Raw GL sampler set-up, by phase: their programs do not draw under -gpu yet.
+# file -> (why, the functions it may sit in, or None for anywhere in the file).
 RAW_OK = {
-    "engine/h2shared/gl_postprocess.c": "the post-process chain, P4 on #340",
-    "engine/h2shared/gl_ssao.c": "SSAO, compute and its composite, P5 on #340",
+    "engine/h2shared/gl_postprocess.c": ("the OIT resolve, P6 on #340 (gated off under -gpu)",
+                                         {"OIT_InitShader", "OIT_EndTranslucency"}),
+    "engine/h2shared/gl_ssao.c": ("SSAO, compute and its composite, P5 on #340", None),
 }
-# The programs those files set up, which therefore have no seam set-up.
-RAW_PROGRAMS = {"postprocess", "bloom_bright", "bloom_down", "bloom_up", "oit_resolve",
-                "oit_resolve_msaa", "ssao_composite"}
+# The programs those files set up, which therefore have no seam set-up.  The
+# post-process and bloom programs went through the seam at P4a-1.
+RAW_PROGRAMS = {"oit_resolve", "oit_resolve_msaa", "ssao_composite"}
+# Files whose functions set sampler units through the seam.
+SETUP_FILES = (SHADER_C, SHADOW_C, "engine/h2shared/gl_postprocess.c")
 
 # The unit each sampler is bound at, as the C spells it.
 CANON = {"u_texture%d" % n: str(n) for n in range(5)}
@@ -105,6 +113,10 @@ CANON.update({
     "u_dlshadowmap": "DLSHADOW_TMU", "u_shadowdbg": "DLSHADOW_TMU",
     # unit 1, which no program declaring it also uses (gl_shader.c, uhexen2-mf9u)
     "u_soft_depth": "1",
+    # the post-process chain (gl_postprocess.c, #340 P4a-1): the composited
+    # scene, the softemu palette LUT and the bloom result; each bloom pass
+    # reads its source at 0
+    "scene": "0", "paletteLUT": "1", "u_bloom": "2", "u_scene": "0",
 })
 # (program, sampler) left without a unit, and why that is right.
 UNSET_OK = {
@@ -409,17 +421,28 @@ def check_routing(root):
                 continue
             code = strip_c(p.read_text(errors="replace"))
             spans = []
+            fns = functions(code)
             if rel == SHADER_C:
-                fns = functions(code)
                 for f in ("R_ProgramSamplerLoc", "R_ProgramSamplerUnit"):
                     b = fns.get(f)
                     if b:
                         i = code.index(b)
                         spans.append((i, i + len(b)))
+            raw_spans = None
+            if rel in RAW_OK and RAW_OK[rel][1] is not None:
+                raw_spans = []
+                for f in sorted(RAW_OK[rel][1]):
+                    b = fns.get(f)
+                    if b is None:
+                        fail("RAW_OK names %s in %s, which has no such function" % (f, rel))
+                        continue
+                    i = code.index(b)
+                    raw_spans.append((i, i + len(b)))
             for m in RAW_CALL.finditer(code):
                 if any(a <= m.start() < b for a, b in spans):
                     continue
-                if rel in RAW_OK:
+                if rel in RAW_OK and (raw_spans is None or
+                                      any(a <= m.start() < b for a, b in raw_spans)):
                     seen[rel] += 1
                     continue
                 line = code.count("\n", 0, m.start()) + 1
@@ -432,12 +455,18 @@ def check_routing(root):
 
 def setup_functions(root, rows):
     """name -> (file, body, [assignment (prog, name, unit expr)], {program ids})."""
-    files = {SHADER_C: strip_c((root / SHADER_C).read_text()),
-             SHADOW_C: strip_c((root / SHADOW_C).read_text())}
+    files = {rel: strip_c((root / rel).read_text()) for rel in SETUP_FILES}
     allfns = {}
     for rel, code in files.items():
         for name, body in functions(code).items():
             allfns[name] = (rel, body)
+    # program variable -> the ids it is created from, per function, so a
+    # local `prog` in two functions is never read as one variable
+    create_rx = r"\b(\w+)\s*=\s*R_Program_Create\s*\(\s*(RPROG_\w+)\s*\)"
+    created_in = {}     # (file, variable) -> {function: {ids}}
+    for fname, (rel, body) in allfns.items():
+        for var, pid in re.findall(create_rx, body):
+            created_in.setdefault((rel, var), {}).setdefault(fname, set()).add(pid)
     if "R_ProgramSamplerUnit" not in allfns:
         fail("gl_shader.c: no R_ProgramSamplerUnit")
     out = {}
@@ -454,6 +483,15 @@ def setup_functions(root, rows):
                 continue
             assigns.append((pos, a[0], a[1], a[2].strip('"'), a[3]))
         ids = set(re.findall(r"\b(?:R_Program_Create|SH_LinkProgram)\s*\(\s*(RPROG_\w+)\s*\)", body))
+        # a per-frame re-set names the program variable its set-up created:
+        # this function's own creation of it, else the one function that
+        # creates it (a file-scope program)
+        for _, prog, _, _, _ in assigns:
+            where = created_in.get((rel, prog), {})
+            if name in where:
+                ids |= where[name]
+            elif len(where) == 1:
+                ids |= next(iter(where.values()))
         out[name] = [rel, body, assigns, ids]
     # ids passed to a set-up function by its callers
     for caller, (rel, body) in allfns.items():
@@ -479,8 +517,23 @@ def check_call_sites(setups, allfns, defs):
                 if not looked:
                     fail('%s: %s is never assigned R_ProgramSamplerLoc (..., "%s")' % (fn, loc, name))
             else:
-                prior = [m for m in re.finditer(r"\b%s\s*=\s*R_ProgramSamplerLoc\s*\(\s*([^,]+),\s*\"(\w+)\"\s*\)"
-                                                % re.escape(loc), body[:pos])]
+                lookup = r"\b%s\s*=\s*R_ProgramSamplerLoc\s*\(\s*([^,]+),\s*\"(\w+)\"\s*\)" % re.escape(loc)
+                prior = [m for m in re.finditer(lookup, body[:pos])]
+                if prior and prior[-1].group(1).strip() != prog.strip():
+                    fail("%s: R_ProgramSamplerUnit (%s, %s, ...) but %s was looked up in %s"
+                         % (fn, prog, loc, loc, prior[-1].group(1).strip()))
+                if not prior and not re.search(r"\b%s\s*=" % re.escape(loc), body):
+                    # a file-scope location, looked up once at set-up
+                    rel_fn = allfns[fn][0]
+                    once = [m for f, (r, b) in allfns.items() if r == rel_fn and f != fn
+                            for m in re.finditer(lookup, b)]
+                    if len(once) > 1:
+                        fail("%s: %s is assigned R_ProgramSamplerLoc in more than one function"
+                             % (fn, loc))
+                    elif once and once[0].group(1).strip() != prog.strip():
+                        fail("%s: R_ProgramSamplerUnit (%s, %s, ...) but %s was looked up in %s"
+                             % (fn, prog, loc, loc, once[0].group(1).strip()))
+                    prior = once
                 if not prior:
                     fail("%s: %s is not a location R_ProgramSamplerLoc returned in this function" % (fn, loc))
                 elif prior[-1].group(2) != name:
