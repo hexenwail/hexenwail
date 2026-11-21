@@ -209,6 +209,12 @@ jobs:
       - name: misc_modelpimp flag 64 gates dynamic lights
         run: python3 tools/test_modelpimp_nodlight.py
 
+      # misc_modelpimp spawnflags 4+16 draws one orb at its controller, which
+      # the server never sends (EF_NODRAW), and 4 alone adds none there
+      # (#518).  Lifts PF_pimpmodel's self_orb test and R_DrawAllGlows.
+      - name: misc_modelpimp self-only orb draws at its controller
+        run: python3 tools/test_modelpimp_selforb.py
+
       # maplist, the map menu and the other name listings must see inside
       # mounted .pk3s, in the shipped Rust quakefs and the C reference (#129).
       - name: Name listings see inside pk3 archives

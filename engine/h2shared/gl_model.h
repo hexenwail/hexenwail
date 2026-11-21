@@ -722,11 +722,18 @@ typedef struct {
 	int		ex_flags;
 	int		trail_flags;	// per-entity model flags (EF_ROCKET, EF_GIB, etc.)
 	qboolean	trail_override;	// true if trail_flags should replace model->flags
+	/* spawnflags 4+16: R_DrawAllGlows draws the orb at origin itself.  The
+	 * controller is EF_NODRAW, which the server never sends, so there is no
+	 * client entity to draw it from.  #518 */
+	qboolean	self_orb;
+	vec3_t		origin;		// the pimped edict's, at the last pimpmodel call
+	struct qmodel_s	*model;
 	float		glow_settings[GLOW_SETTINGS_COUNT];
 } pimp_override_t;
 
 void R_ClearPimpOverrides (void);
 pimp_override_t *R_GetPimpOverride (int entnum);
+void R_AddPimpSelfOrb (int entnum);	/* #518 */
 int R_GetEntityModelFlags (entity_t *e);
 
 // XF_ Extra model effects set by engine: qmodel_t->ex_flags
