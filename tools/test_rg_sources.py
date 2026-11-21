@@ -194,6 +194,20 @@ Checked, from the sources (stock python3, lint.yml):
     * testparticles and testentity, the sweep's fixed content, are behind
       CL_TestFixtureAllowed (noclip's conditions plus a server in this
       process), which runs before either command touches anything.
+  fog under -gpu (#340 P3c), which tools/sweep-fog-gpu.steps draws
+  (check_fog).  Fog is uniforms only -- FragParams' u_ffogv and u_fskyfog,
+  which R_FlushUniforms hands SDL_GPU like any block -- so the pin is that it
+  stays that way: no shader stage reads fog inside a VULKAN, GL_SPIRV or
+  __VERSION__ conditional, and a fogged program's stages hold directives only
+  there (spart_vert's gl_PointSize the one statement); v_fogdist sits at one
+  location per program family (Vulkan links varyings by location); the five
+  fogged programs keep their blend; FragParams keeps its fog members, is
+  registered with the backend whole and snapshotted whole; R_SetFog and
+  R_SetSkyFog write it on both backends; gl_fog.c never names the backend;
+  and no engine C function that touches fog (the flat fog passes, r_fastsky's
+  colour, the glows' attenuation, the additive black fog, every R_SetFog /
+  R_SetWorldFrag caller) names the backend or is compiled under a backend
+  conditional.
 
 Usage: test_rg_sources.py [--root DIR]
 """
@@ -1796,6 +1810,181 @@ def check_points(root):
                  % (rel, cmd, name))
 
 
+# Every fog read in a shader, the eye distance the stages hand on included.
+FOG_READ = re.compile(r"\b(?:u_fog_density|u_fog_color|u_skyfog|u_ffogv|u_fskyfog|v_fogdist)\b")
+# What tells the two compiles apart: the macros only the SPIR-V compile
+# defines (glslang predefines both), and the version (the GL tier header is
+# 430, the Vulkan copy 450).
+BACKEND_MACRO = re.compile(r"\b(?:VULKAN|GL_SPIRV|__VERSION__)\b")
+# The fogged programs' stages.  Inside a backend conditional these may hold
+# directives only (the gl_VertexID aliases), plus the one statement allowed
+# below: anything else there could change what fog does on one backend
+# without naming fog -- a write to a local after the blend, say.
+FOG_STAGES = ("sworld_vert.glsl", "sworld_frag.glsl", "sworld_opaque_frag.glsl",
+              "salias_vert.glsl", "salias_inst_vert.glsl", "sskeletal_vert.glsl", "salias_frag.glsl",
+              "spart_vert.glsl", "spart_gpu_vert.glsl", "spart_frag.glsl",
+              "ssky_layers_vert.glsl", "ssky_layers_frag.glsl")
+FOG_STAGE_OK = {("spart_vert.glsl", "gl_PointSize = 2.0;")}     # check_points' write
+# The stages that hand v_fogdist on, one location per family: GL links
+# varyings by name, Vulkan by location, so a mismatch is invisible on GL and
+# leaves -gpu's fog reading another varying.
+FOG_VARYING_FAMILIES = (
+    ("sworld_vert.glsl", "sworld_frag.glsl", "sworld_opaque_frag.glsl"),
+    ("salias_vert.glsl", "salias_inst_vert.glsl", "sskeletal_vert.glsl", "salias_frag.glsl"),
+    ("spart_vert.glsl", "spart_gpu_vert.glsl", "spart_frag.glsl"),
+)
+# Each fogged program's blend, which must stay: (file, the blend).
+FOG_BLENDS = (
+    ("sworld_frag.glsl", r"\bcolor\.rgb\s*=\s*mix\s*\(\s*u_fog_color\s*,\s*color\.rgb\s*,"),
+    ("sworld_opaque_frag.glsl", r"\bcolor\.rgb\s*=\s*mix\s*\(\s*u_fog_color\s*,\s*color\.rgb\s*,"),
+    ("salias_frag.glsl", r"\bcolor\.rgb\s*=\s*mix\s*\(\s*u_fog_color\s*,\s*color\.rgb\s*,"),
+    ("spart_frag.glsl", r"\bcolor\.rgb\s*=\s*mix\s*\(\s*u_fog_color\s*,\s*color\.rgb\s*,"),
+    ("ssky_layers_frag.glsl", r"\bcolor\s*=\s*mix\s*\(\s*color\s*,\s*u_skyfog\.rgb\s*,\s*u_skyfog\.a\s*\)"),
+)
+# A C function that touches fog in any of these ways never names the backend.
+FOG_C_SYMBOL = re.compile(r"\b(?:Fog_\w+|r_skyfog|skyfog|fogdensity|r_fog_density|r_fog_color|R_SetFog|"
+                          r"R_SetSkyFog|R_SetWorldFrag|Sky_LayerFogAlpha|Sky_LayerFogColor|Sky_FastColor)\b")
+BACKEND_C = re.compile(r"\bR_GPU\b|\brg_active\b|\bUSE_SDL_GPU\b")
+
+
+def pp_backend_spans(code, rx):
+    """[(start, end)] of the text inside a preprocessor conditional whose
+    condition (or an #elif of it) matches rx -- the #else arms included."""
+    spans, stack, pos = [], [], 0
+    for line in code.splitlines(True):
+        d = re.match(r"\s*#\s*(ifdef|ifndef|if|elif|else|endif)\b(.*)", line)
+        if d:
+            k, rest = d.group(1), d.group(2)
+            if k in ("ifdef", "ifndef", "if"):
+                stack.append([bool(rx.search(rest)), pos + len(line)])
+            elif k == "elif" and stack:
+                stack[-1][0] = stack[-1][0] or bool(rx.search(rest))
+            elif k == "endif" and stack:
+                hit, start = stack.pop()
+                if hit:
+                    spans.append((start, pos))
+        pos += len(line)
+    return spans
+
+
+def check_fog(root):
+    """#340 P3c: fog is the same uniforms on both backends -- no shader stage
+    fogs under one compile only, and nothing on the C side decides fog by
+    backend."""
+    sd = root / "engine/shaders"
+    for p in sorted(sd.glob("*")):
+        if p.suffix not in (".glsl", ".inc"):
+            continue
+        stack = []
+        for ln, line in enumerate(strip_c_comments(p.read_text(errors="replace")).splitlines(), 1):
+            d = re.match(r"\s*#\s*(ifdef|ifndef|if|elif|else|endif)\b(.*)", line)
+            if d:
+                k, rest = d.group(1), d.group(2)
+                if k in ("ifdef", "ifndef", "if"):
+                    stack.append(bool(BACKEND_MACRO.search(rest)))
+                elif k == "elif" and stack:
+                    stack[-1] = stack[-1] or bool(BACKEND_MACRO.search(rest))
+                elif k == "endif" and stack:
+                    stack.pop()
+                continue
+            if not any(stack) or not line.strip() or re.match(r"\s*#", line):
+                continue
+            if FOG_READ.search(line):
+                fail("engine/shaders/%s:%d: a fog read inside a VULKAN / GL_SPIRV / __VERSION__ conditional "
+                     "-- fog is FragParams' u_ffogv / u_fskyfog on both backends, and a stage that fogs under "
+                     "one compile only draws fog on GL and not under -gpu, or the reverse (#340 P3c)"
+                     % (p.name, ln))
+            elif p.name in FOG_STAGES and (p.name, " ".join(line.split())) not in FOG_STAGE_OK:
+                fail("engine/shaders/%s:%d: a statement inside a VULKAN / GL_SPIRV / __VERSION__ conditional "
+                     "in a fogged program's stage (`%s`) -- it can change the fog one backend draws without "
+                     "naming fog; directives only there (#340 P3c)" % (p.name, ln, " ".join(line.split())[:60]))
+    for fam in FOG_VARYING_FAMILIES:
+        locs = {}
+        for f in fam:
+            src = strip_c_comments((sd / f).read_text(errors="replace")) if (sd / f).is_file() else ""
+            m = re.findall(r"\b(?:VERT_OUT|FRAG_IN)\s*\(\s*(\d+)\s*\)\s*(?:out|in)\s+(?:\w+\s+)?float\s+v_fogdist\s*;", src)
+            locs[f] = m[0] if len(m) == 1 else None
+        if None in locs.values() or len(set(locs.values())) != 1:
+            fail("engine/shaders: v_fogdist must be declared once per stage, at one location, across %s (%s) "
+                 "-- Vulkan links varyings by location, so a mismatch leaves -gpu's fog reading another "
+                 "varying while GL, linking by name, looks right (#340 P3c)"
+                 % (", ".join(fam), ", ".join("%s=%s" % (f, locs[f]) for f in fam)))
+    for f, rx in FOG_BLENDS:
+        if not (sd / f).is_file():
+            fail("engine/shaders/%s: missing -- the #340 P3c fog pin has nothing to read" % f)
+        elif not re.search(rx, strip_c_comments((sd / f).read_text(errors="replace"))):
+            fail("engine/shaders/%s: its fog blend (`%s`) is gone -- tools/sweep-fog-gpu.steps holds "
+                 "this program's fog against GL (#340 P3c)" % (f, re.sub(r"\\[bs]\*?", " ", rx).replace("\\", "").strip()))
+    un = sd / "uniforms.inc"
+    if un.is_file():
+        src = strip_c_comments(un.read_text(errors="replace"))
+        blk = re.search(r"FRAG_UBO\s*\(\s*0\s*\)\s*uniform\s+FragParams\s*\{([^}]*)\}", src)
+        defs = all(re.search(r"#\s*define\s+%s\s+%s\s*$" % (a, re.escape(b)), src, re.M)
+                   for a, b in (("u_fog_color", "u_ffogv.xyz"), ("u_fog_density", "u_ffogv.w"),
+                                ("u_skyfog", "u_fskyfog")))
+        if not blk or not re.search(r"\bvec4\s+u_ffogv\s*;", blk.group(1)) or \
+           not re.search(r"\bvec4\s+u_fskyfog\s*;", blk.group(1)) or not defs:
+            fail("engine/shaders/uniforms.inc: u_ffogv and u_fskyfog must be FragParams members, with "
+                 "u_fog_color / u_fog_density / u_skyfog their #defines -- the block R_FlushUniforms "
+                 "hands SDL_GPU, and the only route fog has to a -gpu draw (#340 P3c)")
+    else:
+        fail("engine/shaders/uniforms.inc: missing -- the #340 P3c fog pin has nothing to read")
+
+    gu = "engine/h2shared/gl_uniforms.c"
+    for name, member in (("R_SetFog", "fog"), ("R_SetSkyFog", "skyfog")):
+        b = body_named(root, gu, name)
+        if b is not None and (BACKEND_C.search(b) or "return" in b or
+                              not re.search(r"\bRU_Set4\s*\(\s*fragparams\.%s\s*," % member, b) or
+                              not re.search(r"\bfrag_dirty\s*=\s*true\s*;", b)):
+            fail("%s: %s must write fragparams.%s and mark FragParams dirty on both backends, with no "
+                 "backend test and no early return (#340 P3c)" % (gu, name, member))
+    b = body_named(root, gu, "RU_FlushToBackend")
+    if b is not None and not re.search(r"\{\s*&\s*frag_dirty\s*,\s*RU_NAME_FRAG\s*\}", b):
+        fail("%s: RU_FlushToBackend's rows must hand FragParams over (`{ &frag_dirty, RU_NAME_FRAG }`) "
+             "-- the fog and sky-fog uniforms under -gpu (#340 P3c)" % gu)
+    if (root / gu).is_file() and not re.search(
+            r"\bRG_UniformBlockRegister\s*\(\s*RU_NAME_FRAG\s*,\s*&\s*fragparams\s*,\s*sizeof\s*\(\s*fragparams\s*\)\s*\)",
+            strip_c_comments((root / gu).read_text(errors="replace"))):
+        fail("%s: FragParams must be registered with the backend whole "
+             "(`RG_UniformBlockRegister (RU_NAME_FRAG, &fragparams, sizeof(fragparams))`) -- unregistered, "
+             "RG_UniformBlockFlushed drops its flushes and -gpu draws with no fog (#340 P3c)" % gu)
+    b = body_named(root, "engine/h2shared/rg_frame.c", "RG_UniformBlockFlushed")
+    if b is not None and not re.search(r"\bmemcpy\s*\(\s*rgb_blocks\s*\[\s*i\s*\]\s*\.\s*flushed\s*,\s*"
+                                       r"rgb_blocks\s*\[\s*i\s*\]\s*\.\s*mirror\s*,\s*"
+                                       r"rgb_blocks\s*\[\s*i\s*\]\s*\.\s*size\s*\)", b):
+        fail("engine/h2shared/rg_frame.c: RG_UniformBlockFlushed must snapshot the whole registered mirror "
+             "(`memcpy (rgb_blocks[i].flushed, rgb_blocks[i].mirror, rgb_blocks[i].size)`) -- a partial copy "
+             "leaves FragParams' fog members stale under -gpu (#340 P3c)")
+    gf = "engine/h2shared/gl_fog.c"
+    if (root / gf).is_file():
+        code = strip_c_comments((root / gf).read_text(errors="replace"))
+        if BACKEND_C.search(code):
+            fail("%s: names the backend -- fog is computed once for both, and P3c's sweep holds -gpu "
+                 "to GL's fog (#340 P3c)" % gf)
+    else:
+        fail("%s: missing -- the #340 P3c fog pin has nothing to read" % gf)
+    # The fog decisions made on the CPU (the skybox's and the two-pass sky's
+    # flat fog passes, r_fastsky's colour, the glows' attenuation, the
+    # additive black) never ask which backend draws them.
+    for p in sorted((root / "engine").rglob("*.c")):
+        if "rust" in p.parts or re.match(r"rg_\w+\.c$", p.name):
+            continue
+        code = strip_c_comments(p.read_text(errors="replace"))
+        spans = pp_backend_spans(code, BACKEND_C)
+        for n, b, e in functions(code):
+            body = code[b:e]
+            if not FOG_C_SYMBOL.search(body):
+                continue
+            ln = code.count("\n", 0, b) + 1
+            if BACKEND_C.search(body):
+                fail("%s:%d: %s touches fog and names the backend (`%s`) -- fog draws the same under -gpu as "
+                     "on GL; a backend decision belongs outside the functions that compute or draw fog "
+                     "(#340 P3c)" % (p.relative_to(root), ln, n, BACKEND_C.search(body).group(0)))
+            elif any(s0 <= b < s1 for s0, s1 in spans):
+                fail("%s:%d: %s touches fog and is compiled under a backend conditional -- fog draws the "
+                     "same under -gpu as on GL (#340 P3c)" % (p.relative_to(root), ln, n))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     ap.add_argument("--root", type=Path, default=ROOT)
@@ -1815,6 +2004,7 @@ def main(argv=None):
     check_storage(root)
     check_translucency(root)
     check_points(root)
+    check_fog(root)
     nfiles = 0
     rg_files = []
     for p in sorted(eng.rglob("*")):
