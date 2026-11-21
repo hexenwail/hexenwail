@@ -530,8 +530,8 @@ jobs:
       # A sampler's texture unit is set through R_ProgramSamplerLoc /
       # R_ProgramSamplerUnit, whose GL arms are the glGetUniformLocation /
       # glUniform1i pair and whose SDL_GPU arms write the unit into the
-      # program's reflected samplers: no other caller but gl_postprocess.c
-      # and gl_ssao.c (P4 / P5), every sampler of every routed program a
+      # program's reflected samplers: no other caller but gl_postprocess.c's
+      # OIT resolve and gl_ssao.c (P6 / P5), every sampler of every routed program a
       # unit from the TMU constants, no two on one unit; and the backend's
       # reflection, unit seam and typed placeholders lifted and run
       # (#340 P2a).

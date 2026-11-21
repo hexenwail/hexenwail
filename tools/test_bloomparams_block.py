@@ -206,6 +206,23 @@ if "9 is its PpParams" not in (ROOT / "engine/h2shared/gl_shader.h").read_text()
 push = re.search(r"static void PP_PushParams \(void\)\s*\{(.*?)\n\}", code, re.S)
 if not push or re.search(r"\bGL_Upload\s*\(|\bGL_BindBufferRange\s*\(", push.group(1)):
     errors.append("PP_PushParams must exist and stay off the GL_Upload ring (ES stub)")
+# #340 P4a-1: under -gpu the blocks are mirrors (tools/test_rg_sources.py
+# pins the SDL_GPU arm); the GL arm after it is the upload it always was.
+if push:
+    gl = re.split(r"#\s*endif", push.group(1))[-1]
+    for want in (r"glBufferSubData_fp\(GL_UNIFORM_BUFFER, 0, sizeof\(pp_vert_mvp\), pp_vert_mvp\)",
+                 r"glBufferSubData_fp\(GL_UNIFORM_BUFFER, 0, sizeof\(pp_params\), &pp_params\)",
+                 r"GL_BindBufferBase\(GL_UNIFORM_BUFFER, PP_VERT_UBO_BINDING, pp_vert_ubo\)",
+                 r"GL_BindBufferBase\(GL_UNIFORM_BUFFER, PP_FRAG_UBO_BINDING, pp_frag_ubo\)"):
+        if not re.search(want, gl):
+            errors.append("PP_PushParams' GL arm (after its #endif) lost `%s`" % want.replace("\\", ""))
+bpush = re.search(r"static void PP_PushBloomParams \([^)]*\)\s*\{(.*?)\n\}", code, re.S)
+if bpush:
+    gate = re.search(r"#ifdef USE_SDL_GPU\s*if \(R_GPU \(\)\)\s*\{[^{}]*\breturn;\s*\}\s*#endif", bpush.group(1))
+    first = re.search(r"\bGL_BindBuffer\(GL_UNIFORM_BUFFER, bloom_ubo\)", bpush.group(1))
+    if not gate or not first or gate.start() > first.start():
+        errors.append("PP_PushBloomParams must return under R_GPU () before touching bloom_ubo, "
+                      "which -gpu does not create until BloomParams is a mirror (P4e)")
 if len(re.findall(r"\bPP_PushParams\s*\(\s*\)\s*;", code)) != 2:
     errors.append("PP_PushParams must run before both pp_program draws (native and final)")
 
