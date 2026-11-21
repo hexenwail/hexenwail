@@ -346,7 +346,8 @@ sleep 60
 console
 sleep 2
 cmd map egypt
-sleep 25
+# 45 s, as tools/sweep-skybox-gpu.steps: egypt's load outran 25 there once
+sleep 45
 console
 sleep 1
 cmd god

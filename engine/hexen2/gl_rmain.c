@@ -6556,11 +6556,24 @@ static void R_Mirror (void)
 	float		d;
 	msurface_t	*s;
 	entity_t	*ent;
+	vec3_t		vieworg, viewangles, origin, forward, right, up;
+	mleaf_t		*viewleaf;
+	cshift_t	contents;
+	float		blend[4];
 
 	if (!mirror)
 		return;
 
 	memcpy (r_base_world_matrix, r_world_matrix, sizeof(r_base_world_matrix));
+	VectorCopy (r_refdef.vieworg, vieworg);
+	VectorCopy (r_refdef.viewangles, viewangles);
+	VectorCopy (r_origin, origin);
+	VectorCopy (vpn, forward);
+	VectorCopy (vright, right);
+	VectorCopy (vup, up);
+	viewleaf = r_viewleaf;
+	contents = cl.cshifts[CSHIFT_CONTENTS];
+	memcpy (blend, v_blend, sizeof(blend));
 
 	d = DotProduct (r_refdef.vieworg, mirror_plane->normal) - mirror_plane->dist;
 	VectorMA (r_refdef.vieworg, -2*d, mirror_plane->normal, r_refdef.vieworg);
@@ -6609,6 +6622,24 @@ static void R_Mirror (void)
 
 	R_DrawTransEntitiesOnList (false);
 
+	/* The view back as it was (#340 P3d).  r_refdef: while the game is
+	 * paused V_RenderView does not recompute it, so the next frame would
+	 * start from the reflection, and every other paused frame showed the
+	 * mirror's view full screen.  What the reflected R_SetupFrame derived
+	 * from it, because readers after this frame's render take them as the
+	 * view's: the listener (host.c S_Update), the motion blur's origin and
+	 * the water warp's leaf (gl_postprocess.c), R_PolyBlend's tint, and
+	 * the next frame's R_MarkLeaves, which re-marks on any leaf change. */
+	VectorCopy (vieworg, r_refdef.vieworg);
+	VectorCopy (viewangles, r_refdef.viewangles);
+	VectorCopy (origin, r_origin);
+	VectorCopy (forward, vpn);
+	VectorCopy (right, vright);
+	VectorCopy (up, vup);
+	r_viewleaf = viewleaf;
+	cl.cshifts[CSHIFT_CONTENTS] = contents;
+	memcpy (v_blend, blend, sizeof(blend));
+
 	if (gl_clipcontrol_able)
 	{
 		gldepthmin = 0.5f;
@@ -6634,10 +6665,20 @@ static void R_Mirror (void)
 
 	GL_LoadMatrixf (r_base_world_matrix);
 
+	/* The mirror's own texture at r_mirroralpha over the reflection, as
+	 * GLQuake's glColor4f did: R_RenderBrushPoly keeps this colour when
+	 * called with override (#340 P3d). */
+	R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	GL_ImmColor4f (1.0f, 1.0f, 1.0f, r_mirroralpha.value);
+	/* ...and its alpha kept to the blend.  Every path that sets the alpha
+	 * override to 1 puts it back to 0 on its way out today (R_DrawAliasModel);
+	 * defensive: it keeps the mirror's alpha should one ever stop. */
+	GL_SetForceOpaqueAlpha (0.0f);
 	s = cl.worldmodel->textures[mirrortexturenum]->texturechain;
 	for ( ; s ; s = s->texturechain)
 		R_RenderBrushPoly (&r_worldentity, s, true);
 	cl.worldmodel->textures[mirrortexturenum]->texturechain = NULL;
+	GL_ImmColor4f (1.0f, 1.0f, 1.0f, 1.0f);
 	R_SetBlend (false);
 }
 
