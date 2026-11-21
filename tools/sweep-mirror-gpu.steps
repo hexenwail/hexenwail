@@ -1,0 +1,206 @@
+# sweep-mirror-gpu.steps -- mirrors through the SDL_GPU backend (-gpu)
+# against GL (#340 P3d), on tools/mk-mirror-testgame.py's game: demo1 with a
+# wall panel (maps/demo1.bsp) and the graveyard's cobbles (maps/demo1f.bsp)
+# renamed to window02_1.  No retail map has a mirror.
+#
+# The mirror (gl_rmain.c R_Mirror, gl_rsurf.c R_MirrorChain) at
+# r_mirroralpha < 1: the view draws into the near half of the depth range
+# (R_Clear), the mirror's surfaces are left off it, the scene is drawn again
+# reflected in the first surface's plane into the far half -- the projection
+# flipped (GL_Scalef (-1, 1, 1) for a wall, (1, -1, 1) for a floor) and so
+# culling GL_BACK -- with the particles, the translucent entities and water,
+# and the mirror's surfaces are blended over it at r_mirroralpha.  At 1 there
+# is no mirror: the texture draws as any other wall.  What -gpu has to get
+# right is the depth range per draw (the viewport's min/max depth), the cull
+# face per pipeline, and the blend; tools/test_rg_sources.py (check_mirror)
+# pins those and holds the mirror path itself free of any backend test.
+#
+# The frames:
+#   01-wall          the panel, 96 units ahead, at r_mirroralpha 0.5: the
+#                    room behind the viewer, the player's own model (R_Mirror
+#                    adds the view entity) and an alias model put behind the
+#                    viewer (testentity), seen through the panel
+#   02-wall-a025     r_mirroralpha 0.25
+#   03-wall-a1       r_mirroralpha 1: no mirror
+#   04-wall-nocull   gl_cull 0 (both faces drawn: the cull flip no longer
+#                    matters, so a missing flip passes here and fails 01)
+#   05-wall-fog      fog B over 01
+#   06-wall-fog-a1   fog B, r_mirroralpha 1
+#   07-wall-parts    testparticles 60, between the viewer and the panel:
+#                    drawn in the view and again in the reflection
+#   10-floor         the graveyard's cobbles at 0.5, from the statue: the
+#                    tombstones, the tree and the sky in the floor
+#   11-floor-a1      r_mirroralpha 1
+#   12-floor-nocull  gl_cull 0
+#
+# Run the SAME binary both ways, with identical settings, three times each,
+# on a basedir made by tools/mk-mirror-testgame.py:
+#
+#   ./tools/mk-mirror-testgame.py $B          # $B holds data1 (see its header)
+#   A="-fsaa 0 +gamma 1 -game mirror +map demo1"
+#   STEPS=tools/sweep-mirror-gpu.steps ENGINE=$E ./tools/headless-drive.sh script /tmp/m-gl  $B $A
+#   VK_ICD_FILENAMES=<lvp_icd json> STEPS=tools/sweep-mirror-gpu.steps ENGINE=$E \
+#       ./tools/headless-drive.sh script /tmp/m-gpu $B -gpu +gpu_allow_software 1 $A
+#   ./tools/mirror-diff.sh /tmp/m-gl /tmp/m-gpu
+#
+# Between REPORT-WALL-BEGIN / -END and REPORT-FLOOR-BEGIN / -END in
+# /tmp/m-gpu/qconsole.log gpu_unrouted counts 0 calls -- it is reset ahead of
+# each section's first shot, so the count covers every state shot -- and with the Vulkan
+# validation layers on (+gpu_debug 1) the -gpu run logs no "Validation
+# Error".
+#
+# SETTINGS.  tools/sweep-fog-gpu.steps' list, on BOTH sides, with fog off
+# but for 05 and 06 (fog B, "fog 0.15 0.6 0.3 0.1": thin enough that the
+# reflection, ~200 units of path away, still shows) and entities on.  The
+# game is paused for every shot, and R_Mirror puts r_refdef back after the
+# reflection: while paused V_RenderView does not recompute it, and before
+# P3d every other paused frame was the reflection full screen.
+#
+# THE THRESHOLDS.  tools/mirror-diff.sh holds the checks; these are the
+# numbers its defaults were set from, measured 2026-11-21 on the P3d binary,
+# 800x600, llvmpipe GL against lavapipe -gpu (Mesa 26.2), three runs a side,
+# PSNR in dB with the HUD and the reflected candle flames masked:
+#
+#   check (gate)                GL vs -gpu    GL vs GL      -gpu vs -gpu
+#   whole frame, wall (42)      53.8 - 65.9   53.8 - 61.5   53.9 - 63.5
+#     03 / 06, no mirror        81.8 - 82.2   identical     identical
+#   whole frame, floor (42)     46.0 - 50.0   46.1 - 49.7   47.4 - 48.4
+#   mirror adds, wall (50)      54.6 - 65.8   54.7 - 62.2   54.7 - 63.9
+#   mirror adds, floor (50)     63.7          identical     identical
+#   gl_cull 0 adds (50)         63.1 - inf    71.3 - inf    63.7 - inf
+#   particles add (50)          67.9 - 70.7   76.1 - 83.0   74.7 - 90.2
+#   mirror present (2000 px)    109,429 - 232,774 changed, both sides
+#
+# What differs run to run outside the masks is the player's own model in the
+# reflection, on GL as well as -gpu.  A Tesla P4 -gpu run against the same
+# llvmpipe GL frames: whole frame 45.8 - 56.7, mirror adds 53.1 - 57.5,
+# gl_cull 0 86.5 - 86.9, particles 59.0; every check passes.
+#
+# Broken builds (one run each, against the honest GL and -gpu run 1), each
+# failing:
+#
+#   -gpu reflected view keeps culling GL_FRONT   whole 26.9 - 37.1, mirror
+#                                                adds 30.2 - 36.5, gl_cull 0
+#                                                adds 32.2 - 35.8
+#   -gpu viewport depth range 0..1 every draw    whole 30.8 - 34.3, mirror
+#                                                adds 33.3 - 36.8
+#   -gpu mirror's surfaces not drawn             whole 27.1 - 35.2, mirror
+#                                                adds 25.8 - 34.0
+#   -gpu reflected scene not drawn               whole 20.8 - 32.6, mirror
+#                                                adds 21.5 - 27.3
+#   -gpu mirror's surfaces at alpha 1            whole 25.7 - 31.4, mirror
+#                                                adds 24.5 - 30.2, present
+#                                                on -gpu 0 - 6 px
+#   -gpu r_refdef left reflected (pre-P3d)       every frame 17.9 - 21.7,
+#                                                present on -gpu 0 px
+#   -gpu empty upload tail not re-derived        02 41.6, mirror adds
+#        (pre-P3d: the player skin lost)         44.0 - 47.5 -- the
+#                                                narrowest margin
+#   GL   compute cull left on (pre-P3d)          10 31.4, mirror adds 10
+#                                                30.3, gl_cull 0 adds 35.3
+
+sleep 20
+cmd god
+cmd notarget
+cmd noclip
+cmd viewsize 120
+cmd crosshair 0
+cmd showpause 0
+cmd r_skyspeed_back 0
+cmd r_skyspeed_front 0
+cmd r_skybox_speed 0
+cmd r_flatlightstyles 1
+cmd r_dynamic 0
+cmd r_gpulightstyles 0
+cmd r_ssao 0
+cmd r_bloom 0
+cmd r_dlight_occlusion 0
+cmd r_alias_gpu 0
+cmd r_particles 0
+cmd gl_texture_anisotropy 1
+cmd r_oit 0
+cmd r_waterwarp 0
+cmd r_softparticles 0
+cmd r_softemu 0
+cmd r_scale 1
+cmd gl_waterwarp_speed 0
+cmd r_caustics 0
+cmd gl_glows 0
+cmd gl_missile_glows 0
+cmd gl_other_glows 0
+cmd r_drawviewmodel 0
+cmd r_drawentities 1
+cmd r_drawparticles 0
+cmd gl_particles 1
+cmd r_wateralpha 0.33
+cmd r_lavaalpha 0
+cmd r_water_pixel_warp 0
+cmd r_skyalpha 1
+cmd r_fastsky 0
+cmd r_skyfog 0
+cmd r_skyfog 0.5
+cmd fog 0
+cmd gl_cull 1
+cmd r_mirroralpha 0.5
+sleep 2
+
+# --- demo1: the wall panel (rtex013, x = -216, facing -x) ---
+cmd testentity models/tombstn1.mdl -560 -2200 184 0 0 0
+cmd setpos -312 -2128 284 0 0 0
+sleep 2
+cmd gpu_unrouted reset
+cmd pause
+shot 01-wall
+cmd r_mirroralpha 0.25
+shot 02-wall-a025
+cmd r_mirroralpha 1
+shot 03-wall-a1
+cmd r_mirroralpha 0.5
+cmd gl_cull 0
+shot 04-wall-nocull
+cmd gl_cull 1
+cmd fog 0.15 0.6 0.3 0.1
+shot 05-wall-fog
+cmd r_mirroralpha 1
+shot 06-wall-fog-a1
+cmd r_mirroralpha 0.5
+cmd fog 0
+cmd testparticles 60
+cmd r_drawparticles 1
+shot 07-wall-parts
+cmd r_drawparticles 0
+cmd pause
+sleep 2
+cmd echo REPORT-WALL-BEGIN
+cmd gpu_unrouted
+cmd renderer_status
+cmd echo REPORT-WALL-END
+sleep 1
+
+# --- demo1f: the graveyard's cobbles (rtex429, z = 0) ---
+cmd map demo1f
+sleep 20
+console
+sleep 1
+cmd god
+cmd notarget
+cmd noclip
+cmd fog 0
+cmd setpos -860 -1990 30 10 40 0
+sleep 2
+cmd gpu_unrouted reset
+cmd pause
+shot 10-floor
+cmd r_mirroralpha 1
+shot 11-floor-a1
+cmd r_mirroralpha 0.5
+cmd gl_cull 0
+shot 12-floor-nocull
+cmd gl_cull 1
+cmd pause
+sleep 2
+cmd echo REPORT-FLOOR-BEGIN
+cmd gpu_unrouted
+cmd renderer_status
+cmd echo REPORT-FLOOR-END
+sleep 1

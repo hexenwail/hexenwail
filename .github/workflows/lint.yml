@@ -520,6 +520,13 @@ jobs:
       - name: SDL_GPU backend stays in the desktop GL client
         run: python3 tools/test_rg_sources.py
 
+      # tools/sweep-mirror-gpu.steps' test game: the miptex rename and each
+      # refusal (two planes, a brush entity, a map that already has a
+      # mirror ...) on a synthetic BSP, so the sweep's map cannot quietly
+      # become one whose mirror is wrong (#340 P3d).
+      - name: Mirror test game generator refuses a bad mirror
+        run: python3 tools/mk-mirror-testgame.py --self-test
+
       # A sampler's texture unit is set through R_ProgramSamplerLoc /
       # R_ProgramSamplerUnit, whose GL arms are the glGetUniformLocation /
       # glUniform1i pair and whose SDL_GPU arms write the unit into the

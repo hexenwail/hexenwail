@@ -1161,7 +1161,11 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 		}
 	}
 
-	GL_ImmColor4f(intensity, intensity, intensity, alpha_val);
+	/* override: the caller has set the colour.  R_Mirror alone, whose
+	 * r_mirroralpha this would otherwise replace with the world's opaque 1,
+	 * hiding the reflection under the mirror's own texture (#340 P3d). */
+	if (!override)
+		GL_ImmColor4f(intensity, intensity, intensity, alpha_val);
 
 	if (fa->flags & SURF_DRAWSKY)
 	{	// warp texture, no lightmaps
@@ -3870,10 +3874,17 @@ void R_DrawWorld (void)
 	 * DRAWTILED/DRAWBLACK/FENCE/UNDERWATER and anything absent from a BSP
 	 * marksurf list — and falls through to the per-surface path that binds
 	 * per-page lightmaps and wants exactly the page-local UVs it has.
-	 * uhexen2-qt7s. */
+	 * uhexen2-qt7s.
+	 *
+	 * Off for every frame of a map with a mirror while mirrors are on, in
+	 * view or not: the compute filter knows nothing of the mirror's texture,
+	 * so it drew the mirror opaque in the view, over the reflection, and into
+	 * the reflected view as well.  The chain pass leaves it to R_MirrorChain.
+	 * No retail map has a mirror (#340 P3d). */
 	gpu_cull_active = R_WorldCullAvailable() && r_gpucull.integer &&
 			  lm_atlas_enabled && lm_atlas_texture &&
-			  r_drawworld.integer;
+			  r_drawworld.integer &&
+			  !(mirrortexturenum >= 0 && r_mirroralpha.value != 1.0);
 	if (gpu_cull_active)
 	{
 		/* GPU compute culling draws solid world surfaces.

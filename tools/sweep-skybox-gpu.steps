@@ -44,8 +44,13 @@
 # Vulkan against the same llvmpipe GL frames) passes too, but its runs log
 # 10 vkCmdCopyImage validation errors on a 32x32x32 3D texture's mips, the
 # same 10 with the P2b binary: a resource bug that predates the stencil.
+#
+# The first wait is 45 s, not the 25 it was: egypt is a big map, and with
+# other engines running beside it the load outran 25 s once (#340 P3c), the
+# keys went to a half-loaded client and the run shot 4 black frames.  The
+# harness has no wait-for-the-log verb, so the margin is the guard.
 
-sleep 25
+sleep 45
 cmd god
 cmd notarget
 cmd viewsize 120

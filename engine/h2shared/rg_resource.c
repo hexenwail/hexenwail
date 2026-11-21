@@ -481,6 +481,13 @@ static void RGT_QueueUpload (rgtex_t *t, int level, int layer, int x, int y, int
 	u->w = w; u->h = h; u->d = d;
 	u->size = size;
 	u->staged = 0;
+	/* An empty list's tail points into rgt[], which RG_GenTextures may have
+	 * moved since, as rg_buffer.c's RGB_Queue says: re-derive it.  The old
+	 * pointer wrote the upload into the freed array and lost it -- the
+	 * player skins (made at init, filled after a map's textures grew the
+	 * table) drew whatever the new texture's memory held (#340 P3d). */
+	if (!t->uploads)
+		t->uploads_tail = &t->uploads;
 	*t->uploads_tail = u;
 	t->uploads_tail = &u->next;
 	rgt_pending_bytes += size;

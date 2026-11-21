@@ -1985,6 +1985,234 @@ def check_fog(root):
                      "same under -gpu as on GL (#340 P3c)" % (p.relative_to(root), ln, n))
 
 
+def and_terms(expr):
+    """The top-level && operands of a C expression, outer parentheses
+    peeled, each with its whitespace collapsed."""
+    expr = expr.strip()
+    while expr.startswith("(") and expr.endswith(")"):
+        depth = 0
+        for i, c in enumerate(expr):
+            depth += {"(": 1, ")": -1}.get(c, 0)
+            if depth == 0 and i < len(expr) - 1:
+                break
+        else:
+            expr = expr[1:-1].strip()
+            continue
+        break
+    out, depth, cur, i = [], 0, "", 0
+    while i < len(expr):
+        c = expr[i]
+        depth += {"(": 1, ")": -1}.get(c, 0)
+        if depth == 0 and expr.startswith("&&", i):
+            out.append(" ".join(cur.split()))
+            cur, i = "", i + 2
+            continue
+        cur += c
+        i += 1
+    out.append(" ".join(cur.split()))
+    return out
+
+
+def mirror_cull_term(t):
+    """`!(mirrortexturenum >= 0 && r_mirroralpha.value != 1.0)`, its two
+    terms in either order, either side of each comparison."""
+    m = re.fullmatch(r"!\s*(\(.*\))", t)
+    if not m:
+        return False
+    inner = and_terms(m.group(1))
+    if len(inner) != 2:
+        return False
+    one = r"1(?:\.0*)?f?"
+    pats = (r"mirrortexturenum\s*>=\s*0|0\s*<=\s*mirrortexturenum",
+            r"r_mirroralpha\s*\.\s*value\s*!=\s*%s|%s\s*!=\s*r_mirroralpha\s*\.\s*value" % (one, one))
+    return sorted(i for t2 in inner for i, rx in enumerate(pats) if re.fullmatch(rx, t2)) == [0, 1]
+
+
+MIRROR_VIEW = (("r_refdef.vieworg", r"r_refdef\s*\.\s*vieworg"), ("r_refdef.viewangles", r"r_refdef\s*\.\s*viewangles"),
+               ("r_origin", r"r_origin"), ("vpn", r"vpn"), ("vright", r"vright"), ("vup", r"vup"))
+
+
+def check_mirror_body(rm, b):
+    """R_Mirror's order: the view saved, reflected, drawn, put back after the
+    last reflected draw, then the mirror's own surfaces at r_mirroralpha."""
+    reflect = re.search(r"\bVectorMA\s*\(\s*r_refdef\s*\.\s*vieworg\s*,", b)
+    scene = [m.end() for m in re.finditer(r"\bR_RenderScene\s*\(\s*\)\s*;", b)]
+    loops = list(re.finditer(r"\bR_RenderBrushPoly\s*\(\s*&\s*r_worldentity\s*,\s*s\s*,\s*true\s*\)\s*;", b))
+    loop = loops[0] if len(loops) == 1 else None
+    # The reflected particles, translucent entities and water: the view must
+    # stay reflected until the last of them.
+    refl = [m.end() for m in re.finditer(r"\b(?:R_DrawParticles|R_DrawTransEntitiesOnList|R_DrawWaterSurfaces)"
+                                         r"\s*\([^;]*\)\s*;", b)]
+    ok = reflect is not None and len(scene) == 1 and loop is not None and bool(refl) and \
+        all(scene[0] <= e <= loop.start() for e in refl)
+    last = max(refl) if refl else 0
+    missing = []
+    if ok:
+        pairs = [(n, r"\bVectorCopy\s*\(\s*%s\s*,\s*(\w+)\s*\)\s*;" % rx,
+                  r"\bVectorCopy\s*\(\s*{0}\s*,\s*%s\s*\)\s*;" % rx) for n, rx in MIRROR_VIEW]
+        pairs += [("r_viewleaf", r"\b(\w+)\s*=\s*r_viewleaf\s*;", r"\br_viewleaf\s*=\s*{0}\s*;"),
+                  ("cl.cshifts[CSHIFT_CONTENTS]", r"\b(\w+)\s*=\s*cl\s*\.\s*cshifts\s*\[\s*CSHIFT_CONTENTS\s*\]\s*;",
+                   r"\bcl\s*\.\s*cshifts\s*\[\s*CSHIFT_CONTENTS\s*\]\s*=\s*{0}\s*;"),
+                  ("v_blend", r"\b(?:memcpy\s*\(\s*(\w+)\s*,\s*v_blend\s*,[^;]*|Vector4Copy\s*\(\s*v_blend\s*,\s*(\w+)\s*)\)\s*;",
+                   r"\b(?:memcpy\s*\(\s*v_blend\s*,\s*{0}\s*,[^;]*|Vector4Copy\s*\(\s*{0}\s*,\s*v_blend\s*)\)\s*;")]
+        for n, save_rx, back_rx in pairs:
+            sv = re.search(save_rx, b)
+            name = sv and next(g for g in sv.groups() if g)
+            back = re.search(back_rx.replace("{0}", re.escape(name)), b) if sv else None
+            if not (sv and back and sv.end() <= reflect.start() and last <= back.start()
+                    and back.end() <= loop.start()):
+                missing.append(n)
+    if not ok or missing:
+        fail("%s: R_Mirror must copy the view aside before reflecting it -- r_refdef.vieworg and .viewangles, and "
+             "what R_SetupFrame derives from them: r_origin, vpn, vright, vup, r_viewleaf, the contents colour "
+             "shift and v_blend -- and copy each back after the last reflected draw (particles, translucent "
+             "entities, water), ahead of the mirror's own surfaces%s.  While paused V_RenderView does not "
+             "recompute r_refdef, and every other frame rendered the reflection full screen; the rest feed the "
+             "listener, the motion blur, the water warp, R_PolyBlend and the next R_MarkLeaves (#340 P3d)"
+             % (rm, " (wrong: %s)" % ", ".join(missing) if missing else ""))
+    blend = [m.end() for m in re.finditer(r"\bR_SetBlend\s*\(\s*true\s*\)\s*;", b)]
+    good = loop is not None and bool(blend) and blend[-1] <= loop.start()
+    if good:
+        # Between turning blending on and the loop, exactly these, once each,
+        # and nothing else that sets blend, colour or the alpha override.
+        seg = b[blend[-1]:loop.start()]
+        want = (r"\bR_SetBlendFunc\s*\(\s*GL_SRC_ALPHA\s*,\s*GL_ONE_MINUS_SRC_ALPHA\s*\)\s*;",
+                r"\bGL_ImmColor4f\s*\(\s*1(?:\.0*)?f?\s*,\s*1(?:\.0*)?f?\s*,\s*1(?:\.0*)?f?\s*,\s*"
+                r"r_mirroralpha\s*\.\s*value\s*\)\s*;",
+                r"\bGL_SetForceOpaqueAlpha\s*\(\s*0(?:\.0*)?f?\s*\)\s*;")
+        good = all(len(re.findall(rx, seg)) == 1 for rx in want) and \
+            len(re.findall(r"\b(?:R_SetBlend|R_SetBlendFunc|GL_ImmColor4f|GL_SetForceOpaqueAlpha)\s*\(", seg)) == 3
+        # The colour put back after the loop, the next colour set.
+        tail = b[loop.end():]
+        reset = re.search(r"\bGL_ImmColor4f\s*\(\s*1(?:\.0*)?f?\s*,\s*1(?:\.0*)?f?\s*,\s*1(?:\.0*)?f?\s*,\s*"
+                          r"1(?:\.0*)?f?\s*\)\s*;", tail)
+        good = good and reset is not None and not re.search(r"\bGL_ImmColor4f\s*\(", tail[:reset.start()])
+    if not good:
+        fail("%s: R_Mirror must turn blending on and then set, once each and nothing else between them and "
+             "the loop, R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA), GL_ImmColor4f (1, 1, 1, "
+             "r_mirroralpha.value) and GL_SetForceOpaqueAlpha (0.0f), draw the mirror's surfaces with "
+             "R_RenderBrushPoly (&r_worldentity, s, true), and put the colour back to (1, 1, 1, 1) after -- the "
+             "alpha the modernization dropped, without which the mirror's texture covers the reflection whole; "
+             "the override reset holds it there whatever the reflection drew last (#340 P3d)" % rm)
+
+
+MIRROR_FUNCS = (("engine/hexen2/gl_rmain.c", "R_Mirror"), ("engine/hexen2/gl_rmain.c", "R_Clear"),
+                ("engine/hexen2/gl_rmain.c", "R_SetupGL"), ("engine/hexen2/gl_rsurf.c", "R_MirrorChain"),
+                ("engine/hexen2/gl_rsurf.c", "R_RenderBrushPoly"))
+
+
+def check_mirror(root):
+    """#340 P3d: the mirror draws the same on both backends -- the path
+    names no backend, the depth range and cull face it switches reach
+    SDL_GPU, and the GL fixes the sweep needed stay in."""
+    for rel, name in MIRROR_FUNCS:
+        if not (root / rel).is_file():
+            fail("%s: missing -- the #340 P3d mirror pin has nothing to read" % rel)
+            continue
+        code = strip_c_comments((root / rel).read_text(errors="replace"))
+        spans = pp_backend_spans(code, BACKEND_C)
+        found = [(b, e) for n, b, e in functions(code) if n == name]
+        if len(found) != 1:
+            fail("%s: %d definitions of %s, the #340 P3d mirror pin reads exactly one" % (rel, len(found), name))
+            continue
+        b, e = found[0]
+        if BACKEND_C.search(code[b:e]) or any(s0 <= b < s1 for s0, s1 in spans):
+            fail("%s: %s names the backend or is compiled under a backend conditional -- the mirror "
+                 "(the reflected view, the depth-range split, the cull flip, the blend over it) draws the "
+                 "same under -gpu as on GL, and tools/sweep-mirror-gpu.steps holds it there (#340 P3d)"
+                 % (rel, name))
+
+    rm = "engine/hexen2/gl_rmain.c"
+    b = body_named(root, rm, "R_Mirror")
+    if b is not None:
+        check_mirror_body(rm, b)
+    rs = "engine/hexen2/gl_rsurf.c"
+    b = body_named(root, rs, "R_RenderBrushPoly")
+    if b is not None:
+        # The colour, under `if (!override)`, bare or braced.
+        col = r"GL_ImmColor4f\s*\(\s*intensity\s*,\s*intensity\s*,\s*intensity\s*,\s*alpha_val\s*\)\s*;"
+        guarded = list(re.finditer(r"\bif\s*\(\s*!\s*override\s*\)\s*(?:\{\s*%s\s*\}|%s)" % (col, col), b))
+        # After the guard, a mirror surface (a plain wall: not sky, not turb)
+        # must meet no other colour; the turb branch, which sets its own, is
+        # the one block a mirror never enters.
+        rest = b[guarded[0].end():] if len(guarded) == 1 else ""
+        for m in list(re.finditer(r"\bif\s*\(\s*fa->flags\s*&\s*SURF_DRAWTURB\s*\)\s*\{", rest))[::-1]:
+            depth, i = 0, m.end() - 1
+            while i < len(rest):
+                depth += {"{": 1, "}": -1}.get(rest[i], 0)
+                if depth == 0:
+                    break
+                i += 1
+            rest = rest[:m.start()] + rest[i + 1:]
+        if len(guarded) != 1 or "EmitBothSkyLayers" not in rest or re.search(r"\bGL_ImmColor4f\s*\(", rest):
+            fail("%s: R_RenderBrushPoly's colour (`GL_ImmColor4f (intensity, intensity, intensity, "
+                 "alpha_val)`) must be set under `if (!override)` once, ahead of the sky, with no other colour "
+                 "after it outside the turb branch -- override is R_Mirror keeping r_mirroralpha (#340 P3d)" % rs)
+    b = body_named(root, rs, "R_DrawWorld")
+    if b is not None:
+        m = re.search(r"\bgpu_cull_active\s*=\s*([^;]*);", b)
+        if not m or not any(mirror_cull_term(t) for t in and_terms(m.group(1))):
+            fail("%s: R_DrawWorld's GL compute cull must be off on a map with a mirror while mirrors are on "
+                 "(`&& !(mirrortexturenum >= 0 && r_mirroralpha.value != 1.0)`) -- its filter draws the "
+                 "mirror's texture opaque over the reflection, which -gpu (no compute) never does, so GL "
+                 "and -gpu part on every mirror frame (#340 P3d)" % rs)
+    # override = true is R_Mirror's alone: any other caller would draw with
+    # whatever colour was left over.
+    for p in sorted((root / "engine").rglob("*.c")):
+        if "rust" in p.parts:
+            continue
+        code = strip_c_comments(p.read_text(errors="replace"))
+        for m in re.finditer(r"\bR_RenderBrushPoly\s*\(([^;]*)\)\s*;", code):
+            last = m.group(1).rsplit(",", 1)[-1].strip()
+            # A prototype names the parameter; false, FALSE and 0 all leave the colour to it.
+            if last not in ("false", "FALSE", "0") and not re.search(r"\bqboolean\b", m.group(1)) and \
+               not (p.name == "gl_rmain.c" and any(n == "R_Mirror" and b0 <= m.start() < e0
+                                                    for n, b0, e0 in functions(code))):
+                fail("%s:%d: R_RenderBrushPoly (%s) passes override outside R_Mirror -- override keeps the "
+                     "caller's colour, which only R_Mirror sets (#340 P3d)"
+                     % (p.relative_to(root), code.count("\n", 0, m.start()) + 1, m.group(1).strip()))
+
+    # The mirror is where the player's own model is first seen: its skin is a
+    # texture made at init and filled after a map has grown the name table.
+    for rel, fn, var, tail in (("engine/h2shared/rg_resource.c", "RGT_QueueUpload", "t", "uploads"),
+                               ("engine/h2shared/rg_buffer.c", "RGB_Queue", "b", "uploads")):
+        b = body_named(root, rel, fn)
+        if b is None:
+            continue
+        rederive = re.search(r"\bif\s*\(\s*!\s*%s->%s\s*\)\s*%s->%s_tail\s*=\s*&\s*%s->%s\s*;"
+                             % (var, tail, var, tail, var, tail), b)
+        append = re.search(r"\*\s*%s->%s_tail\s*=\s*u\s*;" % (var, tail), b)
+        if not rederive or not append or rederive.end() > append.start():
+            fail("%s: %s must re-derive an empty list's tail (`if (!%s->%s) %s->%s_tail = &%s->%s;`) before "
+                 "appending -- the tail of an empty list points into the name table, which growing it "
+                 "moves, and the upload was written into the freed array and lost (#340 P3d)"
+                 % (rel, fn, var, tail, var, tail, var, tail))
+
+    # What the mirror switches mid-frame, and how it reaches SDL_GPU.
+    rf = "engine/h2shared/rg_frame.c"
+    b = body_named(root, rf, "RGF_CommitDraw")
+    if b is not None and not (re.search(r"\bd->vp\.min_depth\s*=\s*\(float\)\s*ps->depth_near\s*;", b) and
+                              re.search(r"\bd->vp\.max_depth\s*=\s*\(float\)\s*ps->depth_far\s*;", b)):
+        fail("%s: RGF_CommitDraw must give each draw's viewport the shadow's depth range, "
+             "`d->vp.min_depth = (float) ps->depth_near;` and `d->vp.max_depth = (float) ps->depth_far;` -- "
+             "the mirror draws the reflection into one half of it and the view into the other (#340 P3d)" % rf)
+    rp = "engine/h2shared/rg_pipeline.c"
+    if (root / rp).is_file():
+        pipe = strip_c_comments((root / rp).read_text(errors="replace"))
+        if not re.search(r"\bif\s*\(\s*s->cull\s*\)\s*\{\s*if\s*\(\s*s->cull_face\s*==\s*GL_FRONT_AND_BACK\s*\)\s*"
+                         r"return\s+false\s*;\s*k->cull_face\s*=\s*\(\s*s->cull_face\s*==\s*GL_FRONT\s*\)\s*\?\s*"
+                         r"GL_FRONT\s*:\s*GL_BACK\s*;\s*\}", pipe) or \
+           not re.search(r"\bcull_mode\s*=\s*\(\s*k->cull_face\s*==\s*GL_FRONT\s*\)\s*\?\s*SDL_GPU_CULLMODE_FRONT\s*:"
+                         r"\s*\(\s*k->cull_face\s*==\s*GL_BACK\s*\)\s*\?\s*SDL_GPU_CULLMODE_BACK\s*:\s*"
+                         r"SDL_GPU_CULLMODE_NONE\s*;", pipe):
+            fail("%s: the pipeline key must take the shadow's cull face only while culling is on (GL_FRONT "
+                 "or GL_BACK, GL_FRONT_AND_BACK refused) and map GL_FRONT / GL_BACK / none to "
+                 "SDL_GPU_CULLMODE_FRONT / BACK / NONE -- the mirror's reflected view culls GL_BACK, its "
+                 "projection flipped (#340 P3d)" % rp)
+    else:
+        fail("%s: missing -- the #340 P3d mirror pin has nothing to read" % rp)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     ap.add_argument("--root", type=Path, default=ROOT)
@@ -2005,6 +2233,7 @@ def main(argv=None):
     check_translucency(root)
     check_points(root)
     check_fog(root)
+    check_mirror(root)
     nfiles = 0
     rg_files = []
     for p in sorted(eng.rglob("*")):
