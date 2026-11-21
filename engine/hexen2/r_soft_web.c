@@ -176,6 +176,12 @@ pimp_override_t *R_GetPimpOverride (int entnum)
 	return &pimp_overrides[entnum];
 }
 
+/* The software renderer draws no glow orbs, so it keeps no list of them. */
+void R_AddPimpSelfOrb (int entnum)
+{
+	(void) entnum;
+}
+
 int R_GetEntityModelFlags (entity_t *e)
 {
 	int entnum = (int)(e - cl_entities);

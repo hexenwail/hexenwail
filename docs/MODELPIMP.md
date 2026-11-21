@@ -13,7 +13,12 @@ from the spawnflag names and has already been field-reported twice as a bug —
 see [Reach](#reach-who-else-is-affected).
 
 Engine side lives in `PF_pimpmodel` (`engine/h2shared/pr_cmds.c`) and
-`R_GetPimpFlags` (`engine/hexen2/gl_rmain.c`).
+`R_GetPimpFlags` / `R_DrawAllGlows` (`engine/hexen2/gl_rmain.c`).
+
+All of it is local to one process: `PF_pimpmodel` runs in server QC and writes
+straight into the client renderer's tables, so only a client in the same
+process as the server sees any pimp effect, this orb included. A remote client
+of a listen server, and every client of `h2ded`, sees none.
 
 ## The call
 
@@ -70,7 +75,7 @@ left to the light.
 | 2 | Float | `EF_FLOAT` — bob without rotating |
 | 4 | Glow orb | `EF_GLOW` — additive sprite at the entity, coloured by `glow_color` |
 | 8 | Cast light | `EF_ILLUMINATE` — allocate a dynamic light at the entity |
-| 16 | Self only | keep glow and cast light on this entity instead of sharing |
+| 16 | Self only | keep glow and cast light on this entity instead of sharing; with 4, **one orb, here**: at the controller's origin (see [below](#the-controller-is-never-drawn)) |
 | 32 | Share motion | give siblings the spin and float as well |
 | 64 | No dynamic light | grant `XF_NO_DLIGHT`; cast no dlight at all |
 
@@ -117,6 +122,46 @@ Two consequences worth knowing:
   intent of the flag, but it is also how a map runs out of dynamic lights.
   Spawnflag 64 is the lever for taking a specific model back out of the set.
 
+### The controller is never drawn
+
+Inky's `misc_modelpimp` sets `EF_NODRAW` on itself, and an edict whose
+`effects` is exactly `EF_NODRAW` is never sent to the client
+(`SV_WriteEntitiesToClient`: "don't send if flagged for NODRAW and there are no
+lighting effects"). The controller has no client entity at all, so anything
+that lives only on the controller is drawn from nowhere.
+
+That is why, until #518, spawnflags 20 (4 + 16) drew **no
+orb anywhere**: 16 kept the orb on the controller, and nothing drew the
+controller. Now:
+
+| Spawnflags | Orb |
+|---|---|
+| 4 | on every entity sharing the model, as before; **none** at the controller |
+| 4 + 16 | **exactly one**, at the controller's origin, with its `glow_color` and `health` (radius) |
+| neither 4 nor 8, a colour, no reach flag | inferred orb, shared, as before (#277) |
+
+`PF_pimpmodel` records the controller's origin and model in its override and
+registers it; `R_DrawAllGlows` draws every registered self-only orb after the
+visible entities' orbs, skipping one whose entity the client already drew (a
+visible prop pimped 4 + 16 keeps its single orb). So the way to put an orb on
+one prop out of several that share a model is a 4 + 16 controller placed where
+the orb should be. Spawnflag 4 alone adds nothing at the controller, because
+its siblings draw the orb and an extra one would change every shipped SoT map.
+
+The orb is drawn at the origin recorded by the last `pimpmodel` call; Inky's
+controllers re-pimp every `wait`, and they do not move. It belongs to the
+controller, not to the prop it sits on: remove the prop and the orb stays. It
+is not PVS-culled, but it is depth-tested, so walls still hide it.
+
+**Known gap:** a self-only cast light (spawnflags 24, 8 + 16) has the same
+cause and is still dark: the dlight is allocated in `CL_RelinkEntities`, which
+never sees the controller. Spawnflag 8 alone works, because each sibling casts
+its own.
+
+`r_glowinfo` lists the orbs the last frame drew (entity number, effects, radius,
+colour, origin, model); `tools/pimp-orb-check.sh` uses it to check all of the
+above live on a SoT map.
+
 ## What resets, and when
 
 Shared writes mutate a model that outlives the map, so they are snapshotted and
@@ -126,7 +171,9 @@ rolled back:
   when the model loads.
 - `R_NewMap` calls `Mod_RestoreAliasModelDefaults` and then
   `R_ClearPimpOverrides`, in that order, so the next map's controllers re-pimp
-  from clean MDL state.
+  from clean MDL state. `R_ClearPimpOverrides` also empties the list of
+  self-only orbs, so a loaded savegame starts with none until its controllers
+  next think.
 
 A model pimped on map A therefore cannot leak onto map B. Per-entity overrides
 are also cleared when the edict is freed (`ED_Free`).

@@ -264,6 +264,7 @@ void R_Init (void)
 	Cmd_AddCommand ("timerefresh", R_TimeRefresh_f);
 	Cmd_AddCommand ("pointfile", R_ReadPointFile_f);
 	Cmd_AddCommand ("r_aliasinfo", R_AliasInfo_f);	/* uhexen2-khsa diagnostic */
+	Cmd_AddCommand ("r_glowinfo", R_GlowInfo_f);	/* #518 */
 	R_DlightVis_Init ();	/* GitHub #97 */
 
 	Cvar_RegisterVariable (&r_norefresh);

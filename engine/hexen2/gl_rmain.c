@@ -5617,9 +5617,39 @@ static void R_DrawTransEntitiesOnList (qboolean inwater)
 // Per-entity PimpModel overrides, keyed by entity number
 static pimp_override_t	pimp_overrides[MAX_EDICTS];
 
+/* The entity numbers whose override carries a self-only orb, so the glow pass
+ * need not walk all MAX_EDICTS overrides every frame.  An entry outlives its
+ * override (ED_Free only clears .active); R_DrawAllGlows drops it then.  #518 */
+#define	MAX_PIMP_SELF_ORBS	1024
+static int	pimp_self_orbs[MAX_PIMP_SELF_ORBS];
+static int	num_pimp_self_orbs;
+
 void R_ClearPimpOverrides (void)
 {
 	memset(pimp_overrides, 0, sizeof(pimp_overrides));
+	num_pimp_self_orbs = 0;
+}
+
+void R_AddPimpSelfOrb (int entnum)
+{
+	static qboolean	warned;
+	int	i;
+
+	if (entnum < 0 || entnum >= MAX_EDICTS)
+		return;
+	for (i = 0; i < num_pimp_self_orbs; i++)
+	{
+		if (pimp_self_orbs[i] == entnum)
+			return;	/* re-pimped every wait */
+	}
+	if (num_pimp_self_orbs < MAX_PIMP_SELF_ORBS)
+		pimp_self_orbs[num_pimp_self_orbs++] = entnum;
+	else if (!warned)
+	{
+		warned = true;
+		Con_DPrintf ("R_AddPimpSelfOrb: more than %d self-only orbs, the rest are not drawn\n",
+			     MAX_PIMP_SELF_ORBS);
+	}
 }
 
 pimp_override_t *R_GetPimpOverride (int entnum)
@@ -5658,14 +5688,66 @@ int R_GetPimpFlags (entity_t *e, float **gsettings_out)
 	return e->model ? e->model->ex_flags : 0;
 }
 
-static void R_DrawGlow (entity_t *e)
+/* r_glowinfo: every orb the last R_DrawAllGlows drew, the observable
+ * tools/pimp-orb-check.sh reads (#518).  Orbs are additive flares a frame
+ * cannot attribute to an entity, and nothing else counts them. */
+#define	MAX_GLOWINFO	256
+typedef struct
+{
+	int		entnum;		/* -1: not in cl_entities (a static) */
+	int		effects;
+	const char	*model;
+	vec3_t		origin;
+	float		radius;
+	float		color[3];
+} glowinfo_t;
+static glowinfo_t	r_glowinfo[MAX_GLOWINFO];
+static int		r_numglowinfo;	/* may exceed MAX_GLOWINFO */
+
+static void R_RecordGlow (entity_t *e, int entnum, float radius, const float *gsettings)
+{
+	glowinfo_t	*g;
+
+	if (r_numglowinfo++ >= MAX_GLOWINFO)
+		return;
+	g = &r_glowinfo[r_numglowinfo - 1];
+	g->entnum = (entnum >= 0 && entnum < MAX_EDICTS) ? entnum : -1;
+	g->effects = e->effects;
+	g->model = e->model->name;
+	VectorCopy (e->origin, g->origin);
+	g->radius = radius;
+	g->color[0] = gsettings[COLOR_R];
+	g->color[1] = gsettings[COLOR_G];
+	g->color[2] = gsettings[COLOR_B];
+}
+
+void R_GlowInfo_f (void)
+{
+	int		i, n = q_min(r_numglowinfo, MAX_GLOWINFO);
+	glowinfo_t	*g;
+
+	Con_Printf ("--- r_glowinfo: %d orb(s) last frame ---\n", r_numglowinfo);
+	for (i = 0, g = r_glowinfo; i < n; i++, g++)
+		Con_Printf ("[%3d] num=%-5d ef=%08x r=%5.1f col=(%.2f,%.2f,%.2f) org=(%.0f,%.0f,%.0f) ent=%s\n",
+			i, g->entnum, g->effects, g->radius,
+			g->color[0], g->color[1], g->color[2],
+			g->origin[0], g->origin[1], g->origin[2], g->model);
+	Con_Printf ("--- end r_glowinfo ---\n");
+}
+
+/* entnum keys the pimp override, and is passed rather than taken from
+ * e - cl_entities because a self-only orb has no client entity (#518). */
+static void R_DrawGlow (entity_t *e, int entnum)
 {
 	qmodel_t	*clmodel;
+	pimp_override_t	*pimp;
 
 	clmodel = e->model;
+	pimp = (entnum >= 0 && entnum < MAX_EDICTS && pimp_overrides[entnum].active)
+		? &pimp_overrides[entnum] : NULL;
 
-	float *gsettings;
-	int glow_flags = R_GetPimpFlags(e, &gsettings);
+	float *gsettings = pimp ? pimp->glow_settings : clmodel->glow_settings;
+	int glow_flags = (pimp ? pimp->ex_flags : 0) | clmodel->ex_flags;
 
 	// If the orb is firing because of an engine-set XF_*GLOW flag on the
 	// model and the per-entity override didn't explicitly request the orb
@@ -5676,10 +5758,7 @@ static void R_DrawGlow (entity_t *e)
 	// recolor an engine-known orb (red mana, orange torch, etc.).
 	if (clmodel)
 	{
-		int entnum = (int)(e - cl_entities);
-		int pimp_ex = (entnum >= 0 && entnum < MAX_EDICTS &&
-		               R_GetPimpOverride(entnum)->active)
-		              ? R_GetPimpOverride(entnum)->ex_flags : 0;
+		int pimp_ex = pimp ? pimp->ex_flags : 0;
 		if (!(pimp_ex & EF_GLOW) &&
 		    (clmodel->ex_flags & (XF_TORCH_GLOW | XF_GLOW | XF_MISSILE_GLOW)))
 		{
@@ -5722,6 +5801,7 @@ static void R_DrawGlow (entity_t *e)
 
 		if (distance > radius)
 		{
+			R_RecordGlow (e, entnum, radius, gsettings);
 			VectorNormalizeFast(vp2);
 			GL_PushMatrix();
 
@@ -5836,8 +5916,11 @@ static void R_DrawGlow (entity_t *e)
 
 static void R_DrawAllGlows (void)
 {
-	int		i;
+	static byte	drawn[(MAX_EDICTS + 7) / 8];
+	int		i, j;
 	entity_t	*e;
+
+	r_numglowinfo = 0;
 
 	if (!gl_glows.integer && !gl_missile_glows.integer && !gl_other_glows.integer)
 		return;
@@ -5849,13 +5932,45 @@ static void R_DrawAllGlows (void)
 	R_SetBlend (true);
 	R_SetBlendFunc (GL_ONE, GL_ONE);
 
+	memset (drawn, 0, sizeof(drawn));
 	for (i = 0; i < cl_numvisedicts; i++)
 	{
 		e = cl_visedicts[i];
 
 		if (e->model && e->model->type == mod_alias)
-			R_DrawGlow (e);
+		{
+			int	entnum = (int)(e - cl_entities);
+
+			if (entnum >= 0 && entnum < MAX_EDICTS)
+				drawn[entnum >> 3] |= 1 << (entnum & 7);
+			R_DrawGlow (e, entnum);
+		}
 	}
+
+	/* Self-only misc_modelpimp orbs (#518), drawn from the override at the
+	 * controller's origin: the controller is EF_NODRAW, so it is never sent
+	 * and there is no client entity for it.  One the client does draw (a
+	 * visible entity pimped 4+16) already had its orb above. */
+	for (i = j = 0; i < num_pimp_self_orbs; i++)
+	{
+		int		entnum = pimp_self_orbs[i];
+		pimp_override_t	*pimp = &pimp_overrides[entnum];
+		entity_t	orb;
+
+		if (!pimp->active || !pimp->self_orb)
+			continue;	/* freed or re-pimped since: drop it */
+		pimp_self_orbs[j++] = entnum;
+		if (drawn[entnum >> 3] & (1 << (entnum & 7)))
+			continue;
+		if (!pimp->model || pimp->model->type != mod_alias)
+			continue;
+		memset (&orb, 0, sizeof(orb));
+		orb.model = pimp->model;
+		orb.effects = EF_NODRAW;
+		VectorCopy (pimp->origin, orb.origin);
+		R_DrawGlow (&orb, entnum);
+	}
+	num_pimp_self_orbs = j;
 
 	R_SetBlend (false);
 	R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);

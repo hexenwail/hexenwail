@@ -556,6 +556,20 @@ static void PF_pimpmodel (void)
 	if (spawnflags & PIMP_SF_NODLIGHT)
 		pimp->ex_flags |= XF_NO_DLIGHT;
 
+	/* A self-only orb stays on the controller, and Inky's controllers have
+	 * effects exactly EF_NODRAW, which SV_WriteEntitiesToClient never sends:
+	 * the client has no entity to draw it on, so it never drew.  The renderer
+	 * draws it from here instead, at the controller's origin.  Not for a
+	 * shared orb (4 without 16): its siblings draw it, and an extra one at
+	 * the controller would change every SoT map.  Assigned on every call,
+	 * since a re-pimp reuses the slot.  #518 */
+	pimp->self_orb = (spawnflags & (PIMP_SF_GLOW | PIMP_SF_SELFONLY))
+			== (PIMP_SF_GLOW | PIMP_SF_SELFONLY);
+	VectorCopy (ref_ent->v.origin, pimp->origin);
+	pimp->model = mod;
+	if (pimp->self_orb)
+		R_AddPimpSelfOrb (entnum);
+
 	/* Per-map shared write to mod->flags so every entity using this
 	 * model on the current map sees the override (Komi / Shanjaq
 	 * design — modder confirmed misc_modelpimp is per-map).  Safe

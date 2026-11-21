@@ -739,6 +739,7 @@ void R_ClearPointFile (void);
 /* Canvas-space position of the leak origin, valid this frame only. */
 qboolean R_GetPointFileLabelPos (float *x, float *y);
 void R_AliasInfo_f (void);	/* uhexen2-khsa diagnostic */
+void R_GlowInfo_f (void);	/* #518: the orbs the last frame drew */
 void R_TranslatePlayerSkin (int playernum);
 
 #endif	/* GLQUAKE_H */
