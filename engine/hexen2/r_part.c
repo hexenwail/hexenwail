@@ -254,6 +254,113 @@ static void R_ParticlesCompat_f (cvar_t *var)
 	r_particles_syncing = false;
 }
 
+/*
+===============
+R_TestParticles_f
+
+`testparticles [<distance>]': a fixed set of particles on the view plane
+<distance> (default 128) units ahead, the same set every run, where every
+effect in the game spawns from rand () and the frame time.  Every live
+particle is cleared first, so nothing an effect left behind joins the set.
+For the GL-against-SDL_GPU sweep, tools/sweep-particles-gpu.steps (#340 P3b),
+and cheat-gated with testentity (CL_TestFixtureAllowed).  Spawn it paused:
+snow and rain only hold still while cl.paused stops the step in
+R_UpdateParticles, and unpaused they fall, land and go.  Otherwise the set
+lasts until the next map, bar a raindrop or snowflake placed inside solid,
+which the collision tests kill even while paused.
+
+  top left      128 pt_static, palette colours 0-254 in steps of 2
+  top right     128 pt_static, the translucent table, 256-510 in steps of 2
+  bottom left   8 snowflakes, the four atlas sizes (count 10, 30, 40, 69)
+  bottom right  16 raindrops, their streaks fanned across the view
+  centre        16 overlapping, opaque and translucent by turns
+===============
+*/
+#define TESTPART_PALETTE	128
+#define TESTPART_SNOW		8
+#define TESTPART_RAIN		16
+#define TESTPART_OVERLAP	16
+
+static void R_TestParticles_f (void)
+{
+	static const byte	snow_count[4] = { 10, 30, 40, 69 };
+	vec3_t		fwd, right, up, centre;
+	float		dist = 128.0f, r, u;
+	particle_t	*p;
+	int		i, n;
+
+	if (Cmd_Argc () > 2)
+	{
+		Con_Printf ("usage: testparticles [<distance>]\n");
+		return;
+	}
+	if (!CL_TestFixtureAllowed ())
+		return;
+	if (Cmd_Argc () == 2)
+		dist = atof (Cmd_Argv (1));
+
+	R_ClearParticles ();
+	AngleVectors (r_refdef.viewangles, fwd, right, up);
+	VectorMA (r_refdef.vieworg, dist, fwd, centre);
+
+	for (i = 0; i < 2 * TESTPART_PALETTE + TESTPART_SNOW + TESTPART_RAIN + TESTPART_OVERLAP; i++)
+	{
+		p = AllocParticle ();
+		if (!p)
+		{
+			Con_Printf ("testparticles: out of particles after %d\n", i);
+			return;
+		}
+		p->type = pt_static;
+		p->die = cl.time + 1000000.0;
+		p->ramp = 0;
+		p->flags = 0;
+		p->count = 0;
+		VectorClear (p->vel);
+		VectorClear (p->min_org);
+		VectorClear (p->max_org);
+
+		n = i;
+		if (n < 2 * TESTPART_PALETTE)
+		{
+			r = ((n < TESTPART_PALETTE) ? -96.0f : 36.0f) + (n & 15) * 4.0f;
+			u = 48.0f - ((n % TESTPART_PALETTE) >> 4) * 4.0f;
+			p->color = n * 2;
+		}
+		else if ((n -= 2 * TESTPART_PALETTE) < TESTPART_SNOW)
+		{
+			r = -96.0f + (n & 3) * 18.0f;
+			u = -12.0f - (n >> 2) * 18.0f;
+			p->type = pt_snow;
+			p->count = snow_count[n & 3];
+			p->color = (n < 4) ? 15 : 256 + 16 * n + 2;
+			/* moving, or the snow branch fades it a step every 7 frames */
+			VectorScale (up, -8.0f, p->vel);
+		}
+		else if ((n -= TESTPART_SNOW) < TESTPART_RAIN)
+		{
+			r = 36.0f + (n & 7) * 8.0f;
+			u = -12.0f - (n >> 3) * 20.0f;
+			p->type = pt_rain;
+			p->color = 256 + 4 * n;
+			VectorScale (up, -400.0f, p->vel);
+			VectorMA (p->vel, (n - 8) * 40.0f, right, p->vel);
+		}
+		else
+		{
+			n -= TESTPART_RAIN;
+			r = -6.0f + n * 0.75f;
+			u = 0.0f;
+			p->color = (n & 1) ? 256 + 96 + n : 144 + n;
+		}
+		/* laid out for 128 units ahead, scaled to cover the same part of
+		 * the screen at any distance */
+		VectorMA (centre, r * dist / 128.0f, right, p->org);
+		VectorMA (p->org, u * dist / 128.0f, up, p->org);
+	}
+	Con_Printf ("testparticles: %d particles\n", i);
+}
+
 void R_InitParticles (void)
 {
 	int		i;
@@ -288,6 +395,7 @@ void R_InitParticles (void)
 	Cvar_RegisterVariable (&r_raincollide);
 	Cvar_RegisterVariable (&r_rainintensity);
 	Cvar_RegisterVariable (&r_snowintensity);
+	Cmd_AddCommand ("testparticles", R_TestParticles_f);
 #ifdef GLQUAKE
 	R_GPU_Particles_Init();
 #endif

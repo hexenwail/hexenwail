@@ -181,6 +181,19 @@ Checked, from the sources (stock python3, lint.yml):
   RGT_CreateLevels creates a 3D texture with the levels GL defined, not the
   full chain -- SDL 3.4's Vulkan defragmenter copies every level of a 3D
   texture at level 0's depth, out of bounds past level 0.
+  particles, sprites and glows under -gpu (#340 P3b), which
+  tools/sweep-particles-gpu.steps draws (check_points):
+    * gl_particles 0 draws GL_POINTS at GL_SetPointSize's one size, a no-op
+      under -gpu.  spart_vert.glsl writes that size to gl_PointSize under
+      `#ifdef VULKAN` alone (GL keeps glPointSize, and its preprocessed program
+      is unchanged), and
+      every point draw is R_DrawParticles_Real's, on the two programs whose
+      vertex stage is spart_vert; a second size needs a uniform instead.  The
+      draw pin is textual: GL_POINTS is 0, and a draw whose mode reaches 0
+      without spelling it would get a POINTLIST pipeline unseen;
+    * testparticles and testentity, the sweep's fixed content, are behind
+      CL_TestFixtureAllowed (noclip's conditions plus a server in this
+      process), which runs before either command touches anything.
 
 Usage: test_rg_sources.py [--root DIR]
 """
@@ -1654,6 +1667,135 @@ def check_translucency(root):
                      "needs that revisited first (#340 P3a)"
                      % (p.relative_to(root), code.count("\n", 0, m.start()) + 1, m.group(1)))
 
+POINT_SIZE = re.compile(r"\bGL_SetPointSize\s*\(\s*([^)]*?)\s*\)")
+
+
+def num(v):
+    try:
+        return float(v.rstrip("fF"))
+    except ValueError:
+        return None
+
+
+def check_points(root):
+    """#340 P3b: square particles keep their size under -gpu, and the sweep's
+    test fixtures are cheat-gated."""
+    sh = "engine/shaders/spart_vert.glsl"
+    size = None
+    if not (root / sh).is_file():
+        fail("%s: missing -- the #340 P3b point-size pin has nothing to read" % sh)
+    else:
+        src = strip_c_comments((root / sh).read_text())
+        writes = re.findall(r"\bgl_PointSize\b", src)
+        m = re.search(r"#\s*(?:ifdef\s+VULKAN|if\s+defined\s*(?:\(\s*VULKAN\s*\)|\s+VULKAN))[ \t]*\n"
+                      r"\s*gl_PointSize\s*=\s*([0-9.]+)[fF]?\s*;\s*\n\s*#\s*endif\b"
+                      r"\s*VK_FLIP_Y\s*\(\s*\)\s*\}\s*$", src)
+        opened = 1
+        if m:
+            head = src[:m.start()]
+            opened = len(re.findall(r"^\s*#\s*if(?:def|ndef)?\b", head, re.M)) - \
+                len(re.findall(r"^\s*#\s*endif\b", head, re.M))
+        if len(writes) != 1 or m is None or opened != 0 or num(m.group(1)) is None:
+            fail("%s: main() must end `#ifdef VULKAN / gl_PointSize = <size>; / #endif / VK_FLIP_Y()`, "
+                 "the file's one gl_PointSize, under no other conditional -- SDL_GPU has no point-size "
+                 "state, so a point-list pipeline takes it from the vertex stage (and Vulkan requires the "
+                 "write), while GL keeps glPointSize and its preprocessed program (#340 P3b)" % sh)
+        else:
+            size = num(m.group(1))
+
+    # Every size GL_SetPointSize is handed, outside its own definition.
+    sizes = {}
+    for p in sorted((root / "engine").rglob("*.c")):
+        if "rust" in p.parts:
+            continue
+        rel = str(p.relative_to(root))
+        code = strip_c_comments(p.read_text(errors="replace"))
+        for m in POINT_SIZE.finditer(code):
+            if re.match(r"float\s+\w+$", m.group(1)):
+                continue        # the definition, gl_pipeline.c
+            v = num(m.group(1))
+            if v is None:
+                fail("%s:%d: GL_SetPointSize (%s) -- not a literal, so the Vulkan stage's size cannot be "
+                     "held to it; a size that varies needs a uniform in spart_vert.glsl (#340 P3b)"
+                     % (rel, code.count("\n", 0, m.start()) + 1, m.group(1)))
+            elif v != 1.0:
+                sizes.setdefault(v, set()).add(rel)
+    if len(sizes) != 1:
+        fail("GL_SetPointSize: %d point sizes besides the 1.0 reset (%s) -- spart_vert.glsl writes one "
+             "literal under VULKAN, right only while every point batch uses one size; more than one "
+             "needs a uniform (#340 P3b)" % (len(sizes), sorted(sizes) or "none"))
+    elif size is not None and next(iter(sizes)) != size:
+        v = next(iter(sizes))
+        fail("%s: gl_PointSize = %g under VULKAN, but GL_SetPointSize sets %g (%s) -- -gpu would draw "
+             "square particles at a size GL does not (#340 P3b)" % (sh, size, v, ", ".join(sorted(sizes[v]))))
+
+    # Every point draw is the square-particle batch, on a spart_vert program.
+    rp = "engine/hexen2/r_part.c"
+    for p in sorted((root / "engine").rglob("*.c")):
+        if "rust" in p.parts or re.match(r"rg_\w+\.c$", p.name):
+            continue
+        rel = str(p.relative_to(root))
+        code = strip_c_comments(p.read_text(errors="replace"))
+        for n, b, e in functions(code):
+            if re.search(r"\bGL_POINTS\b", code[b:e]) and (rel, n) != (rp, "R_DrawParticles_Real"):
+                fail("%s: %s draws GL_POINTS -- under -gpu a point's size comes from the vertex stage, "
+                     "and only spart_vert.glsl writes one (R_DrawParticles_Real's batch, #340 P3b)"
+                     % (rel, n))
+    b = body_named(root, rp, "R_DrawParticles_Real")
+    if b is not None:
+        pts = re.findall(r"\bGL_ImmEnd\s*\(\s*GL_POINTS\s*,\s*(\w+)\s*\)", b)
+        sq = re.search(r"\bsquare\s*=\s*!\s*gl_particles\.integer\s*&&\s*!\s*showtris\s*;", b)
+        pr = re.search(r"\bprog\s*=\s*showtris\s*\?\s*&gl_shader_flat\s*:\s*OIT_InPass\s*\(\s*\)\s*\?\s*"
+                       r"&gl_shader_particle_oit\s*:\s*&gl_shader_particle\s*;", b)
+        if not pts or set(pts) != {"prog"} or not sq or not pr or \
+           len(re.findall(r"\bGL_POINTS\b", b)) != len(pts):
+            fail("%s: R_DrawParticles_Real's points must be GL_ImmEnd (GL_POINTS, prog) alone, with "
+                 "`square = !gl_particles.integer && !showtris;` and prog gl_shader_particle or its OIT "
+                 "twin outside showtris -- the programs whose vertex stage writes gl_PointSize "
+                 "(#340 P3b)" % rp)
+    gs = strip_c_comments((root / "engine/h2shared/gl_shader.c").read_text(errors="replace"))
+    for prog in ("RPROG_PARTICLE", "RPROG_PARTICLE_OIT"):
+        if not re.search(r"\[\s*%s\s*\]\s*=\s*\{[^{}]*\{\s*\{\s*GLSL_VERT_HEADER\s*,\s*spart_vert\s*," % prog, gs):
+            fail("engine/h2shared/gl_shader.c: %s's vertex stage must be spart_vert, the one that writes "
+                 "gl_PointSize for -gpu's square particles (#340 P3b)" % prog)
+
+    # The fixtures' gate, noclip's.
+    cm = "engine/hexen2/cl_main.c"
+    g = body_named(root, cm, "CL_TestFixtureAllowed")
+    if g is not None:
+        cond = re.search(r"\bif\s*\((.*?)\)\s*\{", g, re.S)
+        terms = {re.sub(r"\s+", "", t) for t in cond.group(1).split("||")} if cond else set()
+        want = {"cls.state!=ca_connected", "!cl.worldmodel", "!sv.active", "*sv_globals.deathmatch",
+                "*sv_globals.coop", "skill.integer>2"}
+        if terms != want or not re.search(r"return\s+false\s*;\s*\}\s*return\s+true\s*;\s*\}?$", g.strip()):
+            fail("%s: CL_TestFixtureAllowed must refuse unless this process serves the map, with no "
+                 "deathmatch or coop and skill 2 or under -- noclip's conditions plus a local server "
+                 "(`%s`) -- and allow nothing else: testparticles and testentity are cheats (#340 P3b)"
+                 % (cm, " || ".join(sorted(want))))
+    for rel, name, first in ((rp, "R_TestParticles_f", r"\bAllocParticle\s*\(|\bAngleVectors\s*\("),
+                             (cm, "CL_TestEntity_f",
+                              r"\bcl_static_entities\b|\bMod_ForName\s*\(|\bcl\.num_statics\b|"
+                              r"\bFS_OpenFileHandle\s*\(")):
+        b = body_named(root, rel, name)
+        if b is None:
+            continue
+        gate = re.search(r"\bif\s*\(\s*!\s*CL_TestFixtureAllowed\s*\(\s*\)\s*\)\s*return\s*;", b)
+        f = re.search(first, b)
+        head = b[:gate.start()] if gate else ""
+        # at the body's own level, and not inside a conditional it opened (#if 0)
+        opened = len(re.findall(r"^\s*#\s*if(?:def|ndef)?\b", head, re.M)) - \
+            len(re.findall(r"^\s*#\s*endif\b", head, re.M))
+        if not gate or not f or gate.start() > f.start() or \
+           head.count("{") - head.count("}") != 1 or opened != 0:
+            fail("%s: %s must return on `!CL_TestFixtureAllowed ()` at the body's own level before it "
+                 "touches anything -- the gate is what makes it a cheat (#340 P3b)" % (rel, name))
+    for rel, cmd, name in ((rp, "testparticles", "R_TestParticles_f"), (cm, "testentity", "CL_TestEntity_f")):
+        code = strip_c_comments((root / rel).read_text(errors="replace"))
+        if not re.search(r'\bCmd_AddCommand\s*\(\s*"%s"\s*,\s*%s\s*\)' % (cmd, name), code):
+            fail('%s: Cmd_AddCommand ("%s", %s) -- tools/sweep-particles-gpu.steps runs it (#340 P3b)'
+                 % (rel, cmd, name))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     ap.add_argument("--root", type=Path, default=ROOT)
@@ -1672,6 +1814,7 @@ def main(argv=None):
     check_buffers(root)
     check_storage(root)
     check_translucency(root)
+    check_points(root)
     nfiles = 0
     rg_files = []
     for p in sorted(eng.rglob("*")):

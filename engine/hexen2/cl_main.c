@@ -1678,6 +1678,106 @@ static void CL_Sensitivity_save_f (void)
 
 /*
 =================
+CL_TestFixtureAllowed
+
+The gate on testparticles (r_part.c) and testentity, which put fixed content
+in front of the camera for the GL-against-SDL_GPU sweeps (#340 P3b,
+tools/sweep-particles-gpu.steps): every effect in the game spawns from rand ()
+and the frame time, so no two runs see the same particles.  Cheat-gated on
+noclip's conditions (no deathmatch, no coop, skill 2 or under) plus a server
+in this process, since both commands act on the local client alone.
+=================
+*/
+qboolean CL_TestFixtureAllowed (void)
+{
+	if (cls.state != ca_connected || !cl.worldmodel || !sv.active ||
+	    *sv_globals.deathmatch || *sv_globals.coop || skill.integer > 2)
+	{
+		Con_Printf ("%s: single player only, skill 2 or under\n", Cmd_Argv (0));
+		return false;
+	}
+	return true;
+}
+
+/*
+=================
+CL_TestEntity_f
+
+`testentity <model> <x> <y> <z> [<pitch> <yaw> <roll> [<frame> [<drawflags>]]]'
+adds a sprite or alias model as a static entity, as a map's makestatic does,
+which lasts until the next map.  The particle sweep's sprites are these: an oriented one flush with a
+wall is decided by the sprite's polygon offset alone.
+=================
+*/
+static void CL_TestEntity_f (void)
+{
+	entity_t	*ent;
+	qmodel_t	*mod;
+	fshandle_t	fh;
+	byte		id[4];
+	unsigned int	ident;
+	size_t		n;
+	int		i, argc = Cmd_Argc ();
+
+	if (argc != 5 && argc != 8 && argc != 9 && argc != 10)
+	{
+		Con_Printf ("usage: testentity <model> <x> <y> <z> "
+			    "[<pitch> <yaw> <roll> [<frame> [<drawflags>]]]\n");
+		return;
+	}
+	if (!CL_TestFixtureAllowed ())
+		return;
+	if (cl.num_statics >= MAX_STATIC_ENTITIES)
+	{
+		Con_Printf ("testentity: too many static entities\n");
+		return;
+	}
+	/* By the file's ident, which is what Mod_LoadModel dispatches on: any
+	 * other file loads as a brush model, and a .bsp loaded mid-map renames
+	 * the map's own inline models ("*1"..) to its submodels, under every
+	 * entity already pointing at them. */
+	if (FS_OpenFileHandle (Cmd_Argv (1), &fh, NULL) < 0)
+	{
+		Con_Printf ("testentity: can't find %s\n", Cmd_Argv (1));
+		return;
+	}
+	n = FS_fread (id, 1, 4, &fh);
+	FS_fclose (&fh);
+	ident = id[0] | (id[1] << 8) | (id[2] << 16) | ((unsigned int) id[3] << 24);
+	if (n != 4 || (ident != IDSPRITEHEADER && ident != IDPOLYHEADER && ident != RAPOLYHEADER))
+	{
+		Con_Printf ("testentity: %s is not a sprite or an alias model\n", Cmd_Argv (1));
+		return;
+	}
+	mod = Mod_ForName (Cmd_Argv (1), false);
+	if (!mod || (mod->type != mod_sprite && mod->type != mod_alias))
+	{
+		Con_Printf ("testentity: can't load %s\n", Cmd_Argv (1));
+		return;
+	}
+
+	ent = &cl_static_entities[cl.num_statics++];
+	memset (ent, 0, sizeof(*ent));
+	ent->model = mod;
+	ent->colormap = vid.colormap;
+	for (i = 0; i < 3; i++)
+	{
+		ent->origin[i] = atof (Cmd_Argv (2 + i));
+		ent->angles[i] = (argc >= 8) ? atof (Cmd_Argv (5 + i)) : 0.0f;
+	}
+	if (argc >= 9)
+		ent->frame = atoi (Cmd_Argv (8));
+	if (argc >= 10)
+		ent->drawflags = atoi (Cmd_Argv (9));
+	VectorCopy (ent->origin, ent->baseline.origin);
+	VectorCopy (ent->angles, ent->baseline.angles);
+	ent->baseline.frame = ent->frame;
+	ent->baseline.drawflags = ent->drawflags;
+	R_AddEfrags (ent);
+}
+
+/*
+=================
 CL_Init
 =================
 */
@@ -1745,5 +1845,6 @@ void CL_Init (void)
 	Cmd_AddCommand ("viewpos", CL_Viewpos_f);
 	Cmd_AddCommand ("r_pos", CL_Viewpos_f);
 	Cmd_AddCommand ("tracepos", CL_Tracepos_f);
+	Cmd_AddCommand ("testentity", CL_TestEntity_f);
 }
 
