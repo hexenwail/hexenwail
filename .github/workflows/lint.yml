@@ -219,6 +219,12 @@ jobs:
       - name: pak2pk3 converter
         run: python3 tools/test_pak2pk3.py
 
+      # jsh2colour lights the Portals candles and the lanterns orange like
+      # the other flames, and its usage line names argv[0]
+      # (sezero/uhexen2#80).  Compiles the real classname test and printf.
+      - name: jsh2colour colours candles and lanterns
+        run: python3 tools/test_jsh2colour_orange.py
+
       # Every Raven release in pr_raven_images[] is named, a row needs both
       # CRCs, and the table agrees with tools/progs_crc.py (#160).
       - name: Raven gamecode releases are named
