@@ -266,6 +266,8 @@ typedef struct {
 static GLuint		sh_prog, sh_dbgprog, sh_dbgvao;
 static GLuint		sh_aprog;		/* alias casters; 0 if it failed to build */
 static GLuint		sh_tex, sh_ubo;
+/* What DLSHADOW_TMU holds on a frame with no maps (#526); see SH_NoneTexture. */
+static GLuint		sh_none;
 /* One framebuffer per layer-face, attached once at allocation, so a face is a
  * bind rather than an attachment change.  (Measured the same as re-pointing
  * one framebuffer on the P4; kept as the shape drivers expect.) */
@@ -549,6 +551,43 @@ static qboolean SH_EnsureTexture (void)
 		sh_filter = filter;
 	}
 	return true;
+}
+
+/* A 1x1 depth cube array with the compare on, for DLSHADOW_TMU whenever the
+ * frame has no maps (#526).  The world and alias programs declare the
+ * samplerCubeArrayShadow whatever the frame holds, and GL validates a
+ * sampler against what is bound to its unit at every draw, read or not.
+ * Without this the unit held texture 0 -- not a depth format, no compare --
+ * on every frame before the first shadow map, so on every frame of
+ * r_dynamic 0, r_dlight_occlusion 0 or 1, r_shadow_maxlights 0 or a scene
+ * with no dlight yet: one undefined-behaviour report per world and alias
+ * draw.  Never sampled: u_dlsparams.x is 0 on such a frame, so the shader
+ * takes no lookup.  Its texels are 1.0 all the same, so a gate that ever
+ * let a lookup through would read "lit" rather than noise.  GL only: -gpu
+ * fills an empty slot with its own shadow placeholder (rg_resource.c). */
+static GLuint SH_NoneTexture (void)
+{
+	/* Six texels, padded for a 4-byte unpack row alignment: every one 1.0
+	 * whichever stride the upload reads the layers at. */
+	static const unsigned short far_depth[6 * 2] = {
+		0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF,
+		0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF
+	};
+
+	if (sh_none)
+		return sh_none;
+	R_GenTextures (1, &sh_none);
+	R_BindTextureForEdit (GL_TEXTURE_CUBE_MAP_ARRAY, sh_none);
+	R_TexImage3D (GL_TEXTURE_CUBE_MAP_ARRAY, sh_none, 0, GL_DEPTH_COMPONENT16,
+			 1, 1, 6, GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT, far_depth);
+	R_TexParameteri (GL_TEXTURE_CUBE_MAP_ARRAY, sh_none, GL_TEXTURE_BASE_LEVEL, 0);
+	R_TexParameteri (GL_TEXTURE_CUBE_MAP_ARRAY, sh_none, GL_TEXTURE_MAX_LEVEL, 0);
+	R_TexSetFilter (GL_TEXTURE_CUBE_MAP_ARRAY, sh_none, GL_NEAREST, GL_NEAREST);
+	R_TexSetWrap (GL_TEXTURE_CUBE_MAP_ARRAY, sh_none, GL_CLAMP_TO_EDGE);
+	R_TexParameteri (GL_TEXTURE_CUBE_MAP_ARRAY, sh_none, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
+	R_TexParameteri (GL_TEXTURE_CUBE_MAP_ARRAY, sh_none, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
+	R_BindTextureForEdit (GL_TEXTURE_CUBE_MAP_ARRAY, 0);
+	return sh_none;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1568,8 +1607,10 @@ void R_Shadow_Draw (void)
 		SH_RestoreState (&saved);
 		sh_ndraws = 0;
 	}
-	if (sh_frame_maps > 0)
-		R_BindTextureTarget (DLSHADOW_TMU, GL_TEXTURE_CUBE_MAP_ARRAY, sh_tex);
+	/* Every frame (#526).  Under -gpu, 0 when there is no map: the backend's
+	 * own shadow placeholder fills the slot, with its D32 fallback. */
+	R_BindTextureTarget (DLSHADOW_TMU, GL_TEXTURE_CUBE_MAP_ARRAY,
+			     sh_frame_maps > 0 ? sh_tex : SH_GPU () ? 0 : SH_NoneTexture ());
 
 #ifdef USE_SDL_GPU
 	/* The same upload for the backend: every draw from here on pushes this
@@ -1699,6 +1740,9 @@ void R_Shadow_Shutdown (void)
 	if (sh_dbgvao) { glDeleteVertexArrays_fp (1, &sh_dbgvao); sh_dbgvao = 0; }
 	if (sh_ubo) { GL_ForgetBuffer (sh_ubo); glDeleteBuffers_fp (1, &sh_ubo); sh_ubo = 0; }
 	SH_FreeTexture ();
+	if (sh_none)
+		R_DeleteTextures (1, &sh_none);
+	sh_none = 0;
 	sh_failed = false;
 }
 

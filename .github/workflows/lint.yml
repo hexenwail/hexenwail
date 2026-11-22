@@ -669,6 +669,11 @@ jobs:
         run: python3 tools/test_shadow_cube_faces.py
       - name: Shadow-map blocks match their mirrors
         run: python3 tools/test_dlshadow_block.py
+      # The shadow-map unit holds a depth cube array on every frame, a 1x1
+      # placeholder when there is no map, or every world and alias draw runs
+      # its samplerCubeArrayShadow against texture 0 (#526).
+      - name: Shadow-map unit always holds a depth cube array
+        run: python3 tools/test_shadow_tmu_bound.py
       # The Display presets' shadow-map tiers, each preset detected as itself
       # after applying it, and the DLight Occlusion row (#97 P5).
       - name: Presets carry their shadow-map tier
