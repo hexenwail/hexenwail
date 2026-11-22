@@ -39,8 +39,10 @@ void	R_Shadow_Prepare (void);
 
 /* Draw what Prepare collected, then upload and bind the block (the GPU half).
  * Call right after Prepare, every frame on desktop, so the block's binding
- * always holds a buffer, if one that says "no maps".  Saves and restores the
- * framebuffer, viewport and every pipeline state it touches. */
+ * always holds a buffer, if one that says "no maps", and DLSHADOW_TMU always
+ * holds a depth cube array: the maps, else a 1x1 placeholder (#526), which
+ * under -gpu is the backend's own.  Saves and restores the framebuffer,
+ * viewport and every pipeline state it touches. */
 void	R_Shadow_Draw (void);
 
 /* Point a freshly linked program's DlShadow block at UBO_BINDING_DLSHADOW and
