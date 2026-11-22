@@ -70,11 +70,13 @@ typedef struct { int effects; vec3_t origin, angles; } entity_t;
 typedef struct { int integer; float value; } cvar_t;
 typedef struct { int length; char map[64]; } lightstyle_t;
 static struct { double time; } cl;
-static lightstyle_t cl_lightstyle[64];
+#define MAX_LIGHTSTYLES 64
+static lightstyle_t cl_lightstyle[MAX_LIGHTSTYLES];
 static cvar_t gl_missile_glows = {1, 1}, gl_flashintensity = {1, 1}, gl_torch_dlight = {1, 1};
 static dlight_t dlights[32];
 static int nalloc;
 static dlight_t *CL_AllocDlight (int key) { (void)key; return &dlights[nalloc++ & 31]; }
+static dlight_t *CL_AllocDlightAt (int key, const float *org) { (void)key; (void)org; return &dlights[nalloc++ & 31]; }
 static int stub_pflags;
 static float stub_gs[16];
 static int R_GetPimpFlags (entity_t *e, float **gs) { (void)e; *gs = stub_gs; return stub_pflags; }
@@ -102,9 +104,19 @@ def block(text):
     return text[a:b]
 
 
+def cast_light(text):
+    """The EF_ILLUMINATE branch calls CL_PimpCastLight (#522), lifted whole."""
+    sig = "static void CL_PimpCastLight (int key, const float *org, const float *gs)"
+    a = text.find(sig)
+    if a < 0:
+        sys.exit("FAIL: could not find %r in cl_main.c" % sig)
+    return text[a:text.index("\n}\n", a) + 3]
+
+
 def main():
     src = Path(sys.argv[1]) if len(sys.argv) > 1 else CL_MAIN
     body = block(src.read_text())
+    light = cast_light(src.read_text())
     if "nodlight" not in body:
         print("note: the block never mentions nodlight")
 
@@ -123,6 +135,7 @@ def main():
     program = "\n".join([
         PRELUDE,
         constants(),
+        light,
         "static void run (int effects, int model_flags, const char *name, int nod)",
         "{",
         "\tentity_t real_ent, *ent = &real_ent;",

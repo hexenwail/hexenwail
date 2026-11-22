@@ -505,6 +505,18 @@ static void PF_pimpmodel (void)
 	ref_ent = G_EDICT(OFS_PARM0);
 	glow_color = G_VECTOR(OFS_PARM1);
 
+	/* Per-entity overrides instead of modifying the shared model.  A call
+	 * that fails below grants nothing self-only, so whatever an earlier call
+	 * registered drops off the self-only list (#522). */
+	entnum = NUM_FOR_EDICT(ref_ent);
+	pimp = R_GetPimpOverride(entnum);
+	if (!pimp)
+	{
+		G_INT(OFS_RETURN) = 0;
+		return;
+	}
+	pimp->self_orb = pimp->self_light = false;
+
 	/* Get model name from the entity */
 	if (ref_ent->v.model == 0)
 	{
@@ -522,14 +534,6 @@ static void PF_pimpmodel (void)
 		return;
 	}
 
-	/* Store per-entity overrides instead of modifying the shared model */
-	entnum = NUM_FOR_EDICT(ref_ent);
-	pimp = R_GetPimpOverride(entnum);
-	if (!pimp)
-	{
-		G_INT(OFS_RETURN) = 0;
-		return;
-	}
 	pimp->active = true;
 
 	/* Start with model defaults */
@@ -562,13 +566,20 @@ static void PF_pimpmodel (void)
 	 * draws it from here instead, at the controller's origin.  Not for a
 	 * shared orb (4 without 16): its siblings draw it, and an extra one at
 	 * the controller would change every SoT map.  Assigned on every call,
-	 * since a re-pimp reuses the slot.  #518 */
+	 * since a re-pimp reuses the slot.  #518
+	 *
+	 * A self-only cast light is dark for the same reason, so the client
+	 * lights it from here too (CL_PimpSelfLights).  Registered even with
+	 * spawnflag 64: XF_NO_DLIGHT is applied where the light is allocated,
+	 * as it is for a visible entity.  #522 */
 	pimp->self_orb = (spawnflags & (PIMP_SF_GLOW | PIMP_SF_SELFONLY))
 			== (PIMP_SF_GLOW | PIMP_SF_SELFONLY);
+	pimp->self_light = (spawnflags & (PIMP_SF_ILLUMINATE | PIMP_SF_SELFONLY))
+			== (PIMP_SF_ILLUMINATE | PIMP_SF_SELFONLY);
 	VectorCopy (ref_ent->v.origin, pimp->origin);
 	pimp->model = mod;
-	if (pimp->self_orb)
-		R_AddPimpSelfOrb (entnum);
+	if (pimp->self_orb || pimp->self_light)
+		R_AddPimpSelfOnly (entnum);
 
 	/* Per-map shared write to mod->flags so every entity using this
 	 * model on the current map sees the override (Komi / Shanjaq

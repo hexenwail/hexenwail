@@ -5,7 +5,7 @@ controller (GitHub #518).
 Inky's controllers have effects exactly EF_NODRAW, which the server never
 sends, so the client has no entity for them: before #518 the orb sat on the
 controller's override and nothing ever drew it.  PF_pimpmodel now marks the
-override (self_orb, origin, model) and registers it with R_AddPimpSelfOrb, and
+override (self_orb, origin, model) and registers it with R_AddPimpSelfOnly, and
 R_DrawAllGlows draws every registered orb the visedict pass did not already
 draw.
 
@@ -16,7 +16,7 @@ This lifts the production code verbatim and runs it against stubs:
     exactly when both 4 and 16 are set, so a shared orb (4 alone) adds
     nothing at the controller and SoT maps draw as before;
   - from engine/hexen2/gl_rmain.c, the override table with the self-orb list,
-    R_ClearPimpOverrides, R_AddPimpSelfOrb and R_DrawAllGlows, with R_DrawGlow
+    R_ClearPimpOverrides, R_AddPimpSelfOnly and R_DrawAllGlows, with R_DrawGlow
     stubbed to record what it was asked to draw.
 
 The live, end-to-end check (needs Storm over Thyrion) is
@@ -79,6 +79,7 @@ typedef struct {
 	qboolean active;
 	int ex_flags;
 	qboolean self_orb;
+	qboolean self_light;
 	vec3_t origin;
 	struct qmodel_s *model;
 } pimp_override_t;
@@ -134,7 +135,7 @@ static void pimp (int n, int self_orb, float x, float y, float z, qmodel_t *m)
 	p->origin[0] = x; p->origin[1] = y; p->origin[2] = z;
 	p->model = m;
 	if (self_orb)
-		R_AddPimpSelfOrb (n);
+		R_AddPimpSelfOnly (n);
 }
 
 int main (void)
@@ -142,8 +143,8 @@ int main (void)
 	int n;
 
 	R_ClearPimpOverrides ();
-	R_AddPimpSelfOrb (-1);			/* out of range: ignored */
-	R_AddPimpSelfOrb (MAX_EDICTS);
+	R_AddPimpSelfOnly (-1);			/* out of range: ignored */
+	R_AddPimpSelfOnly (MAX_EDICTS);
 	frame ("empty");
 
 	pimp (10, true, 1, 2, 3, &alias);
@@ -180,6 +181,20 @@ int main (void)
 	frame ("brush");
 	pimp_overrides[13].active = false;
 
+	/* spawnflags 24: a self-only light shares the list, and draws no orb. */
+	pimp (14, false, 9, 9, 9, &alias);
+	pimp_overrides[14].self_light = true;
+	R_AddPimpSelfOnly (14);
+	frame ("lightonly");
+	{
+		const int *l;
+		int k, kept = 0, m = R_GetPimpSelfOnly (&l);
+		for (k = 0; k < m; k++)
+			kept += l[k] == 14;
+		printf ("lightkept %d\n", kept);
+	}
+	pimp_overrides[14].active = false;
+
 	gl_glows.integer = gl_missile_glows.integer = gl_other_glows.integer = 0;
 	frame ("glowsoff");
 	gl_glows.integer = gl_missile_glows.integer = gl_other_glows.integer = 1;
@@ -188,18 +203,18 @@ int main (void)
 	r_drawentities.integer = 1;
 
 	/* R_NewMap: the next map's edict 10 is set up by hand, not through
-	 * R_AddPimpSelfOrb, so only a list left over from this map could draw it. */
+	 * R_AddPimpSelfOnly, so only a list left over from this map could draw it. */
 	R_ClearPimpOverrides ();
 	pimp_overrides[10].active = true;
 	pimp_overrides[10].self_orb = true;
 	pimp_overrides[10].model = &alias;
 	frame ("newmap");
 
-	/* Overflow: the list keeps MAX_PIMP_SELF_ORBS and says so once. */
+	/* Overflow: the list keeps MAX_PIMP_SELF_ONLY and says so once. */
 	R_ClearPimpOverrides ();
-	for (n = 1; n <= MAX_PIMP_SELF_ORBS + 2; n++)
-		R_AddPimpSelfOrb (n);
-	printf ("overflow %d %d\n", num_pimp_self_orbs, ndprint);
+	for (n = 1; n <= MAX_PIMP_SELF_ONLY + 2; n++)
+		R_AddPimpSelfOnly (n);
+	printf ("overflow %d %d\n", num_pimp_self_only, ndprint);
 	return 0;
 }
 '''
@@ -216,6 +231,7 @@ WANT = {
     "again": ["10@1,2,3"],
     "unflagged": [],
     "brush": ["10@1,2,3"],
+    "lightonly": ["10@1,2,3"],
     "glowsoff": [],
     "noents": [],
     "newmap": [],
@@ -239,7 +255,7 @@ def compile_and_run(program, work, name):
 def check_spawnflags(work, errors):
     text = PR_CMDS.read_text()
     fn = between(text, "static void PF_pimpmodel (void)", "\n}\n", "PF_pimpmodel")
-    m = re.search(r"pimp->self_orb\s*=.*?;", fn, re.S)
+    m = re.search(r"pimp->self_orb\s*=\s*\(\s*spawnflags.*?;", fn, re.S)
     if not m:
         fail("PF_pimpmodel no longer assigns pimp->self_orb")
     stmt = m.group(0)
@@ -247,7 +263,7 @@ def check_spawnflags(work, errors):
             (r"VectorCopy\s*\(\s*ref_ent->v\.origin\s*,\s*pimp->origin\s*\)",
              "copy the controller's origin into the override"),
             (r"pimp->model\s*=\s*mod\s*;", "record the controller's model"),
-            (r"if\s*\(\s*pimp->self_orb\s*\)\s*R_AddPimpSelfOrb\s*\(\s*entnum\s*\)",
+            (r"if\s*\(\s*pimp->self_orb\s*\|\|\s*pimp->self_light\s*\)\s*R_AddPimpSelfOnly\s*\(\s*entnum\s*\)",
              "register a self-only orb with the renderer")):
         if not re.search(needle, fn):
             errors.append("PF_pimpmodel must " + why)
@@ -281,22 +297,31 @@ def check_glow_pass(src, work, errors):
     text = src.read_text()
     table = between(text, "static pimp_override_t\tpimp_overrides[MAX_EDICTS];",
                     "pimp_override_t *R_GetPimpOverride", "the override table")
-    if "R_AddPimpSelfOrb" not in table:
-        errors.append("gl_rmain.c defines no R_AddPimpSelfOrb beside the override table")
+    if "R_AddPimpSelfOnly" not in table:
+        errors.append("gl_rmain.c defines no R_AddPimpSelfOnly beside the override table")
         return
     pass_ = function(text, "static void R_DrawAllGlows (void)", "R_DrawAllGlows")
     out = compile_and_run(PRELUDE + table + pass_ + DRIVER, work, "glows")
     seen = {}
+    if "lightkept " not in out:
+        errors.append("the light-only case printed nothing")
     if "overflow " not in out:
         errors.append("the overflow case printed nothing")
     for line in out.split("\n"):
-        if line.startswith("overflow "):
+        if line.startswith("lightkept "):
+            kept = int(line.split()[1])
+            print("lightonly  kept in the list %d time(s), want 1  %s"
+                  % (kept, "ok" if kept == 1 else "WRONG"))
+            if kept != 1:
+                errors.append("a self-only light (no orb) was dropped from the "
+                              "self-only list: CL_PimpSelfLights would never see it")
+        elif line.startswith("overflow "):
             kept, said = map(int, line.split()[1:])
             ok = kept == 1024 and said == 1
             print("overflow   kept %d, said so %d time(s), want 1024 and 1  %s"
                   % (kept, said, "ok" if ok else "WRONG"))
             if not ok:
-                errors.append("R_AddPimpSelfOrb overflow: kept %d, %d message(s)"
+                errors.append("R_AddPimpSelfOnly overflow: kept %d, %d message(s)"
                               % (kept, said))
         elif line:
             parts = line.split()
@@ -398,11 +423,11 @@ def check_headers(errors):
                       r"struct qmodel_s\s*\*\s*model;"):
             if not re.search(field, body):
                 errors.append("%s: pimp_override_t lacks %s" % (h.name, field))
-        if "void R_AddPimpSelfOrb (int entnum);" not in h.read_text():
-            errors.append("%s does not declare R_AddPimpSelfOrb" % h.name)
+        if "void R_AddPimpSelfOnly (int entnum);" not in h.read_text():
+            errors.append("%s does not declare R_AddPimpSelfOnly" % h.name)
     soft = (ROOT / "engine/hexen2/r_soft_web.c").read_text()
-    if not re.search(r"void R_AddPimpSelfOrb \(int entnum\)\s*\{", soft):
-        errors.append("r_soft_web.c defines no R_AddPimpSelfOrb: WEBSOFT will not link")
+    if not re.search(r"void R_AddPimpSelfOnly \(int entnum\)\s*\{", soft):
+        errors.append("r_soft_web.c defines no R_AddPimpSelfOnly: WEBSOFT will not link")
 
 
 def main():

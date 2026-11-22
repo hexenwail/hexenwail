@@ -681,9 +681,12 @@ A slot is reserved by key, so an entity that already owns a light keeps it
 from frame to frame.  That stability is what stops the visible set churning,
 and everything below is about preserving it when the pool runs out.
 
+CL_AllocDlightAt takes the owner's position, org, for the pool-full contest
+(NULL: no owner, never refused).  CL_AllocDlight reads it off the client
+entity, which a self-only misc_modelpimp controller does not have.  #522
 ===============
 */
-dlight_t *CL_AllocDlight (int key)
+static dlight_t *CL_AllocDlightAt (int key, const float *org)
 {
 	int		i;
 	dlight_t	*dl;
@@ -754,22 +757,24 @@ dlight_t *CL_AllocDlight (int key)
 		}
 	}
 
-	/* Don't let a newcomer evict something better than itself.  key is the
-	 * entity index for every light CL_RelinkEntities allocates, and that
-	 * entity's origin has already been interpolated for this frame by the
-	 * time we are called, so the newcomer's position is known exactly --
+	/* Don't let a newcomer evict something better than itself.  org is
+	 * where its owner stands: the client entity's for every light
+	 * CL_RelinkEntities allocates, a self-only controller's recorded origin
+	 * for CL_PimpSelfLights.  The entity's origin has already been
+	 * interpolated for this frame by the time we are called, so the
+	 * newcomer's position is known exactly --
 	 * unlike its radius, which the caller fills in after we return.  Judge
 	 * it on distance alone: it may only take the slot if it is itself
 	 * inside DLIGHT_NEAR and the incumbent it would displace is outside
 	 * DLIGHT_FAR (see above for why the gap, rather than a margin, is what
 	 * stops the set rotating).
 	 *
-	 * key 0 means a temporary entity (explosions, impacts); those are
-	 * brief and always near something the player just did, so they are
-	 * never refused. */
-	if (key > 0 && key < cl.num_entities)
+	 * org NULL: never refused.  That is key 0, a temporary entity
+	 * (explosions, impacts), brief and always near something the player
+	 * just did, and a key with no client entity. */
+	if (org)
 	{
-		VectorSubtract (cl_entities[key].origin, r_origin, delta);
+		VectorSubtract (org, r_origin, delta);
 		if (VectorLength (delta) > DLIGHT_NEAR || worst_dist < DLIGHT_FAR)
 		{
 			dl = &cl_dlight_discard;
@@ -783,6 +788,12 @@ done:
 	dl->key = key;
 	dl->color[0] = dl->color[1] = dl->color[2] = dl->color[3] = 1.0;
 	return dl;
+}
+
+dlight_t *CL_AllocDlight (int key)
+{
+	return CL_AllocDlightAt (key, (key > 0 && key < cl.num_entities)
+					? cl_entities[key].origin : NULL);
 }
 
 
@@ -864,6 +875,96 @@ static float CL_LerpPoint (void)
 	return frac;
 }
 
+
+/*
+===============
+CL_PimpCastLight
+
+Inky's misc_modelpimp cast light (EF_ILLUMINATE), keyed to key, at org plus the
+orb offset, coloured and sized by the pimp glow settings gs.  One function for
+a visible entity and a self-only controller, so the two lights cannot drift.
+===============
+*/
+static void CL_PimpCastLight (int key, const float *org, const float *gs)
+{
+	dlight_t	*dl;
+	int		k, l;
+	float		intensity;
+
+	dl = CL_AllocDlightAt (key, org);
+	VectorCopy (org, dl->origin);
+	dl->origin[0] += gs[ORB_OFFSET_X];
+	dl->origin[1] += gs[ORB_OFFSET_Y];
+	dl->origin[2] += gs[ORB_OFFSET_Z];
+	dl->radius = (gs[LIGHT_RADIUS] >= 1.0f) ? gs[LIGHT_RADIUS] : 200;
+	dl->die = cl.time + 0.001;
+	dl->color[0] = (gs[COLOR_R] != 0.0f) ? gs[COLOR_R] : 1.0f;
+	dl->color[1] = (gs[COLOR_G] != 0.0f) ? gs[COLOR_G] : 1.0f;
+	dl->color[2] = (gs[COLOR_B] != 0.0f) ? gs[COLOR_B] : 1.0f;
+	dl->color[3] = (gs[COLOR_A] != 0.0f) ? gs[COLOR_A] : 1.0f;
+	/* Apply light style flicker.  The style is the map's "style" key,
+	 * unchecked: one outside [0, MAX_LIGHTSTYLES) is no style. */
+	k = (int)(cl.time * 10);
+	l = (int)gs[LIGHT_STYLE];
+	if (l <= 0 || l >= MAX_LIGHTSTYLES || !cl_lightstyle[l].length)
+		intensity = 1.0f;
+	else
+	{
+		l = cl_lightstyle[l].map[k % cl_lightstyle[l].length] - 'a';
+		intensity = (float)(l * 22) / 255.0f;
+	}
+	dl->color[0] *= intensity;
+	dl->color[1] *= intensity;
+	dl->color[2] *= intensity;
+}
+
+/*
+===============
+CL_PimpSelfLights
+
+A self-only cast light (misc_modelpimp spawnflags 8 + 16) stays on the
+controller, and Inky's controllers have effects exactly EF_NODRAW, which the
+server never sends: CL_RelinkEntities never sees them, so the light was never
+allocated.  Light each registered one from its override instead, at the origin
+its last pimpmodel call recorded, exactly as a visible entity carrying the same
+override would be lit.  #522
+
+Only for a slot the client has never had an entity in on this map: msgtime is
+written by every entity update (CL_ParseUpdate) and nowhere else, and
+CL_ClearState zeroes cl_entities on each serverinfo (new map, savegame load).
+A prop pimped 8 + 16 that the client does have is lit by CL_RelinkEntities,
+and when it leaves the PVS, or QC hides it with EF_NODRAW, its light goes with
+it as it always did.  Not the baseline: SV_CreateBaseline sends one for every
+edict with a model, controllers included.  The cost: a controller spawned
+mid-map into a recycled slot that once held a sent entity stays dark.
+===============
+*/
+static void CL_PimpSelfLights (void)
+{
+	const int	*list;
+	int		k, n;
+
+	n = R_GetPimpSelfOnly (&list);
+	for (k = 0; k < n; k++)
+	{
+		int		entnum = list[k];
+		pimp_override_t	*pimp = R_GetPimpOverride (entnum);
+		int		pflags;
+
+		if (!pimp || !pimp->self_light)
+			continue;
+		/* The client has had it: CL_RelinkEntities lights it while it is
+		 * there, and nothing should once it is gone.  Also what keeps a
+		 * visible one to a single light. */
+		if (cl_entities[entnum].msgtime != 0)
+			continue;
+		/* R_GetPimpFlags' combination, with the override's model */
+		pflags = pimp->ex_flags | (pimp->model ? pimp->model->ex_flags : 0);
+		if (pflags & XF_NO_DLIGHT)
+			continue;
+		CL_PimpCastLight (entnum, pimp->origin, pimp->glow_settings);
+	}
+}
 
 /*
 ===============
@@ -1187,39 +1288,8 @@ static void CL_RelinkEntities (void)
 		}
 
 		/* Inky: misc_modelpimp cast light */
-		{
-			float *gs = pimp_gs;
-			if ((pflags & EF_ILLUMINATE) && !nodlight)
-			{
-				int k, l;
-				float intensity;
-
-				dl = CL_AllocDlight (i);
-				VectorCopy (ent->origin, dl->origin);
-				dl->origin[0] += gs[ORB_OFFSET_X];
-				dl->origin[1] += gs[ORB_OFFSET_Y];
-				dl->origin[2] += gs[ORB_OFFSET_Z];
-				dl->radius = (gs[LIGHT_RADIUS] >= 1.0f) ? gs[LIGHT_RADIUS] : 200;
-				dl->die = cl.time + 0.001;
-				dl->color[0] = (gs[COLOR_R] != 0.0f) ? gs[COLOR_R] : 1.0f;
-				dl->color[1] = (gs[COLOR_G] != 0.0f) ? gs[COLOR_G] : 1.0f;
-				dl->color[2] = (gs[COLOR_B] != 0.0f) ? gs[COLOR_B] : 1.0f;
-				dl->color[3] = (gs[COLOR_A] != 0.0f) ? gs[COLOR_A] : 1.0f;
-				/* Apply light style flicker */
-				k = (int)(cl.time * 10);
-				l = (int)gs[LIGHT_STYLE];
-				if (l <= 0 || !cl_lightstyle[l].length)
-					intensity = 1.0f;
-				else
-				{
-					l = cl_lightstyle[(int)gs[LIGHT_STYLE]].map[k % cl_lightstyle[(int)gs[LIGHT_STYLE]].length] - 'a';
-					intensity = (float)(l * 22) / 255.0f;
-				}
-				dl->color[0] *= intensity;
-				dl->color[1] *= intensity;
-				dl->color[2] *= intensity;
-			}
-		}
+		if ((pflags & EF_ILLUMINATE) && !nodlight)
+			CL_PimpCastLight (i, ent->origin, pimp_gs);
 
 		/* Use per-entity trail flags from PimpModel overrides if set,
 		 * otherwise fall back to the shared model flags */
@@ -1389,6 +1459,9 @@ static void CL_RelinkEntities (void)
 			cl_numvisedicts++;
 		}
 	}
+
+	/* Once per frame, after the loop: the controllers it never sees */
+	CL_PimpSelfLights ();
 }
 
 
