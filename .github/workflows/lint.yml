@@ -215,6 +215,12 @@ jobs:
       - name: misc_modelpimp self-only orb draws at its controller
         run: python3 tools/test_modelpimp_selforb.py
 
+      # misc_modelpimp spawnflags 8+16 casts one light from its controller,
+      # through the same CL_PimpCastLight as a visible entity, once, and not
+      # with flag 64 (#522).  Runs the real list and dlight code, GL and soft.
+      - name: misc_modelpimp self-only cast light comes from its controller
+        run: python3 tools/test_modelpimp_selflight.py
+
       # maplist, the map menu and the other name listings must see inside
       # mounted .pk3s, in the shipped Rust quakefs and the C reference (#129).
       - name: Name listings see inside pk3 archives

@@ -429,6 +429,9 @@ typedef struct {
 	 * controller is EF_NODRAW, which the server never sends, so there is no
 	 * client entity to draw it from.  #518 */
 	qboolean	self_orb;
+	/* spawnflags 8+16: the cast light, from origin, by CL_PimpSelfLights,
+	 * for the same reason.  #522 */
+	qboolean	self_light;
 	vec3_t		origin;		// the pimped edict's, at the last pimpmodel call
 	struct qmodel_s	*model;
 	float		glow_settings[GLOW_SETTINGS_COUNT];
@@ -436,7 +439,8 @@ typedef struct {
 
 void R_ClearPimpOverrides (void);
 pimp_override_t *R_GetPimpOverride (int entnum);
-void R_AddPimpSelfOrb (int entnum);	/* #518 */
+void R_AddPimpSelfOnly (int entnum);	/* #518, #522 */
+int R_GetPimpSelfOnly (const int **list);
 int R_GetEntityModelFlags (entity_t *e);
 int R_GetPimpFlags (entity_t *e, float **gsettings_out);
 

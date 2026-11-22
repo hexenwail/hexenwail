@@ -12,12 +12,14 @@ name, and what resets when. It exists because the reach rule is not obvious
 from the spawnflag names and has already been field-reported twice as a bug —
 see [Reach](#reach-who-else-is-affected).
 
-Engine side lives in `PF_pimpmodel` (`engine/h2shared/pr_cmds.c`) and
-`R_GetPimpFlags` / `R_DrawAllGlows` (`engine/hexen2/gl_rmain.c`).
+Engine side lives in `PF_pimpmodel` (`engine/h2shared/pr_cmds.c`),
+`R_GetPimpFlags` / `R_DrawAllGlows` (`engine/hexen2/gl_rmain.c`) and the cast
+light in `CL_PimpCastLight` / `CL_PimpSelfLights` (`engine/hexen2/cl_main.c`).
 
 All of it is local to one process: `PF_pimpmodel` runs in server QC and writes
 straight into the client renderer's tables, so only a client in the same
-process as the server sees any pimp effect, this orb included. A remote client
+process as the server sees any pimp effect, the self-only orb and light
+included. A remote client
 of a listen server, and every client of `h2ded`, sees none.
 
 ## The call
@@ -75,7 +77,7 @@ left to the light.
 | 2 | Float | `EF_FLOAT` — bob without rotating |
 | 4 | Glow orb | `EF_GLOW` — additive sprite at the entity, coloured by `glow_color` |
 | 8 | Cast light | `EF_ILLUMINATE` — allocate a dynamic light at the entity |
-| 16 | Self only | keep glow and cast light on this entity instead of sharing; with 4, **one orb, here**: at the controller's origin (see [below](#the-controller-is-never-drawn)) |
+| 16 | Self only | keep glow and cast light on this entity instead of sharing; with 4, **one orb, here**, and with 8, **one light, here**: at the controller's origin (see [below](#the-controller-is-never-drawn)) |
 | 32 | Share motion | give siblings the spin and float as well |
 | 64 | No dynamic light | grant `XF_NO_DLIGHT`; cast no dlight at all |
 
@@ -132,13 +134,17 @@ that lives only on the controller is drawn from nowhere.
 
 That is why, until #518, spawnflags 20 (4 + 16) drew **no
 orb anywhere**: 16 kept the orb on the controller, and nothing drew the
-controller. Now:
+controller. Until #522 spawnflags 24 (8 + 16) cast **no light anywhere**, for
+the same reason. Now:
 
-| Spawnflags | Orb |
-|---|---|
-| 4 | on every entity sharing the model, as before; **none** at the controller |
-| 4 + 16 | **exactly one**, at the controller's origin, with its `glow_color` and `health` (radius) |
-| neither 4 nor 8, a colour, no reach flag | inferred orb, shared, as before (#277) |
+| Spawnflags | Orb | Cast light |
+|---|---|---|
+| 4 | on every entity sharing the model, as before; **none** at the controller | — |
+| 4 + 16 | **exactly one**, at the controller's origin, with its `glow_color` and `health` (radius) | — |
+| 8 | — | on every entity sharing the model, each from its own origin, as before; **none** at the controller |
+| 8 + 16 | — | **one light, here**: exactly one, at the controller's origin plus `view_ofs`, with its `glow_color`, `max_health` (radius) and `style` |
+| 8 + 16 + 64 | — | none (`XF_NO_DLIGHT`) |
+| neither 4 nor 8, a colour, no reach flag | inferred orb, shared, as before (#277) | — |
 
 `PF_pimpmodel` records the controller's origin and model in its override and
 registers it; `R_DrawAllGlows` draws every registered self-only orb after the
@@ -153,14 +159,38 @@ controllers re-pimp every `wait`, and they do not move. It belongs to the
 controller, not to the prop it sits on: remove the prop and the orb stays. It
 is not PVS-culled, but it is depth-tested, so walls still hide it.
 
-**Known gap:** a self-only cast light (spawnflags 24, 8 + 16) has the same
-cause and is still dark: the dlight is allocated in `CL_RelinkEntities`, which
-never sees the controller. Spawnflag 8 alone works, because each sibling casts
-its own.
+The self-only light rides on the same registered list. After the entity loop
+in `CL_RelinkEntities`, `CL_PimpSelfLights` allocates a light for each
+registered controller carrying 8 + 16, keyed to the controller's edict number
+so it updates in place frame to frame, through `CL_PimpCastLight`: the same
+function that lights a visible pimped entity, so the colour, radius, offset,
+style flicker and lifetime are identical. A style outside 0..255 is treated as
+no style. Spawnflag 64 suppresses it, through the same `XF_NO_DLIGHT` test,
+including when another controller shared 64 onto the model. From there it is an
+ordinary dynamic light: `r_dynamic 0` turns it off, and shadow maps and
+`r_dlight_occlusion` treat it like any other. When the light pool is full, the
+contest in `CL_AllocDlightAt` judges it from the controller's recorded origin
+without `view_ofs`, exactly as it judges a visible entity from its origin.
+
+Only a slot the client has never had an entity in on this map is lit from the
+list (its `msgtime` is still 0: every entity update sets it, and the client
+zeroes its entities on each new map or savegame load). So a prop pimped 8 + 16
+that the client does have is lit by the entity loop and keeps one light, and
+when it leaves the PVS, or QC hides it with `EF_NODRAW`, its light goes with it,
+as it always did. The one case this gets wrong: a controller spawned mid-map
+into a recycled edict slot that once held an entity the client saw stays dark.
+Map-placed controllers, and every controller after a savegame load, are not
+affected.
+
+A `pimpmodel` call that fails (no model, or one that will not load) clears the
+self-only orb and light, so a controller that re-pimps with a bad model loses
+both instead of keeping the last good call's.
 
 `r_glowinfo` lists the orbs the last frame drew (entity number, effects, radius,
-colour, origin, model); `tools/pimp-orb-check.sh` uses it to check all of the
-above live on a SoT map.
+colour, origin, model) and `r_dlightinfo` the live dynamic lights (key, radius,
+colour, origin; a controller's light has no `ent=`, because the client has no
+entity for it). `tools/pimp-orb-check.sh` uses both to check all of the above
+live on a SoT map.
 
 ## What resets, and when
 
@@ -172,11 +202,13 @@ rolled back:
 - `R_NewMap` calls `Mod_RestoreAliasModelDefaults` and then
   `R_ClearPimpOverrides`, in that order, so the next map's controllers re-pimp
   from clean MDL state. `R_ClearPimpOverrides` also empties the list of
-  self-only orbs, so a loaded savegame starts with none until its controllers
-  next think.
+  self-only orbs and lights, so a loaded savegame starts with none until its
+  controllers next think.
 
 A model pimped on map A therefore cannot leak onto map B. Per-entity overrides
-are also cleared when the edict is freed (`ED_Free`).
+are also cleared when the edict is freed (`ED_Free`), and a freed or reused
+slot drops off the self-only list the next time it is read, as does a
+controller re-pimped without 16.
 
 Changing `EF_TRANSPARENT`, `EF_HOLEY` or `EF_SPECIAL_TRANS` re-uploads the
 model's skins, because those three decide the texture mode the skin was
@@ -187,7 +219,9 @@ palettized texels directly.
 
 `EF_SPIN` and `EF_FLOAT` drive the software alias transform as well as the
 GL/GLES transform. Glow orbs remain GL-only; `EF_ILLUMINATE` does work,
-because the dlight is allocated in `cl_main.c`, which both renderers share.
+because the dlight is allocated in `cl_main.c`, which both renderers share. The
+self-only light (8 + 16) works too: `r_soft_web.c` keeps the same self-only
+list as `gl_rmain.c`.
 
 ## Adding your own light-casting models: `r_dlight_model_list`
 

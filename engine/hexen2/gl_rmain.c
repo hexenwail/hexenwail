@@ -5617,39 +5617,61 @@ static void R_DrawTransEntitiesOnList (qboolean inwater)
 // Per-entity PimpModel overrides, keyed by entity number
 static pimp_override_t	pimp_overrides[MAX_EDICTS];
 
-/* The entity numbers whose override carries a self-only orb, so the glow pass
- * need not walk all MAX_EDICTS overrides every frame.  An entry outlives its
- * override (ED_Free only clears .active); R_DrawAllGlows drops it then.  #518 */
-#define	MAX_PIMP_SELF_ORBS	1024
-static int	pimp_self_orbs[MAX_PIMP_SELF_ORBS];
-static int	num_pimp_self_orbs;
+/* The entity numbers whose override carries a self-only orb or cast light
+ * (spawnflag 16 with 4 or 8), so neither the glow pass nor the client's light
+ * pass need walk all MAX_EDICTS overrides every frame.  An entry outlives its
+ * override (ED_Free only clears .active); R_GetPimpSelfOnly drops it then.
+ * #518, #522 */
+#define	MAX_PIMP_SELF_ONLY	1024
+static int	pimp_self_only[MAX_PIMP_SELF_ONLY];
+static int	num_pimp_self_only;
 
 void R_ClearPimpOverrides (void)
 {
 	memset(pimp_overrides, 0, sizeof(pimp_overrides));
-	num_pimp_self_orbs = 0;
+	num_pimp_self_only = 0;
 }
 
-void R_AddPimpSelfOrb (int entnum)
+void R_AddPimpSelfOnly (int entnum)
 {
 	static qboolean	warned;
 	int	i;
 
 	if (entnum < 0 || entnum >= MAX_EDICTS)
 		return;
-	for (i = 0; i < num_pimp_self_orbs; i++)
+	for (i = 0; i < num_pimp_self_only; i++)
 	{
-		if (pimp_self_orbs[i] == entnum)
+		if (pimp_self_only[i] == entnum)
 			return;	/* re-pimped every wait */
 	}
-	if (num_pimp_self_orbs < MAX_PIMP_SELF_ORBS)
-		pimp_self_orbs[num_pimp_self_orbs++] = entnum;
+	if (num_pimp_self_only < MAX_PIMP_SELF_ONLY)
+		pimp_self_only[num_pimp_self_only++] = entnum;
 	else if (!warned)
 	{
 		warned = true;
-		Con_DPrintf ("R_AddPimpSelfOrb: more than %d self-only orbs, the rest are not drawn\n",
-			     MAX_PIMP_SELF_ORBS);
+		Con_DPrintf ("R_AddPimpSelfOnly: more than %d self-only controllers, the rest get no orb or light\n",
+			     MAX_PIMP_SELF_ONLY);
 	}
+}
+
+/* The registered controllers that still carry a self-only orb or light.  An
+ * entry whose override was freed, or re-pimped with neither, is dropped here,
+ * so the glow pass and CL_PimpSelfLights read the same list. */
+int R_GetPimpSelfOnly (const int **list)
+{
+	int	i, j;
+
+	for (i = j = 0; i < num_pimp_self_only; i++)
+	{
+		pimp_override_t	*pimp = &pimp_overrides[pimp_self_only[i]];
+
+		if (!pimp->active || !(pimp->self_orb || pimp->self_light))
+			continue;
+		pimp_self_only[j++] = pimp_self_only[i];
+	}
+	num_pimp_self_only = j;
+	*list = pimp_self_only;
+	return num_pimp_self_only;
 }
 
 pimp_override_t *R_GetPimpOverride (int entnum)
@@ -5917,7 +5939,8 @@ static void R_DrawGlow (entity_t *e, int entnum)
 static void R_DrawAllGlows (void)
 {
 	static byte	drawn[(MAX_EDICTS + 7) / 8];
-	int		i, j;
+	const int	*self;
+	int		i, n;
 	entity_t	*e;
 
 	r_numglowinfo = 0;
@@ -5951,15 +5974,15 @@ static void R_DrawAllGlows (void)
 	 * controller's origin: the controller is EF_NODRAW, so it is never sent
 	 * and there is no client entity for it.  One the client does draw (a
 	 * visible entity pimped 4+16) already had its orb above. */
-	for (i = j = 0; i < num_pimp_self_orbs; i++)
+	n = R_GetPimpSelfOnly (&self);
+	for (i = 0; i < n; i++)
 	{
-		int		entnum = pimp_self_orbs[i];
+		int		entnum = self[i];
 		pimp_override_t	*pimp = &pimp_overrides[entnum];
 		entity_t	orb;
 
-		if (!pimp->active || !pimp->self_orb)
-			continue;	/* freed or re-pimped since: drop it */
-		pimp_self_orbs[j++] = entnum;
+		if (!pimp->self_orb)
+			continue;	/* a self-only light: CL_PimpSelfLights */
 		if (drawn[entnum >> 3] & (1 << (entnum & 7)))
 			continue;
 		if (!pimp->model || pimp->model->type != mod_alias)
@@ -5970,7 +5993,6 @@ static void R_DrawAllGlows (void)
 		VectorCopy (pimp->origin, orb.origin);
 		R_DrawGlow (&orb, entnum);
 	}
-	num_pimp_self_orbs = j;
 
 	R_SetBlend (false);
 	R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);

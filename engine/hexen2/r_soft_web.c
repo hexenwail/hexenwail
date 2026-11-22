@@ -164,9 +164,17 @@ void R_SoftWebInitCvars (void)
 static pimp_override_t	pimp_overrides[MAX_EDICTS];
 static float		null_glow_settings[GLOW_SETTINGS_COUNT];
 
+/* The software renderer draws no glow orbs, but it does cast the pimp light
+ * (cl_main.c allocates it), so a self-only light needs the same list as GL:
+ * see gl_rmain.c.  #522 */
+#define	MAX_PIMP_SELF_ONLY	1024
+static int	pimp_self_only[MAX_PIMP_SELF_ONLY];
+static int	num_pimp_self_only;
+
 void R_ClearPimpOverrides (void)
 {
 	memset (pimp_overrides, 0, sizeof(pimp_overrides));
+	num_pimp_self_only = 0;
 }
 
 pimp_override_t *R_GetPimpOverride (int entnum)
@@ -176,10 +184,43 @@ pimp_override_t *R_GetPimpOverride (int entnum)
 	return &pimp_overrides[entnum];
 }
 
-/* The software renderer draws no glow orbs, so it keeps no list of them. */
-void R_AddPimpSelfOrb (int entnum)
+void R_AddPimpSelfOnly (int entnum)
 {
-	(void) entnum;
+	static qboolean	warned;
+	int	i;
+
+	if (entnum < 0 || entnum >= MAX_EDICTS)
+		return;
+	for (i = 0; i < num_pimp_self_only; i++)
+	{
+		if (pimp_self_only[i] == entnum)
+			return;	/* re-pimped every wait */
+	}
+	if (num_pimp_self_only < MAX_PIMP_SELF_ONLY)
+		pimp_self_only[num_pimp_self_only++] = entnum;
+	else if (!warned)
+	{
+		warned = true;
+		Con_DPrintf ("R_AddPimpSelfOnly: more than %d self-only controllers, the rest get no orb or light\n",
+			     MAX_PIMP_SELF_ONLY);
+	}
+}
+
+int R_GetPimpSelfOnly (const int **list)
+{
+	int	i, j;
+
+	for (i = j = 0; i < num_pimp_self_only; i++)
+	{
+		pimp_override_t	*pimp = &pimp_overrides[pimp_self_only[i]];
+
+		if (!pimp->active || !(pimp->self_orb || pimp->self_light))
+			continue;
+		pimp_self_only[j++] = pimp_self_only[i];
+	}
+	num_pimp_self_only = j;
+	*list = pimp_self_only;
+	return num_pimp_self_only;
 }
 
 int R_GetEntityModelFlags (entity_t *e)
