@@ -8008,9 +8008,23 @@ r_refdef must be set before the first call
  * draw included, so the pair is never read unwritten.  #97. */
 #define RPROF_SHADOW	(RPROF_COUNT + 1)
 #define RPROF_QUERIES	(RPROF_COUNT + 3)
+/* Query sets in flight.  One set, re-issued every frame and read the next,
+ * only ever reported when the GPU had drained the whole queue by the start of
+ * the following frame: a GPU-bound frame (r_ssao's compute passes at 1080p)
+ * leaves the driver two or three frames behind, so the set was overwritten
+ * before it was ever ready: on a Tesla P4 at 1080p r_speeds 2 reported under 1
+ * frame in 10 with r_ssao 0 and under 1 in 100 with r_ssao 1.  Enough
+ * sets to cover the driver's queue: each frame writes the next, the report
+ * reads the newest one that has landed.  The CPU block printed under it is
+ * still the previous frame's, so the GPU line can be up to RPROF_RING frames
+ * older than it.  GitHub #503. */
+#define RPROF_RING	4
 
-static GLuint	rprof_queries[RPROF_QUERIES];
-static qboolean	rprof_pending;		/* results from previous frame waiting */
+static GLuint	rprof_queries[RPROF_RING][RPROF_QUERIES];
+static qboolean	rprof_pending;		/* some set has results not yet reported */
+static qboolean	rprof_set_pending[RPROF_RING];	/* written, not yet read back */
+static int	rprof_set;		/* the set this frame writes; -1 = none */
+static int	rprof_next_set;		/* the set the next frame writes */
 static qboolean	rprof_available;	/* queries have been allocated */
 static double	rprof_cpu_world;	/* CPU wall-clock for R_RenderScene */
 /* sub-pass breakdown — declarations hoisted above R_RenderScene */
@@ -8065,16 +8079,38 @@ static void R_ProfileInit (void)
 		rprof_gpu_unavailable_reason = "GL timer-query entry points missing";
 		return;
 	}
-	glGenQueries_fp(RPROF_QUERIES, rprof_queries);
+	glGenQueries_fp(RPROF_RING * RPROF_QUERIES, rprof_queries[0]);
 	rprof_available = true;
 	rprof_pending = false;
+	rprof_set = -1;
 #endif
+}
+
+/* Claim the set this frame writes.  One still unread is not re-issued, which
+ * would throw away a result the driver is about to hand over; the frame goes
+ * unmeasured instead. */
+static void R_ProfileBeginFrame (void)
+{
+	rprof_set = -1;
+	if (!rprof_available || rprof_set_pending[rprof_next_set])
+		return;
+	rprof_set = rprof_next_set;
+	rprof_next_set = (rprof_next_set + 1) % RPROF_RING;
 }
 
 static void R_ProfileTimestamp (int idx)
 {
-	if (rprof_available)
-		glQueryCounter_fp(rprof_queries[idx], GL_TIMESTAMP);
+	if (rprof_available && rprof_set >= 0)
+		glQueryCounter_fp(rprof_queries[rprof_set][idx], GL_TIMESTAMP);
+}
+
+/* The last timestamp of the frame is in: mark this frame's set for the report. */
+static void R_ProfileEndFrame (void)
+{
+	if (rprof_set >= 0)
+		rprof_set_pending[rprof_set] = true;
+	rprof_set = -1;	/* nothing after this frame's last stamp may write it */
+	rprof_pending = true;
 }
 
 static void R_ProfileShadowTimestamp (qboolean end)
@@ -8083,11 +8119,34 @@ static void R_ProfileShadowTimestamp (qboolean end)
 		R_ProfileTimestamp (RPROF_SHADOW + (end ? 1 : 0));
 }
 
+/* Free every set that has landed, oldest first, and return the newest of them
+ * (-1 if none).  Never GL_QUERY_RESULT on a set whose last timestamp is not
+ * available, which is the readback stall; the last being in implies the rest
+ * of its set are too. */
+static int R_ProfileNewestLanded (void)
+{
+	GLint ready;
+	int n, set, newest = -1;
+
+	for (n = 0; n < RPROF_RING; n++)
+	{
+		set = (rprof_next_set + n) % RPROF_RING;
+		if (!rprof_set_pending[set])
+			continue;
+		ready = 0;
+		glGetQueryObjectiv_fp(rprof_queries[set][RPROF_COUNT], GL_QUERY_RESULT_AVAILABLE, &ready);
+		if (!ready)
+			break;	/* the GPU retires in order: nothing later is in either */
+		rprof_set_pending[set] = false;
+		newest = set;
+	}
+	return newest;
+}
+
 static void R_ProfileReport (void)
 {
 	HWGLuint64 ts[RPROF_QUERIES];
-	GLint ready = 0;
-	int i;
+	int i, n, newest;
 
 	if (!rprof_pending)
 		return;
@@ -8096,13 +8155,12 @@ static void R_ProfileReport (void)
 	{
 		double ms[RPROF_COUNT], total, shadow;
 
-		/* Check if last timestamp is ready (implies all earlier ones are too) */
-		glGetQueryObjectiv_fp(rprof_queries[RPROF_COUNT], GL_QUERY_RESULT_AVAILABLE, &ready);
-		if (!ready)
+		newest = R_ProfileNewestLanded ();
+		if (newest < 0)
 			return;
 
 		for (i = 0; i < RPROF_QUERIES; i++)
-			glGetQueryObjectui64v_fp(rprof_queries[i], GL_QUERY_RESULT, &ts[i]);
+			glGetQueryObjectui64v_fp(rprof_queries[newest][i], GL_QUERY_RESULT, &ts[i]);
 
 		for (i = 0; i < RPROF_COUNT; i++)
 			ms[i] = (double)(ts[i + 1] - ts[i]) / 1000000.0;
@@ -8174,6 +8232,9 @@ static void R_ProfileReport (void)
 		   rprof_wpoly, rprof_epoly, rprof_texbinds);
 
 	rprof_pending = false;
+	for (n = 0; n < RPROF_RING; n++)
+		if (rprof_set_pending[n])
+			rprof_pending = true;	/* sets still in flight report later */
 }
 
 /*
@@ -8272,8 +8333,9 @@ void R_RenderView (void)
 	if (r_speeds.integer >= 2)
 	{
 		R_ProfileInit();
-		/* Report previous frame's results (non-blocking) */
+		/* Report the newest frame the GPU has finished (non-blocking) */
 		R_ProfileReport();
+		R_ProfileBeginFrame();
 	}
 
 	mirror = false;
@@ -8340,7 +8402,7 @@ void R_RenderView (void)
 
 	// render mirror view
 	R_Mirror ();
-	if (r_speeds.integer >= 2) { R_ProfileTimestamp(RPROF_COUNT); rprof_pending = true; }
+	if (r_speeds.integer >= 2) { R_ProfileTimestamp(RPROF_COUNT); R_ProfileEndFrame(); }
 
 	R_Shadow_DrawDebug ();	/* r_shadow_debug, #97 */
 

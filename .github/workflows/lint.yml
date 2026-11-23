@@ -682,6 +682,11 @@ jobs:
         run: python3 tools/test_shadow_cube_faces.py
       - name: Shadow-map blocks match their mirrors
         run: python3 tools/test_dlshadow_block.py
+      # r_speeds 2's GPU timestamps live in a ring of query sets, read only
+      # once landed, so a GPU frames behind the CPU still reports every frame
+      # (#503; the live count is tools/rspeeds-ssao-check.sh).
+      - name: r_speeds 2 rings its timestamp queries
+        run: python3 tools/test_rprof_ring.py
       # The shadow-map unit holds a depth cube array on every frame, a 1x1
       # placeholder when there is no map, or every world and alias draw runs
       # its samplerCubeArrayShadow against texture 0 (#526).
