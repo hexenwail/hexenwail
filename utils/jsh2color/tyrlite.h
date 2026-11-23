@@ -45,6 +45,7 @@ void	TestLightFace (int surfnum, const vec3_t faceoffset);
 void	TestLightFace2 (int surfnum, const vec3_t faceoffset);
 void	LightFaceLIT (int surfnum, const vec3_t faceoffset);
 void	LightFaceLIT2 (int surfnum, const vec3_t faceoffset);
+void	StoreFaceLIT (void);
 
 void	MakeTnodes (dmodel_t *bm);
 

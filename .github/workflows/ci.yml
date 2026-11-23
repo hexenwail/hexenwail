@@ -513,6 +513,16 @@ jobs:
           python3 tools/test_hcc_tail_slack.py "$utils/bin/hcc" "${dats[@]}"
           python3 tools/test_hcc_tail_slack.py "$utils/bin/dhcc"
 
+      # jsh2colour must write the same .lit with -threads 8 as with -threads 1
+      # (#515), with faces that share lightmap bytes too.  The fixture map is
+      # generated and compiled with the qbsp and light built above; the keep2
+      # and demo1 halves need retail data and skip here.
+      - name: jsh2colour output does not depend on thread count
+        run: |
+          set -euo pipefail
+          utils=$(nix build .#utils --no-link --print-out-paths)
+          python3 tools/test_jsh2colour_threads.py "$utils/bin"
+
   flatpak:
     runs-on: ubuntu-latest
     timeout-minutes: 30

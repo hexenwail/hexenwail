@@ -230,6 +230,7 @@ static void LightWorld (void)
 
 	bspfileface = 0;	// reset
 	RunThreadsOn (ColorLightThread);
+	StoreFaceLIT ();
 }
 
 

@@ -11,8 +11,9 @@ either one rebuilds `.#gamecode`. A new build-time tool must be added to the
 Some scripts are CI gates, run from `.github/workflows/lint.yml`:
 `menu_soft_parity.py`, `test_software_model_flags.py`,
 `test_multiplayer_join.py` and `ironwail_scorecard.py --check`.
-`test_hcc_tail_slack.py` is a gate in `ci.yml`'s `cross` job instead,
-because it needs the `hcc` that job builds.
+`test_hcc_tail_slack.py` and `test_jsh2colour_threads.py` are gates in
+`ci.yml`'s `cross` job instead, because they need the `hcc`, `qbsp`, `light`
+and `jsh2colour` that job builds.
 
 Run the scripts directly. The Python ones need only stock `python3`, except
 `pak_extract.py`, which needs Pillow.
