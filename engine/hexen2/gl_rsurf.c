@@ -3876,15 +3876,24 @@ void R_DrawWorld (void)
 	 * per-page lightmaps and wants exactly the page-local UVs it has.
 	 * uhexen2-qt7s.
 	 *
-	 * Off for every frame of a map with a mirror while mirrors are on, in
-	 * view or not: the compute filter knows nothing of the mirror's texture,
-	 * so it drew the mirror opaque in the view, over the reflection, and into
-	 * the reflected view as well.  The chain pass leaves it to R_MirrorChain.
-	 * No retail map has a mirror (#340 P3d). */
+	 * The mirror's surfaces are not in the compute filter's set at all
+	 * (R_BuildWorldCull marks them skipped), so the view keeps the cull on
+	 * a mirror map; it used to be off there for every frame (#340 P3d,
+	 * #517).  Off for the reflected view (`mirror' is set from the view's
+	 * chain pass until R_RenderView's next frame): R_DrawWorldCulled keeps
+	 * the MVP it drew with for the next frame's Hi-Z reprojection against
+	 * the pyramid of the view's depth, and the reflected one would be
+	 * kept instead.  And off on a mirror map at gl_cull 0 while mirrors
+	 * are on: cull_mark_comp keeps back faces and leaves them to the
+	 * rasterizer's cull, so with none they draw -- the chain pass never
+	 * does -- and through the hole the mirror leaves in the view's depth
+	 * the back of the wall covered the reflection
+	 * (tools/sweep-mirror-gpu.steps 04-wall-nocull). */
 	gpu_cull_active = R_WorldCullAvailable() && r_gpucull.integer &&
 			  lm_atlas_enabled && lm_atlas_texture &&
-			  r_drawworld.integer &&
-			  !(mirrortexturenum >= 0 && r_mirroralpha.value != 1.0);
+			  r_drawworld.integer && !mirror &&
+			  !(mirrortexturenum >= 0 && r_mirroralpha.value != 1.0 &&
+			    !gl_cull.integer);
 	if (gpu_cull_active)
 	{
 		/* GPU compute culling draws solid world surfaces.

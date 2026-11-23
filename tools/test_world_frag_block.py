@@ -418,13 +418,16 @@ rmain, rsurf = strip(read("engine/hexen2/gl_rmain.c")), strip(read("engine/hexen
 lc, vbo, wcull = strip(read("engine/h2shared/gl_lightcluster.c")), strip(read("engine/h2shared/gl_vbo.c")), \
     strip(read("engine/h2shared/gl_worldcull.c"))
 warp = strip(read("engine/h2shared/gl_warp.c"))
+# The fill is R_SetupWorldFrame's, which R_SetupFrame calls and R_Mirror
+# calls again once the view is back (#517).
 sf = body_of(rmain, r"static void R_SetupFrame \(void\)\s*\{") or ""
+swf = body_of(rmain, r"static void R_SetupWorldFrame \(void\)\s*\{") or ""
 if not re.search(r"GL_MaterialParams \(mat\);\s*R_SoftEmuParams \(se\);\s*R_SetWorldFrame \(R_CausticsIntensity\(\), "
                  r"\(float\)cl\.time,\s*r_lightmap_bicubic\.integer \? 1\.0f : 0\.0f,\s*r_fullbright\.integer \? 1\.0f : "
-                 r"0\.0f,\s*r_lightmap\.integer \? 1\.0f : 0\.0f, mat, se\);\s*R_SetWorldSpans \(R_SpanCell \(false\)\);", sf):
-    errors.append("R_SetupFrame must fill the world frame record with the values it pushed to the three programs")
-if sf.find("R_SetWorldFrame") < sf.find("r_viewleaf = Mod_PointInLeaf"):
-    errors.append("R_SetupFrame must set the caustics after r_viewleaf moves (R_CausticsIntensity reads it)")
+                 r"0\.0f,\s*r_lightmap\.integer \? 1\.0f : 0\.0f, mat, se\);\s*R_SetWorldSpans \(R_SpanCell \(false\)\);", swf):
+    errors.append("R_SetupWorldFrame must fill the world frame record with the values it pushed to the three programs")
+if "R_SetWorldFrame" in sf or not 0 <= sf.find("r_viewleaf = Mod_PointInLeaf") < sf.find("R_SetupWorldFrame ();"):
+    errors.append("R_SetupFrame must set the caustics (R_SetupWorldFrame) after r_viewleaf moves (R_CausticsIntensity reads it)")
 bfw = body_of(lc, r"void R_LightCluster_BindForWorld \(void\)\s*\{") or ""
 if not re.search(r"\}\s*R_SetWorldDlight \(scale, lc_view, lc_vp, lc_zlogscale, lc_zlogbias,\s*"
                  r"r_dlight_occlusion\.integer >= 1 \? DLIGHT_PLANE_EPSILON : 0\.0f\);\s*if \(scale <= 0\.0f\)", bfw):

@@ -2365,18 +2365,26 @@ def and_terms(expr):
 
 
 def mirror_cull_term(t):
-    """`!(mirrortexturenum >= 0 && r_mirroralpha.value != 1.0)`, its two
-    terms in either order, either side of each comparison."""
-    m = re.fullmatch(r"!\s*(\(.*\))", t)
+    """`!mirror`: the compute cull off for the reflected view (#517)."""
+    return re.fullmatch(r"!\s*(?:mirror|\(\s*mirror\s*\))", t) is not None
+
+
+def mirror_nocull_term(t):
+    """`!(mirrortexturenum >= 0 && r_mirroralpha.value != 1.0 && !gl_cull.integer)`,
+    its three terms in any order, either side of each comparison: off on a
+    mirror map at gl_cull 0, where the compute filter's back faces cover the
+    reflection (#517)."""
+    m = re.fullmatch(r"!\s*(\(.*\))", t, re.S)
     if not m:
         return False
     inner = and_terms(m.group(1))
-    if len(inner) != 2:
+    if len(inner) != 3:
         return False
     one = r"1(?:\.0*)?f?"
     pats = (r"mirrortexturenum\s*>=\s*0|0\s*<=\s*mirrortexturenum",
-            r"r_mirroralpha\s*\.\s*value\s*!=\s*%s|%s\s*!=\s*r_mirroralpha\s*\.\s*value" % (one, one))
-    return sorted(i for t2 in inner for i, rx in enumerate(pats) if re.fullmatch(rx, t2)) == [0, 1]
+            r"r_mirroralpha\s*\.\s*value\s*!=\s*%s|%s\s*!=\s*r_mirroralpha\s*\.\s*value" % (one, one),
+            r"!\s*gl_cull\s*\.\s*integer")
+    return sorted(i for t2 in inner for i, rx in enumerate(pats) if re.fullmatch(rx, t2.strip())) == [0, 1, 2]
 
 
 MIRROR_VIEW = (("r_refdef.vieworg", r"r_refdef\s*\.\s*vieworg"), ("r_refdef.viewangles", r"r_refdef\s*\.\s*viewangles"),
@@ -2502,11 +2510,35 @@ def check_mirror(root):
     b = body_named(root, rs, "R_DrawWorld")
     if b is not None:
         m = re.search(r"\bgpu_cull_active\s*=\s*([^;]*);", b)
-        if not m or not any(mirror_cull_term(t) for t in and_terms(m.group(1))):
-            fail("%s: R_DrawWorld's GL compute cull must be off on a map with a mirror while mirrors are on "
-                 "(`&& !(mirrortexturenum >= 0 && r_mirroralpha.value != 1.0)`) -- its filter draws the "
-                 "mirror's texture opaque over the reflection, which -gpu (no compute) never does, so GL "
-                 "and -gpu part on every mirror frame (#340 P3d)" % rs)
+        terms = and_terms(m.group(1)) if m else []
+        named = [t for t in terms if re.search(r"\bmirrortexturenum\b|\br_mirroralpha\b", t)]
+        if not m or not any(mirror_cull_term(t) for t in terms) or len(named) != 1 or \
+                not mirror_nocull_term(named[0]):
+            fail("%s: R_DrawWorld's GL compute cull must be off for the reflected view (`&& !mirror`) -- the "
+                 "reflected MVP would be the one R_DrawWorldCulled keeps for the next frame's Hi-Z -- and on a "
+                 "mirror map only at gl_cull 0 (`&& !(mirrortexturenum >= 0 && r_mirroralpha.value != 1.0 && "
+                 "!gl_cull.integer)`), where its back faces cover the reflection; not for every frame of a "
+                 "mirror map, as before #517 (#340 P3d, #517)" % rs)
+    # The compute filter leaves the mirror's surfaces to the chain pass, and
+    # it can only tell which they are if R_NewMap has found the texture first.
+    wc = "engine/h2shared/gl_worldcull.c"
+    b = body_named(root, wc, "R_BuildWorldCull")
+    if b is not None and not re.search(
+            r"\bif\s*\(\s*mirrortexturenum\s*>=\s*0\s*&&[^;{]*"
+            r"surf\s*->\s*texinfo\s*->\s*texture\s*==\s*m\s*->\s*textures\s*\[\s*mirrortexturenum\s*\]\s*\)\s*"
+            r"gpu_surfs\s*\[\s*i\s*\]\s*\.\s*flags\s*\|=\s*SURF_DRAWTILED\s*;", b):
+        fail("%s: R_BuildWorldCull must mark the mirror's surfaces SURF_DRAWTILED (skipped by cull_mark_comp) "
+             "-- a cull draw of them is the mirror opaque over the reflection, which -gpu (no compute) never "
+             "does, so GL and -gpu part on every mirror frame (#340 P3d, #517)" % wc)
+    nm = body_named(root, "engine/hexen2/gl_rmisc.c", "R_NewMap")
+    if nm is not None:
+        found = re.search(r"\bmirrortexturenum\s*=\s*i\s*;", nm)
+        build = re.search(r"\bR_BuildWorldCull\s*\(\s*\)\s*;", nm)
+        resets = [r.start() for r in re.finditer(r"\bmirrortexturenum\s*=\s*-\s*1\s*;", nm)]
+        if not found or not build or found.start() > build.start() or len(resets) != 1 or \
+                resets[0] > found.start():
+            fail("engine/hexen2/gl_rmisc.c: R_NewMap must find mirrortexturenum ahead of R_BuildWorldCull, "
+                 "which reads it to leave the mirror's surfaces out of the compute cull (#517)")
     # override = true is R_Mirror's alone: any other caller would draw with
     # whatever colour was left over.
     for p in sorted((root / "engine").rglob("*.c")):

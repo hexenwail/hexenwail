@@ -539,6 +539,13 @@ jobs:
       - name: Mirror test game generator refuses a bad mirror
         run: python3 tools/mk-mirror-testgame.py --self-test
 
+      # R_Mirror puts back what the reflected pass derived from the reflected
+      # view (the world frame's caustics, the light grid, the view matrix and
+      # frustum) before the mirror's own surfaces draw, and r_speeds' counters
+      # reset once a frame in R_RenderView, not per pass (#517).
+      - name: Mirror restores the view's derived state
+        run: python3 tools/test_mirror_view_state.py
+
       # A sampler's texture unit is set through R_ProgramSamplerLoc /
       # R_ProgramSamplerUnit, whose GL arms are the glGetUniformLocation /
       # glUniform1i pair and whose SDL_GPU arms write the unit into the

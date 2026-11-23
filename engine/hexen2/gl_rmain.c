@@ -6341,31 +6341,15 @@ static void R_SetFrustum (void)
 
 /*
 ===============
-R_SetupFrame
+R_SetupWorldFrame
+
+The world fragment stages' per-frame values, from r_viewleaf and the cvars.
+R_SetupFrame's, and again R_Mirror's once it has put the view back: the
+reflected R_SetupFrame wrote them from the reflected leaf (#517).
 ===============
 */
-static void R_SetupFrame (void)
+static void R_SetupWorldFrame (void)
 {
-// don't allow cheats in multiplayer
-	if (cl.maxclients > 1)
-		Cvar_SetQuick (&r_fullbright, "0");
-
-	R_AnimateLight ();
-
-	r_framecount++;
-
-// build the transformation matrix for the given view angles
-	VectorCopy (r_refdef.vieworg, r_origin);
-
-	AngleVectors (r_refdef.viewangles, vpn, vright, vup);
-
-// current viewleaf
-	r_oldviewleaf = r_viewleaf;
-	r_viewleaf = Mod_PointInLeaf (r_origin, cl.worldmodel);
-
-	V_SetContentsColor (r_viewleaf->contents);
-	V_CalcBlend ();
-
 	/* The world fragment stages' per-frame values, into the world frame
 	 * record every world draw copies into WorldFrag and FragParams (#450 W2).
 	 * Set once per frame (immediately after r_viewleaf updates), as they
@@ -6407,12 +6391,42 @@ static void R_SetupFrame (void)
 		 * callback. */
 		R_UseProgram (0);
 	}
+}
+
+/*
+===============
+R_SetupFrame
+===============
+*/
+static void R_SetupFrame (void)
+{
+// don't allow cheats in multiplayer
+	if (cl.maxclients > 1)
+		Cvar_SetQuick (&r_fullbright, "0");
+
+	R_AnimateLight ();
+
+	r_framecount++;
+
+// build the transformation matrix for the given view angles
+	VectorCopy (r_refdef.vieworg, r_origin);
+
+	AngleVectors (r_refdef.viewangles, vpn, vright, vup);
+
+// current viewleaf
+	r_oldviewleaf = r_viewleaf;
+	r_viewleaf = Mod_PointInLeaf (r_origin, cl.worldmodel);
+
+	V_SetContentsColor (r_viewleaf->contents);
+	V_CalcBlend ();
+
+	R_SetupWorldFrame ();
 
 	r_cache_thrash = false;
 
-	c_brush_polys = 0;
-	c_alias_polys = 0;
-	c_texbinds = 0;
+	/* No counter reset here: this runs for the reflected view too, and
+	 * zeroing there dropped the view's own polys from r_speeds (#517).
+	 * R_RenderView resets them once a frame. */
 }
 
 
@@ -6801,6 +6815,20 @@ static void R_Mirror (void)
 	GL_MatrixMode(GL_MAT_MODELVIEW);
 
 	GL_LoadMatrixf (r_base_world_matrix);
+
+	/* What the reflected R_SetupFrame / R_SetupGL derived from the
+	 * reflection and the mirror's own surfaces below would draw with
+	 * (#517): the world frame record (caustics from the reflected leaf),
+	 * the light grid (dlights clustered against the reflected view), and
+	 * the view matrix and frustum.  The grid after the matrices, as in
+	 * R_SetupGL: it reads the modelview and projection current when it
+	 * runs.  Not R_LightStyles_FrameSetup, which reads no view. */
+	memcpy (r_world_matrix, r_base_world_matrix, sizeof(r_world_matrix));
+	R_SetFrustum ();
+	R_SetupWorldFrame ();
+	R_LightCluster_Update ();
+	R_LightCluster_BindForWorld ();
+	R_LightCluster_BindForAlias ();
 
 	/* The mirror's own texture at r_mirroralpha over the reflection, as
 	 * GLQuake's glColor4f did: R_RenderBrushPoly keeps this colour when
@@ -8234,10 +8262,12 @@ void R_RenderView (void)
 		rprof_wpoly = c_brush_polys;
 		rprof_epoly = c_alias_polys;
 		rprof_texbinds = c_texbinds;
-		c_brush_polys = 0;
-		c_alias_polys = 0;
-		c_texbinds = 0;
 	}
+	/* Once a frame, ahead of both passes: R_SetupFrame used to do it,
+	 * so the reflected pass zeroed the view's counts (#517). */
+	c_brush_polys = 0;
+	c_alias_polys = 0;
+	c_texbinds = 0;
 
 	if (r_speeds.integer >= 2)
 	{
