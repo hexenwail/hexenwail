@@ -2056,7 +2056,8 @@ static void GL_Init_NullGL (void)
 	Con_SafePrintf ("GL: %s -- no GL context, every GL call is counted (gpu_unrouted)\n",
 			gl_renderer);
 
-	glGetIntegerv_fp(GL_MAX_TEXTURE_SIZE, &gl_max_size);
+	gl_max_size = RG_MaxTextureSize ();
+	Con_SafePrintf ("SDL_GPU max texture size: %i\n", (int) gl_max_size);
 	glGetIntegerv_fp(GL_MAX_SAMPLES, &gl_max_samples);
 	R_TexBind_Init();
 	gl_have_s3tc = gl_have_rgtc = gl_have_bptc = false;

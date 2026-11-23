@@ -312,6 +312,32 @@ const char *RG_DriverName (void)
 	return d ? d : "none";
 }
 
+/* SDL 3.4 has no query for a device's texture limit (SDL_GetGPUDeviceProperties
+ * carries names and versions only), so this is the floor each backend's
+ * requirements guarantee, never more than the 16384 SDL_CreateGPUTexture's
+ * debug-mode validation allows (SDL_gpu.c MAX_2D_DIMENSION):
+ *   direct3d12  16384  D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION; SDL requires
+ *                      feature level 11_0 (SDL_gpu.h "System Requirements")
+ *   metal       16384  Apple's feature set tables, for the Mac2 and A9
+ *                      (Apple3) families SDL requires
+ *   vulkan       4096  maxImageDimension2D's required minimum (Vulkan spec,
+ *                      "Required Limits"); SDL checks no limit when it picks
+ *                      a physical device, so a 4096 part is accepted
+ * An unknown driver gets the smallest of them.  The cost is on Vulkan, the
+ * only driver RG_CreateDevice can get while it offers SPIR-V alone (the
+ * 16384 arms wait for DXIL / MSL, P7): a desktop part that reports 16384
+ * still gets textures over 4096 scaled down, and a map past 120 lightmap
+ * pages (15 rows of 8 at 260 px, gl_rsurf.c) loses the atlas, where GL on
+ * the same box keeps both.  Eleven big retail maps checked use 14 at most. */
+int RG_MaxTextureSize (void)
+{
+	const char	*d = RG_DriverName ();
+
+	if (!strcmp (d, "direct3d12") || !strcmp (d, "metal"))
+		return 16384;
+	return 4096;
+}
+
 void RG_EndFrame (qboolean show)
 {
 	if (!rg_dev)

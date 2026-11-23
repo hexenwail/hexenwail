@@ -37,7 +37,7 @@
 # on a basedir made by tools/mk-mirror-testgame.py:
 #
 #   ./tools/mk-mirror-testgame.py $B          # $B holds data1 (see its header)
-#   A="-fsaa 0 +gamma 1 -game mirror +map demo1"
+#   A="-fsaa 0 +gamma 1 +host_framerate 0.000001 -game mirror +map demo1"
 #   STEPS=tools/sweep-mirror-gpu.steps ENGINE=$E ./tools/headless-drive.sh script /tmp/m-gl  $B $A
 #   VK_ICD_FILENAMES=<lvp_icd json> STEPS=tools/sweep-mirror-gpu.steps ENGINE=$E \
 #       ./tools/headless-drive.sh script /tmp/m-gpu $B -gpu +gpu_allow_software 1 $A
@@ -56,6 +56,41 @@
 # reflection: while paused V_RenderView does not recompute it, and before
 # P3d every other paused frame was the reflection full screen.
 #
+# GAME TIME IS HELD, and it has to be on the command line, ahead of the
+# map (#513).  Pausing freezes the player, but in whatever pose it had when
+# `cmd pause` landed, and that is wall-clock timing: the steps sleep in real
+# seconds, so each run reaches the pause a different number of server frames
+# after the spawn.  Three unpinned GL runs of one chase-cam frame on demo1
+# paused with the player on frames 220, 212 and 213 (edict 1's `frame`, set
+# by the progs) and differed by 45.2 - 47.2 dB, in the player's box and the
+# status bar's health; each run's two shots, taken seconds apart while
+# paused, were identical, so nothing changes the skin's texels once the pose
+# holds.  host_framerate makes every render frame one server tick of
+# exactly that long (host_tick.h), so at 0.000001 the clock moves a
+# microsecond a frame, at most 1000 frames a second (Host_FilterTime's 1 ms
+# floor), and only while the console is closed.  That does not stop the
+# clock, it bounds it: cl.time and sv.time still differ between runs by the
+# frame count, at most ~25 ms from the spawn to the first pause.  Three
+# held GL runs of that frame paused on frame 209 each, bit-identical, and so
+# did three held -gpu runs; GL against -gpu 79.4 dB.  That is measured, not
+# guaranteed: a progs frame change that falls inside the window would still
+# split runs.  Set it with `cmd` and it is too late: the pose is whatever it
+# was by then.  A centerprint also holds for the whole sweep
+# (scr_centertime_off counts down by host_frametime), on both sides alike.
+#
+# Held, measured 2026-11-22 as below, three runs a side: GL against GL
+# every frame byte-identical but 07 (testparticles is random; 83.6 - 98.9
+# dB) and the floor frames' health digits (masked); -gpu against -gpu the
+# same, plus up to 3 px of a floating potion on the floor (51.7 dB with
+# the health) and 1 - 6 px on the wall inside the flame masks (106 - 110
+# dB): EF_ROTATE spins pickups at 108 degrees per second of cl.time
+# (gl_rmain.c), so the ~25 ms the clock can still drift is a few degrees.
+# That is the bound above, not a -gpu difference.  The player model no
+# longer differs anywhere.  GL against -gpu:
+# whole frame wall 80.1 - 83.9 (07, with particles, 65.3), floor 65.6 -
+# 73.9, mirror adds 79.6 - 83.2 (wall) and 65.1 (floor), gl_cull 0 82.2 -
+# inf, particles 64.1; every check passes.
+#
 # THE THRESHOLDS.  tools/mirror-diff.sh holds the checks; these are the
 # numbers its defaults were set from, measured 2026-11-21 on the P3d binary,
 # 800x600, llvmpipe GL against lavapipe -gpu (Mesa 26.2), three runs a side,
@@ -71,8 +106,9 @@
 #   particles add (50)          67.9 - 70.7   76.1 - 83.0   74.7 - 90.2
 #   mirror present (2000 px)    109,429 - 232,774 changed, both sides
 #
-# What differs run to run outside the masks is the player's own model in the
-# reflection, on GL as well as -gpu.  A Tesla P4 -gpu run against the same
+# Those runs did not hold game time: what differed run to run outside the masks was
+# the player's own model in the reflection, on GL as well as -gpu, which is
+# its pose (see GAME TIME above), not its skin.  A Tesla P4 -gpu run against the same
 # llvmpipe GL frames: whole frame 45.8 - 56.7, mirror adds 53.1 - 57.5,
 # gl_cull 0 86.5 - 86.9, particles 59.0; every check passes.
 #
