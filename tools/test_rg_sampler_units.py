@@ -118,13 +118,11 @@ CANON.update({
     # reads its source at 0
     "scene": "0", "paletteLUT": "1", "u_bloom": "2", "u_scene": "0",
 })
-# (program, sampler) left without a unit, and why that is right.
-UNSET_OK = {
-    ("alias_instanced", "u_soft_depth"):
-        "GL leaves it at unit 0 and the instanced path never samples it (u_soft_params.x is 0 "
-        "on every non-sprite draw); under -gpu a draw that reads it gets a placeholder",
-    ("alias_instanced_np", "u_soft_depth"): "the affine twin of the above",
-}
+# (program, sampler) left without a unit, and why that is right.  Empty
+# since #532: an unset sampler reads unit 0 on GL and is counted under -gpu
+# ("sampler with no GL unit mapping") on every draw, so give it its unit
+# rather than listing it here.
+UNSET_OK = {}
 
 errors = []
 
