@@ -523,6 +523,14 @@ jobs:
           utils=$(nix build .#utils --no-link --print-out-paths)
           python3 tools/test_jsh2colour_threads.py "$utils/bin"
 
+      # light must write the same BSP with -threads 8 as with -threads 1
+      # (#530): lightmap space goes out in face order, not finishing order.
+      - name: light output does not depend on thread count
+        run: |
+          set -euo pipefail
+          utils=$(nix build .#utils --no-link --print-out-paths)
+          python3 tools/test_light_threads.py "$utils/bin"
+
   flatpak:
     runs-on: ubuntu-latest
     timeout-minutes: 30
