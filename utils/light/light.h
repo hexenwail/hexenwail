@@ -38,7 +38,7 @@ extern	float		minlights[MAX_MAP_FACES];
 
 extern	qboolean	extrasamples;
 
-byte	*GetFileSpace (int size);
+byte	*GetFaceSpace (int surfnum, int size);
 
 qboolean TestLine (const vec3_t start, const vec3_t stop);
 void	LightFace (int surfnum);

@@ -47,18 +47,42 @@ static byte	*file_p, *file_end;
 float		minlights[MAX_MAP_FACES];
 
 
-byte *GetFileSpace (int size)
-{
-	byte	*buf;
+/* Space in dlightdata used to be handed out as each thread finished a
+ * face, so with more than one thread the layout followed the schedule
+ * (#530).  Each face now lights into a buffer of its own, and
+ * PlaceFaceSpace lays the buffers out in face order once the threads are
+ * done: the order, and the bytes, of a -threads 1 run. */
+static byte	*facespace[MAX_MAP_FACES];
+static int	facespacesize[MAX_MAP_FACES];
 
-	ThreadLock();
-	file_p = (byte *)(((intptr_t)file_p + 3) & ~3);
-	buf = file_p;
-	file_p += size;
-	ThreadUnlock();
-	if (file_p > file_end)
-		COM_Error ("%s: overrun", __thisfunc__);
-	return buf;
+/* no lock: each surfnum belongs to the one thread that took it */
+byte *GetFaceSpace (int surfnum, int size)
+{
+	facespace[surfnum] = (byte *) SafeMalloc (size);
+	facespacesize[surfnum] = size;
+	return facespace[surfnum];
+}
+
+static void PlaceFaceSpace (void)
+{
+	int	i;
+
+	for (i = 0; i < numfaces; i++)
+	{
+		if (!facespace[i])
+			continue;
+		file_p = (byte *)(((intptr_t)file_p + 3) & ~3);
+		if (file_p + facespacesize[i] > file_end)
+			COM_Error ("%s: overrun", __thisfunc__);
+		memcpy (file_p, facespace[i], facespacesize[i]);
+		if (is_bsp2)
+			dfaces2[i].lightofs = file_p - filebase;
+		else
+			dfaces[i].lightofs = file_p - filebase;
+		file_p += facespacesize[i];
+		free (facespace[i]);
+		facespace[i] = NULL;
+	}
 }
 
 
@@ -93,6 +117,7 @@ static void LightWorld (void)
 	file_end = filebase + MAX_MAP_LIGHTING;
 
 	RunThreadsOn (LightThread);
+	PlaceFaceSpace ();
 
 	lightdatasize = file_p - filebase;
 

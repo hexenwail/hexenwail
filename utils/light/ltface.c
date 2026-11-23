@@ -629,8 +629,7 @@ void LightFace (int surfnum)
 
 	lightmapsize = size*l.numlightstyles;
 
-	out = GetFileSpace (lightmapsize);
-	f->lightofs = out - filebase;
+	out = GetFaceSpace (surfnum, lightmapsize);	// lightofs: PlaceFaceSpace
 
 // extra filtering
 //	h = (l.texsize[1] + 1) * 2;
@@ -743,8 +742,7 @@ void LightFace2 (int surfnum)
 
 	lightmapsize = size*l.numlightstyles;
 
-	out = GetFileSpace (lightmapsize);
-	f->lightofs = out - filebase;
+	out = GetFaceSpace (surfnum, lightmapsize);	// lightofs: PlaceFaceSpace
 
 // extra filtering
 //	h = (l.texsize[1] + 1) * 2;
