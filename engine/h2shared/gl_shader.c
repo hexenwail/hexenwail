@@ -903,6 +903,12 @@ static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p, rprog_id_t id)
 		R_ProgramSamplerUnit (prog, u_tex, "u_texture3", 3);
 		u_tex = R_ProgramSamplerLoc (prog, "u_texture4");
 		R_ProgramSamplerUnit (prog, u_tex, "u_texture4", 4);
+		/* The soft-depth snapshot's unit, 1, the one every other program
+		 * declaring it gets.  This path never samples it (soft params are 0
+		 * here), but left unset GL aimed it at the skin's unit and -gpu had
+		 * no unit to bind at all (#532). */
+		u_tex = R_ProgramSamplerLoc (prog, "u_soft_depth");
+		R_ProgramSamplerUnit (prog, u_tex, "u_soft_depth", 1);
 	}
 	/* The froxel grid lives on its own unit for the whole world+entity draw;
 	 * GL_InitProgramSplit does this for every other program that declares it. */
