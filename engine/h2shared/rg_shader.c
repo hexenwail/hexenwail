@@ -162,30 +162,48 @@ typedef struct {
  * in layout.inc); the point is the `gl` beside it, which the C side binds
  * with GL_BindBufferBase / Range.  A name keeps one point in every stage
  * that declares it, so the name is the key: tools/test_rg_sources.py holds
- * this table to every storage block in engine/shaders. */
+ * this table to every storage block in engine/shaders.  The kind is when
+ * nothing bound there is expected rather than a routing gap (#520). */
 static const struct {
 	const char	*block;
 	int		point;
+	rg_ssbokind_t	kind;
+	int		format;		/* RG_SSBO_POSE: the u_poseverttype it is read at */
 } rg_storage_points[] = {
-	{ "InstanceBuffer",	0 },	/* R_DrawAliasInstanced's GL_Upload */
-	{ "PoseBuffer",		1 },	/* gl_mesh.c ssbo_pose */
-	{ "ShadeDots",		2 },	/* gl_shader.c ubo_shadedots */
-	{ "MD3PoseBuffer",	3 },	/* gl_mesh.c ssbo_pose_md3 */
-	{ "BoneBuffer",		4 },	/* gl_mesh.c ssbo_bones */
-	{ "GpuParticleBuffer",	0 },	/* r_part.c, never drawn */
-	{ "LightBuffer",	LIGHT_SSBO_BINDING },	/* gl_lightcluster.c, compute: P5 */
+	{ "InstanceBuffer",	0, RG_SSBO_NEEDED, -1 },	/* R_DrawAliasInstanced's GL_Upload */
+	{ "PoseBuffer",		1, RG_SSBO_POSE, PV_QUAKE1 },	/* gl_mesh.c ssbo_pose */
+	{ "ShadeDots",		2, RG_SSBO_NEEDED, -1 },	/* gl_shader.c ubo_shadedots */
+	{ "MD3PoseBuffer",	3, RG_SSBO_POSE, PV_MD3 },	/* gl_mesh.c ssbo_pose_md3 */
+	{ "BoneBuffer",		4, RG_SSBO_POSE, PV_IQM },	/* gl_mesh.c ssbo_bones */
+	{ "GpuParticleBuffer",	0, RG_SSBO_NEEDED, -1 },	/* r_part.c, never drawn */
+	{ "LightBuffer",	LIGHT_SSBO_BINDING, RG_SSBO_COMPUTE_FED, -1 },	/* gl_lightcluster.c, compute: P5 */
 };
+
+static int RG_StorageRow (const char *block)
+{
+	int	i;
+
+	for (i = 0; i < (int)(sizeof(rg_storage_points) / sizeof(rg_storage_points[0])); i++)
+	{
+		if (!strcmp (rg_storage_points[i].block, block))
+			return i;
+	}
+	return -1;
+}
 
 int RG_StoragePoint (const char *block)
 {
-	size_t	i;
+	int	i = RG_StorageRow (block);
 
-	for (i = 0; i < sizeof(rg_storage_points) / sizeof(rg_storage_points[0]); i++)
-	{
-		if (!strcmp (rg_storage_points[i].block, block))
-			return rg_storage_points[i].point;
-	}
-	return -1;
+	return (i < 0) ? -1 : rg_storage_points[i].point;
+}
+
+rg_ssbokind_t RG_StorageKind (const char *block, int *format)
+{
+	int	i = RG_StorageRow (block);
+
+	*format = (i < 0) ? -1 : rg_storage_points[i].format;
+	return (i < 0) ? RG_SSBO_NEEDED : rg_storage_points[i].kind;
 }
 
 /* An OpTypeImage's Dim and Arrayed operands as the texture kind a unit
@@ -351,6 +369,7 @@ static qboolean RG_Reflect (const Uint32 *w, size_t nwords, int sampler_set, int
 			 * is P5's.  `slot` holds the raw binding until RG_CheckStage
 			 * knows how many textures come first. */
 			rgssbo_t	*sb;
+			int		format;
 
 			if (!v->has_binding || (int)v->set != sampler_set)
 				continue;
@@ -365,6 +384,8 @@ static qboolean RG_Reflect (const Uint32 *w, size_t nwords, int sampler_set, int
 			q_strlcpy (sb->name, ty->name ? ty->name : "", sizeof(sb->name));
 			sb->slot = (Uint8) v->binding;
 			sb->point = RG_StoragePoint (sb->name);
+			sb->kind = (Uint8) RG_StorageKind (sb->name, &format);
+			sb->format = (Sint8) format;
 		}
 		else if (v->b == SPV_ScUniform && ty->op == SPV_OpTypeStruct && ty->block)
 		{

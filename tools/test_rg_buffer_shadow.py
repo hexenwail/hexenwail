@@ -42,7 +42,9 @@ the RG_* entry points the gl_buffer.c seams call and checks, case by case:
     GL_Upload's arm hands each upload of a frame its own buffer at offset
     0, reuses them in order the next frame with cycling on, refuses a
     uniform target; an upload into a storage buffer a recorded draw of the
-    open segment reads ends the segment.
+    open segment reads ends the segment.  Nothing bound is counted unless
+    the caller excuses it (unbound_ok, #520), and the excuse covers that
+    case alone: a refused range is counted either way.
 
 Stock python3 and a C compiler (cc / gcc / clang); lint.yml.
 """
@@ -459,24 +461,32 @@ static void storage (void)
 	RG_BufferData (GL_SHADER_STORAGE_BUFFER, 64, bytes, 0);
 	RG_BindBuffer (GL_SHADER_STORAGE_BUFFER, 0);
 	CopyPass ();
-	CHECK (!RG_Buf_Storage (4, &read) && !read, "nothing bound at the point: no buffer");
+	unhandled = 0;
+	CHECK (!RG_Buf_Storage (4, false, &read) && !read && unhandled == 1,
+	       "nothing bound at the point: no buffer, and counted");
+	unhandled = 0;
+	CHECK (!RG_Buf_Storage (4, true, &read) && !read && unhandled == 0,
+	       "nothing bound at a point the draw provably does not read: no buffer, not counted (#520)");
 	RG_BindBufferBase (GL_SHADER_STORAGE_BUFFER, 4, sb);
-	g = RG_Buf_Storage (4, &read);
+	g = RG_Buf_Storage (4, false, &read);
 	CHECK (g && read, "a base bind is what the draw's slot gets");
+	CHECK (RG_Buf_Storage (4, true, &read) == g && read, "an excused slot still gets a bound buffer");
 	CHECK (g && (g->usage & SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ), "made with storage-read usage");
 	CHECK (g && !memcmp (g->data, bytes, 64), "glBufferData through the storage target filled it");
-	CHECK (!RG_Buf_Storage (3, &read), "the other points are untouched");
+	CHECK (!RG_Buf_Storage (3, false, &read), "the other points are untouched");
 	unhandled = 0;
 	RG_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 4, sb, 16, 32);
-	CHECK (!RG_Buf_Storage (4, &read) && unhandled == 1,
+	CHECK (!RG_Buf_Storage (4, false, &read) && unhandled == 1,
 	       "a range at a non-zero offset is refused, not bound whole from 0");
+	CHECK (!RG_Buf_Storage (4, true, &read) && unhandled == 2,
+	       "unbound_ok excuses nothing bound only: a refused range is still counted (#520)");
 	RG_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 4, sb, 0, 32);
-	CHECK (RG_Buf_Storage (4, &read) == g, "a range at offset 0 binds the buffer");
+	CHECK (RG_Buf_Storage (4, false, &read) == g, "a range at offset 0 binds the buffer");
 	RG_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 4, sb, 0, 128);
-	CHECK (!RG_Buf_Storage (4, &read), "a range past the buffer is refused");
+	CHECK (!RG_Buf_Storage (4, false, &read), "a range past the buffer is refused");
 	RG_BindBufferBase (GL_SHADER_STORAGE_BUFFER, 4, sb);
 	RG_BindBufferBase (GL_UNIFORM_BUFFER, 4, 0);
-	CHECK (RG_Buf_Storage (4, &read) == g, "a uniform-target bind leaves the storage point alone");
+	CHECK (RG_Buf_Storage (4, false, &read) == g, "a uniform-target bind leaves the storage point alone");
 
 	/* the hazard: a recorded draw read it in the open segment */
 	f0 = flushes;
@@ -488,13 +498,13 @@ static void storage (void)
 
 	/* GL deletes a buffer out of every binding point */
 	RG_DeleteBuffers (1, &sb);
-	CHECK (!RG_Buf_Storage (4, &read), "a deleted buffer leaves its binding point");
+	CHECK (!RG_Buf_Storage (4, false, &read), "a deleted buffer leaves its binding point");
 	/* and the name, handed straight back out, is not read through the point */
 	RG_GenBuffers (1, &other);
 	CHECK (other == sb, "the free list hands the name back");
 	RG_BindBuffer (GL_SHADER_STORAGE_BUFFER, other);
 	RG_BufferData (GL_SHADER_STORAGE_BUFFER, 64, bytes, 0);
-	CHECK (!RG_Buf_Storage (4, &read), "the point does not read the buffer that inherited the name");
+	CHECK (!RG_Buf_Storage (4, false, &read), "the point does not read the buffer that inherited the name");
 	RG_DeleteBuffers (1, &other);
 	EndFrame ();
 
@@ -504,7 +514,7 @@ static void storage (void)
 	CHECK (n1 && n2 && n1 != n2, "two uploads in a frame, two buffers");
 	CHECK (o1 == 0 && o2 == 0, "every upload at offset 0");
 	RG_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, n1, o1, 64);
-	g1 = RG_Buf_Storage (0, &read);
+	g1 = RG_Buf_Storage (0, false, &read);
 	CopyPass ();
 	CHECK (g1 && !memcmp (g1->data, bytes, 64), "the upload is in its buffer");
 	CHECK (g1 && (g1->usage & SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ), "a stream buffer is storage too");

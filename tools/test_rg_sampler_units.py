@@ -629,7 +629,7 @@ PRELUDE = r"""
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
-typedef uint8_t Uint8; typedef uint32_t Uint32; typedef uint16_t Uint16;
+typedef uint8_t Uint8; typedef int8_t Sint8; typedef uint32_t Uint32; typedef uint16_t Uint16;
 typedef int qboolean;
 #define true 1
 #define false 0
@@ -669,6 +669,7 @@ static size_t q_strlcpy (char *d, const char *s, size_t n) { snprintf (d, n, "%s
 #define q_min(a, b) ((a) < (b) ? (a) : (b))
 /* the storage blocks' GL points (#340 P2e) are tools/test_rg_sources.py's */
 static int RG_StoragePoint (const char *block) { (void) block; return -1; }
+static int RG_StorageKind (const char *block, int *format) { (void) block; *format = -1; return 0; }
 """
 
 HARNESS = r"""
