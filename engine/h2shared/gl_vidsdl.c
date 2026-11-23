@@ -2644,6 +2644,7 @@ static void VID_ChangeVideoMode (int newmode)
 	Sky_ContextLost();
 	TexMgr_ContextLost();
 	GL_AliasGPUMeshes_ContextLost();
+	R_ProfileContextLost();
 
 	// Unload all textures and reset texture counts
 	D_ClearOpenGLTextures(0);
