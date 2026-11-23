@@ -223,8 +223,8 @@ Checked, from the sources (stock python3, lint.yml):
       gets no credit for its gate, so GL_SoftDepth_Capture is routed for P4b;
     * the gates: PP_NeedsPostProcess still returns false under -gpu (P4a-2
       lifts it with the backend), OIT_InitShader returns false (GPU_GATES),
-      PP_CreateFBO forces 0 samples after the gl_max_samples clamp and before
-      the MSAA branch, and an FBO failure under -gpu returns from BeginFrame
+      PP_SceneSamples (PP_CreateFBO's sample count) forces 0 samples after
+      the gl_max_samples clamp, and an FBO failure under -gpu returns from BeginFrame
       before the copyback fallback turns post-process on; the soft-particle
       snapshot is valid only if R_BlitFramebuffer says the copy was made;
     * PpVert (pp_vert_mvp, float[16]) and PpParams (pp_params) are registered
@@ -1615,9 +1615,10 @@ def check_storage(root):
     b = body_named(root, "engine/h2shared/gl_vidsdl.c", "GL_Init_NullGL")
     if b is not None:
         on = sorted(set(re.findall(r"\bgl_renderer_caps\.(\w+)\s*=\s*true\s*;", b)))
-        if on != ["shader_storage", "skeletal_animation"]:
+        if on != ["shader_storage", "skeletal_animation", "texture_lod_bias"]:
             fail("engine/h2shared/gl_vidsdl.c: GL_Init_NullGL turns on %s; under -gpu exactly "
-                 "shader_storage and skeletal_animation are real (#340 P2e) -- compute_shaders would "
+                 "shader_storage, skeletal_animation (#340 P2e) and texture_lod_bias (sampler "
+                 "mip_lod_bias, GitHub #521) are real -- compute_shaders would "
                  "run the light cluster, culling and SSAO against the null table (P5)" % (on or "nothing"))
         other = [c for c in re.findall(r"\bgl_renderer_caps\.(\w+)\s*=\s*([^;]+);", b)
                  if c[1].strip() not in ("true", "false", "GL_RENDERER_DESKTOP_43", '"SDL_GPU"')]
@@ -2380,17 +2381,27 @@ def check_postprocess(root):
         return body_named(root, rel, name)
 
     gate = r"#\s*ifdef\s+USE_SDL_GPU\s*\n\s*if\s*\(\s*R_GPU\s*\(\s*\)\s*\)\s*%s\s*#\s*endif"
-    b = body("PP_CreateFBO")
-    if b is not None:
+    # The sample count lives in PP_SceneSamples so gl_lodbias auto reads the
+    # same number the FBO is built with (GitHub #521).
+    b = body("PP_SceneSamples")
+    cb = body("PP_CreateFBO")
+    if b is not None and cb is not None:
         g = re.search(gate % r"samples\s*=\s*0\s*;", b)
         clamp = re.search(r"samples\s*=\s*gl_max_samples\s*;", b)
-        msaa = re.search(r"\bif\s*\(\s*samples\s*>\s*1\b", b)
-        if not (g and clamp and msaa and clamp.end() < g.start() < msaa.start()):
-            fail("%s: PP_CreateFBO needs `#ifdef USE_SDL_GPU / if (R_GPU ()) samples = 0; / #endif` "
-                 "after the gl_max_samples clamp and before the MSAA branch -- MSAA targets are P6, and "
+        ret = re.search(r"\breturn\s+samples\s*;", b)
+        take = re.search(r"\bint\s+samples\s*=\s*PP_SceneSamples\s*\(\s*\)\s*;", cb)
+        msaa = re.search(r"\bif\s*\(\s*samples\s*>\s*1\b", cb)
+        if not (g and clamp and ret and clamp.end() < g.start() < ret.start()):
+            fail("%s: PP_SceneSamples needs `#ifdef USE_SDL_GPU / if (R_GPU ()) samples = 0; / #endif` "
+                 "after the gl_max_samples clamp and before it returns -- MSAA targets are P6, and "
                  "gl_max_samples being 0 under -gpu is an accident to lean on (#340 P4a-1)" % rel)
         elif b[:g.start()].count("{") - b[:g.start()].count("}") != 1:
-            fail("%s: PP_CreateFBO's samples gate must sit at the body's own level" % rel)
+            fail("%s: PP_SceneSamples's samples gate must sit at the body's own level" % rel)
+        if not (take and msaa and take.start() < msaa.start()):
+            fail("%s: PP_CreateFBO must take `int samples = PP_SceneSamples ();` before the MSAA "
+                 "branch (#340 P4a-1, GitHub #521)" % rel)
+        elif re.search(r"\bvid_config_fsaa\b", cb):
+            fail("%s: PP_CreateFBO reads vid_config_fsaa itself; go through PP_SceneSamples" % rel)
     b = body("GL_PostProcess_BeginFrame")
     if b is not None:
         m = re.search(r"\bif\s*\(\s*pp_fbo_failed\s*\)\s*\{", b)

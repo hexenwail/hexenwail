@@ -642,12 +642,13 @@ static qboolean PP_CreateBloomFBOs (int width, int height)
 	return true;
 }
 
-static qboolean PP_CreateFBO (int width, int height)
+/* The MSAA sample count the scene FBO is built with: vid_config_fsaa after
+ * the driver clamp and the -gpu gate.  Public because gl_lodbias auto scales
+ * from it, and must read what the renderer uses, not what the player asked
+ * for (GitHub #521).  The one runtime fallback it cannot see is an MSAA FBO
+ * the driver reports incomplete, which falls back to 0 below. */
+int PP_SceneSamples (void)
 {
-	GLenum status;
-	/* OIT now follows Ironwail: when MSAA is active the accum/revealage
-	 * targets are created as GL_TEXTURE_2D_MULTISAMPLE and resolved
-	 * per-sample, so they share the multisampled depth/stencil cleanly. */
 	int samples = (vid_config_fsaa.integer > 1) ? vid_config_fsaa.integer : 0;
 
 	/* Clamp to what the driver can actually allocate.  config.cfg is a plain
@@ -668,6 +669,16 @@ static qboolean PP_CreateFBO (int width, int height)
 #endif
 	if (samples < 2)
 		samples = 0;
+	return samples;
+}
+
+static qboolean PP_CreateFBO (int width, int height)
+{
+	GLenum status;
+	/* OIT now follows Ironwail: when MSAA is active the accum/revealage
+	 * targets are created as GL_TEXTURE_2D_MULTISAMPLE and resolved
+	 * per-sample, so they share the multisampled depth/stencil cleanly. */
+	int samples = PP_SceneSamples ();
 
 	PP_DeleteFBO();
 

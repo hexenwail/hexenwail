@@ -29,6 +29,7 @@
 #include "gl_vbo.h"
 #include "gl_matrix.h"
 #include "image.h"	/* imagedump's writer */
+#include "gl_postprocess.h"	/* PP_SceneSamples, for gl_lodbias auto */
 
 #ifdef __SSE2__
 #include <emmintrin.h>
@@ -845,11 +846,12 @@ static void Draw_TouchMipmapFilterModes (void)
 
 static float GL_ResolveLodBias (void)
 {
-	extern cvar_t vid_config_fsaa;
 	const char *s = gl_lodbias.string;
 	if (s && (s[0] == 'a' || s[0] == 'A') && q_strcasecmp(s, "auto") == 0)
 	{
-		int n = vid_config_fsaa.integer;
+		/* The scene FBO's sample count, not vid_config_fsaa: -gpu has no
+		 * MSAA yet and a driver can cap below the request (GitHub #521). */
+		int n = PP_SceneSamples ();
 		switch (n)
 		{
 		case 0: case 1:	return  0.0f;

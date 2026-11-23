@@ -2074,6 +2074,11 @@ static void GL_Init_NullGL (void)
 	 * compute_shaders, which stays false. */
 	gl_renderer_caps.shader_storage = true;
 	gl_renderer_caps.skeletal_animation = true;
+	/* RG_TexParameter carries GL_TEXTURE_LOD_BIAS into the sampler's
+	 * mip_lod_bias; without this GL_ApplyLodBias dropped gl_lodbias under
+	 * -gpu (GitHub #521).  SDL_GPU's Metal driver ignores mip_lod_bias
+	 * (SDL_gpu.h), so there the bias is accepted and has no effect. */
+	gl_renderer_caps.texture_lod_bias = true;
 	Con_SafeDPrintf ("[RENDERER] Profile: %s\n", gl_renderer_caps.profile_name);
 	gl_max_anisotropy = 1;
 
