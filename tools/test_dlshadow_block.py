@@ -651,7 +651,7 @@ if not m or i_alias < 0 or m.start() < i_alias:
                   "after R_LightCluster_BindForAlias and outside the mirror pass")
 if not re.search(r"#define RPROF_SHADOW\s+\(RPROF_COUNT \+ 1\)", rmain) \
         or not re.search(r"#define RPROF_QUERIES\s+\(RPROF_COUNT \+ 3\)", rmain) \
-        or "glGenQueries_fp(RPROF_QUERIES, rprof_queries);" not in rmain:
+        or "glGenQueries_fp(RPROF_RING * RPROF_QUERIES, rprof_queries[0]);" not in rmain:
     errors.append("the profiler must allocate RPROF_QUERIES with the RPROF_SHADOW pair after RPROF_COUNT")
 
 if errors:
