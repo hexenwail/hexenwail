@@ -562,6 +562,12 @@ jobs:
       # not vid_config_fsaa: 0 under -gpu until MSAA lands (GitHub #521).
       - name: gl_lodbias reaches -gpu, auto reads samples in use
         run: python3 tools/test_lod_bias_gpu.py
+      # gl_max_size caps every texture upload.  Under -gpu it comes from
+      # RG_MaxTextureSize (the backend's guaranteed floor: SDL 3.4 has no
+      # query), never from rg_null.c's GL_MAX_TEXTURE_SIZE placeholder, and
+      # nothing else writes it (#513).
+      - name: -gpu texture limit comes from the device
+        run: python3 tools/test_rg_max_size.py
 
       # rg_null.c, SDL_GPU mode's counting null GL table, is generated from
       # gl_func.h; a stale copy would leave a new entry point NULL under -gpu

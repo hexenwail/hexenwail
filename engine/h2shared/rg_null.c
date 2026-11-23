@@ -112,8 +112,11 @@ static const char *rgn_string (GLenum name)
  * never an overrun, because every glGet* writes at least one value.
  *
  * The limits are the ones the engine checks before it will run.  16384 for
- * 2D and cube textures is what current desktop drivers report; the real
- * SDL_GPU limit replaces it when P1 creates textures.  MSAA reads 0
+ * 2D and cube textures is what current desktop drivers report.  The 2D one
+ * is a placeholder only: gl_max_size comes from RG_MaxTextureSize, never
+ * from here (#513, tools/test_rg_max_size.py).  The cube one still reaches
+ * gl_shadow.c, which clamps to 1024 first, under Vulkan's 4096 cube floor.
+ * Render targets sized from the window are capped by neither.  MSAA reads 0
  * (unsupported for now), so no multisampled target is ever requested. */
 typedef struct
 {
