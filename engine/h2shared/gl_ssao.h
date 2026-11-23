@@ -6,6 +6,8 @@ extern cvar_t	r_ssao;
 
 void	R_SSAO_Init (void);		/* cvars, once */
 void	R_SSAO_Shutdown (void);		/* GL objects; vid_restart and quit */
+/* r_ssao is on and could run here: the post chain must raise its scene FBO. */
+qboolean R_SSAO_WantsSceneFBO (void);
 /* Inside R_RenderScene: after the world is drawn and before anything else
  * writes depth, then after the opaque entities.  Both are no-ops unless the
  * path is on and the scene FBO is up. */

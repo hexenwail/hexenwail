@@ -23,6 +23,7 @@
 #include "gl_vbo.h"
 #include "draw.h"
 #include "gl_fbo.h"	/* framebuffers and renderbuffers, through the seam (#340 P4a-1) */
+#include "gl_ssao.h"	/* R_SSAO_WantsSceneFBO: SSAO draws through the scene FBO (#539) */
 #ifdef USE_SDL_GPU
 #include "rg_device.h"	/* R_GPU(): the chain's -gpu gates and uniform mirrors */
 #endif
@@ -478,6 +479,16 @@ static qboolean PP_NeedsPostProcess (void)
 	if (r_oit.integer)
 		return true;
 	if (r_bloom.integer)
+		return true;
+	/* SSAO snapshots and composites into the scene FBO, so like OIT it has
+	 * to raise the chain itself: without this r_ssao 1 on a default config
+	 * (gamma 1, nothing else on) drew nothing at all (#539).  What the chain
+	 * brings -- the scene FBO at vid_fsaa samples (4 by default, so MSAA
+	 * edges), its resolve and present blits, Hi-Z and soft particles off on
+	 * the MSAA path -- then lands on r_ssao users alone.  Not on a driver
+	 * whose FBO failed: the copyback fallback has no scene FBO, SSAO could
+	 * not run, and the copy would be all cost. */
+	if (!pp_fbo_failed && R_SSAO_WantsSceneFBO ())
 		return true;
 	return false;
 }
@@ -2154,14 +2165,18 @@ qboolean OIT_InPass (void)
 	return oit_in_pass;
 }
 
+/* The scene FBO only while this frame renders into it.  pp_fbo outlives the
+ * chain: when nothing needs post any more (r_ssao 1 -> 0 at runtime, #539)
+ * it stays allocated, and handing it out made Hi-Z build from, and soft
+ * particles match formats against, a buffer nothing draws into. */
 GLuint GL_GetSceneFBO (void)
 {
-	return pp_fbo;	/* 0 if no postprocess FBO active */
+	return pp_active ? pp_fbo : 0;
 }
 
 GLuint GL_PostProcess_GetSceneDepthTex (void)
 {
-	return pp_depth_tex;	/* 0 in the MSAA branch or when no FBO is up */
+	return pp_active ? pp_depth_tex : 0;	/* 0 in the MSAA branch too */
 }
 
 /* ------------------------------------------------------------------ */
@@ -2201,14 +2216,14 @@ void GL_SoftDepth_Capture (void)
 	 * what the depth test actually compared against.  Skip and let sprites
 	 * keep the hard cut rather than fade against a guess.  Mirrors how
 	 * R_BuildHiZForNextFrame declines the same path. */
-	if (pp_fbo && pp_samples > 1)
+	if (GL_GetSceneFBO () && pp_samples > 1)
 		return;
 
 	/* glBlitFramebuffer wants matching depth formats.  The scene FBO carries
 	 * packed depth/stencil; the default-framebuffer case mirrors the format
 	 * the Hi-Z standalone resolve has been blitting from fb 0 since
 	 * uhexen2-9912. */
-	if (pp_fbo)	{ fmt = GL_DEPTH24_STENCIL8;  attach = GL_DEPTH_STENCIL_ATTACHMENT; }
+	if (GL_GetSceneFBO ())	{ fmt = GL_DEPTH24_STENCIL8;  attach = GL_DEPTH_STENCIL_ATTACHMENT; }
 	else		{ fmt = GL_DEPTH_COMPONENT24; attach = GL_DEPTH_ATTACHMENT; }
 
 	if (soft_depth_tex && soft_depth_fbo &&
@@ -2272,7 +2287,7 @@ GLuint GL_SoftDepth_GetTex (void)
 
 qboolean GL_PostProcess_GetSceneSize (int *w, int *h)
 {
-	if (!pp_initialized || !pp_fbo || pp_width <= 0 || pp_height <= 0)
+	if (!pp_initialized || !GL_GetSceneFBO () || pp_width <= 0 || pp_height <= 0)
 		return false;
 	if (w) *w = pp_width;
 	if (h) *h = pp_height;

@@ -58,8 +58,8 @@ if not re.search(r"R_LightCluster_Shutdown\(\);[^\n]*\n\s*R_SSAO_Shutdown \(\);"
     errors.append("R_SSAO_Shutdown must run beside R_LightCluster_Shutdown (GL reuses names)")
 if "${COMMONDIR}/gl_ssao.c" not in cm:
     errors.append("gl_ssao.c is not in the GL client sources")
-if not re.search(r"#else\s*/\* USE_GLES.*?\*/\s*void R_SSAO_Shutdown \(void\) \{\}\s*void R_SSAO_CaptureWorld \(void\) \{\}\s*void R_SSAO_Apply \(void\) \{\}", c, re.S):
-    errors.append("the ES tier must compile empty R_SSAO_* stubs")
+if not re.search(r"#else\s*/\* USE_GLES.*?\*/\s*void R_SSAO_Shutdown \(void\) \{\}\s*qboolean R_SSAO_WantsSceneFBO \(void\) \{ return false; \}\s*void R_SSAO_CaptureWorld \(void\) \{\}\s*void R_SSAO_Apply \(void\) \{\}", c, re.S):
+    errors.append("the ES tier must compile empty R_SSAO_* stubs, R_SSAO_WantsSceneFBO answering false")
 
 for n in ("ssao_prepare_comp.glsl", "ssao_mip_comp.glsl"):
     if not re.search(r"(?<!un)packHalf2x16 \(", sh[n]):
@@ -82,9 +82,63 @@ if "zeros[SSAO_MISMATCH_MAX * SSAO_MISMATCH_MAX]" not in c or \
 if "#define SSAO_UBO_BINDING	3" not in c:
     errors.append("SSAO_UBO_BINDING moved: 0-2 are taken (Hi-Z, shared vert/frag)")
 
+# #539: SSAO draws through the scene FBO, so it raises the post chain itself,
+# as OIT does; on a default config (gamma 1, nothing else on) r_ssao 1 drew
+# nothing.  The want is everything SS_Active asks but the FBO (asked before the
+# frame's FBO exists), so a driver that could never run SSAO keeps a bare frame.
+# Raising the chain at runtime exposed two older faults, held here too: the
+# scene FBO's getters handed out pp_fbo after the chain dropped (r_ssao 1 -> 0:
+# Hi-Z built from, and soft particles keyed on, a buffer nothing drew into),
+# and a skipped Hi-Z build left an older frame's pyramid in use.
+pp = (ROOT / "engine/h2shared/gl_postprocess.c").read_text()
+wc = (ROOT / "engine/h2shared/gl_worldcull.c").read_text()
+
+
+def fn_body(src, head):
+    m = re.search(head + r"\s*\{(.*?)\n\}", src, re.S)
+    return m.group(1) if m else ""
+
+
+need = fn_body(pp, r"static qboolean PP_NeedsPostProcess \(void\)")
+m = re.search(r"if \(!pp_fbo_failed && R_SSAO_WantsSceneFBO \(\)\)\s*return true;\s*return false;\s*$", need)
+if not m:
+    errors.append("PP_NeedsPostProcess must end: if (!pp_fbo_failed && R_SSAO_WantsSceneFBO ()) return true; "
+                  "return false; (#539)")
+if '#include "gl_ssao.h"' not in pp:
+    errors.append("gl_postprocess.c must include gl_ssao.h for R_SSAO_WantsSceneFBO")
+want = fn_body(c, r"qboolean R_SSAO_WantsSceneFBO \(void\)")
+if not re.search(r"#ifdef USE_SDL_GPU\s*if \(R_GPU \(\)\)[^\n]*\n\s*return false;\s*#endif", want):
+    errors.append("R_SSAO_WantsSceneFBO must answer false under -gpu, as OIT_Active does")
+ret = re.search(r"return (r_ssao.*?);", want, re.S)
+for term in ("r_ssao.integer > 0", "!ss_failed", "gl_renderer_caps.compute_shaders", "glBindImageTexture_fp",
+             "glBlitFramebuffer_fp", "glTexStorage2D_fp"):
+    if not ret or term not in ret.group(1):
+        errors.append(f"R_SSAO_WantsSceneFBO must require {term}")
+if ret and "GL_GetSceneFBO" in ret.group(1):
+    errors.append("R_SSAO_WantsSceneFBO must not ask for the scene FBO: it decides whether there is one")
+active = fn_body(c, r"static qboolean SS_Active \(void\)")
+if re.sub(r"\s+", " ", active).strip() != "return R_SSAO_WantsSceneFBO () && GL_GetSceneFBO () != 0;":
+    errors.append("SS_Active must be R_SSAO_WantsSceneFBO () && GL_GetSceneFBO () != 0")
+if "qboolean R_SSAO_WantsSceneFBO (void);" not in (ROOT / "engine/h2shared/gl_ssao.h").read_text():
+    errors.append("gl_ssao.h must declare R_SSAO_WantsSceneFBO")
+if "return pp_active ? pp_fbo : 0;" not in fn_body(pp, r"GLuint GL_GetSceneFBO \(void\)") or \
+   "return pp_active ? pp_depth_tex : 0;" not in fn_body(pp, r"GLuint GL_PostProcess_GetSceneDepthTex \(void\)"):
+    errors.append("GL_GetSceneFBO and GL_PostProcess_GetSceneDepthTex must answer 0 when the chain is down this frame")
+if "!GL_GetSceneFBO ()" not in fn_body(pp, r"qboolean GL_PostProcess_GetSceneSize \(int \*w, int \*h\)"):
+    errors.append("GL_PostProcess_GetSceneSize must go through GL_GetSceneFBO")
+soft = fn_body(pp, r"void GL_SoftDepth_Capture \(void\)")
+if re.search(r"\bpp_fbo\b", re.sub(r"/\*.*?\*/", "", soft, flags=re.S)):
+    errors.append("GL_SoftDepth_Capture must ask GL_GetSceneFBO (), not the raw pp_fbo")
+build = fn_body(wc, r"void R_BuildHiZForNextFrame \(void\)")
+if not re.match(r"\s*GLuint[^;]*;\s*int[^;]*;\s*int[^;]*;\s*hiz_pyramid_valid = false;", build) or \
+   not re.search(r"hiz_pyramid_valid = true;\s*$", build):
+    errors.append("R_BuildHiZForNextFrame must invalidate the pyramid first and validate it only at the end")
+if "hiz_on = gl_hiz_cull.integer && hiz_pyramid_tex && hiz_pyramid_valid && hiz_prev_mvp_valid;" not in wc:
+    errors.append("the cull must use the Hi-Z pyramid only when the last build ran")
+
 if errors:
     print("test_ssao: FAIL")
     for e in errors:
         print("  -", e)
     sys.exit(1)
-print("test_ssao: ok (hook order, rounding, alpha, projection, stubs, teardown)")
+print("test_ssao: ok (hook order, rounding, alpha, projection, stubs, teardown, raises the scene FBO)")
