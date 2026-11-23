@@ -599,6 +599,16 @@ void R_NewMap (void)
 		Cbuf_AddText ("pointfile leak\n");
 	}
 
+	/* Ahead of R_BuildWorldCull, which leaves the mirror's surfaces out
+	 * of the compute cull (#517). */
+	mirrortexturenum = -1;
+	for (i = 0; i < cl.worldmodel->numtextures; i++)
+	{
+		if (cl.worldmodel->textures[i] &&
+		    !strncmp(cl.worldmodel->textures[i]->name,"window02_1",10) )
+			mirrortexturenum = i;
+	}
+
 	GL_BuildLightmaps ();
 	R_BuildWorldVBO ();
 	R_BuildSkyStencilVBO ();
@@ -613,15 +623,12 @@ void R_NewMap (void)
 	R_DlightVis_NewMap ();	/* GitHub #97 */
 	R_DlightMark_NewMap ();	/* GitHub #496 */
 	R_Shadow_NewMap ();	/* GitHub #97: the maps are of the old world */
-	mirrortexturenum = -1;
 	for (i = 0; i < cl.worldmodel->numtextures; i++)
 	{
 		if (!cl.worldmodel->textures[i])
 			continue;
 		if (!strncmp(cl.worldmodel->textures[i]->name,"sky",3) )
 			skytexturenum = i;
-		if (!strncmp(cl.worldmodel->textures[i]->name,"window02_1",10) )
-			mirrortexturenum = i;
 	}
 #ifdef QUAKE2
 	R_LoadSkys ();

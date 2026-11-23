@@ -18,8 +18,9 @@ plane, so a texture spread over two walls would draw one of them reflected in
 the other's plane, and a face on a brush entity would put the mirror on a
 model that moves.  Every condition is checked, and anything else fails loudly
 rather than writing a map whose mirror is wrong in a way the sweep would only
-see as a difference.  Two maps, one for each way R_Mirror flips the
-projection (GL_Scalef (-1, 1, 1) for a wall, (1, -1, 1) for a floor):
+see as a difference.  Two maps for tools/sweep-mirror-gpu.steps, one for
+each way R_Mirror flips the projection (GL_Scalef (-1, 1, 1) for a wall,
+(1, -1, 1) for a floor), and one for tools/sweep-mirror-leaks.steps:
 
   maps/demo1.bsp    rtex013 -- one face: the horseman panel in the wall at
                     x = -216, facing -x (y -2200 .. -2056, z 208 .. 360); its
@@ -27,6 +28,11 @@ projection (GL_Scalef (-1, 1, 1) for a wall, (1, -1, 1) for a floor):
   maps/demo1f.bsp   rtex429 -- five faces on the plane z = 0: the cobbles of
                     the graveyard (x -1320 .. -680, y -1960 .. -1736); the
                     reflection holds the tombstones, the tree and the sky.
+  maps/demo1p.bsp   rtex241 -- 44 faces on the plane z = -520: the floor of
+                    a pool (x -488 .. 648, y -560 .. 600),
+                    water from -520 to -384.  A view in the water is in a
+                    CONTENTS_WATER leaf and its reflection, below the floor,
+                    is not: the caustics the reflected pass leaked (#517).
 
 Nothing here is committed: the maps are copied out of the retail pak each
 time.
@@ -35,7 +41,7 @@ Usage:  mk-mirror-testgame.py <basedir> [game]
 reads the demo1 the engine loads from <basedir>/data1 -- in quakefs.c
 FS_AddGameDirectory's order: a loose maps/demo1.bsp, then the .pk3s
 (alphabetically last first), then pak9.pak down to pak0.pak -- and writes
-both maps to <basedir>/<game>/maps/ (game defaults to "mirror").  The
+every map to <basedir>/<game>/maps/ (game defaults to "mirror").  The
 engine's user directory, searched above the basedir, is not looked at:
 run it with -userdir on an empty one, as tools/headless-drive.sh does.  The basedir has to hold
 data1 as a directory or a link that resolves inside
@@ -340,7 +346,7 @@ def self_test():
     return 0
 
 
-MIRRORS = (("rtex013", "demo1"), ("rtex429", "demo1f"))   # (texture, map written)
+MIRRORS = (("rtex013", "demo1"), ("rtex429", "demo1f"), ("rtex241", "demo1p"))   # (texture, map written)
 
 
 def main(argv=None):

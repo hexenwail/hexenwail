@@ -320,6 +320,13 @@ void R_BuildWorldCull (void)
 		gpu_surfs[i].flags = surf->flags;
 		if (!surf->samples)
 			gpu_surfs[i].flags |= SURF_DRAWTILED;
+		/* The mirror's surfaces too, whatever r_mirroralpha: the chain
+		 * pass draws them, as a wall at 1 and through R_MirrorChain
+		 * below it, and a cull draw would put them opaque over the
+		 * reflection (#517).  R_NewMap sets mirrortexturenum first. */
+		if (mirrortexturenum >= 0 && mirrortexturenum < m->numtextures &&
+		    surf->texinfo->texture == m->textures[mirrortexturenum])
+			gpu_surfs[i].flags |= SURF_DRAWTILED;
 
 		cull_bucket_map[i] = gpu_surfs[i].tex_bucket;
 	}

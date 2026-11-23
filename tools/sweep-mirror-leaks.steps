@@ -1,0 +1,153 @@
+# sweep-mirror-leaks.steps -- what the mirror's reflected pass leaked into
+# the view (#517), on tools/mk-mirror-testgame.py's maps/demo1p.bsp: demo1
+# with the floor of a pool (rtex241, 44 faces on z = -520, water up to -384)
+# renamed to window02_1.  No retail map has a mirror.
+#
+# R_Mirror (gl_rmain.c) renders the scene again from the view reflected in
+# the mirror's plane, through the same R_RenderScene -> R_SetupFrame ->
+# R_SetupGL the view took, then blends the mirror's own surfaces over it at
+# r_mirroralpha -- drawn from the VIEW.  What the reflected setup derived from
+# the reflected view was not put back for them:
+#
+#   caustics   R_SetupFrame writes the world frame record's caustics from
+#              r_viewleaf.  The camera here is in the pool (a CONTENTS_WATER
+#              leaf); its reflection, 100 units below the floor, is not.  So
+#              the mirror lost the caustics the view puts on it.
+#   r_speeds   R_SetupFrame zeroed the poly counters, and the reflected pass
+#              threw away the view's: r_speeds 1 on a mirror map counted the
+#              reflection and the mirror surfaces only.
+#   dlights    R_SetupGL re-clustered the dlights against the reflected view.
+#              Not in these frames, because on a mirror whose surfaces all
+#              lie on its plane -- every mirror tools/mk-mirror-testgame.py
+#              writes -- it has nothing to show: a point on the plane is the
+#              same distance from both eyes and lands on the same pixel, so
+#              it looks up the same froxel, and a light reaches it in one
+#              grid exactly when it does in the other.  A run with a fixed-
+#              radius torch (a light_torch_castle with a targetname, as
+#              tools/dlight-leak-check.sh adds one) by the floor could not
+#              tell the two binaries apart either: a mirror frame is not
+#              reproducible run to run (47 - 49 dB GL against GL, the same
+#              binary, no entities drawn), only within one run.
+#              tools/test_mirror_view_state.py holds the restore.
+#
+# The frames, from inside the pool looking down at the floor, paused:
+#   20-pool               r_mirroralpha 0.5, r_caustics 1
+#   21-pool-nocaus        r_caustics 0
+#   22-pool-a1            r_mirroralpha 1 (no mirror), r_caustics 1
+#   23-pool-a1-nocaus     r_mirroralpha 1, r_caustics 0
+#
+# THE CHECKS (tools/mirror-leaks-check.sh <dir>), each inside one run:
+#   1. Caustics reach the mirror: 20 against 21 changes at least MIN_CAUS
+#      pixels.  The view is almost all mirror; before the fix only the
+#      pool's walls changed.
+#   2. r_speeds 1 counts the view: what r_drawviewmodel 1 adds to epoly is
+#      the same with the mirror on as off.  Only R_RenderView draws the view
+#      model, so before the fix the reflected pass zeroed it with the mirror
+#      on.  (wpoly cannot say it: the reflected pass draws more than the view
+#      from every camera tried, before the fix as after.)
+#
+# Measured 2026-11-22, 800x600, llvmpipe, the pre-fix binary (master at
+# "docs(release-notes): r35 notes add the shadow-map unit fix (#528)") and the
+# fix, the same basedir:
+#
+#                          pre-fix                  fix
+#   1. caustics            2,333 px   FAIL          133,145 px   OK
+#   2. view model epoly    +0 on / +320 off FAIL    +320 / +320  OK
+#   wpoly, mirror on       225 (reflection only)    289 (the view's 64 too)
+#   wpoly, mirror off      79                       79
+#
+# Run it on GL, and on the pre-fix binary to see both fail:
+#
+#   ./tools/mk-mirror-testgame.py $B          # $B holds data1 (see its header)
+#   A="-fsaa 0 +gamma 1 -game mirror +map demo1p"
+#   STEPS=tools/sweep-mirror-leaks.steps ENGINE=$E ./tools/headless-drive.sh script /tmp/ml $B $A
+#   ./tools/mirror-leaks-check.sh /tmp/ml
+
+sleep 20
+cmd god
+cmd notarget
+cmd noclip
+cmd viewsize 120
+cmd crosshair 0
+cmd showpause 0
+cmd r_skyspeed_back 0
+cmd r_skyspeed_front 0
+cmd r_skybox_speed 0
+cmd r_flatlightstyles 1
+cmd r_dynamic 0
+cmd r_gpulightstyles 0
+cmd r_ssao 0
+cmd r_bloom 0
+cmd r_dlight_occlusion 0
+cmd r_alias_gpu 0
+cmd r_particles 0
+cmd gl_texture_anisotropy 1
+cmd r_oit 0
+cmd r_waterwarp 0
+cmd r_softparticles 0
+cmd r_softemu 0
+cmd r_scale 1
+cmd gl_waterwarp_speed 0
+cmd r_caustics 1
+cmd gl_glows 0
+cmd gl_missile_glows 0
+cmd gl_other_glows 0
+cmd r_drawviewmodel 0
+cmd r_drawentities 1
+cmd r_drawparticles 0
+cmd gl_particles 1
+cmd r_wateralpha 0.33
+cmd r_lavaalpha 0
+cmd r_water_pixel_warp 0
+cmd r_skyalpha 1
+cmd r_fastsky 0
+cmd r_skyfog 0
+cmd fog 0
+cmd gl_cull 1
+cmd r_mirroralpha 0.5
+sleep 2
+
+cmd setpos 200 0 -470 80 0 0
+sleep 2
+cmd pause
+shot 20-pool
+cmd r_caustics 0
+shot 21-pool-nocaus
+cmd r_mirroralpha 1
+cmd r_caustics 1
+shot 22-pool-a1
+cmd r_caustics 0
+shot 23-pool-a1-nocaus
+cmd r_caustics 1
+
+# r_speeds 1, four ways: the mirror on and off, the view model on and off.
+cmd r_drawviewmodel 1
+cmd r_mirroralpha 0.5
+cmd echo REPORT-SPEEDS-MIRROR-VM-BEGIN
+cmd r_speeds 1
+sleep 1
+cmd r_speeds 0
+cmd echo REPORT-SPEEDS-MIRROR-VM-END
+cmd r_drawviewmodel 0
+cmd echo REPORT-SPEEDS-MIRROR-BEGIN
+cmd r_speeds 1
+sleep 1
+cmd r_speeds 0
+cmd echo REPORT-SPEEDS-MIRROR-END
+cmd r_mirroralpha 1
+cmd r_drawviewmodel 1
+cmd echo REPORT-SPEEDS-A1-VM-BEGIN
+cmd r_speeds 1
+sleep 1
+cmd r_speeds 0
+cmd echo REPORT-SPEEDS-A1-VM-END
+cmd r_drawviewmodel 0
+cmd echo REPORT-SPEEDS-A1-BEGIN
+cmd r_speeds 1
+sleep 1
+cmd r_speeds 0
+cmd echo REPORT-SPEEDS-A1-END
+cmd r_mirroralpha 0.5
+cmd viewpos
+cmd pause
+sleep 1

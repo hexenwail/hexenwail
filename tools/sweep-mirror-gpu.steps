@@ -98,6 +98,9 @@
 #                                                narrowest margin
 #   GL   compute cull left on (pre-P3d)          10 31.4, mirror adds 10
 #                                                30.3, gl_cull 0 adds 35.3
+#   GL   compute cull on at gl_cull 0 (#517,     04 32.7, gl_cull 0 adds 31.5
+#        before its gl_cull term): its back
+#        faces cover the reflection
 
 sleep 20
 cmd god
