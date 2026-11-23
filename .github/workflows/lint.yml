@@ -550,6 +550,12 @@ jobs:
       - name: Sampler units go through one seam
         run: python3 tools/test_rg_sampler_units.py
 
+      # gl_lodbias reaches the SDL_GPU sampler's mip_lod_bias, and `auto`
+      # scales from PP_SceneSamples, the samples the scene FBO is built with,
+      # not vid_config_fsaa: 0 under -gpu until MSAA lands (GitHub #521).
+      - name: gl_lodbias reaches -gpu, auto reads samples in use
+        run: python3 tools/test_lod_bias_gpu.py
+
       # rg_null.c, SDL_GPU mode's counting null GL table, is generated from
       # gl_func.h; a stale copy would leave a new entry point NULL under -gpu
       # (#340 P0).

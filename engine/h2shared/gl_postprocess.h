@@ -43,6 +43,10 @@ void GL_PostProcess_EndFrame (void);
 /* Returns true if post-processing is currently active. */
 qboolean GL_PostProcess_Active (void);
 
+/* MSAA samples the scene FBO uses (0 = none): vid_config_fsaa clamped to
+ * the driver and forced 0 under -gpu.  gl_lodbias auto reads this. */
+int PP_SceneSamples (void);
+
 /* Returns true if the post-process chain initialized successfully at all. */
 qboolean GL_PostProcess_Available (void);
 

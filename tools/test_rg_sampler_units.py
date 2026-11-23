@@ -1025,7 +1025,10 @@ def check_backend(root, verbose):
                 fail("placeholder format for class %s is %s" % (cname, fl[i] if i < len(fl) else None))
     made = [split_args(cp[m.end():match_close(cp, m.end() - 1, "(", ")") - 1])
             for m in re.finditer(r"rgt_ph_shadow = RGT_MakePlaceholder \(", cp)]
-    if not made or "enable_compare = true" not in cp or any(
+    # The placeholder samplers are built in RGT_CreatePhSamplers, which the
+    # sampler-cache flush also calls (GitHub #521).
+    ps = lift(rgr, r"^static void RGT_CreatePhSamplers \(", "RGT_CreatePhSamplers")
+    if not made or "RGT_CreatePhSamplers ();" not in cp or "enable_compare = true" not in ps or any(
             len(a) != 3 or a[0] != "RG_TT_CUBE_ARRAY"
             or not re.fullmatch(r"SDL_GPU_TEXTUREFORMAT_D(16_UNORM|32_FLOAT)", a[1])
             or "SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET" not in a[2] for a in made):

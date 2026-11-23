@@ -123,6 +123,13 @@ typedef struct {
 } rgsamplerentry_t;
 static rgsamplerentry_t	rgs_cache[RG_MAX_SAMPLERS];
 static int		rgs_count;
+/* Every gl_lodbias value adds a sampler per filter/wrap/level combination in
+ * use (GitHub #521), so a few changes at the console fill the cache.  It is
+ * emptied after a frame's submit, the one point no binding array holds a
+ * sampler, once it is 3/4 full or a lookup found it full. */
+#define RG_SAMPLER_FLUSH_AT	(RG_MAX_SAMPLERS * 3 / 4)
+static qboolean		rgs_overflowed;
+static unsigned long	rgs_flushes;
 
 static Uint32		rgt_pending_bytes;
 static unsigned long	rgt_created, rgt_recreated, rgt_uploads, rgt_upload_bytes;
@@ -810,7 +817,8 @@ static SDL_GPUSampler *RGT_SamplerFor (const SDL_GPUSamplerCreateInfo *info)
 	}
 	if (rgs_count == RG_MAX_SAMPLERS)
 	{
-		RG_NoteUnhandled ("sampler cache full (sampled with the first sampler)");
+		RG_NoteUnhandled ("sampler cache full (sampled with the first sampler until the frame ends)");
+		rgs_overflowed = true;
 		return rgs_cache[0].sampler;
 	}
 	rgs_cache[rgs_count].info = *info;
@@ -937,6 +945,19 @@ static SDL_GPUTexture *RGT_MakePlaceholder (int type, SDL_GPUTextureFormat fmt,
 	return tex;
 }
 
+static void RGT_CreatePhSamplers (void)
+{
+	SDL_GPUSamplerCreateInfo	si;
+
+	SDL_zero (si);
+	rgt_ph_sampler = RGT_SamplerFor (&si);
+	/* As GL samples sh_tex: compare on, LEQUAL; nearest, clamped. */
+	si.address_mode_u = si.address_mode_v = si.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+	si.enable_compare = true;
+	si.compare_op = SDL_GPU_COMPAREOP_LESS_OR_EQUAL;
+	rgt_ph_shadow_sampler = RGT_SamplerFor (&si);
+}
+
 static void RGT_CreatePlaceholders (void)
 {
 	static const SDL_GPUTextureFormat	fmts[RG_SC_COUNT] = {
@@ -944,7 +965,6 @@ static void RGT_CreatePlaceholders (void)
 		SDL_GPU_TEXTUREFORMAT_R32G32B32A32_INT,
 		SDL_GPU_TEXTUREFORMAT_R32G32B32A32_UINT
 	};
-	SDL_GPUSamplerCreateInfo	si;
 	int				c, i;
 
 	for (c = 0; c < RG_SC_COUNT; c++)
@@ -962,13 +982,7 @@ static void RGT_CreatePlaceholders (void)
 		rgt_ph_shadow = RGT_MakePlaceholder (RG_TT_CUBE_ARRAY, SDL_GPU_TEXTUREFORMAT_D32_FLOAT,
 						     SDL_GPU_TEXTUREUSAGE_SAMPLER |
 						     SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET);
-	SDL_zero (si);
-	rgt_ph_sampler = RGT_SamplerFor (&si);
-	/* As GL samples sh_tex: compare on, LEQUAL; nearest, clamped. */
-	si.address_mode_u = si.address_mode_v = si.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
-	si.enable_compare = true;
-	si.compare_op = SDL_GPU_COMPAREOP_LESS_OR_EQUAL;
-	rgt_ph_shadow_sampler = RGT_SamplerFor (&si);
+	RGT_CreatePhSamplers ();
 	rgt_ph_uploaded = false;
 	rgt_ph_shadow_cleared = false;
 }
@@ -1206,6 +1220,26 @@ void RG_Res_IssueUploads (SDL_GPUCopyPass *copy, SDL_GPUTransferBuffer *tb)
 	}
 }
 
+/* Release every cached sampler and forget each texture's; they rebuild on
+ * their next draw.  SDL keeps a released sampler alive until the submitted
+ * work using it retires. */
+static void RGT_FlushSamplers (void)
+{
+	int	i;
+
+	for (i = 0; i < rgs_count; i++)
+	{
+		if (rgs_cache[i].sampler)
+			SDL_ReleaseGPUSampler (rg_dev, rgs_cache[i].sampler);
+	}
+	rgs_count = 0;
+	for (i = 0; i < rgt_count; i++)
+		rgt[i].sampler = NULL;
+	RGT_CreatePhSamplers ();
+	rgs_overflowed = false;
+	rgs_flushes++;
+}
+
 void RG_Res_EndFrame (void)
 {
 	int	i;
@@ -1213,6 +1247,8 @@ void RG_Res_EndFrame (void)
 	for (i = 0; i < rgt_numretired; i++)
 		SDL_ReleaseGPUTexture (rg_dev, rgt_retired[i]);
 	rgt_numretired = 0;
+	if (rgs_overflowed || rgs_count >= RG_SAMPLER_FLUSH_AT)
+		RGT_FlushSamplers ();
 }
 
 /* ------------------------------------------------------------------ */
@@ -1223,6 +1259,7 @@ void RG_Res_Init (void)
 {
 	memset (rgt_units, 0, sizeof(rgt_units));
 	rgs_count = 0;
+	rgs_overflowed = false;
 	RGT_CreatePlaceholders ();
 }
 
@@ -1275,7 +1312,7 @@ void RG_Res_Status (void)
 		made += (rgt[i].alive && rgt[i].tex);
 	}
 	Con_Printf ("[RENDERER] SDL_GPU textures: %d names, %d created (%lu creates, %lu re-creates), "
-		    "%d samplers, %lu uploads / %lu KB, %u bytes queued\n",
-		    alive, made, rgt_created, rgt_recreated, rgs_count,
+		    "%d samplers (%lu cache flushes), %lu uploads / %lu KB, %u bytes queued\n",
+		    alive, made, rgt_created, rgt_recreated, rgs_count, rgs_flushes,
 		    rgt_uploads, rgt_upload_bytes / 1024, (unsigned int)rgt_pending_bytes);
 }
