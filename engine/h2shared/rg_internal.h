@@ -256,6 +256,20 @@ typedef struct {
 	int		block;		/* rg_frame.c's registered block, -1 none */
 } rgubo_t;
 
+/* When a storage slot may read the zeroed stand-in without that being a gap
+ * in the routing (#520).  A stage declares every block any of its paths
+ * reads, and on GL a block the draw does not read may have nothing bound. */
+typedef enum {
+	RG_SSBO_NEEDED,		/* every draw reads it: nothing bound is counted */
+	RG_SSBO_POSE,		/* one pose format of several, read only while VertParams'
+				 * u_poseverttype is its format: unbound is expected while
+				 * the flushed u_poseverttype names another pose block of
+				 * the same stage */
+	RG_SSBO_COMPUTE_FED	/* only the light cluster fills it, and every read is behind
+				 * a uniform C leaves 0 without compute: unbound is expected
+				 * while gl_renderer_caps.compute_shaders is off (P5) */
+} rg_ssbokind_t;
+
 /* A read-only storage block (#340 P2e).  GL binds it by binding point and
  * SDL_GPU by slot, and the Vulkan SPIR-V keeps only the slot: the point is
  * found from the block's name (RG_StoragePoint), the convention every
@@ -263,6 +277,8 @@ typedef struct {
 typedef struct {
 	char		name[32];
 	Uint8		slot;		/* the SDL_GPU storage-buffer slot */
+	Uint8		kind;		/* rg_ssbokind_t */
+	Sint8		format;		/* RG_SSBO_POSE: the poseverttype_t it is read for, else -1 */
 	int		point;		/* the GL_SHADER_STORAGE_BUFFER binding point, -1 none */
 } rgssbo_t;
 
@@ -293,8 +309,12 @@ const char *RG_ShaderSource (void);
 const rgprog_t *RG_Program (GLuint name);
 int	RG_ProgramCount (void);
 /* The GL_SHADER_STORAGE_BUFFER binding point the engine binds storage block
- * `block` to (GL_BindBufferBase / Range), -1 for a block it never binds. */
+ * `block` to (GL_BindBufferBase / Range), -1 for a block it never binds, and
+ * its rg_ssbokind_t (RG_SSBO_NEEDED for a block the table does not name)
+ * with, in *format, the poseverttype_t an RG_SSBO_POSE block is read for
+ * (-1 otherwise). */
 int	RG_StoragePoint (const char *block);
+rg_ssbokind_t RG_StorageKind (const char *block, int *format);
 
 /* ------------------------------------------------------------------ */
 /* rg_pipeline.c                                                       */
@@ -372,9 +392,11 @@ void	RG_Buf_MarkRead (const rgvinput_t *in);
 /* The buffer bound to GL_SHADER_STORAGE_BUFFER binding point `point`, for
  * a draw's storage slot; NULL, and counted, when there is none SDL_GPU can
  * bind whole (nothing bound, no data, a range at a non-zero offset or past
- * the buffer): the slot keeps the zeroed stand-in.  *read is what
- * RG_Buf_StampRead takes once the draw is recorded (#340 P2e). */
-SDL_GPUBuffer *RG_Buf_Storage (int point, void **read);
+ * the buffer): the slot keeps the zeroed stand-in.  `unbound_ok` is the
+ * caller's proof that the draw does not read the slot (rg_ssbokind_t):
+ * nothing bound is then not counted; the other refusals still are.  *read
+ * is what RG_Buf_StampRead takes once the draw is recorded (#340 P2e). */
+SDL_GPUBuffer *RG_Buf_Storage (int point, qboolean unbound_ok, void **read);
 void	RG_Buf_StampRead (void *read);
 Uint32	RG_Buf_PendingBytes (void);
 void	RG_Buf_StageUploads (Uint8 *dst, Uint32 base);

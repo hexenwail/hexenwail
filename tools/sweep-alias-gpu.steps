@@ -20,7 +20,10 @@
 # gpu_unrouted counts 0 calls into the GL entry points, and renderer_status
 # reports storage slots bound to buffers (the instanced batches' instance,
 # pose and shadedots buffers), the rest the zeroed stand-in (each world and
-# alias fragment stage's LightBuffer: the light cluster is compute, P5).
+# alias fragment stage's LightBuffer: the light cluster is compute, P5; and
+# each instanced batch's other pose format).  Those stand-ins are expected,
+# so gpu_unrouted lists no "read-only storage buffer with nothing bound"
+# (#520: before, this sweep's report counted 116,335 of them, 2026-11-22).
 #
 # The cameras look at demo1's graveyard by the start: tombstn1.mdl (4 of
 # them), tombstn2.mdl (2), the angel statue and tree2.mdl, all opaque, so

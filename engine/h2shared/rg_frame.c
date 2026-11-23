@@ -61,6 +61,8 @@
 #include "quakedef.h"
 #include "rg_internal.h"
 #include "gl_vbo.h"		/* GL_IMM_MAX_VERTS */
+#include "gl_uniforms.h"	/* r_vertparams_t: the pose type a draw reads (#520) */
+#include <stddef.h>		/* offsetof */
 
 /* ------------------------------------------------------------------ */
 /* Uniform blocks                                                      */
@@ -412,6 +414,60 @@ static Uint32 RGF_BlockOffset (rgblock_t *b)
 	return b->arena_ofs;
 }
 
+/* The u_poseverttype this draw reads: VertParams as last flushed, which is
+ * what the draw's uniform arena copy holds; -1 when the stage has no
+ * VertParams or the block is not registered. */
+static int RGF_PoseVertType (const rgstage_t *st)
+{
+	int	i, b;
+	int	v;
+
+	for (i = 0; i < st->num_ubos; i++)
+	{
+		if (!strcmp (st->ubos[i].name, "VertParams"))
+			break;
+	}
+	if (i == st->num_ubos)
+		return -1;
+	b = RG_Frame_BlockIndex ("VertParams");
+	if (b < 0 || rgb_blocks[b].size < (int) sizeof(r_vertparams_t))
+		return -1;
+	memcpy (&v, rgb_blocks[b].flushed + offsetof(r_vertparams_t, posei) + 2 * sizeof(int),
+		sizeof(v));
+	return v;
+}
+
+/* Whether storage slot `sb` of stage `st` may go unbound because this draw
+ * provably does not read it (rg_ssbokind_t, #520). */
+static qboolean RGF_StandinExpected (const rgstage_t *st, const rgssbo_t *sb)
+{
+	int	i, pv;
+
+	switch (sb->kind)
+	{
+	case RG_SSBO_COMPUTE_FED:
+		return !gl_renderer_caps.compute_shaders;
+	case RG_SSBO_POSE:
+		/* Excused only when the pose type names ANOTHER pose block of this
+		 * stage: salias_inst_vert reads MD3PoseBuffer at PV_MD3 and
+		 * PoseBuffer otherwise, so at a type no block of the stage names
+		 * (or a stage with one pose block, the skeletal) nothing is. */
+		pv = RGF_PoseVertType (st);
+		if (pv < 0 || pv == sb->format)
+			return false;
+		for (i = 0; i < st->num_ssbos; i++)
+		{
+			const rgssbo_t	*o = &st->ssbos[i];
+
+			if (o != sb && o->kind == RG_SSBO_POSE && o->format == pv)
+				return true;
+		}
+		return false;
+	default:
+		return false;
+	}
+}
+
 /* False when the stage cannot be bound whole: the draw is dropped. */
 static qboolean RGF_RecordStage (rgdraw_t *d, const rgprog_t *prog, int stage)
 {
@@ -449,7 +505,8 @@ static qboolean RGF_RecordStage (rgdraw_t *d, const rgprog_t *prog, int stage)
 		{
 			const rgssbo_t	*sb = &st->ssbos[i];
 			void		*read;
-			SDL_GPUBuffer	*buf = RG_Buf_Storage (sb->point, &read);
+			SDL_GPUBuffer	*buf = RG_Buf_Storage (sb->point, RGF_StandinExpected (st, sb),
+							       &read);
 
 			/* RG_Buf_Storage notes why when it has nothing */
 			if (buf)

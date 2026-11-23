@@ -163,6 +163,22 @@ Checked, from the sources (stock python3, lint.yml):
       culling, SSAO and GPU particles (P5) stay off;
     * GL_DrawAliasSkeletal and use_instancing test shader_storage alone,
       with no -gpu note left behind.
+    * the stand-in is counted as unhandled unless the draw provably does
+      not read the slot (#520): rg_storage_points gives each block a kind
+      and pose format (STANDIN_KINDS; any other block is NEEDED), and
+      RGF_StandinExpected excuses a COMPUTE_FED block only while
+      compute_shaders is off, a POSE block only while the draw's flushed
+      VertParams u_poseverttype is another pose block's format in the same
+      stage.  Shader side: no COMPUTE_FED member is named outside a function
+      (no macro, no global), every read reaches main() only through a call
+      that is the whole of an `if (<gate>) ...;` line, gate from
+      STANDIN_GATES, and v_dlightscale is u_alias_dlight or 0; in a stage
+      that selects by u_poseverttype, each pose block is read only inside
+      `if (u_poseverttype == N)` / else regions that do not run at the
+      types it is excused at.  C side: the chain from compute_shaders to
+      each gate (STANDIN_PINS), each gate's one writer in gl_uniforms.c
+      (STANDIN_WRITERS), the setters' callers (STANDIN_CALLERS), and every
+      R_/GL_SetAliasDlight in engine/ taking R_AliasDlightScale or 0.
   liquids and the translucent world under -gpu (#340 P3a), which
   tools/sweep-liquid-gpu.steps draws: they go through GL_ImmEnd and the P2
   seams, and three GL-only paths stay off under -gpu, each by
@@ -1545,7 +1561,8 @@ STORAGE_PINS = (
     ("rg_buffer.c", "RG_BindBufferRange", r"\brgb_points\[index\]\.buffer\s*=\s*buffer\s*;\s*"
      r"rgb_points\[index\]\.offset\s*=\s*buffer\s*\?\s*offset\s*:\s*0\s*;",
      "the binding point records the buffer and the offset it was bound at"),
-    ("rg_frame.c", "RGF_RecordStage", r"\bSDL_GPUBuffer\s*\*buf\s*=\s*RG_Buf_Storage\s*\(\s*sb->point\s*,\s*&read\s*\)\s*;"
+    ("rg_frame.c", "RGF_RecordStage", r"\bSDL_GPUBuffer\s*\*buf\s*=\s*RG_Buf_Storage\s*\(\s*sb->point\s*,"
+     r"\s*RGF_StandinExpected\s*\(\s*st\s*,\s*sb\s*\)\s*,\s*&read\s*\)\s*;"
      r".*\bslots\[sb->slot\]\s*=\s*buf\s*;.*\bslots\[sb->slot\]\s*=\s*rgf_ssbo\s*;",
      "each storage slot gets the buffer at its block's GL binding point, the stand-in when none"),
     ("rg_frame.c", "RGF_Replay", r"\bSDL_BindGPUVertexStorageBuffers\s*\(\s*pass\s*,\s*0\s*,\s*d->vssbo\s*,\s*d->nvssbo\s*\)\s*;"
@@ -1599,7 +1616,7 @@ def check_storage(root):
     if not m:
         fail("%s: no rg_storage_points[] table (#340 P2e)" % rs)
     else:
-        for e in re.finditer(r"\{\s*\"(\w+)\"\s*,\s*(\w+)\s*\}", m.group(1)):
+        for e in re.finditer(r"\{\s*\"(\w+)\"\s*,\s*(\w+)\s*,\s*\w+\s*,\s*-?\w+\s*\}", m.group(1)):
             table[e.group(1)] = value(e.group(2), rs)
     for name, (v, where) in sorted(declared.items()):
         if name not in table:
@@ -1631,6 +1648,290 @@ def check_storage(root):
         body = body_named(root, rel, fn)
         if body is not None and not re.search(rx, body, re.S):
             fail("%s: %s: %s (#340 P2e)" % (rel, fn, why))
+    return 0
+
+
+# The block kinds rg_shader.c may give, and which blocks hold which (#520):
+# name -> (kind, pose format).  A block not listed must be (NEEDED, -1), so
+# a new block reads as a routing gap until someone proves otherwise.
+STANDIN_KINDS = {
+    "PoseBuffer": ("RG_SSBO_POSE", "PV_QUAKE1"),
+    "MD3PoseBuffer": ("RG_SSBO_POSE", "PV_MD3"),
+    "BoneBuffer": ("RG_SSBO_POSE", "PV_IQM"),
+    "LightBuffer": ("RG_SSBO_COMPUTE_FED", "-1"),
+}
+PV_VALUE = {"PV_QUAKE1": 0, "PV_MD3": 1, "PV_IQM": 2}
+# The uniform-static compares a read of a COMPUTE_FED block may sit behind,
+# whitespace dropped: each is 0 unless the light cluster ran this frame.
+STANDIN_GATES = ("u_lmstyles.x>0.5", "u_dlight_scale>0.0", "v_dlightscale>0.0")
+# Why those gates are 0 without compute: the C chain from the capability to
+# each uniform.  (file, function, regex, why).
+STANDIN_PINS = (
+    ("engine/h2shared/gl_lightcluster.c", "R_LightCluster_Build",
+     r"^\s*if\s*\(\s*lc_failed\s*\)\s*return\s+false\s*;\s*"
+     r"if\s*\(\s*!\s*gl_renderer_caps\.compute_shaders\s*\|\|\s*!\s*gl_renderer_caps\.shader_storage\s*\)"
+     r"\s*return\s+false\s*;",
+     "the grid's buffer exists only with compute"),
+    ("engine/h2shared/gl_lightcluster.c", "R_LightCluster_Update",
+     r"^\s*float\b[^;]*;\s*float\b[^;]*;\s*GLint\b[^;]*;\s*int\b[^;]*;\s*"
+     r"lc_valid_this_frame\s*=\s*false\s*;\s*if\s*\(\s*!\s*r_lightclusters\.integer\s*\)\s*return\s*;\s*"
+     r"if\s*\(\s*!\s*lc_ready\s*&&\s*!\s*R_LightCluster_Build\s*\(\s*\)\s*\)\s*return\s*;",
+     "the grid is valid for a frame only once Build succeeded"),
+    ("engine/h2shared/gl_lightcluster.c", "R_LightCluster_ShadesWorld",
+     r"^\s*return\s+r_lightclusters\.integer\s*!=\s*0\s*&&\s*!\s*lc_failed\s*&&\s*"
+     r"gl_renderer_caps\.compute_shaders\s*&&\s*gl_renderer_caps\.shader_storage\s*;\s*$",
+     "GPU lightstyles (u_lmstyles.x) and alias dlights need compute"),
+    ("engine/h2shared/gl_lightcluster.c", "R_LightCluster_ShadesAlias",
+     r"^\s*return\s+r_lightclusters_models\.integer\s*!=\s*0\s*&&\s*R_LightCluster_ShadesWorld\s*\(\s*\)\s*;\s*$",
+     "alias dlights need what the world's need"),
+    ("engine/h2shared/gl_lightcluster.c", "R_LightCluster_AliasActive",
+     r"^\s*return\s+R_LightCluster_ShadesAlias\s*\(\s*\)\s*&&\s*lc_valid_this_frame\s*&&[^;|]*;\s*$",
+     "an alias dlight scale needs a valid grid"),
+    ("engine/h2shared/gl_lightcluster.c", "R_LightCluster_BindForWorld",
+     r"\bscale\s*=\s*0\.0f\s*;\s*if\s*\(\s*lc_valid_this_frame\s*&&[^)|]*\)\s*\{.*?\}\s*"
+     r"R_SetWorldDlight\s*\(\s*scale\s*,",
+     "u_dlight_scale is 0 unless the grid is valid"),
+    ("engine/hexen2/gl_rsurf.c", "LM_GpuStylesWanted",
+     r"#\s*else\s*return\s+r_gpulightstyles\.integer\s*!=\s*0\s*&&\s*lm_atlas_enabled\s*&&\s*"
+     r"R_LightCluster_ShadesWorld\s*\(\s*\)\s*;",
+     "u_lmstyles.x is 1 only while the light cluster shades the world"),
+    ("engine/hexen2/gl_rsurf.c", "R_LightStyles_FrameSetup",
+     r"\bwant\s*=\s*LM_GpuStylesWanted\s*\(\s*\)\s*&&[^;|]*;.*"
+     r"\bR_SetWorldLMStyles\s*\(\s*lm_gpu_styles\s*\?\s*1\.0f\s*:\s*0\.0f\s*,",
+     "u_lmstyles.x is lm_gpu_styles, which follows LM_GpuStylesWanted"),
+    ("engine/hexen2/gl_rmain.c", "R_AliasDlightScale",
+     r"^\s*if\s*\(\s*!\s*want\s*\|\|\s*!\s*R_LightCluster_AliasActive\s*\(\s*\)\s*\)\s*return\s+0\.0f\s*;",
+     "u_alias_dlight is 0 unless the grid is live"),
+    ("engine/h2shared/rg_buffer.c", "RG_Buf_Storage",
+     r"if\s*\(\s*!p\s*\|\|\s*!p->buffer\s*\)\s*\{\s*if\s*\(\s*!unbound_ok\s*\)\s*RG_NoteUnhandled\s*\("
+     r"[^;]*;\s*return\s+NULL\s*;\s*\}",
+     "nothing bound is counted unless the caller proved the slot unread"),
+    ("engine/h2shared/rg_frame.c", "RGF_StandinExpected",
+     r"^\s*int\s+i\s*,\s*pv\s*;\s*switch\s*\(\s*sb->kind\s*\)\s*\{\s*"
+     r"case\s+RG_SSBO_COMPUTE_FED\s*:\s*return\s+!\s*gl_renderer_caps\.compute_shaders\s*;\s*"
+     r"case\s+RG_SSBO_POSE\s*:\s*pv\s*=\s*RGF_PoseVertType\s*\(\s*st\s*\)\s*;\s*"
+     r"if\s*\(\s*pv\s*<\s*0\s*\|\|\s*pv\s*==\s*sb->format\s*\)\s*return\s+false\s*;\s*"
+     r"for\s*\(\s*i\s*=\s*0\s*;\s*i\s*<\s*st->num_ssbos\s*;\s*i\+\+\s*\)\s*\{\s*"
+     r"const\s+rgssbo_t\s*\*o\s*=\s*&st->ssbos\[i\]\s*;\s*"
+     r"if\s*\(\s*o\s*!=\s*sb\s*&&\s*o->kind\s*==\s*RG_SSBO_POSE\s*&&\s*o->format\s*==\s*pv\s*\)\s*return\s+true\s*;\s*\}\s*"
+     r"return\s+false\s*;\s*default\s*:\s*return\s+false\s*;\s*\}\s*$",
+     "a compute-fed block is excused only while compute is off, a pose block only while the draw's "
+     "pose type is another pose block's of the same stage, and nothing else ever"),
+    ("engine/h2shared/rg_frame.c", "RGF_PoseVertType",
+     r"!strcmp\s*\(\s*st->ubos\[i\]\.name\s*,\s*\"VertParams\"\s*\).*"
+     r"\bb\s*=\s*RG_Frame_BlockIndex\s*\(\s*\"VertParams\"\s*\)\s*;.*"
+     r"rgb_blocks\[b\]\.size\s*<\s*\(int\)\s*sizeof\s*\(\s*r_vertparams_t\s*\).*"
+     r"rgb_blocks\[b\]\.flushed\s*\+\s*offsetof\s*\(\s*r_vertparams_t\s*,\s*posei\s*\)\s*\+\s*2\s*\*\s*sizeof\s*\(\s*int\s*\)",
+     "the pose type is the stage's own VertParams as flushed, u_vposei.z (uniforms.inc)"),
+)
+# The one writer of each gate uniform's C mirror (gl_uniforms.c), and who
+# calls it: (regex over gl_uniforms.c, the function it must sit in).
+STANDIN_WRITERS = (
+    (r"\bvertparams\.alias\s*\[\s*0\s*\]\s*=", "R_SetAliasDlight"),
+    (r"\bworldframe\.lmstyles\b", "R_SetWorldLMStyles"),
+    (r"\bworldframe\.gridz\b(?!\s*\[\s*3\s*\])", "R_SetWorldDlight"),
+)
+STANDIN_CALLERS = {
+    # setter -> {file: functions allowed to call it}
+    "R_SetWorldDlight": {"engine/h2shared/gl_lightcluster.c": {"R_LightCluster_BindForWorld"}},
+    "R_SetWorldLMStyles": {"engine/hexen2/gl_rsurf.c": {"R_LightStyles_FrameSetup"}},
+}
+
+
+def gl_regions(body, rx_if):
+    """[(N, if_span, else_span or None)] for each `if (<sel> == N) {` in body."""
+    out = []
+    for m in rx_if.finditer(body):
+        o = body.index("{", m.start())
+        c = match_brace(body, o)
+        if c < 0:
+            continue
+        e = re.match(r"\s*else\s*\{", body[c + 1:])
+        es = None
+        if e:
+            eo = c + 1 + e.end() - 1
+            ec = match_brace(body, eo)
+            if ec >= 0:
+                es = (eo, ec)
+        out.append((int(m.group(1)), (o, c), es))
+    return out
+
+
+def match_brace(text, o):
+    d = 0
+    for i in range(o, len(text)):
+        if text[i] == "{":
+            d += 1
+        elif text[i] == "}":
+            d -= 1
+            if d == 0:
+                return i
+    return -1
+
+
+def check_standin(root):
+    """#520: the zeroed storage stand-in is counted unless provably unread."""
+    rs = "engine/h2shared/rg_shader.c"
+    code = strip_c_comments((root / rs).read_text(errors="replace"))
+    m = re.search(r"\brg_storage_points\s*\[\s*\]\s*=\s*\{(.*?)\};", code, re.S)
+    kinds = {}
+    if m:
+        for e in re.finditer(r"\{\s*\"(\w+)\"\s*,\s*\w+\s*,\s*(\w+)\s*,\s*(-?\w+)\s*\}", m.group(1)):
+            kinds[e.group(1)] = (e.group(2), e.group(3))
+    if not kinds:
+        fail("%s: rg_storage_points has no kind and pose-format columns -- every unbound storage slot "
+             "is counted as a routing gap, the expected ones included (#520)" % rs)
+        return 0
+    for name, kf in sorted(kinds.items()):
+        want = STANDIN_KINDS.get(name, ("RG_SSBO_NEEDED", "-1"))
+        if kf != want:
+            fail("%s: rg_storage_points gives %s %s, the proof in tools/test_rg_sources.py covers %s "
+                 "(#520)" % (rs, name, kf, want))
+    if not re.search(r"\bsb->kind\s*=\s*\(Uint8\)\s*RG_StorageKind\s*\(\s*sb->name\s*,\s*&format\s*\)\s*;"
+                     r"\s*sb->format\s*=\s*\(Sint8\)\s*format\s*;", code):
+        fail("%s: the reflection does not record each storage block's kind and format (#520)" % rs)
+
+    files = {}
+    for p in sorted((root / "engine/shaders").glob("*")):
+        if p.suffix in (".glsl", ".inc") and not p.name.endswith("_comp.glsl"):
+            files[p.name] = strip_c_comments(p.read_text(errors="replace"))
+
+    # COMPUTE_FED: every read of the block's members is in a function, and
+    # reaches main() only through a call that is the whole of an
+    # `if (<gate>) ...;` line.
+    for block in sorted(b for b, k in kinds.items() if k[0] == "RG_SSBO_COMPUTE_FED"):
+        members = set()
+        for code in files.values():
+            for d in re.finditer(r"\bbuffer\s+%s\s*\{([^}]*)\}" % block, code):
+                members |= set(re.findall(r"(\w+)\s*\[", d.group(1)))
+        if not members:
+            fail("engine/shaders: no array member found in storage block %s (#520)" % block)
+            continue
+        mrx = re.compile(r"\b(%s)\s*\[" % "|".join(sorted(members)))
+        for fname, code in sorted(files.items()):
+            outside = re.sub(r"\bbuffer\s+%s\s*\{[^}]*\}" % block, "", code)
+            for n, b, e in reversed(functions(outside)):
+                outside = outside[:b] + outside[e + 1:]
+            hit = mrx.search(outside)
+            if hit:
+                fail("engine/shaders/%s: %s[] named outside a function (a macro or a global) -- the #520 "
+                     "proof follows reads through functions only" % (fname, hit.group(1)))
+
+        def ungated(body, rx):
+            for c in rx.finditer(body):
+                ls = body.rfind("\n", 0, c.start()) + 1
+                le = body.find("\n", c.start())
+                line = re.sub(r"\s+", "", body[ls:le if le >= 0 else len(body)])
+                g = re.match(r"if\((.*?)\)", line)
+                if not g or g.group(1) not in STANDIN_GATES or "else" in line or ";" not in line \
+                        or line.index(";") != len(line) - 1:
+                    return c.group(1)
+                prev = body[:ls].rstrip()
+                if prev.endswith("else"):
+                    return c.group(1)
+            return None
+        readers, why = set(), {}
+        while True:
+            rx = re.compile(r"\b(%s)\s*[\[(]" % "|".join(sorted(members | readers)))
+            grew = False
+            for fname, code in files.items():
+                for n, b, e in functions(code):
+                    if not n or n in readers:
+                        continue
+                    hit = ungated(code[b:e], rx)
+                    if hit:
+                        readers.add(n)
+                        why[n] = (fname, hit)
+                        grew = True
+            if not grew:
+                break
+        if not readers:
+            fail("engine/shaders: no function reads %s -- the #520 proof has nothing to hold" % block)
+        if "main" in readers:
+            fname, hit = why["main"]
+            fail("engine/shaders/%s: main() reaches %s (through %s) outside a whole-line `if (<gate>) ...;` "
+                 "with a gate from %s -- under -gpu that read is the zeroed stand-in, which rg_frame.c "
+                 "does not count (#520)" % (fname, block, hit, ", ".join(STANDIN_GATES)))
+    # The alias gate's varying is the batch scale or 0, nothing else.
+    for fname, code in sorted(files.items()):
+        for a in re.finditer(r"\bv_dlightscale\s*=\s*([^;]*);", code):
+            rhs, prev = a.group(1), None
+            while rhs != prev:
+                prev, rhs = rhs, re.sub(r"\([^()]*\)", "", rhs)
+            if not re.fullmatch(r"\s*(?:\?\s*)?u_alias_dlight(?:\s*:\s*0\.0)?\s*", rhs):
+                fail("engine/shaders/%s: v_dlightscale = %s -- the #520 proof takes it to be "
+                     "u_alias_dlight or 0" % (fname, a.group(1).strip()))
+    # Each gate uniform's mirror has one writer, called only from the chain.
+    gu = "engine/h2shared/gl_uniforms.c"
+    gcode = strip_c_comments((root / gu).read_text(errors="replace"))
+    gfun = functions(gcode)
+    for rx, fn in STANDIN_WRITERS:
+        for w in re.finditer(rx, gcode):
+            owner = [n for n, b, e in gfun if b < w.start() < e]
+            if owner != [fn]:
+                fail("%s: %s written in %s -- the #520 proof takes %s to be its only writer"
+                     % (gu, w.group(0), owner[0] if owner else "file scope", fn))
+    srcs = sorted(p for p in (root / "engine").rglob("*.c")
+                  if not ("rust" in p.parts and "target" in p.parts))
+    for p in srcs:
+        rel = str(p.relative_to(root))
+        src = strip_c_comments(p.read_text(errors="replace"))
+        fun = None
+        for a in re.finditer(r"\b(?:R|GL)_SetAliasDlight\s*\(([^;]*)\)\s*;", src):
+            arg = a.group(1).strip()
+            if not re.fullmatch(r"R_AliasDlightScale\s*\([^()]*\)|0\.0f|GL_GetAliasDlight\s*\(\s*\)|"
+                                r"imm_alias_dlight", arg):
+                fail("%s: %s -- u_alias_dlight must come from R_AliasDlightScale or be 0 (#520)"
+                     % (rel, a.group(0)))
+        for setter, allowed in STANDIN_CALLERS.items():
+            for a in re.finditer(r"\b%s\s*\(" % setter, src):
+                if rel == gu:
+                    continue
+                fun = fun or functions(src)
+                owner = [n for n, b, e in fun if b < a.start() < e]
+                if not owner or owner[0] not in allowed.get(rel, ()):
+                    fail("%s: %s called from %s -- the #520 proof takes %s to be its only caller"
+                         % (rel, setter, owner[0] if owner else "file scope",
+                            " / ".join(sorted(f for s in allowed.values() for f in s))))
+
+    # POSE: in a stage that picks its pose block by u_poseverttype (the
+    # only selector RGF_PoseVertType reads), each pose block's reads must
+    # lie in regions that do not run at any other pose block's format --
+    # the types at which rg_frame.c excuses it.
+    poses = {b: PV_VALUE[k[1]] for b, k in kinds.items() if k[0] == "RG_SSBO_POSE" and k[1] in PV_VALUE}
+    rx_if = re.compile(r"\bif\s*\(\s*u_poseverttype\s*==\s*(\d+)\s*\)\s*\{")
+    for fname, code in sorted(files.items()):
+        decl = {}
+        for b in poses:
+            d = re.search(r"\bbuffer\s+%s\s*\{([^}]*)\}" % b, code)
+            if d:
+                decl[b] = set(re.findall(r"(\w+)\s*\[", d.group(1)))
+        if len(decl) < 2 or "u_poseverttype" not in code:
+            continue
+        for n, fb, fe in (f for f in functions(code) if f[0]):
+            body = code[fb:fe]
+            regions = gl_regions(body, rx_if)
+            for b, mem in decl.items():
+                for r in re.finditer(r"\b(%s)\s*\[" % "|".join(sorted(mem)), body):
+                    for o in decl:
+                        if o == b:
+                            continue
+                        at = poses[o]
+                        runs = True     # unconditional: runs at every type
+                        for N, (io, ic), es in regions:
+                            if io < r.start() < ic:
+                                runs = (N == at)
+                            elif es and es[0] < r.start() < es[1]:
+                                runs = (N != at)
+                        if runs:
+                            fail("engine/shaders/%s: %s reads %s[] where it runs at u_poseverttype %d, "
+                                 "%s's format -- rg_frame.c excuses %s unbound at that type (#520)"
+                                 % (fname, n, r.group(1), at, o, b))
+
+    for rel, fn, rx, why in STANDIN_PINS:
+        body = body_named(root, rel, fn)
+        if body is not None and not re.search(rx, body, re.S | re.M):
+            fail("%s: %s: %s (#520)" % (rel, fn, why))
     return 0
 
 
@@ -2492,6 +2793,7 @@ def main(argv=None):
     check_stencil(root)
     check_buffers(root)
     check_storage(root)
+    check_standin(root)
     check_translucency(root)
     check_points(root)
     check_fog(root)

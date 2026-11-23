@@ -606,7 +606,7 @@ void RG_Upload (GLenum target, const void *data, size_t numbytes, GLuint *outbuf
 	rgb_streamed_bytes += numbytes;
 }
 
-SDL_GPUBuffer *RG_Buf_Storage (int point, void **read)
+SDL_GPUBuffer *RG_Buf_Storage (int point, qboolean unbound_ok, void **read)
 {
 	const rgbpoint_t	*p;
 	rgbuf_t			*b;
@@ -615,8 +615,9 @@ SDL_GPUBuffer *RG_Buf_Storage (int point, void **read)
 	p = (point >= 0 && point < RGB_SSBO_POINTS) ? &rgb_points[point] : NULL;
 	if (!p || !p->buffer)
 	{
-		RG_NoteUnhandled ("read-only storage buffer with nothing bound at its GL binding point "
-				  "(stand-in bound)");
+		if (!unbound_ok)
+			RG_NoteUnhandled ("read-only storage buffer with nothing bound at its GL binding "
+					  "point (stand-in bound)");
 		return NULL;
 	}
 	b = RGB_Buf (p->buffer);
