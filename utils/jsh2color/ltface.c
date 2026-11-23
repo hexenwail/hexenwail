@@ -106,6 +106,7 @@ typedef struct
 	vec_t	exactmins[2], exactmaxs[2];
 
 	int		texmins[2], texsize[2];
+	vec_t	texshift[2];	// faceoffset in texture space: see CalcFaceLayout
 	int		lightstyles[256];
 	int		surfnum;
 	void	*face; // dface_t* or dface2_t*
@@ -340,16 +341,16 @@ static void CalcPoints (lightinfo_t *l)
 	{	// extra filtering
 		h = (l->texsize[1]+1)*2;
 		w = (l->texsize[0]+1)*2;
-		starts = (l->texmins[0]-0.5)*16;
-		startt = (l->texmins[1]-0.5)*16;
+		starts = (l->texmins[0]-0.5)*16 + l->texshift[0];
+		startt = (l->texmins[1]-0.5)*16 + l->texshift[1];
 		step = 8;
 	}
 	else
 	{
 		h = l->texsize[1]+1;
 		w = l->texsize[0]+1;
-		starts = l->texmins[0]*16;
-		startt = l->texmins[1]*16;
+		starts = l->texmins[0]*16 + l->texshift[0];
+		startt = l->texmins[1]*16 + l->texshift[1];
 		step = 16;
 	}
 
@@ -652,40 +653,218 @@ static void FixMinlight (lightinfo_t *l)
 
 /*
 ============
-FaceLITBuffer, StoreFaceLIT
+CalcFaceLayout
 
-A face's lightmap can be bigger here than the space the original light
-gave it at lightofs, so its write runs into the next face's bytes.  With
-one thread the faces are written in index order and the higher face wins;
-with more, the thread schedule would pick the winner (#515).  So each
-worker lights its face into a buffer of its own, and StoreFaceLIT copies
-them into newdlightdata afterwards in face order.
+The .lit has to be laid out the way the engine reads it, not the way we
+sample it (#531).  CalcSurfaceExtents (gl_model.c) keeps the texture
+coordinates in floats and knows nothing of faceoffset, while
+CalcFaceExtents works in doubles on the moved face: a vertex at s =
+32.000001 is 32 to the engine and one lightmap column more to us, and the
+whole lightmap then has the wrong width.  This repeats the engine's sums,
+and moves the sample grid by the face's offset instead.
+============
+*/
+static void CalcFaceLayout (lightinfo_t *l, const vec3_t faceoffset)
+{
+	float	mins[2], maxs[2], val;
+	int		i, j, e, numedges, firstedge, texnum;
+	dvertex_t	*v;
+	texinfo_t	*tex;
+
+	if (is_bsp2)
+	{
+		const dface2_t *f = (const dface2_t *)l->face;
+		numedges = f->numedges;
+		firstedge = f->firstedge;
+		texnum = f->texinfo;
+	}
+	else
+	{
+		const dface_t *f = (const dface_t *)l->face;
+		numedges = f->numedges;
+		firstedge = f->firstedge;
+		texnum = f->texinfo;
+	}
+	tex = &texinfo[texnum];
+
+	mins[0] = mins[1] = 9999999;
+	maxs[0] = maxs[1] = -9999999;
+
+	for (i = 0 ; i < numedges ; i++)
+	{
+		e = dsurfedges[firstedge + i];
+		if (is_bsp2)
+			v = dvertexes + (e >= 0 ? dedges2[e].v[0] : dedges2[-e].v[1]);
+		else
+			v = dvertexes + (e >= 0 ? dedges[e].v[0] : dedges[-e].v[1]);
+
+		for (j = 0 ; j < 2 ; j++)
+		{
+			val = (float)(	((double)v->point[0] * (double)tex->vecs[j][0]) +
+					((double)v->point[1] * (double)tex->vecs[j][1]) +
+					((double)v->point[2] * (double)tex->vecs[j][2]) +
+					(double)tex->vecs[j][3]);
+			if (val < mins[j])
+				mins[j] = val;
+			if (val > maxs[j])
+				maxs[j] = val;
+		}
+	}
+
+	for (i = 0 ; i < 2 ; i++)
+	{
+		l->texmins[i] = (int) floor(mins[i]/16);
+		l->texsize[i] = (int) ceil(maxs[i]/16) - l->texmins[i];
+		if (l->texsize[i] > 17)
+			COM_Error ("Bad surface extents");
+		l->texshift[i] = faceoffset[0] * tex->vecs[i][0] +
+				 faceoffset[1] * tex->vecs[i][1] +
+				 faceoffset[2] * tex->vecs[i][2];
+	}
+}
+
+
+/*
+============
+WriteFaceLIT, StoreFaceLIT
+
+Each worker lights its face into a buffer of its own, and StoreFaceLIT
+copies them into newdlightdata in face order once the threads are done,
+so the thread schedule cannot decide what is written (#515).
+
+The buffer holds one lightmap per style the BSP gives the face, in the
+BSP's order: that is how the engine indexes the .lit.  A BSP style we
+did not light keeps the grey copy of the original lightmap that
+MakeNewLightData put there, and a style the BSP does not have is
+dropped, as the engine has nowhere to read it from.  The copy stops at
+the end of the space light gave the face (faces_ltsize), so a face can
+never write over the next one (#531).
 ============
 */
 static byte	*facelit[MAX_MAP_FACES];
-static int	facelitsize[MAX_MAP_FACES];
+static int	facelitslot[MAX_MAP_FACES];	// bytes per style
+static int	facelitmask[MAX_MAP_FACES];	// BSP style slots we lit
 
-static byte *FaceLITBuffer (int surfnum, int size)
+static void WriteFaceLIT (lightinfo_t *l, int surfnum)
 {
-	facelit[surfnum] = (byte *) SafeMalloc (size);
-	facelitsize[surfnum] = size;
-	return facelit[surfnum];
+	int		s, t, i, j, k, c, w, size, numslots;
+	int		x1, x2, x3, x4;
+	vec_t	maxc;
+	vec3_t	*lightcolor;
+	vec3_t	totalcolors;
+	byte	*out;
+	const byte	*styles = faces_ltstyles[surfnum];
+
+	for (i = 0 ; i < l->numlightstyles ; i++)
+	{
+		if (l->lightstyles[i] == 0xff)
+			COM_Error ("Wrote empty lightmap");
+	}
+
+	size = (l->texsize[0] + 1) * (l->texsize[1] + 1);
+	for (numslots = 0 ; numslots < MAXLIGHTMAPS && styles[numslots] != 255 ; numslots++)
+		;
+	if (!numslots)
+		return;
+
+	facelit[surfnum] = (byte *) SafeMalloc (numslots * size * 3);
+	facelitslot[surfnum] = size * 3;
+	facelitmask[surfnum] = 0;
+
+// extra filtering
+	w = (l->texsize[0] + 1) * 2;
+
+	for (k = 0 ; k < numslots ; k++)
+	{
+		for (i = 0 ; i < l->numlightstyles ; i++)
+		{
+			if (l->lightstyles[i] == styles[k])
+				break;
+		}
+		if (i == l->numlightstyles)
+			continue;
+		facelitmask[surfnum] |= 1 << k;
+
+		lightcolor = l->lightmapcolors[i];
+		out = facelit[surfnum] + k * size * 3;
+		c = 0;
+
+		for (t = 0 ; t <= l->texsize[1] ; t++)
+		{
+			for (s = 0 ; s <= l->texsize[0] ; s++, c++)
+			{
+				if (extrasamples)
+				{
+					x1 = t*2*w + s*2;
+					x2 = x1 + 1;
+					x3 = (t*2 + 1)*w + s*2;
+					x4 = x3 + 1;
+
+					// calculate the color
+					totalcolors[0] = lightcolor[x1][0] + lightcolor[x2][0] + lightcolor[x3][0] + lightcolor[x4][0];
+					totalcolors[0] *= 0.25;
+					totalcolors[1] = lightcolor[x1][1] + lightcolor[x2][1] + lightcolor[x3][1] + lightcolor[x4][1];
+					totalcolors[1] *= 0.25;
+					totalcolors[2] = lightcolor[x1][2] + lightcolor[x2][2] + lightcolor[x3][2] + lightcolor[x4][2];
+					totalcolors[2] *= 0.25;
+				}
+				else
+				{
+					VectorCopy (lightcolor[c], totalcolors);
+				}
+
+				// CSL - Scale back intensity, instead
+				//	 of capping individual colors
+				VectorScale (totalcolors, rangescale, totalcolors);
+				maxc = 0;
+
+				for (j = 0; j < 3; j++)
+				{
+					if (totalcolors[j] > maxc)
+					{
+						maxc = totalcolors[j];
+					}
+					else if (totalcolors[j] < 0)
+					{
+						totalcolors[j] = 0;	// this used to be an error!!!!
+					}
+				}
+				if (maxc > 255.0)
+					VectorScale (totalcolors, 255.0 / maxc, totalcolors);
+
+				// write out the lightmap in RGBA format
+				*out++ = totalcolors[0];
+				*out++ = totalcolors[1];
+				*out++ = totalcolors[2];
+			}
+		}
+	}
 }
 
 void StoreFaceLIT (void)
 {
-	int	i;
+	int	i, k, at, len;
 
 	for (i = 0; i < numfaces; i++)
 	{
 		if (!facelit[i])
 			continue;
-		memcpy (&newdlightdata[faces_ltoffset[i]], facelit[i], facelitsize[i]);
+		for (k = 0; k < MAXLIGHTMAPS; k++)
+		{
+			at = k * facelitslot[i];
+			if (at >= faces_ltsize[i])
+				break;
+			if (!(facelitmask[i] & (1 << k)))
+				continue;
+			len = facelitslot[i];
+			if (len > faces_ltsize[i] - at)
+				len = faces_ltsize[i] - at;
+			memcpy (&newdlightdata[faces_ltoffset[i] + at], facelit[i] + at, len);
+		}
 		free (facelit[i]);
 		facelit[i] = NULL;
 	}
 }
-
 
 /*
 ============
@@ -696,18 +875,7 @@ void LightFaceLIT (int surfnum, const vec3_t faceoffset)
 {
 	dface_t	*f;
 	lightinfo_t	l;
-	int		s, t;
-	int		i, j, c;
-	int		size;
-	int		lightmapwidth;
-	byte	*out;
-	int	w;
-	/* TYR - temp vars */
-	vec_t		maxc;
-	int		x1, x2, x3, x4;
-	/* TYR - colored lights */
-	vec3_t		*lightcolor;
-	vec3_t		totalcolors;
+	int		i, j;
 	vec3_t		point;
 
 
@@ -746,13 +914,11 @@ void LightFaceLIT (int surfnum, const vec3_t faceoffset)
 	}
 
 	CalcFaceVectors (&l);
-	CalcFaceExtents (&l, faceoffset, true);
+	CalcFaceExtents (&l, faceoffset, false);	// the limit is CalcFaceLayout's
+	CalcFaceLayout (&l, faceoffset);
 	CalcPoints (&l);
 
-	lightmapwidth = l.texsize[0]+1;
-
-	size = lightmapwidth*(l.texsize[1]+1);
-	if (size > SINGLEMAP)
+	if ((l.texsize[0] + 1) * (l.texsize[1] + 1) > SINGLEMAP)
 		COM_Error ("Bad lightmap size");
 
 	for (i = 0 ; i < MAXLIGHTMAPS ; i++)
@@ -784,87 +950,19 @@ void LightFaceLIT (int surfnum, const vec3_t faceoffset)
 
 	// we have to store the new light data at
 	// the same offset as the old stuff... by way of StoreFaceLIT
-	out = FaceLITBuffer (surfnum, l.numlightstyles * size * 3);
-
-// extra filtering
-	w = (l.texsize[0] + 1) * 2;
-
-	for (i = 0 ; i < l.numlightstyles ; i++)
-	{
-		if (l.lightstyles[i] == 0xff)
-			COM_Error ("Wrote empty lightmap");
-
-		lightcolor = l.lightmapcolors[i];
-		c = 0;
-
-		for (t = 0 ; t <= l.texsize[1] ; t++)
-		{
-			for (s = 0 ; s <= l.texsize[0] ; s++, c++)
-			{
-				if (extrasamples)
-				{
-					x1 = t*2*w + s*2;
-					x2 = x1 + 1;
-					x3 = (t*2 + 1)*w + s*2;
-					x4 = x3 + 1;
-
-					// calculate the color
-					totalcolors[0] = lightcolor[x1][0] + lightcolor[x2][0] + lightcolor[x3][0] + lightcolor[x4][0];
-					totalcolors[0] *= 0.25;
-					totalcolors[1] = lightcolor[x1][1] + lightcolor[x2][1] + lightcolor[x3][1] + lightcolor[x4][1];
-					totalcolors[1] *= 0.25;
-					totalcolors[2] = lightcolor[x1][2] + lightcolor[x2][2] + lightcolor[x3][2] + lightcolor[x4][2];
-					totalcolors[2] *= 0.25;
-				}
-				else
-				{
-					VectorCopy (lightcolor[c], totalcolors);
-				}
-
-				// CSL - Scale back intensity, instead
-				//	 of capping individual colors
-				VectorScale (totalcolors, rangescale, totalcolors);
-				maxc = 0;
-
-				for (j = 0; j < 3; j++)
-				{
-					if (totalcolors[j] > maxc)
-					{
-						maxc = totalcolors[j];
-					}
-					else if (totalcolors[j] < 0)
-					{
-						totalcolors[j] = 0;	// this used to be an error!!!!
-					}
-				}
-				if (maxc > 255.0)
-					VectorScale (totalcolors, 255.0 / maxc, totalcolors);
-
-				// write out the lightmap in RGBA format
-				*out++ = totalcolors[0];
-				*out++ = totalcolors[1];
-				*out++ = totalcolors[2];
-			}
-		}
-	}
+	WriteFaceLIT (&l, surfnum);
 }
 
+/*
+============
+LightFace
+============
+*/
 void LightFaceLIT2 (int surfnum, const vec3_t faceoffset)
 {
 	dface2_t	*f;
 	lightinfo_t	l;
-	int		s, t;
-	int		i, j, c;
-	int		size;
-	int		lightmapwidth;
-	byte	*out;
-	int	w;
-	/* TYR - temp vars */
-	vec_t		maxc;
-	int		x1, x2, x3, x4;
-	/* TYR - colored lights */
-	vec3_t		*lightcolor;
-	vec3_t		totalcolors;
+	int		i, j;
 	vec3_t		point;
 
 
@@ -903,13 +1001,11 @@ void LightFaceLIT2 (int surfnum, const vec3_t faceoffset)
 	}
 
 	CalcFaceVectors (&l);
-	CalcFaceExtents2 (&l, faceoffset, true);
+	CalcFaceExtents2 (&l, faceoffset, false);	// the limit is CalcFaceLayout's
+	CalcFaceLayout (&l, faceoffset);
 	CalcPoints (&l);
 
-	lightmapwidth = l.texsize[0]+1;
-
-	size = lightmapwidth*(l.texsize[1]+1);
-	if (size > SINGLEMAP)
+	if ((l.texsize[0] + 1) * (l.texsize[1] + 1) > SINGLEMAP)
 		COM_Error ("Bad lightmap size");
 
 	for (i = 0 ; i < MAXLIGHTMAPS ; i++)
@@ -941,69 +1037,7 @@ void LightFaceLIT2 (int surfnum, const vec3_t faceoffset)
 
 	// we have to store the new light data at
 	// the same offset as the old stuff... by way of StoreFaceLIT
-	out = FaceLITBuffer (surfnum, l.numlightstyles * size * 3);
-
-// extra filtering
-	w = (l.texsize[0] + 1) * 2;
-
-	for (i = 0 ; i < l.numlightstyles ; i++)
-	{
-		if (l.lightstyles[i] == 0xff)
-			COM_Error ("Wrote empty lightmap");
-
-		lightcolor = l.lightmapcolors[i];
-		c = 0;
-
-		for (t = 0 ; t <= l.texsize[1] ; t++)
-		{
-			for (s = 0 ; s <= l.texsize[0] ; s++, c++)
-			{
-				if (extrasamples)
-				{
-					x1 = t*2*w + s*2;
-					x2 = x1 + 1;
-					x3 = (t*2 + 1)*w + s*2;
-					x4 = x3 + 1;
-
-					// calculate the color
-					totalcolors[0] = lightcolor[x1][0] + lightcolor[x2][0] + lightcolor[x3][0] + lightcolor[x4][0];
-					totalcolors[0] *= 0.25;
-					totalcolors[1] = lightcolor[x1][1] + lightcolor[x2][1] + lightcolor[x3][1] + lightcolor[x4][1];
-					totalcolors[1] *= 0.25;
-					totalcolors[2] = lightcolor[x1][2] + lightcolor[x2][2] + lightcolor[x3][2] + lightcolor[x4][2];
-					totalcolors[2] *= 0.25;
-				}
-				else
-				{
-					VectorCopy (lightcolor[c], totalcolors);
-				}
-
-				// CSL - Scale back intensity, instead
-				//	 of capping individual colors
-				VectorScale (totalcolors, rangescale, totalcolors);
-				maxc = 0;
-
-				for (j = 0; j < 3; j++)
-				{
-					if (totalcolors[j] > maxc)
-					{
-						maxc = totalcolors[j];
-					}
-					else if (totalcolors[j] < 0)
-					{
-						totalcolors[j] = 0;	// this used to be an error!!!!
-					}
-				}
-				if (maxc > 255.0)
-					VectorScale (totalcolors, 255.0 / maxc, totalcolors);
-
-				// write out the lightmap in RGBA format
-				*out++ = totalcolors[0];
-				*out++ = totalcolors[1];
-				*out++ = totalcolors[2];
-			}
-		}
-	}
+	WriteFaceLIT (&l, surfnum);
 }
 
 static void TestSingleLightFace (entity_t *light, lightinfo_t *l, const vec3_t faceoffset)

@@ -531,6 +531,16 @@ jobs:
           utils=$(nix build .#utils --no-link --print-out-paths)
           python3 tools/test_light_threads.py "$utils/bin"
 
+      # jsh2colour lays each face's colour out at the engine's lightmap size
+      # and in the BSP's style order, inside the space light gave the face
+      # (#531).  Compiles the layout code against the engine's own; the rest
+      # runs on the generated fixture, no game data.
+      - name: jsh2colour lays faces out as the engine reads them
+        run: |
+          set -euo pipefail
+          utils=$(nix build .#utils --no-link --print-out-paths)
+          python3 tools/test_jsh2colour_layout.py "$utils/bin"
+
   flatpak:
     runs-on: ubuntu-latest
     timeout-minutes: 30
