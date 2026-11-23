@@ -652,6 +652,43 @@ static void FixMinlight (lightinfo_t *l)
 
 /*
 ============
+FaceLITBuffer, StoreFaceLIT
+
+A face's lightmap can be bigger here than the space the original light
+gave it at lightofs, so its write runs into the next face's bytes.  With
+one thread the faces are written in index order and the higher face wins;
+with more, the thread schedule would pick the winner (#515).  So each
+worker lights its face into a buffer of its own, and StoreFaceLIT copies
+them into newdlightdata afterwards in face order.
+============
+*/
+static byte	*facelit[MAX_MAP_FACES];
+static int	facelitsize[MAX_MAP_FACES];
+
+static byte *FaceLITBuffer (int surfnum, int size)
+{
+	facelit[surfnum] = (byte *) SafeMalloc (size);
+	facelitsize[surfnum] = size;
+	return facelit[surfnum];
+}
+
+void StoreFaceLIT (void)
+{
+	int	i;
+
+	for (i = 0; i < numfaces; i++)
+	{
+		if (!facelit[i])
+			continue;
+		memcpy (&newdlightdata[faces_ltoffset[i]], facelit[i], facelitsize[i]);
+		free (facelit[i]);
+		facelit[i] = NULL;
+	}
+}
+
+
+/*
+============
 LightFace
 ============
 */
@@ -746,8 +783,8 @@ void LightFaceLIT (int surfnum, const vec3_t faceoffset)
 		f->styles[i] = l.lightstyles[i];
 
 	// we have to store the new light data at
-	// the same offset as the old stuff...
-	out = &newdlightdata[faces_ltoffset[surfnum]];
+	// the same offset as the old stuff... by way of StoreFaceLIT
+	out = FaceLITBuffer (surfnum, l.numlightstyles * size * 3);
 
 // extra filtering
 	w = (l.texsize[0] + 1) * 2;
@@ -903,8 +940,8 @@ void LightFaceLIT2 (int surfnum, const vec3_t faceoffset)
 		f->styles[i] = l.lightstyles[i];
 
 	// we have to store the new light data at
-	// the same offset as the old stuff...
-	out = &newdlightdata[faces_ltoffset[surfnum]];
+	// the same offset as the old stuff... by way of StoreFaceLIT
+	out = FaceLITBuffer (surfnum, l.numlightstyles * size * 3);
 
 // extra filtering
 	w = (l.texsize[0] + 1) * 2;
@@ -1019,9 +1056,14 @@ static void TestSingleLightFace (entity_t *light, lightinfo_t *l, const vec3_t f
 		// to them from when they were initially loaded
 		// this will give madly high color values here so we will
 		// scale them down later on
+		// Every worker thread adds into the same light, so the add
+		// takes the lock; integer sums do not depend on the order the
+		// faces arrive in, so the result is the -threads 1 one (#515).
+		ThreadLock ();
 		light->lightcolor[0] = light->lightcolor[0] + surf_r;
 		light->lightcolor[1] = light->lightcolor[1] + surf_g;
 		light->lightcolor[2] = light->lightcolor[2] + surf_b;
+		ThreadUnlock ();
 
 		// speed up the checking process some more - if we have one hit
 		// on a face, all other hits on the same face are just going to
