@@ -293,6 +293,11 @@ qboolean RG_Frame_SegmentHasDraws (void)
 	return rgf_numdraws > 0;
 }
 
+qboolean RG_Frame_SegmentWritesTarget (void)
+{
+	return rgf_numdraws > 0 || rgf_clear_mask != 0;
+}
+
 void RG_SetViewport (int x, int y, int width, int height)
 {
 	rgf_vp_set = true;
@@ -423,11 +428,6 @@ qboolean RG_Frame_TargetHolds (const SDL_GPUTexture *tex)
 SDL_GPUTextureFormat RG_Frame_DepthFormat (void)
 {
 	return rgf_depth_fmt;
-}
-
-void RG_Frame_SceneWritten (void)
-{
-	rgf_cleared = true;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1295,6 +1295,10 @@ void RG_Clear (GLbitfield mask, const float color[4], float depth, int stencil)
 	 * recorded already has to go out in a pass of its own. */
 	if (rgf_numdraws)
 		RGF_EndSegment ();
+	/* The clear is the target's as GL has it now, realized, so an upload
+	 * into it after this sees RG_Frame_TargetHolds and lands after it. */
+	if (rgf_tgt_dirty)
+		RGF_ResolveTarget ();
 	rgf_clear_mask |= mask;
 	if (mask & GL_COLOR_BUFFER_BIT)
 		memcpy (rgf_clear_rgba, color, sizeof(rgf_clear_rgba));

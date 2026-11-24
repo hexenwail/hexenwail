@@ -456,6 +456,9 @@ void	RG_Frame_Flush (void);
 /* Serial of the open segment, for RG_Res_ForDraw's hazard stamp. */
 unsigned int RG_Frame_Segment (void);
 qboolean RG_Frame_SegmentHasDraws (void);
+/* The open segment draws into or clears the current target: its render
+ * pass, which runs after the segment's copy pass, writes it. */
+qboolean RG_Frame_SegmentWritesTarget (void);
 void	RG_Frame_End (qboolean show);	/* RG_EndFrame's body */
 void	RG_Frame_Status (void);
 /* The block rg_frame.c registered under `name`, -1 if none. */
@@ -482,8 +485,5 @@ qboolean RG_Frame_TargetHolds (const SDL_GPUTexture *tex);
 /* End the open segment and hand back the frame's command buffer, for a blit
  * or a copy between passes; NULL outside a frame or on a device failure. */
 SDL_GPUCommandBuffer *RG_Frame_Break (void);
-/* Something other than a render pass wrote the scene target this frame:
- * its first pass must load, not clear. */
-void	RG_Frame_SceneWritten (void);
 
 #endif /* RG_INTERNAL_H */

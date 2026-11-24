@@ -248,8 +248,9 @@ static void RGT_FlushIfRead (const rgtex_t *t)
 {
 	if (t->read_ever && t->read_segment == RG_Frame_Segment () && RG_Frame_SegmentHasDraws ())
 		RG_Frame_Flush ();
-	/* Drawn into, too: the copy pass runs ahead of the segment's draws. */
-	else if (RG_Frame_TargetHolds (t->tex) && RG_Frame_SegmentHasDraws ())
+	/* Drawn into or cleared, too: the copy pass runs ahead of the render
+	 * pass, whose load op is the clear. */
+	else if (RG_Frame_TargetHolds (t->tex) && RG_Frame_SegmentWritesTarget ())
 		RG_Frame_Flush ();
 }
 
