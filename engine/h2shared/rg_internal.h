@@ -10,6 +10,8 @@
  *   rg_buffer.c    buffers and vertex arrays, keyed by the GL names (P2d)
  *   rg_frame.c     the frame recorder: draws per render-target segment, one
  *                  copy pass per segment, the scene target and the present
+ *   rg_target.c    framebuffers and renderbuffers, keyed by the GL names, and
+ *                  the blits between them (P4a-2)
  *
  * Copyright (C) 2026  Contributors of the uHexen2 project
  *
@@ -231,6 +233,20 @@ void	RG_Res_IssueUploads (SDL_GPUCopyPass *copy, SDL_GPUTransferBuffer *tb);
  * re-creations retired during it. */
 void	RG_Res_EndFrame (void);
 void	RG_Res_Status (void);
+/* Texture `name` as a render target with `usage` (COLOR_TARGET or
+ * DEPTH_STENCIL_TARGET), realized now: its SDL texture, format, usage and
+ * size.  False unless it is a defined 2D texture created with that usage.
+ * The first time a new texture is asked for, its one clear is queued
+ * (RG_Res_ClearTargets): a never-written Vulkan image loads undefined, where
+ * GL gives a texture defined with no data zeros (#340 P4a-2). */
+qboolean RG_Res_RenderTarget (GLuint name, SDL_GPUTextureUsageFlags usage, SDL_GPUTexture **tex,
+			      SDL_GPUTextureFormat *fmt, SDL_GPUTextureUsageFlags *have, int *w, int *h);
+/* Drop SAMPLER from `name`'s usage: a renderbuffer's hidden texture. */
+void	RG_Res_TargetOnly (GLuint name);
+/* The queued creation clears, a render pass each, outside any other pass.
+ * rg_frame.c calls this ahead of each segment's copy pass, so an upload
+ * queued into a new target lands after its clear. */
+void	RG_Res_ClearTargets (SDL_GPUCommandBuffer *cmd);
 
 /* ------------------------------------------------------------------ */
 /* rg_shader.c                                                         */
@@ -405,6 +421,28 @@ void	RG_Buf_EndFrame (void);
 void	RG_Buf_Status (void);
 
 /* ------------------------------------------------------------------ */
+/* rg_frame.c / rg_target.c: render targets (#340 P4a-2)               */
+/* ------------------------------------------------------------------ */
+
+/* What a render pass draws into.  depth NULL and dfmt INVALID when there is
+ * no depth attachment; color NULL and cfmt INVALID when none is drawn. */
+typedef struct {
+	SDL_GPUTexture			*color, *depth;
+	SDL_GPUTextureFormat		cfmt, dfmt;
+	SDL_GPUTextureUsageFlags	cusage, dusage;
+	int				w, h;
+} rgtarget_t;
+
+void	RG_Target_Init (void);
+void	RG_Target_Shutdown (void);
+void	RG_Target_Status (void);
+/* Texture name `tex` is deleted: GL detaches it; here every framebuffer
+ * drops it, since the name is handed out again. */
+void	RG_Target_TextureDeleted (GLuint tex);
+/* Framebuffer `fbo` (0: the scene) as a target, if it is complete. */
+qboolean RG_Target_Resolve (GLuint fbo, rgtarget_t *out);
+
+/* ------------------------------------------------------------------ */
 /* rg_frame.c                                                          */
 /* ------------------------------------------------------------------ */
 
@@ -424,5 +462,28 @@ void	RG_Frame_Status (void);
 int	RG_Frame_BlockIndex (const char *name);
 /* A depth format with a stencil aspect (D24S8 / D32S8). */
 qboolean RG_FormatHasStencil (SDL_GPUTextureFormat fmt);
+/* The scene's depth format, which GL_DEPTH24_STENCIL8 maps to, so that a
+ * depth copy between the scene and a framebuffer is between one format. */
+SDL_GPUTextureFormat RG_Frame_DepthFormat (void);
+/* Draws go to framebuffer `fbo` (0: the scene) from now on.  Ends the open
+ * segment only if it has something for the old target (draws, a clear), or
+ * if what `fbo` resolves to changed: a call per GL bind, and per attachment
+ * change of the bound framebuffer, costs nothing otherwise. */
+void	RG_Frame_BindTarget (GLuint fbo);
+/* `tex` is about to be deleted or re-created: if the current target holds
+ * it, what the segment drew into it lands first, and the target is resolved
+ * again before the next draw. */
+void	RG_Frame_ReleaseTarget (const SDL_GPUTexture *tex);
+void	RG_Frame_SceneTarget (rgtarget_t *out);
+/* `tex` is the colour or depth the open segment draws into (a sampler
+ * reading it would be a feedback loop; a delete or a re-definition of it
+ * has to let the segment's draws land first). */
+qboolean RG_Frame_TargetHolds (const SDL_GPUTexture *tex);
+/* End the open segment and hand back the frame's command buffer, for a blit
+ * or a copy between passes; NULL outside a frame or on a device failure. */
+SDL_GPUCommandBuffer *RG_Frame_Break (void);
+/* Something other than a render pass wrote the scene target this frame:
+ * its first pass must load, not clear. */
+void	RG_Frame_SceneWritten (void);
 
 #endif /* RG_INTERNAL_H */

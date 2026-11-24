@@ -645,6 +645,9 @@ typedef struct SDL_GPUSampler SDL_GPUSampler;
 typedef struct SDL_GPUSamplerCreateInfo { int x; } SDL_GPUSamplerCreateInfo;
 typedef struct { SDL_GPUTexture *texture; SDL_GPUSampler *sampler; } SDL_GPUTextureSamplerBinding;
 typedef unsigned int SDL_GPUTextureUsageFlags;
+#define SDL_GPU_TEXTUREUSAGE_SAMPLER			(1u << 0)
+#define SDL_GPU_TEXTUREUSAGE_COLOR_TARGET		(1u << 1)
+#define SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET	(1u << 2)
 typedef enum {
 	SDL_GPU_TEXTUREFORMAT_INVALID, SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
 	SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB, SDL_GPU_TEXTUREFORMAT_R8_UNORM,
@@ -702,6 +705,9 @@ static rgtex_t *RGT_Get (GLuint name) { return (name && name < 4 && rgt_tab[name
 static void RGT_Realize (rgtex_t *t) { if (!t->tex) t->tex = (SDL_GPUTexture *) &fake[40]; }
 static SDL_GPUSampler *RGT_Sampler (rgtex_t *t) { (void) t; return (SDL_GPUSampler *) &fake[50]; }
 static unsigned int RG_Frame_Segment (void) { return 7; }
+/* the texture the draw renders into (#340 P4a-2): the real one, when set */
+static int		fb_hold;
+static int RG_Frame_TargetHolds (const SDL_GPUTexture *t) { return fb_hold && t == (SDL_GPUTexture *) &fake[40]; }
 @RES@
 
 static Uint32 *load (const char *path, size_t *n)
@@ -778,18 +784,22 @@ int main (int argc, char **argv)
 		printf ("PHSHADOW type=%d ok=%d tex=%d sampler=%d\n", i, ok,
 			ok ? (int) ((char *) b.texture - fake) : -1, ok ? (int) ((char *) b.sampler - fake) : -1);
 	}
-	/* a real texture on unit 5: RGBA32UI 3D, then a float 3D, then a depth cube array */
+	/* a real texture on unit 5: RGBA32UI 3D, then a float 3D, then a depth cube array;
+	 * then one made without SAMPLER usage, and one the draw renders into (P4a-2) */
 	{
-		static const struct { SDL_GPUTextureFormat fmt; int type; int unit; int sclass; int shadow; int cmp; } k[] = {
-			{ SDL_GPU_TEXTUREFORMAT_R32G32B32A32_UINT, RG_TT_3D, 5, RG_SC_UINT, 0, 0 },
-			{ SDL_GPU_TEXTUREFORMAT_R32G32B32A32_UINT, RG_TT_3D, 5, RG_SC_FLOAT, 0, 0 },
-			{ SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, RG_TT_3D, 5, RG_SC_UINT, 0, 0 },
-			{ SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, RG_TT_3D, 5, RG_SC_FLOAT, 0, 0 },
-			{ SDL_GPU_TEXTUREFORMAT_D16_UNORM, RG_TT_CUBE_ARRAY, 9, RG_SC_FLOAT, 1, 1 },
-			{ SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, RG_TT_CUBE_ARRAY, 9, RG_SC_FLOAT, 1, 1 },
-			{ SDL_GPU_TEXTUREFORMAT_D16_UNORM, RG_TT_CUBE_ARRAY, 9, RG_SC_FLOAT, 0, 0 },
-			{ SDL_GPU_TEXTUREFORMAT_D16_UNORM, RG_TT_CUBE_ARRAY, 9, RG_SC_FLOAT, 1, 0 },
-			{ SDL_GPU_TEXTUREFORMAT_D16_UNORM, RG_TT_CUBE_ARRAY, 9, RG_SC_FLOAT, 0, 1 },
+		static const struct { SDL_GPUTextureFormat fmt; int type; int unit; int sclass; int shadow; int cmp;
+				      int nosampler; int target; } k[] = {
+			{ SDL_GPU_TEXTUREFORMAT_R32G32B32A32_UINT, RG_TT_3D, 5, RG_SC_UINT, 0, 0, 0, 0 },
+			{ SDL_GPU_TEXTUREFORMAT_R32G32B32A32_UINT, RG_TT_3D, 5, RG_SC_FLOAT, 0, 0, 0, 0 },
+			{ SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, RG_TT_3D, 5, RG_SC_UINT, 0, 0, 0, 0 },
+			{ SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, RG_TT_3D, 5, RG_SC_FLOAT, 0, 0, 0, 0 },
+			{ SDL_GPU_TEXTUREFORMAT_D16_UNORM, RG_TT_CUBE_ARRAY, 9, RG_SC_FLOAT, 1, 1, 0, 0 },
+			{ SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, RG_TT_CUBE_ARRAY, 9, RG_SC_FLOAT, 1, 1, 0, 0 },
+			{ SDL_GPU_TEXTUREFORMAT_D16_UNORM, RG_TT_CUBE_ARRAY, 9, RG_SC_FLOAT, 0, 0, 0, 0 },
+			{ SDL_GPU_TEXTUREFORMAT_D16_UNORM, RG_TT_CUBE_ARRAY, 9, RG_SC_FLOAT, 1, 0, 0, 0 },
+			{ SDL_GPU_TEXTUREFORMAT_D16_UNORM, RG_TT_CUBE_ARRAY, 9, RG_SC_FLOAT, 0, 1, 0, 0 },
+			{ SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, RG_TT_3D, 5, RG_SC_FLOAT, 0, 0, 1, 0 },
+			{ SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, RG_TT_3D, 5, RG_SC_FLOAT, 0, 0, 0, 1 },
 		};
 		for (i = 0; i < (int) (sizeof k / sizeof k[0]); i++)
 		{
@@ -802,6 +812,9 @@ int main (int argc, char **argv)
 			rgt_tab[1].type = (rg_textype_t) k[i].type;
 			rgt_tab[1].fmt = k[i].fmt;
 			rgt_tab[1].compare_mode = k[i].cmp ? GL_COMPARE_REF_TO_TEXTURE : 0;
+			rgt_tab[1].tex_usage = k[i].nosampler ? SDL_GPU_TEXTUREUSAGE_COLOR_TARGET
+							  : SDL_GPU_TEXTUREUSAGE_SAMPLER;
+			fb_hold = k[i].target;
 			rgt_units[k[i].unit][k[i].type] = 1;
 			ok = RG_Res_ForDraw (k[i].unit, (rg_textype_t) k[i].type, (rg_sampclass_t) k[i].sclass,
 					     k[i].shadow, &b);
@@ -1003,9 +1016,12 @@ def check_backend(root, verbose):
     real = {int(m.group(1)): (int(m.group(2)), int(m.group(3)))
             for m in re.finditer(r"^REAL (\d+) ok=(\d+) tex=(-?\d+)$", out, re.M)}
     # 7: a depth texture with no compare mode on a shadow sampler, 8: one with
-    # compare mode on a plain sampler -- each a sampler the shader cannot use
+    # compare mode on a plain sampler -- each a sampler the shader cannot use;
+    # 9: a texture made without SAMPLER usage (a renderbuffer's), 10: the one
+    # the draw renders into -- each the placeholder, not a fault (#340 P4a-2)
     expect_real = {0: 40, 1: C["FLOAT"] * T["COUNT"] + T["3D"], 2: C["UINT"] * T["COUNT"] + T["3D"],
-                   3: 40, 4: 40, 5: 30, 6: 40, 7: 30, 8: C["FLOAT"] * T["COUNT"] + T["CUBE_ARRAY"]}
+                   3: 40, 4: 40, 5: 30, 6: 40, 7: 30, 8: C["FLOAT"] * T["COUNT"] + T["CUBE_ARRAY"],
+                   9: C["FLOAT"] * T["COUNT"] + T["3D"], 10: C["FLOAT"] * T["COUNT"] + T["3D"]}
     for i, tex in expect_real.items():
         if real.get(i) != (1, tex):
             fail("RG_Res_ForDraw case %d binds %s, want texture %d (40 the real one)" % (i, real.get(i), tex))

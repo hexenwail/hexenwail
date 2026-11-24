@@ -444,18 +444,23 @@ static GLuint	oit_ubo;
 
 /* ------------------------------------------------------------------ */
 
+/* Bloom is P4e of #340 under -gpu: its passes are bufferless draws
+ * (glDrawArrays, no seam yet) and BloomParams has no mirror there, so -gpu
+ * builds no pyramid and adds none.  Everywhere the chain asks "is bloom on",
+ * it asks this. */
+static qboolean PP_BloomOn (void)
+{
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+		return false;
+#endif
+	return r_bloom.integer != 0;
+}
+
 static qboolean PP_NeedsPostProcess (void)
 {
 	if (!pp_initialized)
 		return false;
-#ifdef USE_SDL_GPU
-	/* The chain is P4 of #340.  Until it is routed, an SDL_GPU frame draws
-	 * straight into rg_frame.c's scene target and the present blit is the
-	 * whole of "post": running the chain into stubbed FBOs would only feed
-	 * gpu_unrouted. */
-	if (R_GPU ())
-		return false;
-#endif
 	if (v_gamma.value != 1.0f || PP_Contrast () != 1.0f)
 		return true;
 	if (r_scale.value < 1.0f)
@@ -478,7 +483,7 @@ static qboolean PP_NeedsPostProcess (void)
 	 * unrelated effect (FXAA, HDR, …) to "wake" the pipeline. */
 	if (r_oit.integer)
 		return true;
-	if (r_bloom.integer)
+	if (PP_BloomOn ())
 		return true;
 	/* SSAO snapshots and composites into the scene FBO, so like OIT it has
 	 * to raise the chain itself: without this r_ssao 1 on a default config
@@ -612,7 +617,7 @@ static qboolean PP_CreateBloomFBOs (int width, int height)
 	 * rather than leaving it allocated but unused.  uhexen2-3p6p. */
 	PP_DeleteBloomFBOs();
 
-	if (!r_bloom.integer)
+	if (!PP_BloomOn ())
 		return true;	/* bloom disabled, skip allocation */
 
 	color_fmt = PP_HDRActive() ? GL_RGBA16F : GL_RGBA8;
@@ -2876,7 +2881,7 @@ void GL_PostProcess_EndFrame (void)
 	glheight = pp_saved_glheight;
 
 	/* Bloom post-process pass */
-	if (r_bloom.integer && bloom_fbo[0] && bloom_bright_prog)
+	if (PP_BloomOn () && bloom_fbo[0] && bloom_bright_prog)
 	{
 		GLuint bloom_src = pp_native_active ? pp_native_color_tex : pp_color_tex;
 		int bloom_src_w = pp_native_active ? pp_native_w : pp_width;
@@ -3057,10 +3062,10 @@ apply_shader:
 	/* bloom composite texture */
 	if (pp_loc_bloom_tex >= 0)
 	{
-		R_BindTextureSlot (2, (r_bloom.integer && bloom_tex[0]) ? bloom_tex[0] : 0);
+		R_BindTextureSlot (2, (PP_BloomOn () && bloom_tex[0]) ? bloom_tex[0] : 0);
 		R_ProgramSamplerUnit(pp_program, pp_loc_bloom_tex, "u_bloom", 2);
 	}
-	pp_params.p3[2] = r_bloom.integer ? r_bloom_intensity.value : 0.0f;	/* u_bloom_strength */
+	pp_params.p3[2] = PP_BloomOn () ? r_bloom_intensity.value : 0.0f;	/* u_bloom_strength */
 	PP_PushParams();
 
 	/* draw full-screen quad using streaming VBO (shader already active) */

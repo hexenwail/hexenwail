@@ -91,6 +91,12 @@ typedef struct {
 	rgupload_t		*uploads, **uploads_tail;
 	unsigned int		read_segment;	/* RG_Frame_Segment () of the last draw */
 	qboolean		read_ever;
+	/* nothing has written tex since it was created: no upload issued, no
+	 * clear queued (RG_Res_RenderTarget) */
+	qboolean		unwritten;
+	/* the usage tex was created with: t->usage is the definition's, and a
+	 * same-size re-definition changes it without re-creating tex */
+	SDL_GPUTextureUsageFlags tex_usage;
 } rgtex_t;
 
 static rgtex_t		*rgt;
@@ -133,6 +139,16 @@ static unsigned long	rgs_flushes;
 
 static Uint32		rgt_pending_bytes;
 static unsigned long	rgt_created, rgt_recreated, rgt_uploads, rgt_upload_bytes;
+
+/* Render targets made since the last segment, each cleared once by
+ * RG_Res_ClearTargets (#340 P4a-2). */
+typedef struct {
+	SDL_GPUTexture		*tex;
+	qboolean		depth;
+} rgclear_t;
+static rgclear_t	*rgt_clears;
+static int		rgt_numclears, rgt_maxclears;
+static unsigned long	rgt_cleared;
 
 /* ------------------------------------------------------------------ */
 /* Names                                                               */
@@ -191,8 +207,16 @@ void RG_GenTextures (GLsizei n, GLuint *textures)
 
 static void RGT_Retire (SDL_GPUTexture *tex)
 {
+	int	i;
+
 	if (!tex)
 		return;
+	/* Released after the next submit, which a queued clear may not precede. */
+	for (i = 0; i < rgt_numclears; i++)
+	{
+		if (rgt_clears[i].tex == tex)
+			rgt_clears[i--] = rgt_clears[--rgt_numclears];
+	}
 	if (rgt_numretired == rgt_maxretired)
 	{
 		rgt_maxretired = rgt_maxretired ? rgt_maxretired * 2 : 64;
@@ -224,6 +248,9 @@ static void RGT_FlushIfRead (const rgtex_t *t)
 {
 	if (t->read_ever && t->read_segment == RG_Frame_Segment () && RG_Frame_SegmentHasDraws ())
 		RG_Frame_Flush ();
+	/* Drawn into, too: the copy pass runs ahead of the segment's draws. */
+	else if (RG_Frame_TargetHolds (t->tex) && RG_Frame_SegmentHasDraws ())
+		RG_Frame_Flush ();
 }
 
 void RG_DeleteTextures (GLsizei n, const GLuint *textures)
@@ -239,6 +266,10 @@ void RG_DeleteTextures (GLsizei n, const GLuint *textures)
 			continue;
 		if (t->uploads)
 			RGT_FlushIfRead (t);
+		/* What was drawn into it lands before it goes, and no
+		 * framebuffer keeps the name for the next texture to get. */
+		RG_Frame_ReleaseTarget (t->tex);
+		RG_Target_TextureDeleted (textures[i]);
 		RGT_DropUploads (t);
 		RGT_Retire (t->tex);
 		t->alive = false;
@@ -324,11 +355,20 @@ static qboolean RGT_Format (GLint internalformat, SDL_GPUTextureFormat *fmt, int
 	case GL_DEPTH_COMPONENT16:
 		*fmt = SDL_GPU_TEXTUREFORMAT_D16_UNORM; *bpp = 2; *depth = true; return true;
 	case GL_DEPTH_COMPONENT: case GL_DEPTH_COMPONENT24:
-		*fmt = SDL_GPU_TEXTUREFORMAT_D24_UNORM; *bpp = 4; *depth = true; return true;
+		/* D24 is not everywhere (Apple silicon, AMD); D32F holds more. */
+		*fmt = SDL_GPUTextureSupportsFormat (rg_dev, SDL_GPU_TEXTUREFORMAT_D24_UNORM,
+						     SDL_GPU_TEXTURETYPE_2D,
+						     SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET |
+						     SDL_GPU_TEXTUREUSAGE_SAMPLER)
+			? SDL_GPU_TEXTUREFORMAT_D24_UNORM : SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+		*bpp = 4; *depth = true; return true;
 	case GL_DEPTH_COMPONENT32F:
 		*fmt = SDL_GPU_TEXTUREFORMAT_D32_FLOAT; *bpp = 4; *depth = true; return true;
 	case GL_DEPTH24_STENCIL8:
-		*fmt = SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT; *bpp = 4; *depth = true; return true;
+		/* The scene's own (D24S8, or D32S8 where that is missing): a depth
+		 * copy is between textures of one format, and the stencil then
+		 * matches have_stencil (#340 P4a-2). */
+		*fmt = RG_Frame_DepthFormat (); *bpp = 4; *depth = true; return true;
 	}
 	return false;
 }
@@ -580,6 +620,14 @@ static void RGT_Realize (rgtex_t *t)
 	ci.num_levels = RGT_CreateLevels (t);
 	ci.sample_count = SDL_GPU_SAMPLECOUNT_1;
 
+	/* A depth format some devices render to but cannot sample (the scene's
+	 * may be one, RG_Frame_Init): a target only, read as a placeholder. */
+	if ((ci.usage & SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET) &&
+	    !SDL_GPUTextureSupportsFormat (rg_dev, ci.format, ci.type, ci.usage))
+	{
+		ci.usage &= ~SDL_GPU_TEXTUREUSAGE_SAMPLER;
+		t->usage = ci.usage;
+	}
 	if (!SDL_GPUTextureSupportsFormat (rg_dev, ci.format, ci.type, ci.usage))
 	{
 		RG_NoteUnhandled ("texture format/usage the device does not support");
@@ -599,6 +647,8 @@ static void RGT_Realize (rgtex_t *t)
 	}
 	t->tex_levels = ci.num_levels;
 	t->sampler = NULL;	/* max_lod follows the levels that exist */
+	t->unwritten = true;
+	t->tex_usage = ci.usage;
 	rgt_created++;
 }
 
@@ -642,8 +692,10 @@ void RG_TexImage (GLenum target, GLuint tex, GLint level, GLint internalformat,
 		{
 			/* Redefined: a new object, whatever was queued for the old
 			 * one is for a texture that no longer exists -- unless a
-			 * recorded draw reads the old one, which still needs it. */
+			 * recorded draw reads the old one, which still needs it,
+			 * or draws into it. */
 			RGT_FlushIfRead (t);
+			RG_Frame_ReleaseTarget (t->tex);
 			RGT_DropUploads (t);
 			RGT_Retire (t->tex);
 			t->tex = NULL;
@@ -671,7 +723,10 @@ void RG_TexImage (GLenum target, GLuint tex, GLint level, GLint internalformat,
 	 * RGT_Realize, and the queued uploads then land in the new one: a draw
 	 * recorded against the old one gets them first. */
 	if (t->tex && level >= t->tex_levels)
+	{
 		RGT_FlushIfRead (t);
+		RG_Frame_ReleaseTarget (t->tex);
+	}
 	if (level + 1 > t->levels)
 	{
 		t->levels = level + 1;
@@ -708,7 +763,10 @@ void RG_TexStorage2D (GLenum target, GLuint tex, GLsizei levels, GLenum internal
 		     GL_UNSIGNED_BYTE, NULL);
 	t = RGT_Get (tex);
 	if (t && t->defined && levels > t->levels)
+	{
+		RG_Frame_ReleaseTarget (t->tex);	/* re-created at the next realize */
 		t->levels = levels;
+	}
 }
 
 void RG_TexSubImage (GLenum target, GLuint tex, GLint level, GLint x, GLint y,
@@ -1054,7 +1112,12 @@ qboolean RG_Res_ForDraw (GLuint unit, rg_textype_t type, rg_sampclass_t sclass, 
 		else
 		{
 			RGT_Realize (t);
-			if (t->tex)
+			if (t->tex && !(t->tex_usage & SDL_GPU_TEXTUREUSAGE_SAMPLER))
+				RG_NoteUnhandled ("texture made without SAMPLER usage sampled (placeholder bound)");
+			else if (RG_Frame_TargetHolds (t->tex))
+				/* GL leaves that undefined; Vulkan faults it. */
+				RG_NoteUnhandled ("texture sampled by a draw into it (placeholder bound)");
+			else if (t->tex)
 			{
 				t->read_segment = RG_Frame_Segment ();
 				t->read_ever = true;
@@ -1074,6 +1137,86 @@ qboolean RG_Res_ForDraw (GLuint unit, rg_textype_t type, rg_sampclass_t sclass, 
 		return false;
 	}
 	return true;
+}
+
+/* ------------------------------------------------------------------ */
+/* Render targets (#340 P4a-2)                                         */
+/* ------------------------------------------------------------------ */
+
+qboolean RG_Res_RenderTarget (GLuint name, SDL_GPUTextureUsageFlags usage, SDL_GPUTexture **tex,
+			      SDL_GPUTextureFormat *fmt, SDL_GPUTextureUsageFlags *have, int *w, int *h)
+{
+	rgtex_t	*t = RGT_Get (name);
+
+	if (!t || !t->defined || t->type != RG_TT_2D)
+		return false;
+	RGT_Realize (t);
+	if (!t->tex || !(t->tex_usage & usage))
+		return false;
+	if (t->unwritten)
+	{
+		if (rgt_numclears == rgt_maxclears)
+		{
+			rgt_maxclears = rgt_maxclears ? rgt_maxclears * 2 : 16;
+			rgt_clears = (rgclear_t *) realloc (rgt_clears, rgt_maxclears * sizeof(rgclear_t));
+			if (!rgt_clears)
+				Sys_Error ("SDL_GPU: out of memory queueing render-target clears");
+		}
+		rgt_clears[rgt_numclears].tex = t->tex;
+		rgt_clears[rgt_numclears].depth = RGT_IsDepth (t->fmt);
+		rgt_numclears++;
+		t->unwritten = false;
+	}
+	*tex = t->tex;
+	*fmt = t->fmt;
+	*have = t->tex_usage;
+	*w = t->w;
+	*h = t->h;
+	return true;
+}
+
+void RG_Res_TargetOnly (GLuint name)
+{
+	rgtex_t	*t = RGT_Get (name);
+
+	if (t && t->defined)
+		t->usage &= ~SDL_GPU_TEXTUREUSAGE_SAMPLER;
+}
+
+void RG_Res_ClearTargets (SDL_GPUCommandBuffer *cmd)
+{
+	SDL_GPUColorTargetInfo		ct;
+	SDL_GPUDepthStencilTargetInfo	ds;
+	SDL_GPURenderPass		*pass;
+
+	/* Zeros, what GL gives a texture defined with no data; depth 0 is
+	 * reversed-Z's far plane. */
+	while (rgt_numclears > 0)
+	{
+		const rgclear_t	*c = &rgt_clears[rgt_numclears - 1];
+
+		if (c->depth)
+		{
+			SDL_zero (ds);
+			ds.texture = c->tex;
+			ds.load_op = ds.stencil_load_op = SDL_GPU_LOADOP_CLEAR;
+			ds.store_op = ds.stencil_store_op = SDL_GPU_STOREOP_STORE;
+			pass = SDL_BeginGPURenderPass (cmd, NULL, 0, &ds);
+		}
+		else
+		{
+			SDL_zero (ct);
+			ct.texture = c->tex;
+			ct.load_op = SDL_GPU_LOADOP_CLEAR;
+			ct.store_op = SDL_GPU_STOREOP_STORE;
+			pass = SDL_BeginGPURenderPass (cmd, &ct, 1, NULL);
+		}
+		if (!pass)
+			return;		/* tried again at the next segment */
+		SDL_EndGPURenderPass (pass);
+		rgt_numclears--;
+		rgt_cleared++;
+	}
 }
 
 /* ------------------------------------------------------------------ */
@@ -1215,6 +1358,7 @@ void RG_Res_IssueUploads (SDL_GPUCopyPass *copy, SDL_GPUTransferBuffer *tb)
 			dst.x = u->x; dst.y = u->y; dst.z = u->z;
 			dst.w = u->w; dst.h = u->h; dst.d = u->d;
 			SDL_UploadToGPUTexture (copy, &src, &dst, false);
+			t->unwritten = false;
 		}
 		RGT_DropUploads (t);
 	}
@@ -1298,6 +1442,8 @@ void RG_Res_Shutdown (void)
 	free (rgt); rgt = NULL;
 	free (rgt_free); rgt_free = NULL;
 	free (rgt_retired); rgt_retired = NULL;
+	free (rgt_clears); rgt_clears = NULL;
+	rgt_numclears = rgt_maxclears = 0;
 	rgt_count = rgt_used = rgt_numfree = rgt_maxfree = rgt_numretired = rgt_maxretired = 0;
 	rgt_pending_bytes = 0;
 }
@@ -1312,7 +1458,8 @@ void RG_Res_Status (void)
 		made += (rgt[i].alive && rgt[i].tex);
 	}
 	Con_Printf ("[RENDERER] SDL_GPU textures: %d names, %d created (%lu creates, %lu re-creates), "
-		    "%d samplers (%lu cache flushes), %lu uploads / %lu KB, %u bytes queued\n",
+		    "%d samplers (%lu cache flushes), %lu uploads / %lu KB, %u bytes queued, "
+		    "%lu render targets cleared\n",
 		    alive, made, rgt_created, rgt_recreated, rgs_count, rgs_flushes,
-		    rgt_uploads, rgt_upload_bytes / 1024, (unsigned int)rgt_pending_bytes);
+		    rgt_uploads, rgt_upload_bytes / 1024, (unsigned int)rgt_pending_bytes, rgt_cleared);
 }

@@ -13,13 +13,13 @@
  * the chain names no GL entry point: the GL arm of each is the bare call it
  * replaced, so a GL build draws what it drew before, call for call.
  *
- * Under -gpu (#340) every arm is RG_NoteUnhandled for now: counted in
- * gpu_unrouted as a routed call the backend did not do.  The chain stays off
- * under -gpu (PP_NeedsPostProcess), so nothing reaches them; a call that
- * does is a gate leak and shows up there.  P4a-2 puts the render-target
- * backend (rg_target.c) behind them.  What each arm answers until then:
- * Gen* fills zero names, R_CheckFramebufferStatus GL_FRAMEBUFFER_UNSUPPORTED,
- * R_FramebufferBinding 0, R_BlitFramebuffer false.
+ * Under -gpu (#340 P4a-2) every arm is rg_target.c's: framebuffers and
+ * renderbuffers keyed by the same GL names, on SDL_GPU textures, with GL's
+ * binding rules and an honest glCheckFramebufferStatus -- what a render pass
+ * cannot be begun on is incomplete, and the chain turns post-process off on
+ * that.  R_BlitFramebuffer declines (false, counted in gpu_unrouted) a blit
+ * SDL_GPU cannot make: a depth copy other than whole, 1:1 and between one
+ * format, a colour blit from a renderbuffer.
  *
  * MSAA (glRenderbufferStorageMultisample) is P6 and has no seam: -gpu forces
  * the chain's sample count to 0 (PP_CreateFBO). */

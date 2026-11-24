@@ -3,36 +3,58 @@
 # r_softemu) on demo1, castle4 and the Shadow of Tremor mod's egypt (#340 P4).
 # Needs the retail data in <basedir>/data1 and the mod in <basedir>/sot.
 #
-# P4a-1 (this file's first use) routes the chain's GL calls through seams
-# whose GL arm is the bare call, with post-process still off under -gpu.  So
-# the check is GL against GL: the binary before the change and the one after,
-# frame for frame, AE 0 on every frame:
+# Since P4a-2 the chain runs under -gpu on SDL_GPU render targets
+# (rg_target.c), so the check is GL's frames against the backend's, one
+# binary both ways, with tools/pp-diff.sh:
 #
 #   A="-fsaa 0 +gamma 1 +map demo1"
-#   STEPS=tools/sweep-pp-gpu.steps ENGINE=$OLD ./tools/headless-drive.sh script /tmp/pp-old ~/hexen2 $A
-#   STEPS=tools/sweep-pp-gpu.steps ENGINE=$NEW ./tools/headless-drive.sh script /tmp/pp-new ~/hexen2 $A
-#   ./tools/shot-diff.sh /tmp/pp-old /tmp/pp-new
+#   STEPS=tools/sweep-pp-gpu.steps ENGINE=$E ./tools/headless-drive.sh script /tmp/pp-gl ~/hexen2 $A
+#   VK_ICD_FILENAMES=<lvp_icd json> STEPS=tools/sweep-pp-gpu.steps ENGINE=$E \
+#       ./tools/headless-drive.sh script /tmp/pp-gpu ~/hexen2 -gpu +gpu_allow_software 1 +gpu_debug 1 $A
+#   ./tools/pp-diff.sh /tmp/pp-gl /tmp/pp-gpu
 #
-# and once more with -fsaa 4 in A, which puts the scene FBO in PP_CreateFBO's
-# MSAA branch and End3D / EndFrame's resolves.  With -gpu the same file gives
-# the boot count (REPORT-BOOT, before anything is reset) and gpu_unrouted 0
-# in every shot state (REPORT-DEMO1 / -CASTLE4 / -EGYPT); its frames are the
-# P2/P3 path, post-process being off there until P4a-2 lifts the gate, which
-# is when GL against -gpu on these frames becomes the check (P4a-2 adds the
-# gates and tools/pp-diff.sh).
+# Between each REPORT-<x>-BEGIN and -END in /tmp/pp-gpu/qconsole.log
+# (DEMO1, CASTLE4, EGYPT) gpu_unrouted counts 0 calls -- reset ahead of
+# each section, so the count covers every shot state, bloom's gated draws
+# included -- and the validation layers (+gpu_debug 1) log no "Validation
+# Error".  REPORT-BOOT is the boot's own count, before anything is reset.
+#
+# A change to the GL side is still checked GL against GL, as P4a-1 did: the
+# binary before it and the one after, AE 0 on every frame the binary
+# repeats (./tools/shot-diff.sh /tmp/pp-old /tmp/pp-new), and once more
+# with -fsaa 4 in A for PP_CreateFBO's MSAA branch.
 #
 # THE FRAMES.  01-08 the graveyard (sweep-world-gpu.steps' 01 camera): PP off,
 # the identity chain (r_waterwarp 1 above water wakes the chain and changes
-# nothing), gamma 0.7, gamma 1.4 with contrast 1.5, r_scale 0.5 and 0.75,
-# FXAA, and the three together.  09 the pools (sweep-liquid-gpu.steps' 01,
-# translucent water into the scene FBO) and 13 the same with r_oit 1, which
-# under -gpu must equal 09 (OIT is P6, gated off: a removed gate loses the
-# water).  12 the console, drawn into the native FBO.  20-29
-# reach the code P4b-P4e route: bloom on the graveyard and the torch room,
-# soft particles on testentity sprites flush with the west wall with
-# post-process off (the fb0 depth snapshot) and on (pp_fbo's), the water warp
-# from under the water, and r_softemu 1/2/3.  10 castle4's lava and 11 egypt's
-# north camera (the stencil in pp_fbo's depth texture) at gamma 1.2.
+# nothing), gamma 0.7, gamma 0.85 with contrast 1.5, r_scale 0.5 and 0.75,
+# FXAA, and the three together.  14 the graveyard at gamma 0.9 and 20 the
+# same with bloom.  09 the pools (sweep-liquid-gpu.steps' 01, translucent
+# water into the scene FBO) and 13 the same with r_oit 1, which under -gpu
+# must equal 09 (OIT is P6, gated off: a removed gate loses the water).  12
+# the console, drawn into the native FBO.  20-29 reach the code P4b-P4e
+# route: bloom on the graveyard and the torch room, soft particles on
+# testentity sprites flush with the west wall with post-process off (the fb0
+# depth snapshot) and on (pp_fbo's), the water warp from under the water,
+# and r_softemu 1/2/3.  10 castle4's lava and 11 egypt's north camera (the
+# stencil in pp_fbo's depth texture) at gamma 0.9.  pp-diff.sh compares 01-14
+# and 26-28 against GL, and 20 against 14 on -gpu (the bloom gate); 21-25
+# wait for their phases (P4b soft particles, P4c the warp, P4e bloom).  So
+# the 3D-effects pass (PP_BlitWith3DEffects: the underwater warp, motion
+# blur), which runs under -gpu since P4a-2, has no frame checked here until
+# P4c's r_pp_time makes one repeatable.
+#
+# GAMMA BELOW 1 ONLY.  V_UpdatePalette (view.c) puts any gamma above 1 back
+# to 1, so a "gamma 1.2" frame is the gamma-1 frame and proves nothing: the
+# first P4a-2 runs had 14 (then gamma 1.2) equal to 01 on -gpu, and GL's
+# differing only by the fault below.  Every gamma here is 0.7-0.9.
+#
+# 14 IS SHOT BEFORE 20.  On GL, after the frames above, r_bloom 1 then 0
+# leaves demo1's sky brighter, and it stays so through later toggles of
+# r_softemu (master too: the sky's mean 0.53, where 08's, at the same gamma,
+# is 0.29).  Gamma, r_hdr and r_bloom toggled alone on the same camera do
+# not do it.  -gpu has no bloom yet and never shows it.  That is a GL fault
+# to chase on its own, not this sweep's, so the bloom frame comes last on
+# the graveyard.
 #
 # 25-underwater-warp is not repeatable: the warp's phase is realtime, which
 # pause does not stop (P4c adds r_pp_time).  Compare it against the run-to-run
@@ -41,9 +63,61 @@
 # Settings as sweep-liquid-gpu.steps, for the same reasons, plus
 # con_notifytime 0: each `cmd` echoes into the notify lines at the top of the
 # screen for three seconds of realtime, which made 02 differ from 01 in text,
-# not in rendering.  The HUD is not masked because both sides of the P4a-1
-# check are GL.  12-console's input cursor blinks on realtime
-# (sweep-2d.steps' second trap), so that frame can differ in one small box.
+# not in rendering.  pp-diff.sh masks the mini status bar's health
+# (210x24+100+576: it reads 83 or 85 by run) and, in 12-console, the input
+# cursor (20,273-30,283), which blinks on realtime (sweep-2d.steps' second
+# trap).
+#
+# THE THRESHOLDS -- see tools/pp-diff.sh for the checks.  Measured
+# 2026-11-24, 800x600, llvmpipe GL (Mesa 26.1.8) against lavapipe -gpu,
+# three runs a side, two GL runs of master beside them, PSNR in dB, masked:
+#
+#   frames                       GL vs -gpu    GL vs GL    P4 vs GL      gate
+#   01-08, 10, 11, 14            53.1 .. 82.0  inf         46.2 .. 58.0  42
+#     (07 FXAA 53.1 and 08 FXAA + r_scale 54.6, FXAA's edge taps; the
+#      rest 72.3 .. 82.0)
+#   09, 13 the pools, 12 console 47.6 .. 47.9  47.6, 61.2  45.8 .. 48.4  42
+#     (the water and the console's backdrop animate under pause: GL
+#      against itself reads 47.6 on the pools, 61.2 on the console)
+#   26-28 r_softemu              64.2 .. 66.5  inf         41.7 .. 42.2  40
+#
+# GL against GL is the same binary three times and master against it twice:
+# every frame the binary repeats is identical, old against new included.
+# "P4" is -gpu on the Tesla P4 (NVIDIA Vulkan) against the llvmpipe GL
+# frames, one run: 0 validation errors, gpu_unrouted 0, every check passing
+# but 26 and 27 at 42 (41.9, 41.7), where palette snapping turns the two
+# rasterizers' last-bit differences (51-52 dB on 01 and 14) into whole
+# palette steps -- hence the r_softemu frames' gate of 40, which r_softemu
+# dropped (26-28 against 14, the same frame without it) misses by 2.4 dB
+# or more: 35.1 .. 37.6.  The 42 gate is 5.6 dB under the worst honest
+# lavapipe frame (the pools) and 11.1 under the worst static one.
+#
+# Broken builds, one -gpu run each (BRK=<proxy> in a scratch build, never
+# committed), every one failing pp-diff.sh:
+#
+#   proxy      what it breaks                          worst check
+#   bind       draw-framebuffer binds ignored          02-28 at 10.8 .. 17.6
+#   noblit     End3D's colour blit claimed, not made   02-28 at 12.4 .. 19.3,
+#                                                      2x2 blocks, both gates
+#   flip       the colour blit flips rows              02-28 at 15.3 .. 20.7
+#   sampler    the final pass's scene sampler unset    02-28 at 0.8 .. 2.3
+#   noflush    PpParams never flushed                  02-28 at 10.8 .. 17.6
+#   firstall   every target's first pass clears        02-28 at 4.8 .. 11.1
+#   oit        the OIT gates removed (P6)              13 at 24.7, oit gate,
+#                                                      4282 null-table calls
+#   bloom      the bloom gate removed (P4e)            bloom gate (89812 px)
+#   fbofail    every framebuffer incomplete            03-28 at 19.2 .. 38.8,
+#                                                      every effect check
+#   nostencil  pp_fbo's depth without stencil          11 at 16.5
+#
+# Two proxies pass and say why: "viewport" (End3D's native R_SetViewport
+# left out) is redundant, since GL_SetCanvas sets the 2D's viewport anyway;
+# "noclear" (new render targets never cleared) draws the same frames on
+# lavapipe and on the Tesla P4, pixel for pixel against the honest P4 run
+# outside the animated pools and console: the chain clears or overwrites
+# all of pp_fbo and pp_native_fbo before it reads them, so the creation
+# clear guards a target read before anything wrote it, which no frame here
+# does.
 
 sleep 20
 cmd echo REPORT-BOOT-BEGIN
@@ -96,9 +170,9 @@ shot 02-gy-identity
 cmd r_waterwarp 0
 cmd gamma 0.7
 shot 03-gy-gamma07
-cmd gamma 1.4
+cmd gamma 0.85
 cmd contrast 1.5
-shot 04-gy-g14-c15
+shot 04-gy-g085-c15
 cmd gamma 1
 cmd contrast 1
 cmd r_scale 0.5
@@ -108,7 +182,7 @@ shot 06-gy-scale075
 cmd r_scale 1
 cmd gl_fxaa 1
 shot 07-gy-fxaa
-cmd gamma 1.2
+cmd gamma 0.9
 cmd r_scale 0.5
 shot 08-gy-combo
 cmd r_scale 1
@@ -120,6 +194,7 @@ shot 27-gy-softemu2
 cmd r_softemu 3
 shot 28-gy-softemu3
 cmd r_softemu 0
+shot 14-gy-gamma09
 cmd r_bloom 1
 cmd r_bloom_threshold 0.5
 shot 20-gy-bloom
@@ -132,7 +207,7 @@ cmd pause
 cmd setpos -1007 2200 -442 25 152 0
 sleep 2
 cmd pause
-cmd gamma 1.2
+cmd gamma 0.9
 shot 09-pools
 cmd r_oit 1
 shot 13-pools-oit
@@ -141,7 +216,10 @@ cmd gamma 1
 cmd pause
 
 # --- 2D into the native FBO: the console over the pools ---
-cmd gamma 1.2
+# Cleared first: the boot log above it differs by backend (the -gpu lines,
+# the bloom pyramid's DPrintfs on GL), and that is text, not rendering.
+cmd clear
+cmd gamma 0.9
 console
 sleep 1
 shot 12-console
@@ -161,7 +239,7 @@ cmd pause
 shot 24-sprites-hard
 cmd r_softparticles 1
 shot 22-sprites-soft-ppoff
-cmd gamma 1.2
+cmd gamma 0.9
 shot 23-sprites-soft-pp
 cmd r_softparticles 0
 cmd gamma 1
@@ -193,7 +271,7 @@ cmd pause
 # --- report: the demo1 shot states once more, counted ---
 cmd gpu_unrouted reset
 cmd setpos -918 -2034 0 -20 45 0
-cmd gamma 1.2
+cmd gamma 0.9
 cmd gl_fxaa 1
 cmd r_scale 0.5
 sleep 2
@@ -223,7 +301,7 @@ cmd noclip
 cmd setpos 1652 1496 -646 20 88 0
 sleep 2
 cmd pause
-cmd gamma 1.2
+cmd gamma 0.9
 cmd gpu_unrouted reset
 shot 10-c4-lava
 cmd echo REPORT-CASTLE4-BEGIN
@@ -282,7 +360,7 @@ sleep 3
 cmd setpos 784 1760 236 -40 180 0
 sleep 2
 cmd pause
-cmd gamma 1.2
+cmd gamma 0.9
 cmd gpu_unrouted reset
 shot 11-egypt-north
 cmd echo REPORT-EGYPT-BEGIN

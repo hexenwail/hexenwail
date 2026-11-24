@@ -266,6 +266,7 @@ qboolean RG_CreateDevice (SDL_Window *window, int vsync)
 	RG_Buf_Init ();
 	RG_Pipeline_Init ();
 	RG_Frame_Init ();
+	RG_Target_Init ();
 	return true;
 }
 
@@ -293,6 +294,7 @@ void RG_Shutdown (void)
 		return;
 	SDL_WaitForGPUIdle (rg_dev);
 	RG_Frame_Shutdown ();
+	RG_Target_Shutdown ();
 	RG_Pipeline_Shutdown ();
 	RG_Shader_Shutdown ();
 	RG_Res_Shutdown ();
@@ -356,8 +358,9 @@ void RG_Status (void)
 	Con_Printf ("[RENDERER] SDL_GPU driver=%s device=%s present=%s swapchain=%s\n",
 		    RG_DriverName (), name, RG_PresentModeName (rg_present_mode),
 		    rg_dev ? "SDR" : "none");
-	Con_Printf ("[RENDERER] SDL_GPU P4a-1: 2D, world, brush and alias models, the stencilled sky, liquids, "
-		    "particles, sprites, glows, fog and mirrors drawn (the post-process chain routed, still off), the world, "
+	Con_Printf ("[RENDERER] SDL_GPU P4a-2: 2D, world, brush and alias models, the stencilled sky, liquids, "
+		    "particles, sprites, glows, fog and mirrors drawn, post-process (gamma, contrast, r_scale, FXAA, "
+		    "r_softemu) on render targets, the world, "
 		    "brush models, sky pre-pass and alias meshes from their vertex buffers, instanced and "
 		    "skeletal alias models from their storage buffers; GL runs against "
 		    "the null table (%lu calls into %d entry points, see gpu_unrouted)\n", total, hit);
@@ -365,6 +368,7 @@ void RG_Status (void)
 	if (rg_dev)
 	{
 		RG_Frame_Status ();
+		RG_Target_Status ();
 		RG_Res_Status ();
 		RG_Buf_Status ();
 	}

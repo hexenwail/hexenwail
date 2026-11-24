@@ -225,20 +225,19 @@ Checked, from the sources (stock python3, lint.yml):
   R_SetWorldFrag caller) names the backend or is compiled under a backend
   conditional.
   the post-process chain's GL calls through seams (#340 P4a-1,
-  check_postprocess), the chain still off under -gpu:
+  check_postprocess):
     * gl_fbo.c is a seam (SEAMS), in the client's source list beside
       gl_texbind.c, each of its GL arms is the one bare call it is named
-      for, its parameters passed through in order, and each SDL_GPU arm notes
-      the call and answers neutrally until P4a-2 (zero names,
-      GL_FRAMEBUFFER_UNSUPPORTED, false, 0);
+      for, its parameters passed through in order, and each SDL_GPU arm is
+      the one rg_target.c call of the same name, its parameters in order
+      (P4a-2; P4a-1's arms noted the call and answered neutrally);
     * no gl*_fp call is left in gl_postprocess.c outside the OIT functions
       (P6) and the GPU palette-LUT builder (compute, P5), except where an
       SDL_GPU arm excludes it and PP_RAW_OK's few, each counted: MSAA's
       multisampled storage (P6), bloom's bufferless draws (P4e), and
       shutdown's program and buffer deletes; a function GPU_GATES gates whole
       gets no credit for its gate, so GL_SoftDepth_Capture is routed for P4b;
-    * the gates: PP_NeedsPostProcess still returns false under -gpu (P4a-2
-      lifts it with the backend), OIT_InitShader returns false (GPU_GATES),
+    * the gates: OIT_InitShader returns false (GPU_GATES),
       PP_SceneSamples (PP_CreateFBO's sample count) forces 0 samples after
       the gl_max_samples clamp, and an FBO failure under -gpu returns from BeginFrame
       before the copyback fallback turns post-process on; the soft-particle
@@ -248,6 +247,33 @@ Checked, from the sources (stock python3, lint.yml):
       after GL_GetMVP and returns, PP_BindUniformBlock returns under -gpu
       before any GL call, and the blocks registered engine-wide leave room
       under RG_MAX_BLOCKS for P4e's BloomParams.
+  the post-process chain on SDL_GPU render targets (#340 P4a-2,
+  check_render_targets), which tools/sweep-pp-gpu.steps and tools/pp-diff.sh
+  draw:
+    * the chain runs under -gpu: PP_NeedsPostProcess names no backend, and
+      GL_Init_NullGL reports the postprocess capability as
+      GL_PostProcess_Available () says, not false;
+    * bloom stays off under -gpu until P4e: every "is bloom on" in
+      gl_postprocess.c is PP_BloomOn (), which returns false under R_GPU ()
+      and r_bloom.integer != 0 otherwise, so GL asks what it asked before;
+    * rg_target.c is in RG_SOURCES; glCheckFramebufferStatus says
+      GL_FRAMEBUFFER_UNSUPPORTED for a second colour attachment before it
+      can say COMPLETE (OIT's MRT, P6: never silently one attachment);
+      framebuffer 0 resolves to the scene target; a renderbuffer's texture
+      drops SAMPLER; a blit ends the segment before it records, its colour
+      half is SDL_BlitGPUTexture with a flip only for a rectangle given
+      backwards, its depth half SDL_CopyGPUTextureToTexture between one
+      format, and a blit into framebuffer 0 tells the frame the scene is
+      written;
+    * GL_DEPTH24_STENCIL8 is the scene's own depth format (RGT_Format), the
+      scene's depth format is chosen sampler-capable first (RG_Frame_Init),
+      a new render target is cleared once (RGT_Realize marks it unwritten,
+      an issued upload unmarks it, RG_Res_RenderTarget queues the clear and
+      RGF_EndSegment issues it before the copy pass), and a draw samples a
+      placeholder, not the texture it draws into;
+    * rg_frame.c draws into the current target: RGF_BeginDraw takes the
+      pipeline formats and the scissor clamp from rgf_tgt, and the
+      first-pass clear is the scene's alone.
 
 Usage: test_rg_sources.py [--root DIR]
 """
@@ -1125,10 +1151,10 @@ def check_world_imm(root):
              "through VK_FLIP_Y and SDL's negative-height viewport (#340 P2b)")
     frame = strip_c_comments((root / "engine/h2shared/rg_frame.c").read_text())
     if not re.search(r"\bds\.load_op\s*=\s*\(\s*\(\s*rgf_clear_mask\s*&\s*GL_DEPTH_BUFFER_BIT\s*\)\s*"
-                     r"\|\|\s*!\s*rgf_cleared\s*\)\s*\?\s*SDL_GPU_LOADOP_CLEAR\s*:\s*SDL_GPU_LOADOP_LOAD\s*;", frame):
-        fail("rg_frame.c: the depth load op must clear when a clear asked for depth or the frame has "
-             "not started, `ds.load_op = ((rgf_clear_mask & GL_DEPTH_BUFFER_BIT) || !rgf_cleared) ? "
-             "SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;` (#340 P2b)")
+                     r"\|\|\s*first\s*\)\s*\?\s*SDL_GPU_LOADOP_CLEAR\s*:\s*SDL_GPU_LOADOP_LOAD\s*;", frame):
+        fail("rg_frame.c: the depth load op must clear when a clear asked for depth or the scene has "
+             "not started, `ds.load_op = ((rgf_clear_mask & GL_DEPTH_BUFFER_BIT) || first) ? "
+             "SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;` (#340 P2b; `first` since P4a-2)")
     cd = re.findall(r"\bclear_depth\s*=\s*([^;]+);", frame)
     if cd != ["rgf_clear_depth"]:
         fail("rg_frame.c: the render pass must clear depth to what RG_Clear was handed, "
@@ -1307,10 +1333,10 @@ def check_stencil(root):
     b = body_named(root, rf, "RGF_EndSegment")
     if b is not None:
         if not re.search(r"\bds\.stencil_load_op\s*=\s*\(\s*\(\s*rgf_clear_mask\s*&\s*GL_STENCIL_BUFFER_BIT\s*\)\s*"
-                         r"\|\|\s*!\s*rgf_cleared\s*\)\s*\?\s*SDL_GPU_LOADOP_CLEAR\s*:\s*SDL_GPU_LOADOP_LOAD\s*;", b):
-            fail("%s: the stencil load op must clear when a clear asked for stencil or the frame has not "
+                         r"\|\|\s*first\s*\)\s*\?\s*SDL_GPU_LOADOP_CLEAR\s*:\s*SDL_GPU_LOADOP_LOAD\s*;", b):
+            fail("%s: the stencil load op must clear when a clear asked for stencil or the scene has not "
                  "started, `ds.stencil_load_op = ((rgf_clear_mask & GL_STENCIL_BUFFER_BIT) || "
-                 "!rgf_cleared) ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;` (#340 P2c)" % rf)
+                 "first) ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;` (#340 P2c; `first` since P4a-2)" % rf)
         if [norm(v) for v in re.findall(r"\bclear_stencil\s*=\s*([^;]+);", b)] != ["rgf_clear_stencil"]:
             fail("%s: the render pass must clear stencil to what RG_Clear was handed, "
                  "`ds.clear_stencil = rgf_clear_stencil;` alone (#340 P2c)" % rf)
@@ -1637,11 +1663,13 @@ def check_storage(root):
                  "shader_storage, skeletal_animation (#340 P2e) and texture_lod_bias (sampler "
                  "mip_lod_bias, GitHub #521) are real -- compute_shaders would "
                  "run the light cluster, culling and SSAO against the null table (P5)" % (on or "nothing"))
+        # postprocess is the one that follows the chain (#340 P4a-2, check_render_targets).
         other = [c for c in re.findall(r"\bgl_renderer_caps\.(\w+)\s*=\s*([^;]+);", b)
-                 if c[1].strip() not in ("true", "false", "GL_RENDERER_DESKTOP_43", '"SDL_GPU"')]
+                 if c[1].strip() not in ("true", "false", "GL_RENDERER_DESKTOP_43", '"SDL_GPU"')
+                 and c != ("postprocess", "GL_PostProcess_Available()")]
         if other:
             fail("engine/h2shared/gl_vidsdl.c: GL_Init_NullGL sets %s from an expression -- every "
-                 "capability there is a constant (#340 P2e)" % ", ".join(c[0] for c in other))
+                 "capability there but postprocess is a constant (#340 P2e)" % ", ".join(c[0] for c in other))
 
     for f, fn, rx, why in STORAGE_PINS:
         rel = "engine/h2shared/" + f
@@ -1954,10 +1982,6 @@ GPU_GATES = (
      r"\bR_Program_Create\s*\(|\bgl\w+_fp\s*\(|\bPP_BindUniformBlock\s*\(", None,
      "OIT is P6: the null glBlendFunci is not NULL, so every -gpu boot reached it, and it is raw GL "
      "for a resolve -gpu never draws (#340 P4a-1)"),
-    ("engine/h2shared/gl_postprocess.c", "PP_NeedsPostProcess", "false",
-     r"\bv_gamma\b|\bPP_Contrast\s*\(", r"\bif\s*\(\s*!\s*pp_initialized\s*\)\s*return\s+false\s*;",
-     "the chain's calls go through seams (P4a-1) whose -gpu arms are not built yet: P4a-2 lifts this "
-     "with the backend, and this row with it"),
     ("engine/h2shared/gl_postprocess.c", "GL_SoftDepth_Capture", "",
      r"\bR_GenTextures\s*\(|\bgl\w+_fp\s*\(|\bR_\w*(?:Framebuffer|Renderbuffer|DrawBuffers)\w*\s*\("
      r"|\bsoft_depth_valid\s*=\s*true\b",
@@ -2652,19 +2676,15 @@ def check_fbo_seam(root):
                  "found `%s` (whitespace dropped; #340 P4a-1)" % (rel, fn, want, got))
         arm = re.search(r"#\s*ifdef\s+USE_SDL_GPU\b(.*?)#\s*endif", bodies[fn], re.S)
         arm = re.sub(r"\s+", "", arm.group(1)) if arm else ""
-        note = r'RG_NoteUnhandled\("%s\(rendertargetsareP4a-2\)"\);' % fn
-        tail = {"GenFramebuffers": r"RG_FboZeroNames\(n,fbos\);return;",
-                "GenRenderbuffers": r"RG_FboZeroNames\(n,rbs\);return;",
-                "CheckFramebufferStatus": r"returnGL_FRAMEBUFFER_UNSUPPORTED;",
-                "BlitFramebuffer": r"returnfalse;",
-                "FramebufferBinding": r"return0;"}.get(name, r"return;")
-        if not re.fullmatch(r"if\(R_GPU\(\)\)\{%s%s\}" % (note, tail), arm):
-            fail("%s: %s's SDL_GPU arm must note the call and answer neutrally until P4a-2 builds "
-                 "rg_target.c -- zero names, GL_FRAMEBUFFER_UNSUPPORTED, false, 0 -- found `%s` "
-                 "(#340 P4a-1)" % (rel, fn, arm))
-    zb = bodies.get("RG_FboZeroNames", "")
-    if not re.search(r"for\s*\(\s*i\s*=\s*0\s*;\s*i\s*<\s*n\s*;\s*i\+\+\s*\)\s*names\s*\[\s*i\s*\]\s*=\s*0\s*;", zb):
-        fail("%s: RG_FboZeroNames must zero all n names (#340 P4a-1)" % rel)
+        call = "RG_%s(%s)" % (name, ",".join(params))
+        want = ("{return%s;}" if name in ("CheckFramebufferStatus", "BlitFramebuffer",
+                                          "FramebufferBinding") else "{%s;return;}") % call
+        if arm != "if(R_GPU())" + want:
+            fail("%s: %s's SDL_GPU arm must be exactly rg_target.c's %s, its parameters in order: want "
+                 "`if(R_GPU())%s`, found `%s` (whitespace dropped; #340 P4a-2)"
+                 % (rel, fn, "RG_" + name, want, arm))
+    if re.search(r"\bRG_NoteUnhandled\b|\bRG_FboZeroNames\b", code):
+        fail("%s: P4a-1's neutral -gpu answers are back -- every arm is rg_target.c's (#340 P4a-2)" % rel)
     cm = (root / "engine/CMakeLists.txt").read_text()
     if not re.search(r"\$\{COMMONDIR\}/gl_texbind\.c\s*\n\s*\$\{COMMONDIR\}/gl_fbo\.c\b", cm):
         fail("engine/CMakeLists.txt: gl_fbo.c must follow gl_texbind.c in the client's source list (#340 P4a-1)")
@@ -2808,6 +2828,186 @@ def check_postprocess(root):
              % (mx.group(1), len(blocks), ", ".join(sorted(blocks))))
 
 
+def squash(s):
+    return re.sub(r"\s+", "", s)
+
+
+def check_render_targets(root):
+    """#340 P4a-2: the post-process chain on SDL_GPU render targets."""
+    pp = "engine/h2shared/gl_postprocess.c"
+    rt = "engine/h2shared/rg_target.c"
+    rr = "engine/h2shared/rg_resource.c"
+    rf = "engine/h2shared/rg_frame.c"
+    vid = "engine/h2shared/gl_vidsdl.c"
+
+    # The gate is lifted, and bloom has one of its own.
+    b = body_named(root, pp, "PP_NeedsPostProcess")
+    if b is not None:
+        if re.search(r"\bR_GPU\b|\bUSE_SDL_GPU\b", b):
+            fail("%s: PP_NeedsPostProcess names the backend -- the chain runs under -gpu since P4a-2; "
+                 "what -gpu cannot do yet is gated where it is done (#340 P4a-2)" % pp)
+        if not re.search(r"\bif\s*\(\s*PP_BloomOn\s*\(\s*\)\s*\)\s*return\s+true\s*;", b):
+            fail("%s: PP_NeedsPostProcess must wake the chain for bloom through PP_BloomOn () "
+                 "(#340 P4a-2)" % pp)
+    b = body_named(root, pp, "PP_BloomOn")
+    if b is not None and squash(b).rstrip("}") != squash(
+            "{#ifdef USE_SDL_GPU\nif (R_GPU ())\nreturn false;\n#endif\nreturn r_bloom.integer != 0;"):
+        fail("%s: PP_BloomOn must be exactly `#ifdef USE_SDL_GPU / if (R_GPU ()) return false; / #endif "
+             "/ return r_bloom.integer != 0;` -- bloom under -gpu is P4e (bufferless draws, no "
+             "BloomParams mirror), and on GL it must ask what r_bloom.integer asked (#340 P4a-2)" % pp)
+    if (root / pp).is_file():
+        code = strip_c_comments((root / pp).read_text(errors="replace"))
+        uses = [code.count("\n", 0, m.start()) + 1 for m in re.finditer(r"\br_bloom\s*\.\s*(?:integer|value)\b", code)]
+        if len(uses) != 1:
+            fail("%s: r_bloom is read at lines %s; only PP_BloomOn may read it, or -gpu builds the "
+                 "pyramid P4e has not routed (#340 P4a-2)" % (pp, ", ".join(map(str, uses)) or "none"))
+        if len(re.findall(r"\bPP_BloomOn\s*\(\s*\)", code)) < 5:
+            fail("%s: fewer than five callers of PP_BloomOn -- the wake, the pyramid, the passes, the "
+                 "composite's texture and its strength each ask it (#340 P4a-2)" % pp)
+    b = body_named(root, vid, "GL_Init_NullGL")
+    if b is not None:
+        if not re.search(r"\bgl_renderer_caps\.postprocess\s*=\s*GL_PostProcess_Available\s*\(\s*\)\s*;", b) \
+                or re.search(r"\bgl_renderer_caps\.postprocess\s*=\s*false\b", b):
+            fail("%s: GL_Init_NullGL must set gl_renderer_caps.postprocess = GL_PostProcess_Available (), "
+                 "not false: the chain runs under -gpu (#340 P4a-2)" % vid)
+
+    # rg_target.c is built.
+    cm = (root / "engine/CMakeLists.txt").read_text()
+    m = re.search(r"set\s*\(\s*RG_SOURCES\b(.*?)\)", cm, re.S)
+    if not m or not re.search(r"\$\{COMMONDIR\}/rg_target\.c\b", m.group(1)):
+        fail("engine/CMakeLists.txt: rg_target.c is not in RG_SOURCES -- gl_fbo.c's -gpu arms have "
+             "nothing to link (#340 P4a-2)")
+
+    # Complete only for what a render pass takes: never one of two colours.
+    b = body_named(root, rt, "RGTG_Complete")
+    if b is not None:
+        ex = re.search(r"\bif\s*\(\s*f->extra\s*\)\s*return\s+GL_FRAMEBUFFER_UNSUPPORTED\s*;", b)
+        ok = re.search(r"\breturn\s+GL_FRAMEBUFFER_COMPLETE\s*;", b)
+        if not (ex and ok and ex.start() < ok.start()):
+            fail("%s: RGTG_Complete must return GL_FRAMEBUFFER_UNSUPPORTED for a second colour "
+                 "attachment before it can return COMPLETE -- OIT's MRT (P6) drawn into one target "
+                 "would lose every translucent (#340 P4a-2)" % rt)
+        for asp, usage in (("color", "COLOR_TARGET"), ("depth", "DEPTH_STENCIL_TARGET")):
+            if not re.search(r"\bRG_Res_RenderTarget\s*\(\s*f->%s\s*,\s*SDL_GPU_TEXTUREUSAGE_%s\b" % (asp, usage), b):
+                fail("%s: RGTG_Complete must realize the %s attachment through RG_Res_RenderTarget "
+                     "with SDL_GPU_TEXTUREUSAGE_%s (#340 P4a-2)" % (rt, asp, usage))
+    b = body_named(root, rt, "RG_Target_Resolve")
+    if b is not None and not re.search(r"\bif\s*\(\s*fbo\s*==\s*0\s*\)\s*\{\s*RG_Frame_SceneTarget\s*\(\s*out\s*\)\s*;"
+                                       r"\s*return\s+true\s*;", b):
+        fail("%s: RG_Target_Resolve must answer framebuffer 0 with the scene target (#340 P4a-2)" % rt)
+    b = body_named(root, rt, "RG_RenderbufferStorage")
+    if b is not None:
+        ti = re.search(r"\bRG_TexImage\s*\(", b)
+        to = re.search(r"\bRG_Res_TargetOnly\s*\(\s*r->tex\s*\)", b)
+        if not (ti and to and ti.start() < to.start()):
+            fail("%s: RG_RenderbufferStorage must define the hidden texture (RG_TexImage) and then drop "
+                 "its SAMPLER (RG_Res_TargetOnly) (#340 P4a-2)" % rt)
+    b = body_named(root, rt, "RG_BlitFramebuffer")
+    if b is not None:
+        br = re.search(r"\bcmd\s*=\s*RG_Frame_Break\s*\(\s*\)\s*;", b)
+        col = re.search(r"\bRGTG_BlitColor\s*\(", b)
+        dep = re.search(r"\bRGTG_CopyDepth\s*\(", b)
+        sw = re.search(r"\bif\s*\(\s*wrote\s*&&\s*rgfb_draw\s*==\s*0\s*\)\s*RG_Frame_SceneWritten\s*\(\s*\)\s*;", b)
+        pre = re.search(r"\bRGTG_DepthCopyable\s*\(", b)
+        if not (pre and br and pre.start() < br.start()):
+            fail("%s: RG_BlitFramebuffer must check a depth blit (RGTG_DepthCopyable) before it ends the "
+                 "segment -- a declined blit must cost no pass (#340 P4a-2)" % rt)
+        if not (br and col and dep and sw and br.end() <= min(col.start(), dep.start())
+                and sw.start() > max(col.start(), dep.start())):
+            fail("%s: RG_BlitFramebuffer must end the segment (cmd = RG_Frame_Break ()) before the colour "
+                 "blit and the depth copy, and tell the frame the scene is written after them (`if (wrote "
+                 "&& rgfb_draw == 0) RG_Frame_SceneWritten ();`) -- the draws so far land first, and the "
+                 "scene's first pass must not clear what the blit wrote (#340 P4a-2)" % rt)
+    b = body_named(root, rt, "RGTG_BlitColor")
+    if b is not None:
+        flips = re.findall(r"\bSDL_FLIP_(?:VERTICAL|HORIZONTAL)\b", b)
+        v = re.search(r"\bif\s*\(\s*sby\s*!=\s*dby\s*\)\s*flip\s*\|=\s*SDL_FLIP_VERTICAL\s*;", b)
+        h = re.search(r"\bif\s*\(\s*sbx\s*!=\s*dbx\s*\)\s*flip\s*\|=\s*SDL_FLIP_HORIZONTAL\s*;", b)
+        if not (re.search(r"\bSDL_BlitGPUTexture\s*\(\s*cmd\s*,", b) and v and h and len(flips) == 2):
+            fail("%s: RGTG_BlitColor must be SDL_BlitGPUTexture with a flip only where GL's rectangles "
+                 "run opposite ways -- every render target holds GL's row order (VK_FLIP_Y), so a flip "
+                 "of its own turns the 3D upside down (#340 P4a-2)" % rt)
+        if not re.search(r"\bSDL_GPU_TEXTUREUSAGE_SAMPLER\b", b):
+            fail("%s: RGTG_BlitColor must decline a source without SAMPLER usage (a renderbuffer) -- "
+                 "SDL_BlitGPUTexture samples it (#340 P4a-2)" % rt)
+    b = body_named(root, rt, "RGTG_CopyDepth")
+    c = body_named(root, rt, "RGTG_DepthCopyable")
+    if b is not None and c is not None:
+        if not (re.search(r"\bSDL_CopyGPUTextureToTexture\s*\(", b) and re.search(r"\bRGTG_DepthCopyable\s*\(", b)
+                and re.search(r"\bsrc->dfmt\s*!=\s*dst->dfmt\b", c)
+                and re.search(r"\bsx1\s*!=\s*src->w\b", c) and re.search(r"\bdy1\s*!=\s*dst->h\b", c)):
+            fail("%s: RGTG_CopyDepth must be SDL_CopyGPUTextureToTexture, declining anything but a whole "
+                 "1:1 copy between one format (#340 P4a-2)" % rt)
+
+    # rg_resource.c: formats, the creation clear, the feedback check.
+    b = body_named(root, rr, "RGT_Format")
+    if b is not None and not re.search(r"\bcase\s+GL_DEPTH24_STENCIL8\s*:\s*\*fmt\s*=\s*RG_Frame_DepthFormat\s*\(\s*\)\s*;", b):
+        fail("%s: RGT_Format must map GL_DEPTH24_STENCIL8 to RG_Frame_DepthFormat () -- a depth copy "
+             "is between one format, and D24S8 is missing on Apple silicon and AMD (#340 P4a-2)" % rr)
+    b = body_named(root, rr, "RGT_Realize")
+    if b is not None and not re.search(r"\bt->unwritten\s*=\s*true\s*;", b):
+        fail("%s: RGT_Realize must mark a new texture unwritten -- a never-written Vulkan image loads "
+             "undefined, where GL gives zeros (#340 P4a-2)" % rr)
+    b = body_named(root, rr, "RG_Res_IssueUploads")
+    if b is not None and not re.search(r"\bSDL_UploadToGPUTexture\s*\(\s*copy\s*,\s*&src\s*,\s*&dst\s*,\s*false\s*\)\s*;"
+                                       r"\s*t->unwritten\s*=\s*false\s*;", b):
+        fail("%s: RG_Res_IssueUploads must unmark a texture an upload was issued into -- or its "
+             "creation clear wipes the upload (#340 P4a-2)" % rr)
+    b = body_named(root, rr, "RG_Res_RenderTarget")
+    if b is not None and not re.search(r"\bif\s*\(\s*t->unwritten\s*\)\s*\{.*?\brgt_clears\s*\[\s*rgt_numclears\s*\]\.tex\s*=\s*t->tex\s*;"
+                                       r".*?\brgt_numclears\s*\+\+\s*;.*?t->unwritten\s*=\s*false\s*;", b, re.S):
+        fail("%s: RG_Res_RenderTarget must queue an unwritten target's one clear (#340 P4a-2)" % rr)
+    b = body_named(root, rr, "RG_Res_ForDraw")
+    if b is not None:
+        fb = re.search(r"\belse\s+if\s*\(\s*RG_Frame_TargetHolds\s*\(\s*t->tex\s*\)\s*\)", b)
+        bind = re.search(r"\bout->texture\s*=\s*t->tex\s*;", b)
+        if not (fb and bind and fb.start() < bind.start()):
+            fail("%s: RG_Res_ForDraw must bind a placeholder, not a texture the draw renders into "
+                 "(RG_Frame_TargetHolds) -- Vulkan faults the feedback GL leaves undefined (#340 P4a-2)" % rr)
+
+    b = body_named(root, rr, "RG_DeleteTextures")
+    if b is not None and not (re.search(r"\bRG_Frame_ReleaseTarget\s*\(\s*t->tex\s*\)", b)
+                              and re.search(r"\bRG_Target_TextureDeleted\s*\(\s*textures\s*\[\s*i\s*\]\s*\)", b)):
+        fail("%s: RG_DeleteTextures must let the draws into the texture land (RG_Frame_ReleaseTarget) and "
+             "drop it from every framebuffer (RG_Target_TextureDeleted) -- the name is handed out again "
+             "(#340 P4a-2)" % rr)
+    b = body_named(root, rr, "RGT_FlushIfRead")
+    if b is not None and not re.search(r"\bRG_Frame_TargetHolds\s*\(\s*t->tex\s*\)\s*&&\s*RG_Frame_SegmentHasDraws", b):
+        fail("%s: RGT_FlushIfRead must flush for a texture the open segment draws into too -- its copy pass "
+             "runs ahead of the draws (#340 P4a-2)" % rr)
+    for fn, rx in (("RG_Res_RenderTarget", r"!\s*\(\s*t->tex_usage\s*&\s*usage\s*\)"),
+                   ("RG_Res_ForDraw", r"!\s*\(\s*t->tex_usage\s*&\s*SDL_GPU_TEXTUREUSAGE_SAMPLER\s*\)")):
+        b = body_named(root, rr, fn)
+        if b is not None and (not re.search(rx, b) or re.search(r"\bt->usage\b", b)):
+            fail("%s: %s must test the usage the texture was created with (t->tex_usage), not the "
+                 "definition's, which a same-size re-definition changes (#340 P4a-2)" % (rr, fn))
+
+    # rg_frame.c: draws go to the current target.
+    b = body_named(root, rf, "RGF_EndSegment")
+    if b is not None:
+        cl = re.search(r"\bRG_Res_ClearTargets\s*\(\s*rgf_cmd\s*\)\s*;", b)
+        cp = re.search(r"\bRGF_CopyPass\s*\(\s*\)", b)
+        if not (cl and cp and cl.start() < cp.start()):
+            fail("%s: RGF_EndSegment must issue the creation clears (RG_Res_ClearTargets) before the copy "
+                 "pass -- after it, an upload queued into a new target is cleared away (#340 P4a-2)" % rf)
+        if not re.search(r"\bfirst\s*=\s*\(\s*rgf_fbo\s*==\s*0\s*&&\s*!\s*rgf_cleared\s*\)\s*;", b):
+            fail("%s: RGF_EndSegment's first-pass clear must be the scene's alone (`first = (rgf_fbo == 0 "
+                 "&& !rgf_cleared);`) -- a framebuffer loads what it holds, as GL's does (#340 P4a-2)" % rf)
+    b = body_named(root, rf, "RGF_BeginDraw")
+    if b is not None:
+        if not re.search(r"\bRG_PipelineFor\s*\(\s*prog\s*,\s*prim\s*,\s*layout\s*,\s*rgf_tgt\.cfmt\s*,\s*rgf_tgt\.dfmt\s*\)", b):
+            fail("%s: RGF_BeginDraw must build the pipeline for the current target's formats (rgf_tgt.cfmt, "
+                 "rgf_tgt.dfmt) -- the scene's fail r_hdr's RGBA16F and a colour-only target (#340 P4a-2)" % rf)
+        if re.search(r"\brgf_t[wh]\b", b) or not re.search(r"\bsc_x1\s*=\s*rgf_tgt\.w\s*;\s*sc_y1\s*=\s*rgf_tgt\.h\s*;", b):
+            fail("%s: RGF_BeginDraw must clamp the scissor to the current target (rgf_tgt.w / .h), not the "
+                 "scene's size (#340 P4a-2)" % rf)
+    b = body_named(root, rf, "RG_Frame_Init")
+    if b is not None and not re.search(r"usage\s*\[\s*2\s*\]\s*=\s*\{\s*SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET\s*\|"
+                                       r"\s*SDL_GPU_TEXTUREUSAGE_SAMPLER\s*,\s*SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET\s*\}", b):
+        fail("%s: RG_Frame_Init must try every depth format with SAMPLER usage before any without -- "
+             "pp_fbo's depth is the scene's format and is sampled (#340 P4a-2)" % rf)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     ap.add_argument("--root", type=Path, default=ROOT)
@@ -2831,6 +3031,7 @@ def main(argv=None):
     check_fog(root)
     check_mirror(root)
     check_postprocess(root)
+    check_render_targets(root)
     nfiles = 0
     rg_files = []
     for p in sorted(eng.rglob("*")):
