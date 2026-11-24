@@ -8038,6 +8038,10 @@ static int	rprof_texbinds;		  /* ditto (uhexen2-im9g) */
 typedef enum { RPROF_GPU_TIMER_QUERIES, RPROF_GPU_UNAVAILABLE } rprof_gpu_source_t;
 static rprof_gpu_source_t rprof_gpu_source = RPROF_GPU_TIMER_QUERIES;
 static const char *rprof_gpu_unavailable_reason = "timer queries not available";
+/* The one unavailability this file decides for itself, as opposed to one a
+ * backend announced; a new context may have the entry points, so
+ * R_ProfileContextLost lifts it (compared by pointer). */
+static const char rprof_missing_entry_points[] = "GL timer-query entry points missing";
 
 /*
 ================
@@ -8070,13 +8074,19 @@ static void R_ProfileInit (void)
 #else
 	if (rprof_available)
 		return;
+	/* A backend that has said it has no timer source keeps saying so, whatever
+	 * its table holds: -gpu's null GL installs query stubs that answer
+	 * "available" with zeros, which printed "GPU 0.0" in place of the reason
+	 * (#540). */
+	if (rprof_gpu_source == RPROF_GPU_UNAVAILABLE)
+		return;
 	if (!glGenQueries_fp)
 	{
 		/* No timer-query entry points on this driver — name the missing
 		 * GPU timing instead of silently skipping the whole report
 		 * (GitHub #451). */
 		rprof_gpu_source = RPROF_GPU_UNAVAILABLE;
-		rprof_gpu_unavailable_reason = "GL timer-query entry points missing";
+		rprof_gpu_unavailable_reason = rprof_missing_entry_points;
 		return;
 	}
 	glGenQueries_fp(RPROF_RING * RPROF_QUERIES, rprof_queries[0]);
@@ -8096,6 +8106,36 @@ static void R_ProfileBeginFrame (void)
 		return;
 	rprof_set = rprof_next_set;
 	rprof_next_set = (rprof_next_set + 1) % RPROF_RING;
+}
+
+/*
+================
+R_ProfileContextLost
+
+vid_restart takes the context and the query names with it.  Forget them, so
+the next r_speeds 2 frame allocates a fresh set in the new context.  Before,
+the profiler kept polling and stamping names the new context never generated:
+NVIDIA and llvmpipe raise one GL_INVALID_OPERATION ("Query object not found")
+and then let glQueryCounter bring the name into being, so the GPU line came
+back -- on a driver's leniency, not by the spec, which makes every such call
+an error.  Called by gl_vidsdl.c's VID_ChangeVideoMode with the other
+context-lost hooks.  #540.
+================
+*/
+void R_ProfileContextLost (void)
+{
+	int	i;
+
+	rprof_available = false;
+	rprof_pending = false;
+	/* The ring (#503): a set marked pending holds dead names, and polling
+	 * one in the new context is the error this hook exists to avoid. */
+	for (i = 0; i < RPROF_RING; i++)
+		rprof_set_pending[i] = false;
+	rprof_set = -1;
+	rprof_next_set = 0;
+	if (rprof_gpu_unavailable_reason == rprof_missing_entry_points)
+		rprof_gpu_source = RPROF_GPU_TIMER_QUERIES;	/* ask the new context */
 }
 
 static void R_ProfileTimestamp (int idx)
