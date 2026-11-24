@@ -2930,6 +2930,11 @@ void GL_PostProcess_EndFrame (void)
 			PP_PushBloomParams(1.0f / bloom_w[i+1], 1.0f / bloom_h[i+1], 0.0f);
 			glDrawArrays_fp(GL_TRIANGLES, 0, 3);
 		}
+		/* Back to the resting pair every other additive pass restores:
+		 * blended draws that set no func of their own (the sky's front
+		 * layer at r_skyalpha < 1) inherit it, and one bloom frame used to
+		 * leave the sky additive until restart.  GitHub #547. */
+		R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		R_SetBlend (false);
 
 		R_BindVertexArray(0);

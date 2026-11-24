@@ -492,6 +492,12 @@ jobs:
       - name: BloomParams block covers the bloom passes on both tiers
         run: python3 tools/test_bloomparams_block.py
 
+      # A pass that switches the blend func puts GL_SRC_ALPHA,
+      # GL_ONE_MINUS_SRC_ALPHA back: the bloom upsample left GL_ONE, GL_ONE
+      # and the sky's front layer went additive until restart (#547).
+      - name: Every blend func change is restored
+        run: python3 tools/test_blend_func_restore.py
+
       # The shader include expander and its WebGL-smoke mirror allow the same
       # number of passes, and no stage exceeds it (#450).
       - name: Shader include bound
