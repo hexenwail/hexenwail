@@ -263,17 +263,22 @@ Checked, from the sources (stock python3, lint.yml):
       drops SAMPLER; a blit ends the segment before it records, its colour
       half is SDL_BlitGPUTexture with a flip only for a rectangle given
       backwards, its depth half SDL_CopyGPUTextureToTexture between one
-      format, and a blit into framebuffer 0 tells the frame the scene is
-      written;
+      format, and nothing after the blit marks the scene written: the
+      segment's end before it is the scene's first pass, which already
+      cleared every aspect (the old RG_Frame_SceneWritten call was dead,
+      #548; tools/test_rg_target.py runs the rest of rg_target.c);
     * GL_DEPTH24_STENCIL8 is the scene's own depth format (RGT_Format), the
       scene's depth format is chosen sampler-capable first (RG_Frame_Init),
       a new render target is cleared once (RGT_Realize marks it unwritten,
       an issued upload unmarks it, RG_Res_RenderTarget queues the clear and
-      RGF_EndSegment issues it before the copy pass), and a draw samples a
-      placeholder, not the texture it draws into;
+      RGF_EndSegment issues it before the copy pass), an upload into the
+      bound target ends a segment that draws into or clears it (#548), and
+      a draw samples a placeholder, not the texture it draws into;
     * rg_frame.c draws into the current target: RGF_BeginDraw takes the
       pipeline formats and the scissor clamp from rgf_tgt, and the
-      first-pass clear is the scene's alone.
+      first-pass clear is the scene's alone, a pass of its own even with
+      nothing drawn or asked for; RG_Clear resolves a dirty target before
+      it records the clear (#548).
 
 Usage: test_rg_sources.py [--root DIR]
 """
@@ -2881,7 +2886,7 @@ def check_render_targets(root):
     # Complete only for what a render pass takes: never one of two colours.
     b = body_named(root, rt, "RGTG_Complete")
     if b is not None:
-        ex = re.search(r"\bif\s*\(\s*f->extra\s*\)\s*return\s+GL_FRAMEBUFFER_UNSUPPORTED\s*;", b)
+        ex = re.search(r"\bif\s*\(\s*RGTG_HasExtra\s*\(\s*f\s*\)\s*\)\s*return\s+GL_FRAMEBUFFER_UNSUPPORTED\s*;", b)
         ok = re.search(r"\breturn\s+GL_FRAMEBUFFER_COMPLETE\s*;", b)
         if not (ex and ok and ex.start() < ok.start()):
             fail("%s: RGTG_Complete must return GL_FRAMEBUFFER_UNSUPPORTED for a second colour "
@@ -2891,10 +2896,15 @@ def check_render_targets(root):
             if not re.search(r"\bRG_Res_RenderTarget\s*\(\s*f->%s\s*,\s*SDL_GPU_TEXTUREUSAGE_%s\b" % (asp, usage), b):
                 fail("%s: RGTG_Complete must realize the %s attachment through RG_Res_RenderTarget "
                      "with SDL_GPU_TEXTUREUSAGE_%s (#340 P4a-2)" % (rt, asp, usage))
-    b = body_named(root, rt, "RG_Target_Resolve")
+    b = body_named(root, rt, "RGTG_Resolve")
     if b is not None and not re.search(r"\bif\s*\(\s*fbo\s*==\s*0\s*\)\s*\{\s*RG_Frame_SceneTarget\s*\(\s*out\s*\)\s*;"
                                        r"\s*return\s+true\s*;", b):
-        fail("%s: RG_Target_Resolve must answer framebuffer 0 with the scene target (#340 P4a-2)" % rt)
+        fail("%s: RGTG_Resolve (RG_Target_Resolve's body) must answer framebuffer 0 with the scene "
+             "target (#340 P4a-2)" % rt)
+    b = body_named(root, rt, "RG_Target_Resolve")
+    if b is not None and not re.search(r"\breturn\s+RGTG_Resolve\s*\(\s*fbo\s*,\s*true\s*,\s*out\s*\)\s*;", b):
+        fail("%s: RG_Target_Resolve is the frame's, so the draw side: `return RGTG_Resolve (fbo, true, "
+             "out);` (#548)" % rt)
     b = body_named(root, rt, "RG_RenderbufferStorage")
     if b is not None:
         ti = re.search(r"\bRG_TexImage\s*\(", b)
@@ -2907,17 +2917,17 @@ def check_render_targets(root):
         br = re.search(r"\bcmd\s*=\s*RG_Frame_Break\s*\(\s*\)\s*;", b)
         col = re.search(r"\bRGTG_BlitColor\s*\(", b)
         dep = re.search(r"\bRGTG_CopyDepth\s*\(", b)
-        sw = re.search(r"\bif\s*\(\s*wrote\s*&&\s*rgfb_draw\s*==\s*0\s*\)\s*RG_Frame_SceneWritten\s*\(\s*\)\s*;", b)
         pre = re.search(r"\bRGTG_DepthCopyable\s*\(", b)
         if not (pre and br and pre.start() < br.start()):
             fail("%s: RG_BlitFramebuffer must check a depth blit (RGTG_DepthCopyable) before it ends the "
                  "segment -- a declined blit must cost no pass (#340 P4a-2)" % rt)
-        if not (br and col and dep and sw and br.end() <= min(col.start(), dep.start())
-                and sw.start() > max(col.start(), dep.start())):
+        if not (br and col and dep and br.end() <= min(col.start(), dep.start())):
             fail("%s: RG_BlitFramebuffer must end the segment (cmd = RG_Frame_Break ()) before the colour "
-                 "blit and the depth copy, and tell the frame the scene is written after them (`if (wrote "
-                 "&& rgfb_draw == 0) RG_Frame_SceneWritten ();`) -- the draws so far land first, and the "
-                 "scene's first pass must not clear what the blit wrote (#340 P4a-2)" % rt)
+                 "blit and the depth copy -- the draws so far land first, and into the scene the segment's "
+                 "end is its first pass, which the blit then writes over (#340 P4a-2, #548)" % rt)
+        if re.search(r"\bRG_Frame_SceneWritten\b", b):
+            fail("%s: RG_BlitFramebuffer must not mark the scene written -- RG_Frame_Break already gave it "
+                 "its clearing first pass; the call was dead and removed (#548)" % rt)
     b = body_named(root, rt, "RGTG_BlitColor")
     if b is not None:
         flips = re.findall(r"\bSDL_FLIP_(?:VERTICAL|HORIZONTAL)\b", b)
@@ -2972,9 +2982,10 @@ def check_render_targets(root):
              "drop it from every framebuffer (RG_Target_TextureDeleted) -- the name is handed out again "
              "(#340 P4a-2)" % rr)
     b = body_named(root, rr, "RGT_FlushIfRead")
-    if b is not None and not re.search(r"\bRG_Frame_TargetHolds\s*\(\s*t->tex\s*\)\s*&&\s*RG_Frame_SegmentHasDraws", b):
-        fail("%s: RGT_FlushIfRead must flush for a texture the open segment draws into too -- its copy pass "
-             "runs ahead of the draws (#340 P4a-2)" % rr)
+    if b is not None and not re.search(r"\bRG_Frame_TargetHolds\s*\(\s*t->tex\s*\)\s*&&\s*RG_Frame_SegmentWritesTarget\s*\(", b):
+        fail("%s: RGT_FlushIfRead must flush for a texture the open segment draws into or clears too "
+             "(RG_Frame_SegmentWritesTarget) -- its copy pass runs ahead of the draws and of the load op "
+             "that is the clear (#340 P4a-2, #548)" % rr)
     for fn, rx in (("RG_Res_RenderTarget", r"!\s*\(\s*t->tex_usage\s*&\s*usage\s*\)"),
                    ("RG_Res_ForDraw", r"!\s*\(\s*t->tex_usage\s*&\s*SDL_GPU_TEXTUREUSAGE_SAMPLER\s*\)")):
         b = body_named(root, rr, fn)
@@ -2993,6 +3004,19 @@ def check_render_targets(root):
         if not re.search(r"\bfirst\s*=\s*\(\s*rgf_fbo\s*==\s*0\s*&&\s*!\s*rgf_cleared\s*\)\s*;", b):
             fail("%s: RGF_EndSegment's first-pass clear must be the scene's alone (`first = (rgf_fbo == 0 "
                  "&& !rgf_cleared);`) -- a framebuffer loads what it holds, as GL's does (#340 P4a-2)" % rf)
+        if not re.search(r"\bif\s*\(\s*rgf_active\s*&&\s*\(\s*rgf_numdraws\s*\|\|\s*first\s*\|\|\s*rgf_clear_mask\s*\)\s*\)", b):
+            fail("%s: RGF_EndSegment must begin the scene's first pass even with nothing drawn or asked for "
+                 "(`if (rgf_active && (rgf_numdraws || first || rgf_clear_mask))`) -- a blit into the scene "
+                 "relies on RG_Frame_Break having cleared every aspect before it writes (#548)" % rf)
+    b = body_named(root, rf, "RG_Clear")
+    if b is not None:
+        rs = re.search(r"\bif\s*\(\s*rgf_tgt_dirty\s*\)\s*RGF_ResolveTarget\s*\(\s*\)\s*;", b)
+        mk = re.search(r"\brgf_clear_mask\s*\|=\s*mask\s*;", b)
+        if not (rs and mk and rs.start() < mk.start()):
+            fail("%s: RG_Clear must resolve a dirty target (`if (rgf_tgt_dirty) RGF_ResolveTarget ();`) "
+                 "before it records the clear -- else the clear lands on whatever the target resolves to "
+                 "later, and RG_Frame_TargetHolds misses the re-created texture an upload goes into, so "
+                 "the clear wipes it (#548)" % rf)
     b = body_named(root, rf, "RGF_BeginDraw")
     if b is not None:
         if not re.search(r"\bRG_PipelineFor\s*\(\s*prog\s*,\s*prim\s*,\s*layout\s*,\s*rgf_tgt\.cfmt\s*,\s*rgf_tgt\.dfmt\s*\)", b):

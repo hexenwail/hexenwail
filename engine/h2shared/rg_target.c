@@ -66,15 +66,25 @@
 #define GL_COLOR_ATTACHMENT15				0x8CEF
 #endif
 
+#define RGTG_EXTRA	15	/* colour attachments past the first */
+
 typedef struct {
 	qboolean	alive;
 	GLuint		color;		/* GL texture names; a renderbuffer's is its hidden one */
 	GLuint		depth;
 	GLuint		stencil;	/* GL_STENCIL_ATTACHMENT alone: complete only as depth's */
-	unsigned int	extra;		/* bit n: GL_COLOR_ATTACHMENT0 + 1 + n holds something */
-	qboolean	bad;		/* an attachment no render pass can take (a level, a target) */
+	GLuint		extra[RGTG_EXTRA];	/* GL_COLOR_ATTACHMENT1 .. 15 */
+	/* RGTG_BAD_*: what no render pass can take (a level, a cube face, a
+	 * renderbuffer never made, MRT), by attachment point, so that what
+	 * replaces it there, or deleting it, takes it back as GL's does. */
+	unsigned int	bad;
 	qboolean	draw_none;	/* glDrawBuffers (GL_NONE): no colour drawn */
 } rgfbo_t;
+
+#define RGTG_BAD_COLOR(n)	(1u << (n))	/* GL_COLOR_ATTACHMENT0 + n */
+#define RGTG_BAD_DEPTH		(1u << 16)
+#define RGTG_BAD_STENCIL	(1u << 17)
+#define RGTG_BAD_DRAWBUFS	(1u << 18)	/* MRT (P6) */
 
 typedef struct {
 	qboolean	alive;
@@ -238,9 +248,41 @@ static rgfbo_t *RGTG_AttachTo (GLenum target)
 	return f;
 }
 
-/* Attach texture name `tex` (0 detaches) at `attachment` of `f`. */
-static void RGTG_Attach (rgfbo_t *f, GLenum attachment, GLuint tex)
+/* `f` changed: if it is the bound draw framebuffer, the frame's target is
+ * whatever it resolves to now. */
+static void RGTG_Changed (const rgfbo_t *f)
 {
+	if (f == RGTG_Fbo (rgfb_draw))
+		RG_Frame_BindTarget (rgfb_draw);
+}
+
+/* The RGTG_BAD_* bits of an attachment point, 0 for one GL does not have. */
+static unsigned int RGTG_Point (GLenum attachment)
+{
+	switch (attachment)
+	{
+	case GL_DEPTH_ATTACHMENT:		return RGTG_BAD_DEPTH;
+	case GL_STENCIL_ATTACHMENT:		return RGTG_BAD_STENCIL;
+	case GL_DEPTH_STENCIL_ATTACHMENT:	return RGTG_BAD_DEPTH | RGTG_BAD_STENCIL;
+	}
+	if (attachment >= GL_COLOR_ATTACHMENT0 && attachment <= GL_COLOR_ATTACHMENT15)
+		return RGTG_BAD_COLOR (attachment - GL_COLOR_ATTACHMENT0);
+	return 0;
+}
+
+/* Attach texture name `tex` (0 detaches) at `attachment` of `f`, replacing
+ * whatever was there; `bad`: as something no render pass can take. */
+static void RGTG_Attach (rgfbo_t *f, GLenum attachment, GLuint tex, qboolean bad)
+{
+	unsigned int	point = RGTG_Point (attachment);
+
+	if (!point)
+	{
+		/* GL_INVALID_ENUM: nothing changes. */
+		RG_NoteUnhandled ("framebuffer attachment point GL does not have (ignored)");
+		return;
+	}
+	f->bad = bad ? (f->bad | point) : (f->bad & ~point);
 	switch (attachment)
 	{
 	case GL_COLOR_ATTACHMENT0:
@@ -256,28 +298,19 @@ static void RGTG_Attach (rgfbo_t *f, GLenum attachment, GLuint tex)
 		f->depth = f->stencil = tex;
 		break;
 	default:
-		if (attachment > GL_COLOR_ATTACHMENT0 && attachment <= GL_COLOR_ATTACHMENT15)
-		{
-			unsigned int	bit = 1u << (attachment - GL_COLOR_ATTACHMENT0 - 1);
-
-			f->extra = tex ? (f->extra | bit) : (f->extra & ~bit);
-		}
-		else
-		{
-			RG_NoteUnhandled ("framebuffer attachment point GL does not have");
-			f->bad = true;
-		}
-		return;
+		f->extra[attachment - GL_COLOR_ATTACHMENT0 - 1] = tex;
+		break;
 	}
-	/* What the bound draw target holds may just have changed. */
-	if (f == RGTG_Fbo (rgfb_draw))
-		RG_Frame_BindTarget (rgfb_draw);
+	/* What the bound draw target holds may just have changed, a bad
+	 * attachment included. */
+	RGTG_Changed (f);
 }
 
 void RG_FramebufferTexture2D (GLenum target, GLenum attachment, GLenum textarget,
 			      GLuint texture, GLint level)
 {
-	rgfbo_t	*f = RGTG_AttachTo (target);
+	rgfbo_t		*f = RGTG_AttachTo (target);
+	qboolean	bad = false;
 
 	if (!f)
 		return;
@@ -285,10 +318,9 @@ void RG_FramebufferTexture2D (GLenum target, GLenum attachment, GLenum textarget
 	{
 		/* Only level 0 of a 2D texture is ever attached here. */
 		RG_NoteUnhandled ("framebuffer attachment of a cube face or a mip level (incomplete)");
-		f->bad = true;
-		return;
+		bad = true;
 	}
-	RGTG_Attach (f, attachment, texture);
+	RGTG_Attach (f, attachment, texture, bad);
 }
 
 void RG_FramebufferRenderbuffer (GLenum target, GLenum attachment, GLenum rbtarget,
@@ -302,10 +334,10 @@ void RG_FramebufferRenderbuffer (GLenum target, GLenum attachment, GLenum rbtarg
 	if (renderbuffer && (rbtarget != GL_RENDERBUFFER || !r))
 	{
 		RG_NoteUnhandled ("framebuffer attachment of a renderbuffer never generated (incomplete)");
-		f->bad = true;
+		RGTG_Attach (f, attachment, 0, true);
 		return;
 	}
-	RGTG_Attach (f, attachment, r ? r->tex : 0);
+	RGTG_Attach (f, attachment, r ? r->tex : 0, false);
 }
 
 void RG_DrawBuffers (GLsizei n, const GLenum *bufs)
@@ -318,6 +350,8 @@ void RG_DrawBuffers (GLsizei n, const GLenum *bufs)
 		RG_NoteUnhandled ("glDrawBuffers on framebuffer 0 (ignored)");
 		return;
 	}
+	/* Each call replaces the last, an unsupported one included. */
+	f->bad &= ~RGTG_BAD_DRAWBUFS;
 	if (n == 1 && bufs[0] == GL_NONE)
 		f->draw_none = true;
 	else if (n == 1 && bufs[0] == GL_COLOR_ATTACHMENT0)
@@ -325,15 +359,28 @@ void RG_DrawBuffers (GLsizei n, const GLenum *bufs)
 	else
 	{
 		RG_NoteUnhandled ("glDrawBuffers other than GL_NONE or GL_COLOR_ATTACHMENT0 alone (MRT is P6)");
-		f->bad = true;
+		f->bad |= RGTG_BAD_DRAWBUFS;
 	}
-	RG_Frame_BindTarget (rgfb_draw);
+	RGTG_Changed (f);
+}
+
+static qboolean RGTG_HasExtra (const rgfbo_t *f)
+{
+	int	i;
+
+	for (i = 0; i < RGTG_EXTRA; i++)
+	{
+		if (f->extra[i])
+			return true;
+	}
+	return false;
 }
 
 /* Whether `f` is complete, its GL status, and when it is the target it
- * describes.  Realizes the attachments, so a format the device cannot render
- * to is found here. */
-static GLenum RGTG_Complete (const rgfbo_t *f, rgtarget_t *out)
+ * describes, drawn into (`draw`) or read from: glDrawBuffers is the draw
+ * side's alone.  Realizes the attachments, so a format the device cannot
+ * render to is found here. */
+static GLenum RGTG_Complete (const rgfbo_t *f, qboolean draw, rgtarget_t *out)
 {
 	rgtarget_t	t;
 
@@ -341,7 +388,7 @@ static GLenum RGTG_Complete (const rgfbo_t *f, rgtarget_t *out)
 	t.dfmt = SDL_GPU_TEXTUREFORMAT_INVALID;
 	if (f->bad)
 		return GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT;
-	if (f->extra)
+	if (RGTG_HasExtra (f))
 		return GL_FRAMEBUFFER_UNSUPPORTED;	/* one colour target per pass (P6) */
 	if (!f->color && !f->depth && !f->stencil)
 		return GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT;
@@ -365,7 +412,7 @@ static GLenum RGTG_Complete (const rgfbo_t *f, rgtarget_t *out)
 		t.w = w;
 		t.h = h;
 	}
-	if (f->draw_none)
+	if (draw && f->draw_none)
 	{
 		t.color = NULL;
 		t.cfmt = SDL_GPU_TEXTUREFORMAT_INVALID;
@@ -390,13 +437,13 @@ GLenum RG_CheckFramebufferStatus (GLenum target)
 	if (fbo == 0)
 		return GL_FRAMEBUFFER_COMPLETE;
 	f = RGTG_Fbo (fbo);
-	status = f ? RGTG_Complete (f, NULL) : GL_FRAMEBUFFER_UNSUPPORTED;
+	status = f ? RGTG_Complete (f, target != GL_READ_FRAMEBUFFER, NULL) : GL_FRAMEBUFFER_UNSUPPORTED;
 	if (status != GL_FRAMEBUFFER_COMPLETE)
 		rgtg_incomplete++;
 	return status;
 }
 
-qboolean RG_Target_Resolve (GLuint fbo, rgtarget_t *out)
+static qboolean RGTG_Resolve (GLuint fbo, qboolean draw, rgtarget_t *out)
 {
 	const rgfbo_t	*f;
 
@@ -406,7 +453,12 @@ qboolean RG_Target_Resolve (GLuint fbo, rgtarget_t *out)
 		return true;
 	}
 	f = RGTG_Fbo (fbo);
-	return f && RGTG_Complete (f, out) == GL_FRAMEBUFFER_COMPLETE;
+	return f && RGTG_Complete (f, draw, out) == GL_FRAMEBUFFER_COMPLETE;
+}
+
+qboolean RG_Target_Resolve (GLuint fbo, rgtarget_t *out)
+{
+	return RGTG_Resolve (fbo, true, out);
 }
 
 GLuint RG_FramebufferBinding (GLenum pname)
@@ -599,12 +651,12 @@ qboolean RG_BlitFramebuffer (GLint sx0, GLint sy0, GLint sx1, GLint sy1,
 {
 	rgtarget_t		src, dst;
 	SDL_GPUCommandBuffer	*cmd;
-	qboolean		ok = true, wrote = false;
+	qboolean		ok = true;
 
 	mask &= GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT;
 	if (!mask)
 		return true;
-	if (!RG_Target_Resolve (rgfb_read, &src) || !RG_Target_Resolve (rgfb_draw, &dst))
+	if (!RGTG_Resolve (rgfb_read, false, &src) || !RGTG_Resolve (rgfb_draw, true, &dst))
 	{
 		RG_NoteUnhandled ("framebuffer blit from or to an incomplete framebuffer (declined)");
 		rgtg_declined++;
@@ -616,10 +668,12 @@ qboolean RG_BlitFramebuffer (GLint sx0, GLint sy0, GLint sx1, GLint sy1,
 		rgtg_declined++;
 		return false;
 	}
-	/* Everything drawn so far lands first, and the blit goes between passes. */
+	/* Everything drawn so far lands first, and the blit goes between passes.
+	 * Into the scene, that includes the frame's first pass, which clears
+	 * every aspect: the blit writes over it, whatever it covers. */
 	cmd = RG_Frame_Break ();
 	/* Again: the segment's copy pass may have re-created an attachment. */
-	if (!cmd || !RG_Target_Resolve (rgfb_read, &src) || !RG_Target_Resolve (rgfb_draw, &dst))
+	if (!cmd || !RGTG_Resolve (rgfb_read, false, &src) || !RGTG_Resolve (rgfb_draw, true, &dst))
 	{
 		RG_NoteUnhandled ("framebuffer blit outside a frame (declined)");
 		rgtg_declined++;
@@ -627,21 +681,14 @@ qboolean RG_BlitFramebuffer (GLint sx0, GLint sy0, GLint sx1, GLint sy1,
 	}
 	if (mask & GL_COLOR_BUFFER_BIT)
 	{
-		if (RGTG_BlitColor (cmd, &src, &dst, sx0, sy0, sx1, sy1, dx0, dy0, dx1, dy1, filter))
-			wrote = true;
-		else
+		if (!RGTG_BlitColor (cmd, &src, &dst, sx0, sy0, sx1, sy1, dx0, dy0, dx1, dy1, filter))
 			ok = false;
 	}
 	if (mask & (GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT))
 	{
-		if (RGTG_CopyDepth (cmd, &src, &dst, sx0, sy0, sx1, sy1, dx0, dy0, dx1, dy1))
-			wrote = true;
-		else
+		if (!RGTG_CopyDepth (cmd, &src, &dst, sx0, sy0, sx1, sy1, dx0, dy0, dx1, dy1))
 			ok = false;
 	}
-	/* The scene's first pass would clear what the blit just wrote. */
-	if (wrote && rgfb_draw == 0)
-		RG_Frame_SceneWritten ();
 	if (!ok)
 		rgtg_declined++;
 	return ok;
@@ -653,16 +700,42 @@ void RG_Target_TextureDeleted (GLuint tex)
 
 	for (i = 1; i <= rgfb_used; i++)
 	{
-		rgfbo_t	*f = &rgfb[i];
+		rgfbo_t		*f = &rgfb[i];
+		qboolean	changed = false;
+		int		k;
 
 		if (!f->alive)
 			continue;
+		/* GL detaches it: a point that held it, badly or not, is empty. */
 		if (f->color == tex)
+		{
 			f->color = 0;
+			f->bad &= ~RGTG_BAD_COLOR (0);
+			changed = true;
+		}
 		if (f->depth == tex)
+		{
 			f->depth = 0;
+			f->bad &= ~RGTG_BAD_DEPTH;
+			changed = true;
+		}
 		if (f->stencil == tex)
+		{
 			f->stencil = 0;
+			f->bad &= ~RGTG_BAD_STENCIL;
+			changed = true;
+		}
+		for (k = 0; k < RGTG_EXTRA; k++)
+		{
+			if (f->extra[k] == tex)
+			{
+				f->extra[k] = 0;
+				f->bad &= ~RGTG_BAD_COLOR (k + 1);
+				changed = true;
+			}
+		}
+		if (changed)
+			RGTG_Changed (f);
 	}
 }
 

@@ -538,6 +538,15 @@ jobs:
       - name: SDL_GPU backend stays in the desktop GL client
         run: python3 tools/test_rg_sources.py
 
+      # rg_target.c compiled against a fake SDL_GPU and frame recorder:
+      # glDrawBuffers is the draw side's alone, a bad attachment is replaced
+      # like any other, every change to the bound draw framebuffer
+      # re-resolves the frame's target, a blit comes after the segment's
+      # end; and RGT_FlushIfRead lifted: an upload into the bound target
+      # behind a pending clear ends the segment first (#548).
+      - name: SDL_GPU framebuffers keep GL's rules
+        run: python3 tools/test_rg_target.py
+
       # tools/sweep-mirror-gpu.steps' test game: the miptex rename and each
       # refusal (two planes, a brush entity, a map that already has a
       # mirror ...) on a synthetic BSP, so the sweep's map cannot quietly
