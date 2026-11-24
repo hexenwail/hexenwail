@@ -100,6 +100,12 @@ static int	hiz_height;
 static int	hiz_mip_count;
 static float	hiz_prev_mvp[16];	/* world MVP captured at end of last 3D pass */
 static qboolean	hiz_prev_mvp_valid;
+/* The pyramid holds the depth of the frame hiz_prev_mvp was captured in.  A
+ * frame whose build was skipped (the MSAA scene FBO has no sampler-readable
+ * depth, a resize failed) leaves an older frame's depth behind, and culling
+ * against it with this frame's matrix hides surfaces that are in view: what
+ * a runtime toggle that raises the post chain (r_ssao, gamma, #539) did. */
+static qboolean	hiz_pyramid_valid;
 
 /* Standalone depth resolve (uhexen2-9912): when the postprocess pipeline
  * is inactive (no FXAA/HDR/etc.) we still need a sampler-readable depth
@@ -610,6 +616,7 @@ void R_FreeHiZ (void)
 	hiz_resolve_w = hiz_resolve_h = 0;
 	hiz_width = hiz_height = hiz_mip_count = 0;
 	hiz_prev_mvp_valid = false;
+	hiz_pyramid_valid = false;
 }
 
 /* uhexen2-9912: standalone depth resolve.  When the postprocess pipeline
@@ -701,6 +708,7 @@ void R_BuildHiZForNextFrame (void)
 	int	scene_w, scene_h;
 	int	mip;
 
+	hiz_pyramid_valid = false;
 	if (!R_HiZ_Available())
 		return;
 
@@ -800,6 +808,7 @@ void R_BuildHiZForNextFrame (void)
 
 	R_UseProgram (0);
 	R_BindTextureSlot (0, 0);
+	hiz_pyramid_valid = true;
 }
 
 qboolean R_WorldCullAvailable (void)
@@ -879,7 +888,7 @@ void R_DispatchWorldCull (void)
 	/* Hi-Z occlusion (uhexen2-xd87).  Sampler binding 1 = pyramid; the
 	 * enable flag is also gated by gl_hiz_cull/prev_mvp_valid CPU-side
 	 * so shaders early-out cheaply when not in use. */
-	hiz_on = gl_hiz_cull.integer && hiz_pyramid_tex && hiz_prev_mvp_valid;
+	hiz_on = gl_hiz_cull.integer && hiz_pyramid_tex && hiz_pyramid_valid && hiz_prev_mvp_valid;
 	if (hiz_on)
 		R_BindTextureSlot (1, hiz_pyramid_tex);
 

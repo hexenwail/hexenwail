@@ -38,6 +38,9 @@
 #include "gl_postprocess.h"
 #include "gl_matrix.h"
 #include "gl_ssao.h"
+#ifdef USE_SDL_GPU
+#include "rg_device.h"	/* R_GPU (): -gpu does not raise the chain for SSAO */
+#endif
 
 #ifndef CLAMP
 #define CLAMP(min,val,max) ((val) < (min) ? (min) : ((val) > (max) ? (max) : (val)))
@@ -356,11 +359,24 @@ static void SS_UnbindTex (int count)
 		SS_BindTex (i, 0);
 }
 
-static qboolean SS_Active (void)
+/* Everything SSAO needs but the scene FBO, which PP_NeedsPostProcess raises
+ * on this answer (#539): asked before the frame's FBO exists, so it cannot
+ * ask for it, and a driver that could never run SSAO is not handed a post
+ * chain it would only pay for. */
+qboolean R_SSAO_WantsSceneFBO (void)
 {
+#ifdef USE_SDL_GPU
+	if (R_GPU ())	/* raw GL compute: nothing here is routed through -gpu */
+		return false;
+#endif
 	return r_ssao.integer > 0 && !ss_failed &&
 	       gl_renderer_caps.compute_shaders && glBindImageTexture_fp &&
-	       glBlitFramebuffer_fp && glTexStorage2D_fp && GL_GetSceneFBO () != 0;
+	       glBlitFramebuffer_fp && glTexStorage2D_fp;
+}
+
+static qboolean SS_Active (void)
+{
+	return R_SSAO_WantsSceneFBO () && GL_GetSceneFBO () != 0;
 }
 
 /* The R_SoftParticleParams linearisation, from the matrices in force for the
@@ -555,6 +571,7 @@ void R_SSAO_Apply (void)
 #else	/* USE_GLES: no compute, no image load/store */
 
 void R_SSAO_Shutdown (void) {}
+qboolean R_SSAO_WantsSceneFBO (void) { return false; }
 void R_SSAO_CaptureWorld (void) {}
 void R_SSAO_Apply (void) {}
 
