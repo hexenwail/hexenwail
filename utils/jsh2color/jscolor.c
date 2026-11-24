@@ -800,17 +800,46 @@ void CheckTex (void)
 
 
 int	faces_ltoffset[MAX_MAP_FACES];
+int	faces_ltsize[MAX_MAP_FACES];
+byte	faces_ltstyles[MAX_MAP_FACES][MAXLIGHTMAPS];
 byte	newdlightdata[MAX_MAP_LIGHTING*3];
 int	newlightdatasize;
 
+static int CompareLightofs (const void *a, const void *b)
+{
+	const int x = faces_ltoffset[*(const int *)a];
+	const int y = faces_ltoffset[*(const int *)b];
+	return (x > y) - (x < y);
+}
+
+/* A face owns the lighting from its lightofs up to the next face's, or to
+ * the end of the lump: that is the space light gave it, and all the .lit
+ * may hold for it (#531).  The styles are kept as the BSP has them, since
+ * the engine reads the .lit by the BSP's styles, not by ours. */
 static void StoreFaceInfo (void)
 {
-	int		i;
+	int		i, j, n, end;
+	static int	order[MAX_MAP_FACES];
 
-	for (i = 0; i < numfaces; i++)
+	for (i = 0, n = 0; i < numfaces; i++)
 	{
 		const int lightofs = is_bsp2 ? (dfaces2 + i)->lightofs : (dfaces + i)->lightofs;
+		const byte *styles = is_bsp2 ? (dfaces2 + i)->styles : (dfaces + i)->styles;
 		faces_ltoffset[i] = lightofs * 3;
+		faces_ltsize[i] = 0;
+		for (j = 0; j < MAXLIGHTMAPS; j++)
+			faces_ltstyles[i][j] = styles[j];
+		if (lightofs >= 0 && lightofs < lightdatasize)
+			order[n++] = i;
+	}
+
+	qsort (order, n, sizeof(order[0]), CompareLightofs);
+	end = lightdatasize * 3;
+	for (i = n - 1; i >= 0; i--)
+	{
+		faces_ltsize[order[i]] = end - faces_ltoffset[order[i]];
+		if (i > 0 && faces_ltoffset[order[i - 1]] < faces_ltoffset[order[i]])
+			end = faces_ltoffset[order[i]];
 	}
 }
 

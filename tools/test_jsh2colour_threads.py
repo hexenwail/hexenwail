@@ -8,10 +8,11 @@ and never reliably the -threads 1 one:
     face a light reaches into that light's entities[].lightcolor.  The add
     was an unlocked read-modify-write, so one face's colour could be lost,
     which changes the light's normalised colour.
-  - LightFaceLIT writes each face's lightmap at the face's old lightofs, and
-    on retail maps a face's lightmap can run into the next face's bytes.
-    With one thread the higher face is written last and wins; with more,
-    whichever thread finished last won.
+  - LightFaceLIT wrote each face's lightmap at the face's old lightofs, and
+    where two faces' bytes meet (on retail maps they did, until #531; two
+    faces can still share a lightofs) the face written last wins.  With one
+    thread that is the higher face; with more, whichever thread finished
+    last won.
 
 This test builds a map for both: a room of many small cubes, in three
 colours, under many lights, so that every thread adds into the same few
@@ -24,7 +25,7 @@ and light that sit next to the jsh2colour under test, and coloured through an
 
 With retail Hexen II data present (--retail, default ~/hexen2), it repeats the
 check on keep2.bsp from portals/pak3.pak, the map #515 was reported on, and on
-demo1.bsp from data1/pak0.pak, which has overlapping faces.  With no data the
+demo1.bsp from data1/pak0.pak, whose faces overlapped before #531.  With no data the
 retail part prints SKIP and the test still runs on the fixture.
 
   test_jsh2colour_threads.py UTILS_BIN [--runs N] [--threads N] [--retail DIR]
@@ -88,7 +89,8 @@ def brush(mins, maxs, tex):
     return "\n".join(lines)
 
 
-def write_map(path, wad):
+def write_map(path, wad, styled=False):
+    """styled adds a light on lightstyle 5, so some faces get two styles."""
     H, Z = 640, 384           # half width of the room, its height
     T = 16                    # wall thickness
     out = ['{', '"classname" "worldspawn"', '"wad" "%s"' % wad]
@@ -113,6 +115,9 @@ def write_map(path, wad):
         for y in range(-H + 80, H, 160):
             out += ['{', '"classname" "light"', '"light" "300"',
                     '"origin" "%d %d %d"' % (x, y, Z - 32), '}']
+    if styled:
+        out += ['{', '"classname" "light"', '"light" "300"', '"style" "5"',
+                '"origin" "0 0 %d"' % (Z - 96), '}']
     out += ['{', '"classname" "info_player_start"', '"origin" "0 0 32"', '}']
     path.write_text("\n".join(out) + "\n")
 
@@ -129,10 +134,9 @@ def run(cmd, cwd):
 def overlap_faces(src, dst):
     """Copy a BSP with every odd face sharing its even neighbour's lightofs.
 
-    Both faces of a pair then write the same bytes of the .lit, as the faces
-    of a retail map do wherever jsh2colour's extents outgrow the space light
-    gave them (demo1 has 199 such pairs).  -threads 1 lets the higher face
-    win; the threaded run must too."""
+    Both faces of a pair then write the same bytes of the .lit, as 199 pairs
+    of faces on demo1 did before #531.  -threads 1 lets the higher face win;
+    the threaded run must too."""
     data = bytearray(src.read_bytes())
     version, ofs, length = struct.unpack_from("<iii", data, 0)
     if version != 29:

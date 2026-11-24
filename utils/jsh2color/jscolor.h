@@ -29,6 +29,8 @@
 extern	miptex_t	miptex[512];
 extern	int		numlighttex;
 extern	int		faces_ltoffset[MAX_MAP_FACES];
+extern	int		faces_ltsize[MAX_MAP_FACES];
+extern	byte		faces_ltstyles[MAX_MAP_FACES][MAXLIGHTMAPS];
 extern	byte		newdlightdata[MAX_MAP_LIGHTING*3];
 extern	int		newlightdatasize;
 extern	int		num_clights;
