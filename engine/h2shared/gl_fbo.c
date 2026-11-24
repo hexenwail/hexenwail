@@ -8,8 +8,9 @@
  * your option) any later version.
  */
 
-/* The GL implementation of gl_fbo.h; see the header for the contract.
- * #340 P4a-1. */
+/* gl_fbo.h's implementation; see the header for the contract.  The GL arm
+ * of each seam is the bare call (#340 P4a-1), the SDL_GPU arm rg_target.c's
+ * (P4a-2). */
 
 #include "quakedef.h"
 #include "sdl_inc.h"
@@ -18,28 +19,12 @@
 #include "rg_device.h"
 #endif
 
-#ifndef GL_FRAMEBUFFER_UNSUPPORTED
-#define GL_FRAMEBUFFER_UNSUPPORTED	0x8CDD
-#endif
-
-#ifdef USE_SDL_GPU
-/* Until P4a-2, each arm below notes the call and does nothing else. */
-static void RG_FboZeroNames (GLsizei n, GLuint *names)
-{
-	GLsizei	i;
-
-	for (i = 0; i < n; i++)
-		names[i] = 0;
-}
-#endif
-
 void R_GenFramebuffers (GLsizei n, GLuint *fbos)
 {
 #ifdef USE_SDL_GPU
 	if (R_GPU ())
 	{
-		RG_NoteUnhandled ("R_GenFramebuffers (render targets are P4a-2)");
-		RG_FboZeroNames (n, fbos);
+		RG_GenFramebuffers (n, fbos);
 		return;
 	}
 #endif
@@ -51,7 +36,7 @@ void R_DeleteFramebuffers (GLsizei n, const GLuint *fbos)
 #ifdef USE_SDL_GPU
 	if (R_GPU ())
 	{
-		RG_NoteUnhandled ("R_DeleteFramebuffers (render targets are P4a-2)");
+		RG_DeleteFramebuffers (n, fbos);
 		return;
 	}
 #endif
@@ -63,7 +48,7 @@ void R_BindFramebuffer (GLenum target, GLuint fbo)
 #ifdef USE_SDL_GPU
 	if (R_GPU ())
 	{
-		RG_NoteUnhandled ("R_BindFramebuffer (render targets are P4a-2)");
+		RG_BindFramebuffer (target, fbo);
 		return;
 	}
 #endif
@@ -76,7 +61,7 @@ void R_FramebufferTexture2D (GLenum target, GLenum attachment, GLenum textarget,
 #ifdef USE_SDL_GPU
 	if (R_GPU ())
 	{
-		RG_NoteUnhandled ("R_FramebufferTexture2D (render targets are P4a-2)");
+		RG_FramebufferTexture2D (target, attachment, textarget, texture, level);
 		return;
 	}
 #endif
@@ -89,7 +74,7 @@ void R_FramebufferRenderbuffer (GLenum target, GLenum attachment, GLenum rbtarge
 #ifdef USE_SDL_GPU
 	if (R_GPU ())
 	{
-		RG_NoteUnhandled ("R_FramebufferRenderbuffer (render targets are P4a-2)");
+		RG_FramebufferRenderbuffer (target, attachment, rbtarget, renderbuffer);
 		return;
 	}
 #endif
@@ -101,8 +86,7 @@ GLenum R_CheckFramebufferStatus (GLenum target)
 #ifdef USE_SDL_GPU
 	if (R_GPU ())
 	{
-		RG_NoteUnhandled ("R_CheckFramebufferStatus (render targets are P4a-2)");
-		return GL_FRAMEBUFFER_UNSUPPORTED;
+		return RG_CheckFramebufferStatus (target);
 	}
 #endif
 	return glCheckFramebufferStatus_fp (target);
@@ -113,7 +97,7 @@ void R_DrawBuffers (GLsizei n, const GLenum *bufs)
 #ifdef USE_SDL_GPU
 	if (R_GPU ())
 	{
-		RG_NoteUnhandled ("R_DrawBuffers (render targets are P4a-2)");
+		RG_DrawBuffers (n, bufs);
 		return;
 	}
 #endif
@@ -125,8 +109,7 @@ void R_GenRenderbuffers (GLsizei n, GLuint *rbs)
 #ifdef USE_SDL_GPU
 	if (R_GPU ())
 	{
-		RG_NoteUnhandled ("R_GenRenderbuffers (render targets are P4a-2)");
-		RG_FboZeroNames (n, rbs);
+		RG_GenRenderbuffers (n, rbs);
 		return;
 	}
 #endif
@@ -138,7 +121,7 @@ void R_DeleteRenderbuffers (GLsizei n, const GLuint *rbs)
 #ifdef USE_SDL_GPU
 	if (R_GPU ())
 	{
-		RG_NoteUnhandled ("R_DeleteRenderbuffers (render targets are P4a-2)");
+		RG_DeleteRenderbuffers (n, rbs);
 		return;
 	}
 #endif
@@ -150,7 +133,7 @@ void R_BindRenderbuffer (GLenum target, GLuint rb)
 #ifdef USE_SDL_GPU
 	if (R_GPU ())
 	{
-		RG_NoteUnhandled ("R_BindRenderbuffer (render targets are P4a-2)");
+		RG_BindRenderbuffer (target, rb);
 		return;
 	}
 #endif
@@ -163,7 +146,7 @@ void R_RenderbufferStorage (GLenum target, GLenum internalformat,
 #ifdef USE_SDL_GPU
 	if (R_GPU ())
 	{
-		RG_NoteUnhandled ("R_RenderbufferStorage (render targets are P4a-2)");
+		RG_RenderbufferStorage (target, internalformat, width, height);
 		return;
 	}
 #endif
@@ -177,8 +160,7 @@ qboolean R_BlitFramebuffer (GLint sx0, GLint sy0, GLint sx1, GLint sy1,
 #ifdef USE_SDL_GPU
 	if (R_GPU ())
 	{
-		RG_NoteUnhandled ("R_BlitFramebuffer (render targets are P4a-2)");
-		return false;
+		return RG_BlitFramebuffer (sx0, sy0, sx1, sy1, dx0, dy0, dx1, dy1, mask, filter);
 	}
 #endif
 	glBlitFramebuffer_fp (sx0, sy0, sx1, sy1, dx0, dy0, dx1, dy1, mask, filter);
@@ -192,8 +174,7 @@ GLuint R_FramebufferBinding (GLenum pname)
 #ifdef USE_SDL_GPU
 	if (R_GPU ())
 	{
-		RG_NoteUnhandled ("R_FramebufferBinding (render targets are P4a-2)");
-		return 0;
+		return RG_FramebufferBinding (pname);
 	}
 #endif
 	glGetIntegerv_fp (pname, &fbo);

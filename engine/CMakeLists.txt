@@ -395,6 +395,7 @@ if(USE_SDL_GPU)
         ${COMMONDIR}/rg_pipeline.c
         ${COMMONDIR}/rg_resource.c
         ${COMMONDIR}/rg_shader.c
+        ${COMMONDIR}/rg_target.c
         ${SPIRV_GEN_C}
     )
     # Two steps, so `--target shaders_spirv` only compiles: regenerating a

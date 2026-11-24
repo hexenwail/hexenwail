@@ -159,6 +159,27 @@ void	RG_Upload (GLenum target, const void *data, size_t numbytes, GLuint *outbuf
 void	RG_DrawIndexed (GLenum mode, GLsizei count, GLenum type, const void *indices,
 			GLsizei instances);
 
+/* gl_fbo.c's framebuffer and renderbuffer seams (rg_target.c, #340 P4a-2),
+ * with GL's signatures and binding rules; see gl_fbo.h. */
+void	RG_GenFramebuffers (GLsizei n, GLuint *fbos);
+void	RG_DeleteFramebuffers (GLsizei n, const GLuint *fbos);
+void	RG_BindFramebuffer (GLenum target, GLuint fbo);
+void	RG_FramebufferTexture2D (GLenum target, GLenum attachment, GLenum textarget,
+				 GLuint texture, GLint level);
+void	RG_FramebufferRenderbuffer (GLenum target, GLenum attachment, GLenum rbtarget,
+				    GLuint renderbuffer);
+GLenum	RG_CheckFramebufferStatus (GLenum target);
+void	RG_DrawBuffers (GLsizei n, const GLenum *bufs);
+void	RG_GenRenderbuffers (GLsizei n, GLuint *rbs);
+void	RG_DeleteRenderbuffers (GLsizei n, const GLuint *rbs);
+void	RG_BindRenderbuffer (GLenum target, GLuint rb);
+void	RG_RenderbufferStorage (GLenum target, GLenum internalformat,
+				GLsizei width, GLsizei height);
+qboolean RG_BlitFramebuffer (GLint sx0, GLint sy0, GLint sx1, GLint sy1,
+			     GLint dx0, GLint dy0, GLint dx1, GLint dy1,
+			     GLbitfield mask, GLenum filter);
+GLuint	RG_FramebufferBinding (GLenum pname);
+
 /* gl_vidsdl.c GL_BeginRendering: the frame's render target size. */
 void	RG_BeginFrame (int width, int height);
 

@@ -2088,10 +2088,10 @@ static void GL_Init_NullGL (void)
 	GL_Shaders_Init();
 	GL_VBO_Init();
 	GL_PostProcess_Init();
-	/* The chain itself runs, into stubbed FBOs, so gpu_unrouted counts it;
-	 * but nothing reaches the screen until P4 routes it, and
-	 * GL_PostProcess_Available() would report the stubs complete. */
-	gl_renderer_caps.postprocess = false;
+	/* The chain runs on rg_target.c's render targets (#340 P4a-2).  The FBO
+	 * self-test is GL's (GL_RunFramebufferSelfTest reads pixels back) and
+	 * is not run. */
+	gl_renderer_caps.postprocess = GL_PostProcess_Available();
 	gl_renderer_caps.fbo_selftest = false;
 
 	/* No persistent mapping (glMapBufferRange is a stub returning NULL), no
