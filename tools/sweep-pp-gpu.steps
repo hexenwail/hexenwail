@@ -48,13 +48,12 @@
 # first P4a-2 runs had 14 (then gamma 1.2) equal to 01 on -gpu, and GL's
 # differing only by the fault below.  Every gamma here is 0.7-0.9.
 #
-# 14 IS SHOT BEFORE 20.  On GL, after the frames above, r_bloom 1 then 0
-# leaves demo1's sky brighter, and it stays so through later toggles of
-# r_softemu (master too: the sky's mean 0.53, where 08's, at the same gamma,
-# is 0.29).  Gamma, r_hdr and r_bloom toggled alone on the same camera do
-# not do it.  -gpu has no bloom yet and never shows it.  That is a GL fault
-# to chase on its own, not this sweep's, so the bloom frame comes last on
-# the graveyard.
+# 14 IS SHOT AFTER 20, with r_bloom back at 0: it is the check that a bloom
+# frame leaves nothing behind.  The bloom upsample used to leave the blend
+# func at GL_ONE, GL_ONE, so on GL the sky's front layer went additive for
+# every frame from 20 to restart (sky mean 0.53 where 08's, at the same
+# gamma, is 0.29), and 14 was shot first to keep out of it.  GitHub #547;
+# tools/bloom-sky-check.sh.
 #
 # 25-underwater-warp is not repeatable: the warp's phase is realtime, which
 # pause does not stop (P4c adds r_pp_time).  Compare it against the run-to-run
@@ -194,12 +193,12 @@ shot 27-gy-softemu2
 cmd r_softemu 3
 shot 28-gy-softemu3
 cmd r_softemu 0
-shot 14-gy-gamma09
 cmd r_bloom 1
 cmd r_bloom_threshold 0.5
 shot 20-gy-bloom
 cmd r_bloom 0
 cmd r_bloom_threshold 1
+shot 14-gy-gamma09
 cmd gamma 1
 cmd pause
 
