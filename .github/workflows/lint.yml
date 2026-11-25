@@ -508,6 +508,12 @@ jobs:
       - name: Every blend func change is restored
         run: python3 tools/test_blend_func_restore.py
 
+      # Depth ranges come from the frame's range, never window-Z constants:
+      # the skybox put back (0, 1) and at r_mirroralpha < 1 every entity after
+      # it wrote depth across all of window Z, over the reflection's half (#552).
+      - name: Every depth range names the frame's range
+        run: python3 tools/test_depth_range_frame.py
+
       # The shader include expander and its WebGL-smoke mirror allow the same
       # number of passes, and no stage exceeds it (#450).
       - name: Shader include bound
