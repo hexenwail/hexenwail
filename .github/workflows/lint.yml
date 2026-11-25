@@ -410,6 +410,12 @@ jobs:
       - name: Headless driver binds
         run: python3 tools/test_headless_drive_binds.py
 
+      # A step file's level load goes `console` + `enter map X`, never `cmd`:
+      # cmd's closing console toggle lands mid-load and pins the console up
+      # (#553, the mirror sweep's floor frames).
+      - name: Step files load levels without a toggle in flight
+        run: python3 tools/test_steps_level_load.py
+
       # Dedicated servers default to the client's 512 MB heap, and running
       # out names -heapsize (in KB) (GitHub #79).
       - name: Dedicated server heap

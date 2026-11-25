@@ -42,7 +42,13 @@
 #   type TEXT          type TEXT, do NOT press Return
 #   enter TEXT         type TEXT and press Return
 #   console            toggle the console (the grave key)
-#   cmd TEXT           console + enter TEXT + console: run one console command
+#   cmd TEXT           console + enter TEXT + console: run one console command.
+#                      NOT for a level load: its closing toggle lands
+#                      mid-load and leaves the console drawn full height.
+#                      Write `console` + `enter map X`; map, load, connect
+#                      and playdemo close the console themselves, changelevel
+#                      and restart do not and need a `console` after the
+#                      load wait (#553, tools/test_steps_level_load.py)
 #   hold KEYSYM SECS   keydown, wait, keyup -- movement, unlike `key`
 #   mouse X Y          warp the pointer
 #   click [BUTTON]     click (default button 1)
@@ -62,7 +68,7 @@
 #
 set -uo pipefail
 
-usage() { sed -n '2,58p' "$0"; exit 2; }
+usage() { sed -n '2,64p' "$0"; exit 2; }
 [ $# -ge 3 ] || usage
 
 SCEN="$1"; shift

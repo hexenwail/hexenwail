@@ -278,7 +278,10 @@ STEPS=/tmp/steps.txt tools/headless-drive.sh script /tmp/out ~/hexen2
 Verbs: `shot` / `shotf` / `key` / `keyn` / `type` / `enter` / `console` / `cmd`
 / `hold` / `mouse` / `click` / `wipe` / `sleep`, plus `#` comments. `type`
 types without submitting, `enter` submits, and `cmd` wraps one console command
-in the grave-key toggle. An unrecognised verb aborts the run.
+in the grave-key toggle. A level load is the exception: write `console` +
+`enter map X`, not `cmd map X` (the headless-drive.sh header says why,
+`tools/test_steps_level_load.py` enforces it). An unrecognised verb aborts
+the run.
 
 The other `case` arms are worked examples. Add one only when a run needs real
 logic (a loop, a control condition). Timings are generous: the engine gets
