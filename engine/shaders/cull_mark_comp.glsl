@@ -148,6 +148,11 @@ void main() {
             rx0 = min(rx0, ndc.x); ry0 = min(ry0, ndc.y);
             rx1 = max(rx1, ndc.x); ry1 = max(ry1, ndc.y);
         }
+        /* Into the window-Z range the pyramid's frame drew the world with:
+         * half of it at r_mirroralpha != 1, where R_Clear splits the range
+         * for the mirror (#533).  Increasing in dnear, so the min/max above
+         * still hold; exact at the usual [0, 1]. */
+        dnear = u_cdepthrange.x + (u_cdepthrange.y - u_cdepthrange.x) * dnear;
         if (valid) {
             /* Clip rect to NDC bounds [-1,1] before mapping to texels. */
             rx0 = clamp(rx0, -1.0, 1.0); ry0 = clamp(ry0, -1.0, 1.0);

@@ -80,8 +80,8 @@ for name, typ, count, align, size in glsl:
         errors.append(f"GLSL member {name} misaligned at {off}")
     glsl_offsets[name] = off
     off += size * count
-if off != 224:
-    errors.append(f"CullParams GLSL size is {off} bytes, expected 224")
+if off != 240:
+    errors.append(f"CullParams GLSL size is {off} bytes, expected 240")
 
 # --- 3. C mirror: same members, same offsets -------------------------------
 m = re.search(r"typedef struct \{([^}]*)\} cull_params_t;", src, re.S)
@@ -101,7 +101,8 @@ else:
 C_NAME = {"u_ccounts0": "counts0", "u_ccounts1": "counts1",
           "u_cvieworg": "vieworg", "u_cfrustum": "frustum",
           "u_cprevmvp": "prevmvp", "u_chizsize": "hizsize",
-          "u_creduce": "reduce", "u_creduce2": "reduce2"}
+          "u_creduce": "reduce", "u_creduce2": "reduce2",
+          "u_cdepthrange": "depthrange"}
 off = 0
 c_offsets = {}
 for name, typ, count in c_members:
@@ -112,10 +113,10 @@ for name, typ, count in c_members:
         errors.append(f"C member {name} is {size} bytes, not a std140 unit")
     c_offsets[name] = off
     off += size
-if off != 224:
-    errors.append(f"cull_params_t is {off} bytes, expected 224")
-if "sizeof(cull_params_t) == 224" not in src:
-    errors.append("no COMPILE_TIME_ASSERT pinning sizeof(cull_params_t) == 224")
+if off != 240:
+    errors.append(f"cull_params_t is {off} bytes, expected 240")
+if "sizeof(cull_params_t) == 240" not in src:
+    errors.append("no COMPILE_TIME_ASSERT pinning sizeof(cull_params_t) == 240")
 
 for gname, goff in glsl_offsets.items():
     cname = C_NAME.get(gname)

@@ -300,6 +300,10 @@ jobs:
       # the C mirror must agree with the GLSL block member for member.
       - name: CullParams block covers the worldcull compute family
         run: python3 tools/test_cullparams_block.py
+      # The Hi-Z cull compares in the depth range its pyramid was drawn
+      # in: half of it at r_mirroralpha != 1 (#533).
+      - name: Hi-Z cull compares in its pyramid's depth range
+        run: python3 tools/test_hiz_depthrange.py
       - name: r_ssao entity contact occlusion (#188)
         run: python3 tools/test_ssao.py
 

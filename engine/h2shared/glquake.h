@@ -722,6 +722,7 @@ qboolean R_WorldCullAvailable (void);
 void R_BuildHiZ (void);
 void R_FreeHiZ (void);
 void R_BuildHiZForNextFrame (void);
+void R_HiZ_ForgetView (void);
 void GL_SetupLightmapFmt (void);
 void GL_MakeAliasModelDisplayLists (qmodel_t *m, aliashdr_t *hdr);
 

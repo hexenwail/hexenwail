@@ -100,6 +100,12 @@ static int	hiz_height;
 static int	hiz_mip_count;
 static float	hiz_prev_mvp[16];	/* world MVP captured at end of last 3D pass */
 static qboolean	hiz_prev_mvp_valid;
+/* The glDepthRange hiz_prev_mvp drew with.  At r_mirroralpha != 1, on any
+ * map, R_Clear puts the view into half the window-Z range, so the world's
+ * depth in the pyramid lies in that half, and an unscaled [0, 1] surface
+ * depth compared against it over-rejected: 306 of 493 post-frustum surfaces
+ * against 164 at r_mirroralpha 1 (tools/hiz-mirror-check.sh, #533). */
+static float	hiz_prev_depthrange[2] = { 0.0f, 1.0f };
 /* The pyramid holds the depth of the frame hiz_prev_mvp was captured in.  A
  * frame whose build was skipped (the MSAA scene FBO has no sampler-readable
  * depth, a resize failed) leaves an older frame's depth behind, and culling
@@ -182,9 +188,10 @@ typedef struct {
 	float	hizsize[4];	/* xy Hi-Z pyramid size, zw unused */
 	GLint	reduce[4];	/* x src_w, y src_h, z dst_w, w dst_h */
 	GLint	reduce2[4];	/* x src_lod, y reverse_z, zw unused */
-} cull_params_t;		/* 224 bytes */
+	float	depthrange[4];	/* x near, y far: glDepthRange of the pyramid's frame, zw unused */
+} cull_params_t;		/* 240 bytes */
 
-COMPILE_TIME_ASSERT(cullparams_size, sizeof(cull_params_t) == 224);
+COMPILE_TIME_ASSERT(cullparams_size, sizeof(cull_params_t) == 240);
 
 
 /* ------------------------------------------------------------------ */
@@ -602,6 +609,20 @@ void R_BuildHiZ (void)
 	/* Allocation deferred to R_BuildHiZForNextFrame so we don't burn
 	 * GPU memory when gl_hiz_cull is off. */
 	memset(hiz_prev_mvp, 0, sizeof(hiz_prev_mvp));
+	hiz_prev_depthrange[0] = 0.0f;
+	hiz_prev_depthrange[1] = 1.0f;
+	hiz_prev_mvp_valid = false;
+}
+
+/* A view frame drawn without the cull (r_gpucull 0, gl_cull 0 on a mirror
+ * map, ...) still gets its pyramid built, but keeps no MVP or depth range:
+ * the ones kept are an older frame's, and the next culled frame would pair
+ * them with this frame's pyramid -- an r_mirroralpha change in between is a
+ * half-range pyramid against a [0, 1] range.  Drop them; that frame runs
+ * without Hi-Z.  Not called for the reflected pass, which follows the view
+ * in the same frame and must leave the view's kept. */
+void R_HiZ_ForgetView (void)
+{
 	hiz_prev_mvp_valid = false;
 }
 
@@ -950,6 +971,8 @@ void R_DispatchWorldCull (void)
 		memcpy(params.prevmvp, hiz_prev_mvp, sizeof(params.prevmvp));
 		params.hizsize[0] = (float)hiz_width;
 		params.hizsize[1] = (float)hiz_height;
+		params.depthrange[0] = hiz_prev_depthrange[0];
+		params.depthrange[1] = hiz_prev_depthrange[1];
 		GL_Upload(GL_UNIFORM_BUFFER, &params, sizeof(params), &ubo, &ofs);
 		GL_BindBufferRange(GL_UNIFORM_BUFFER, CULL_PARAMS_UBO_BINDING,
 				   ubo, ofs, sizeof(params));
@@ -1082,6 +1105,12 @@ void R_DrawWorldCulled (void)
 	 * has landed), and the cull dispatch one frame from now consults
 	 * this matrix when reprojecting AABBs onto the pyramid. */
 	memcpy(hiz_prev_mvp, mvp, sizeof(hiz_prev_mvp));
+	{
+		double	znear, zfar;
+		R_GetDepthRange (&znear, &zfar);
+		hiz_prev_depthrange[0] = (float)znear;
+		hiz_prev_depthrange[1] = (float)zfar;
+	}
 	hiz_prev_mvp_valid = true;
 }
 

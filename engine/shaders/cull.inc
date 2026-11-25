@@ -2,7 +2,7 @@
  * programs (cull_clear_comp, cull_mark_comp, hiz_reduce_comp).
  *
  * One copy, so the three programs cannot disagree about it.  The C mirror is
- * cull_params_t in gl_worldcull.c (224 bytes, COMPILE_TIME_ASSERT), and
+ * cull_params_t in gl_worldcull.c (240 bytes, COMPILE_TIME_ASSERT), and
  * tools/test_cullparams_block.py checks the two member for member: an
  * std140 offset mismatch compiles clean and culls wrong.
  *
@@ -28,6 +28,7 @@ UBO(0) uniform CullParams {
     vec4 u_chizsize;	/* xy Hi-Z pyramid size */
     ivec4 u_creduce;	/* x src_w, y src_h, z dst_w, w dst_h */
     ivec4 u_creduce2;	/* x src_lod, y reverse_z */
+    vec4 u_cdepthrange;	/* x near, y far: glDepthRange of the pyramid's frame */
 };
 
 #endif /* CULL_INC */
