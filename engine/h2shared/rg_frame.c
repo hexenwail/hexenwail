@@ -1419,6 +1419,11 @@ qboolean RG_DepthHasStencil (void)
 	return rg_dev != NULL && RG_FormatHasStencil (rgf_depth_fmt);
 }
 
+qboolean RG_DepthSampled (void)
+{
+	return rg_dev != NULL && rgf_depth_sampled;
+}
+
 static const char *RGF_DepthName (SDL_GPUTextureFormat fmt)
 {
 	switch (fmt)

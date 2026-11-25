@@ -188,4 +188,9 @@ void	RG_BeginFrame (int width, int height);
  * skybox run as on GL (#340 P2c).  The GL arm reads the visual's bits. */
 qboolean RG_DepthHasStencil (void);
 
+/* gl_postprocess.c GL_SoftDepth_Capture: the scene's depth format can be
+ * sampled, so a copy of it can be read (#340 P4b).  Where it cannot, the
+ * copy would be bound as a placeholder whose depth is the near plane. */
+qboolean RG_DepthSampled (void);
+
 #endif /* RG_DEVICE_H */

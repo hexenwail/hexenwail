@@ -188,9 +188,8 @@ Checked, from the sources (stock python3, lint.yml):
       and OIT_Active.  The OIT twins read their targets through
       sampler2DMS, which -gpu drops; once P4 turns post-process on under
       -gpu, r_oit 1 would otherwise lose every translucent;
-    * the soft-particle depth snapshot (P4): GL_SoftDepth_Capture returns
-      after clearing soft_depth_valid, so sprites never sample a depth
-      texture the null glBlitFramebuffer (not NULL) never wrote;
+    * (the soft-particle depth snapshot, GL_SoftDepth_Capture, was gated
+      here until P4b lifted it: check_soft_particles);
     * the GPU particle buffers: R_GPU_Particles_Init makes none, where it
       made raw GL into the null table for an SSBO path nothing draws.
   and one SDL workaround the sweep's map changes found: rg_resource.c's
@@ -236,7 +235,7 @@ Checked, from the sources (stock python3, lint.yml):
       SDL_GPU arm excludes it and PP_RAW_OK's few, each counted: MSAA's
       multisampled storage (P6), bloom's bufferless draws (P4e), and
       shutdown's program and buffer deletes; a function GPU_GATES gates whole
-      gets no credit for its gate, so GL_SoftDepth_Capture is routed for P4b;
+      gets no credit for its gate;
     * the gates: OIT_InitShader returns false (GPU_GATES),
       PP_SceneSamples (PP_CreateFBO's sample count) forces 0 samples after
       the gl_max_samples clamp, and an FBO failure under -gpu returns from BeginFrame
@@ -279,6 +278,26 @@ Checked, from the sources (stock python3, lint.yml):
       first-pass clear is the scene's alone, a pass of its own even with
       nothing drawn or asked for; RG_Clear resolves a dirty target before
       it records the clear (#548).
+  soft particles under -gpu (#340 P4b, check_soft_particles), which
+  tools/sweep-softpart-gpu.steps and tools/softpart-diff.sh draw, and
+  tools/test_soft_depth_gpu.py runs against rg_target.c:
+    * GL_SoftDepth_Capture has no -gpu gate, and under -gpu its snapshot is
+      GL_DEPTH24_STENCIL8 whatever the source -- the scene's own depth
+      format there (RGT_Format), framebuffer 0's as much as pp_fbo's, and
+      rg_target.c copies depth only between one format -- while GL keeps
+      GL_DEPTH_COMPONENT24 for framebuffer 0; and under -gpu none is taken
+      when the scene's depth format cannot be sampled (RG_DepthSampled):
+      the placeholder bound for it reads as the near plane, which would
+      fade every sprite out;
+    * it reads the framebuffer bound for drawing (pp_fbo or framebuffer 0),
+      not a fixed one;
+    * it is taken after the opaque world and before the first translucent
+      draw, in the view and in R_Mirror's reflected pass, which has a depth
+      range of its own;
+    * R_SoftParticleParams names no backend and folds glDepthRange in, so
+      the shader's raw gl_FragCoord.z and the snapshot agree in the
+      mirror's split ranges; salias_frag.glsl reads the snapshot with
+      texelFetch at gl_FragCoord, under no backend conditional.
 
 Usage: test_rg_sources.py [--root DIR]
 """
@@ -1987,12 +2006,6 @@ GPU_GATES = (
      r"\bR_Program_Create\s*\(|\bgl\w+_fp\s*\(|\bPP_BindUniformBlock\s*\(", None,
      "OIT is P6: the null glBlendFunci is not NULL, so every -gpu boot reached it, and it is raw GL "
      "for a resolve -gpu never draws (#340 P4a-1)"),
-    ("engine/h2shared/gl_postprocess.c", "GL_SoftDepth_Capture", "",
-     r"\bR_GenTextures\s*\(|\bgl\w+_fp\s*\(|\bR_\w*(?:Framebuffer|Renderbuffer|DrawBuffers)\w*\s*\("
-     r"|\bsoft_depth_valid\s*=\s*true\b",
-     r"\bsoft_depth_valid\s*=\s*false\s*;",
-     "soft particles are P4: the null glBlitFramebuffer is not NULL, so the snapshot would be marked "
-     "valid and sprites would sample a texture nothing wrote"),
     ("engine/hexen2/r_part.c", "R_GPU_Particles_Init", "",
      r"\bGL_CreateParticleResources\s*\(", None,
      "the GPU particle buffers are raw GL, into the null table, for a path nothing draws"),
@@ -2781,7 +2794,7 @@ def check_postprocess(root):
                           or re.search(r"\bsoft_depth_valid\s*=\s*true\b", b)):
         fail("%s: GL_SoftDepth_Capture must set soft_depth_valid from R_BlitFramebuffer's result and "
              "nowhere to true -- a blit the -gpu arm declines must not leave sprites sampling a "
-             "snapshot nothing wrote (P4b lifts the gate; #340 P4a-1)" % rel)
+             "snapshot nothing wrote (#340 P4a-1, P4b)" % rel)
     decl = re.search(r"\bstatic\s+float\s+pp_vert_mvp\s*\[\s*16\s*\]\s*;", code)
     if not decl:
         fail("%s: pp_vert_mvp is not `static float pp_vert_mvp[16];` -- PpVert's mirror is 64 bytes"
@@ -3032,6 +3045,97 @@ def check_render_targets(root):
              "pp_fbo's depth is the scene's format and is sampled (#340 P4a-2)" % rf)
 
 
+def check_soft_particles(root):
+    """#340 P4b: the soft-particle depth snapshot runs under -gpu."""
+    pp = "engine/h2shared/gl_postprocess.c"
+    rm = "engine/hexen2/gl_rmain.c"
+    b = body_named(root, pp, "GL_SoftDepth_Capture")
+    if b is not None:
+        if re.search(r"\bif\s*\(\s*R_GPU\s*\(\s*\)\s*\)\s*return\b", b):
+            fail("%s: GL_SoftDepth_Capture returns under -gpu -- P4b lifted that gate; the copy runs on "
+                 "rg_target.c's depth arm (#340 P4b)" % pp)
+        init = re.search(r"\bpacked\s*=\s*GL_GetSceneFBO\s*\(\s*\)\s*!=\s*0\s*;", b)
+        arm = re.search(r"#\s*ifdef\s+USE_SDL_GPU\s*\n\s*if\s*\(\s*R_GPU\s*\(\s*\)\s*\)\s*\{\s*"
+                        r"if\s*\(\s*!\s*RG_DepthSampled\s*\(\s*\)\s*\)\s*return\s*;\s*"
+                        r"packed\s*=\s*true\s*;\s*\}\s*#\s*endif", b)
+        pick = re.search(r"\bif\s*\(\s*packed\s*\)\s*\{\s*fmt\s*=\s*GL_DEPTH24_STENCIL8\s*;\s*"
+                         r"attach\s*=\s*GL_DEPTH_STENCIL_ATTACHMENT\s*;\s*\}\s*"
+                         r"else\s*\{\s*fmt\s*=\s*GL_DEPTH_COMPONENT24\s*;\s*attach\s*=\s*GL_DEPTH_ATTACHMENT\s*;\s*\}", b)
+        if not (init and arm and pick and init.end() <= arm.start() and arm.end() <= pick.start()):
+            fail("%s: GL_SoftDepth_Capture must take `packed = GL_GetSceneFBO () != 0;`, then `#ifdef "
+                 "USE_SDL_GPU / if (R_GPU ()) { if (!RG_DepthSampled ()) return; packed = true; } / #endif`, then `if (packed) { fmt = "
+                 "GL_DEPTH24_STENCIL8; attach = GL_DEPTH_STENCIL_ATTACHMENT; } else { fmt = "
+                 "GL_DEPTH_COMPONENT24; attach = GL_DEPTH_ATTACHMENT; }` -- under -gpu framebuffer 0's "
+                 "depth is the scene's format, which GL_DEPTH24_STENCIL8 names, and the depth copy is "
+                 "between one format, and a format the device cannot sample takes no snapshot (its "
+                 "placeholder reads as the near plane); GL keeps DEPTH_COMPONENT24 for framebuffer 0 "
+                 "(#340 P4b)" % pp)
+        lab = b.find("blit:")
+        tail = b[lab:] if lab >= 0 else ""
+        q = re.search(r"\bprev_draw\s*=\s*R_FramebufferBinding\s*\(\s*GL_DRAW_FRAMEBUFFER_BINDING\s*\)\s*;", tail)
+        rd = re.search(r"\bR_BindFramebuffer\s*\(\s*GL_READ_FRAMEBUFFER\s*,\s*prev_draw\s*\)\s*;", tail)
+        bl = re.search(r"\bsoft_depth_valid\s*=\s*R_BlitFramebuffer\s*\(", tail)
+        if not (q and rd and bl and q.start() < rd.start() < bl.start()):
+            fail("%s: GL_SoftDepth_Capture's copy must read the framebuffer bound for drawing (`prev_draw "
+                 "= R_FramebufferBinding (GL_DRAW_FRAMEBUFFER_BINDING)`, then `R_BindFramebuffer "
+                 "(GL_READ_FRAMEBUFFER, prev_draw)`) after `blit:` and before the copy -- pp_fbo when "
+                 "the chain is up, framebuffer 0 otherwise (#340 P4b)" % pp)
+    # Where it is taken: after the opaque world, before the first translucent.
+    if (root / rm).is_file():
+        code = strip_c_comments((root / rm).read_text(errors="replace"))
+        callers = [(n, code[bb:e]) for n, bb, e in functions(code)
+                   if re.search(r"\bGL_SoftDepth_Capture\s*\(", code[bb:e])]
+        want = {"R_Mirror": (r"\bR_RenderScene\s*\(\s*\)\s*;", "R_RenderScene ();"),
+                "R_RenderView": (r"\bR_DrawWaterSurfaces\s*\(\s*WATER_PHASE_OPAQUE\s*\)\s*;",
+                                 "R_DrawWaterSurfaces (WATER_PHASE_OPAQUE);")}
+        trans = (r"\bR_DrawParticles\s*\(|\bR_DrawTransEntitiesOnList\s*\(|\bOIT_BeginTranslucency\s*\("
+                 r"|\bWATER_PHASE_TRANSLUCENT\b|\bR_DrawAllGlows\s*\(")
+        names = sorted(n for n, _ in callers)
+        if names != sorted(want):
+            fail("%s: GL_SoftDepth_Capture is called from %s; the pin expects R_Mirror and R_RenderView "
+                 "(the reflected pass and the view) -- a new caller needs its place pinned (#340 P4b)"
+                 % (rm, ", ".join(names) or "nowhere"))
+        for name, body in callers:
+            if name not in want:
+                continue
+            caps = list(re.finditer(r"\bGL_SoftDepth_Capture\s*\(", body))
+            opaque = [m.end() for m in re.finditer(want[name][0], body)]
+            first_t = re.search(trans, body)
+            ok = len(caps) == 1 and bool(opaque) and first_t is not None
+            ok = ok and opaque[0] <= caps[0].start() < first_t.start()
+            if not ok:
+                fail("%s: %s must take the snapshot once, after its opaque pass (`%s`) and before its "
+                     "first translucent draw -- after them the fade would read the translucents' own "
+                     "depth (#340 P4b)" % (rm, name, want[name][1]))
+    b = body_named(root, rm, "R_SoftParticleParams")
+    if b is not None:
+        if re.search(r"\bR_GPU\b|\bUSE_SDL_GPU\b|\brg_\w+", b):
+            fail("%s: R_SoftParticleParams names the backend -- one expression covers both, -gpu through "
+                 "gl_clipcontrol_able's [0,1] branch (#340 P4b)" % rm)
+        if not (re.search(r"\brange\s*=\s*gldepthmax\s*-\s*gldepthmin\s*;", b)
+                and re.search(r"\*\s*za\s*=\s*a\s*\*\s*range\s*\+\s*gldepthmin\s*;", b)
+                and re.search(r"\*\s*zb\s*=\s*b\s*\*\s*range\s*;", b)
+                and re.search(r"\bif\s*\(\s*gl_clipcontrol_able\s*\)", b)):
+            fail("%s: R_SoftParticleParams must fold glDepthRange into za / zb (`range = gldepthmax - "
+                 "gldepthmin;`, `*za = a * range + gldepthmin;`, `*zb = b * range;`) beside its "
+                 "gl_clipcontrol_able branch -- the mirror's reflected pass draws into half the range, "
+                 "and the shader feeds raw gl_FragCoord.z (#340 P4b)" % rm)
+    sh = root / "engine/shaders/salias_frag.glsl"
+    if not sh.is_file():
+        fail("engine/shaders/salias_frag.glsl: missing -- the #340 P4b pin has nothing to read")
+    else:
+        text = strip_c_comments(sh.read_text(errors="replace"))
+        reads = re.findall(r"\bu_soft_depth\b", text)
+        fetch = re.search(r"\btexelFetch\s*\(\s*u_soft_depth\s*,\s*ivec2\s*\(\s*gl_FragCoord\.xy\s*\)\s*,\s*0\s*\)", text)
+        cond = any(re.search(r"VULKAN|GL_SPIRV|__VERSION__", t) for t in
+                   re.findall(r"^\s*#\s*(?:if|elif).*$", text, re.M))
+        if not fetch or len(reads) != 2 or cond:
+            fail("engine/shaders/salias_frag.glsl: the snapshot must be declared once and read once, as "
+                 "`texelFetch (u_soft_depth, ivec2 (gl_FragCoord.xy), 0)`, under no VULKAN / GL_SPIRV / "
+                 "__VERSION__ conditional -- render targets hold GL's rows under -gpu (VK_FLIP_Y), so "
+                 "gl_FragCoord addresses the same texel on both backends (#340 P4b)")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     ap.add_argument("--root", type=Path, default=ROOT)
@@ -3056,6 +3160,7 @@ def main(argv=None):
     check_mirror(root)
     check_postprocess(root)
     check_render_targets(root)
+    check_soft_particles(root)
     nfiles = 0
     rg_files = []
     for p in sorted(eng.rglob("*")):

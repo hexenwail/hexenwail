@@ -26,7 +26,8 @@
  * whole texels: only a full-size 1:1 copy between identical formats, which
  * is why GL_DEPTH24_STENCIL8 is the scene's own depth format here
  * (rg_resource.c RGT_Format).  A blit this cannot make returns false
- * (counted), which the soft-particle snapshot will test (P4b).  A blit is
+ * (counted), and the soft-particle snapshot is valid only if it was made
+ * (gl_postprocess.c GL_SoftDepth_Capture, P4b).  A blit is
  * checked before it ends the segment, so a declined one costs nothing.
  *
  * Copyright (C) 2026  Contributors of the uHexen2 project

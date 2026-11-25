@@ -36,9 +36,11 @@
 # testentity sprites flush with the west wall with post-process off (the fb0
 # depth snapshot) and on (pp_fbo's), the water warp from under the water,
 # and r_softemu 1/2/3.  10 castle4's lava and 11 egypt's north camera (the
-# stencil in pp_fbo's depth texture) at gamma 0.9.  pp-diff.sh compares 01-14
-# and 26-28 against GL, and 20 against 14 on -gpu (the bloom gate); 21-25
-# wait for their phases (P4b soft particles, P4c the warp, P4e bloom).  So
+# stencil in pp_fbo's depth texture) at gamma 0.9.  pp-diff.sh compares 01-14,
+# 22-24 and 26-28 against GL, and 20 against 14 on -gpu (the bloom gate); 21
+# and 25 wait for their phases (P4c the warp, P4e bloom).  22-24 joined at P4b
+# (56.9 - 57.0 dB on its binary; tools/sweep-softpart-gpu.steps checks the
+# fade itself).  So
 # the 3D-effects pass (PP_BlitWith3DEffects: the underwater warp, motion
 # blur), which runs under -gpu since P4a-2, has no frame checked here until
 # P4c's r_pp_time makes one repeatable.
