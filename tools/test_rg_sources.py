@@ -298,6 +298,16 @@ Checked, from the sources (stock python3, lint.yml):
       the shader's raw gl_FragCoord.z and the snapshot agree in the
       mirror's split ranges; salias_frag.glsl reads the snapshot with
       texelFetch at gl_FragCoord, under no backend conditional.
+  the underwater screen warp and motion blur under -gpu (#340 P4c,
+  check_screen_warp), which tools/sweep-warp-gpu.steps and
+  tools/warp-diff.sh draw (tools/test_pp_time.py pins r_pp_time, the clock
+  that makes them repeatable):
+    * PP_BlitWith3DEffects, GL_PostProcess_End3D and PP_Time name no
+      backend: one path, compared frame by frame;
+    * PP_NeedsPostProcess raises the chain on r_waterwarp and r_motionblur
+      alone, and gl_rsurf.c's legacy vertex wobble stays `r_waterwarp &&
+      !GL_PostProcess_Active()` at its three sites, naming no backend: the
+      fallback for no chain, which under -gpu before P4a-2 was every frame.
 
 Usage: test_rg_sources.py [--root DIR]
 """
@@ -3136,6 +3146,42 @@ def check_soft_particles(root):
                  "gl_FragCoord addresses the same texel on both backends (#340 P4b)")
 
 
+def check_screen_warp(root):
+    """#340 P4c: the underwater screen warp and motion blur run under -gpu,
+    the same code as GL, and the legacy vertex wobble stays the no-chain
+    fallback it is on GL."""
+    pp = "engine/h2shared/gl_postprocess.c"
+    rs = "engine/hexen2/gl_rsurf.c"
+    rx_backend = re.compile(r"\bR_GPU\s*\(|\bUSE_SDL_GPU\b|\brg_active\b")
+    for name in ("PP_BlitWith3DEffects", "GL_PostProcess_End3D", "PP_Time"):
+        b = body_named(root, pp, name)
+        if b is not None and rx_backend.search(b):
+            fail("%s: %s names the backend -- the 3D-effects pass is one path for GL and -gpu, which "
+                 "tools/sweep-warp-gpu.steps compares frame by frame (#340 P4c)" % (pp, name))
+    b = body_named(root, pp, "PP_NeedsPostProcess")
+    if b is not None:
+        for cv in (r"r_waterwarp\.value\s*>\s*0", r'Cvar_VariableValue\s*\(\s*"r_motionblur"\s*\)\s*>\s*0'):
+            if not re.search(r"\bif\s*\(\s*%s\s*\)\s*return\s+true\s*;" % cv, b):
+                fail("%s: PP_NeedsPostProcess must raise the chain on `%s` alone -- without it "
+                     "r_waterwarp falls back to gl_rsurf.c's vertex wobble (#340 P4c)" % (pp, cv))
+    if (root / rs).is_file():
+        code = strip_c_comments((root / rs).read_text(errors="replace"))
+        sites = re.findall(r"r_waterwarp\.integer\s*&&\s*([^)]*\))", code)
+        if len(sites) != 3 or any(not re.fullmatch(r"!\s*GL_PostProcess_Active\s*\(\s*\)", s.strip())
+                                  for s in sites):
+            fail("%s: the legacy underwater wobble must stay `r_waterwarp.integer && "
+                 "!GL_PostProcess_Active()` at its three sites (DrawGLWaterPoly, "
+                 "DrawGLWaterPolyMTexLM, DrawTextureChains_DrawDeferred), found %r: it is the "
+                 "fallback when no chain is up, on either backend (#340 P4c)" % (rs, sites))
+        for name in ("DrawGLWaterPoly", "DrawGLWaterPolyMTexLM", "DrawTextureChains_DrawDeferred"):
+            b = body_named(root, rs, name)
+            if b is not None and rx_backend.search(b):
+                fail("%s: %s names the backend; the wobble's fallback is the chain's, not the "
+                     "backend's (#340 P4c)" % (rs, name))
+    else:
+        fail("%s: missing -- the #340 P4c check has nothing to read" % rs)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     ap.add_argument("--root", type=Path, default=ROOT)
@@ -3161,6 +3207,7 @@ def main(argv=None):
     check_postprocess(root)
     check_render_targets(root)
     check_soft_particles(root)
+    check_screen_warp(root)
     nfiles = 0
     rg_files = []
     for p in sorted(eng.rglob("*")):

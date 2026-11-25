@@ -1,0 +1,219 @@
+# sweep-warp-gpu.steps -- the underwater screen warp (r_waterwarp) and
+# motion blur (r_motionblur) through the SDL_GPU backend (-gpu) against GL
+# (#340 P4c).  Both are PP_BlitWith3DEffects (gl_postprocess.c), End3D's
+# pass from pp_fbo into the native target, which runs under -gpu since
+# P4a-2; this sweep is what checks it.  r_pp_time holds the warp's clock
+# (spp_frag.glsl's `time`): it is realtime by default, which a pause does
+# not stop, so without it no two runs catch the warp at one phase.
+#
+# Run the SAME binary both ways, with identical settings:
+#
+#   A="-fsaa 0 +gamma 1 +map demo1"
+#   STEPS=tools/sweep-warp-gpu.steps ENGINE=$E ./tools/headless-drive.sh script /tmp/wp-gl ~/hexen2 $A
+#   VK_ICD_FILENAMES=<lvp_icd json> VK_LAYER_PATH=<vulkan-validation-layers>/share/vulkan/explicit_layer.d \
+#       STEPS=tools/sweep-warp-gpu.steps ENGINE=$E \
+#       ./tools/headless-drive.sh script /tmp/wp-gpu ~/hexen2 -gpu +gpu_allow_software 1 +gpu_debug 1 $A
+#   ./tools/warp-diff.sh /tmp/wp-gl /tmp/wp-gpu
+#
+# warp-diff.sh also reads /tmp/wp-gpu/qconsole.log: gpu_unrouted 0 in every
+# REPORT-<name>-BEGIN / -END section (reset ahead of each section's first
+# shot) and no "Validation Error".
+#
+# THE FRAMES.  Under demo1's *lowlight water (sweep-liquid-gpu.steps' 07
+# camera, looking up at the surface), r_pp_time 10: 01 r_waterwarp 0, 02 1,
+# 03 2, 09 1 at r_pp_time 3.7, 04 1 with the contents tint
+# (gl_cshiftpercent_contents 100) and 04-under-tint-nowarp the same at 0,
+# 05 1 at r_scale 0.5 and 05-under-scale-off the same at 0.  10 faces the
+# pool's west wall, off and on: the surfaces there are the ones
+# gl_rsurf.c's legacy per-vertex wobble moves (none of the surface camera's
+# are), and gl_waterwarp_amount 4 makes that wobble 8x the default's, so a
+# wobble drawn beside the screen warp cannot hide.  06 the graveyard above
+# any water, PP off and r_waterwarp 1 (wakes the chain, warps nothing); 07
+# r_motionblur 1 at rest.  08 the graveyard's cobbles from above with +right
+# held, motion blur off and on: paused, V_RenderView skips V_CalcRefdef
+# (view.c), so the rendered view stays where setpos put it while +right
+# keeps turning cl.viewangles, which is what the blur's viewdelta reads --
+# one still view, blurred by a turn per frame that follows the frame rate.
+#
+# Settings as sweep-pp-gpu.steps (and sweep-liquid-gpu.steps), plus the
+# contents tint off but in 04 (gl_cshiftpercent_contents 0) and
+# gl_waterwarp_amount 4 (above).  gl_waterwarp_speed 0 freezes the liquid
+# surface's own turbulence and the wobble's phase; r_pp_time the screen
+# warp's.  tools/test_pp_time.py fails if a shot runs with it not held.
+#
+# THE THRESHOLDS -- see tools/warp-diff.sh for the checks.  Measured
+# 2026-11-25, 800x600, llvmpipe GL against lavapipe -gpu (Mesa 26.2), three
+# runs a side, and the Tesla P4 (NVIDIA Vulkan) -gpu once against them:
+#
+#   check                          GL vs lavapipe   GL vs GL /      Tesla P4     gate
+#                                                   -gpu vs -gpu
+#   PSNR, frames 01-07, 09, 10     74.3 - 79.6      identical       51.9 - 55.3  42
+#   model mismatch (02-05, 09, 10) <= 0.00001 each  --              <= 0.00027   0.001
+#   02 vs 01, 09 vs 02 changed     ~472k / ~464k    --              ~472k / 464k 5000
+#   06 identity (-gpu)             0 pixels         --              0            0
+#   07 blur at rest, largest step  0 / 0            --              0            1
+#   08 anisotropy blur / no blur   GL 0.688-0.734,  --              0.745-0.751  0.85
+#                                  -gpu 0.698-0.707
+#
+# GL's 06 differs from its PP-off frame in 2,497 scattered texels (GL's
+# default framebuffer and FBO round apart, as sweep-pp-gpu.steps' 02), the
+# same on master, so warp-diff.sh prints it and checks -gpu's alone.  The
+# model's honest remainder is NEAREST landing on the neighbouring texel at a
+# rounding boundary: 5 pixels of 470k on the Mesa pair, 127 on the P4.
+#
+# This binary against master (which has no r_pp_time), each with the clock
+# at realtime: every frame without the warp or the blur (01, 04-nowarp,
+# 05-off, 06, 07, 08-noblur, 10-off) identical on GL and on -gpu; the warp
+# and blur frames differ only by the phase realtime gave them.
+#
+# Broken builds (one -gpu run each against honest GL run 1; BRK=<proxy> in
+# a scratch build, never committed), every one failing warp-diff.sh:
+#
+#   proxy     what it breaks                       worst check
+#   wobble    r_waterwarp no longer wakes the      02-04, 09, 10 at 26.7-33.8 dB;
+#             chain: post-process off at gamma 1,  model 0.70-0.92; 02 = 01
+#             so no screen warp, and gl_rsurf.c's  (0 changed); the wall shows
+#             vertex wobble instead                the wobble (5,237 AE)
+#   wobble2   the chain up AND the vertex wobble   10 at 35.2 dB, model 0.486
+#             (the screen warp plus the wobble)    (the surface frames pass:
+#                                                  no wobbled surface there)
+#   twice     the warp in End3D and again in the   02-05, 09, 10 at 26.6-33.3 dB,
+#             final pass                           model 0.69-0.92
+#   flip      the warp's uv.y read flipped         27.8-35.3 dB, model 0.55-0.84
+#   leaf      the viewleaf test inverted           no warp under water (model
+#                                                  0.70-0.92, 02 = 01), a warp
+#                                                  above it (06 at 25.7 dB,
+#                                                  460,870 px; 07 step 116)
+#   time      r_pp_time ignored (realtime)         26.2-33.0 dB, model 0.74-0.93
+#
+# So PSNR 42 (the other -gpu sweeps' gate; 9.9 dB under the P4's worst
+# honest frame, 6.7 over the best broken one); MODEL_MAX 0.001 (3.7x the
+# P4's worst honest frame, 486x under the nearest broken one); BLUR_RATIO
+# 0.85 (0.10 over the worst honest ratio; no blur at all reads 1.0).  The
+# gates are for the Mesa pair; a hardware pair needs its own runs.
+
+sleep 20
+cmd god
+cmd notarget
+cmd noclip
+cmd con_notifytime 0
+cmd viewsize 120
+cmd crosshair 0
+cmd showpause 0
+cmd r_skyspeed_back 0
+cmd r_skyspeed_front 0
+cmd r_flatlightstyles 1
+cmd r_dynamic 0
+cmd r_gpulightstyles 0
+cmd r_ssao 0
+cmd r_bloom 0
+cmd r_dlight_occlusion 0
+cmd r_alias_gpu 0
+cmd r_particles 0
+cmd fog 0
+cmd gl_texture_anisotropy 1
+cmd r_oit 0
+cmd r_waterwarp 0
+cmd r_motionblur 0
+cmd r_softparticles 0
+cmd r_softemu 0
+cmd r_scale 1
+cmd gl_fxaa 0
+cmd contrast 1
+cmd gl_waterwarp_speed 0
+cmd gl_waterwarp_amount 4
+cmd r_caustics 0
+cmd gl_glows 0
+cmd r_drawviewmodel 0
+cmd r_drawentities 0
+cmd r_wateralpha 0.33
+cmd r_lavaalpha 0
+cmd r_water_pixel_warp 0
+cmd gl_cshiftpercent_contents 0
+cmd r_pp_time 10
+sleep 2
+
+# --- under demo1's *lowlight water, looking up ---
+cmd setpos -2000 1600 -520 -50 90 0
+sleep 2
+cmd gpu_unrouted reset
+cmd pause
+shot 01-under-off
+cmd r_waterwarp 1
+shot 02-under-warp1
+cmd r_waterwarp 2
+shot 03-under-warp2
+cmd r_waterwarp 1
+cmd r_pp_time 3.7
+shot 09-under-time37
+cmd r_pp_time 10
+cmd gl_cshiftpercent_contents 100
+shot 04-under-tint
+cmd r_waterwarp 0
+shot 04-under-tint-nowarp
+cmd gl_cshiftpercent_contents 0
+cmd r_scale 0.5
+shot 05-under-scale-off
+cmd r_waterwarp 1
+shot 05-under-scale
+cmd r_scale 1
+cmd r_waterwarp 0
+cmd pause
+
+# --- the same water, facing the pool's west wall ---
+cmd setpos -2000 1600 -520 10 180 0
+sleep 2
+cmd pause
+shot 10-wall-off
+cmd r_waterwarp 1
+shot 10-wall-warp1
+cmd r_waterwarp 0
+cmd pause
+sleep 2
+cmd echo REPORT-UNDER-BEGIN
+cmd gpu_unrouted
+cmd renderer_status
+cmd echo REPORT-UNDER-END
+sleep 1
+
+# --- the graveyard, above any water ---
+cmd setpos -918 -2034 0 -20 45 0
+sleep 2
+cmd gpu_unrouted reset
+cmd pause
+shot 06-above-off
+cmd r_waterwarp 1
+shot 06-above-warp
+cmd r_waterwarp 0
+cmd r_motionblur 1
+shot 07-above-blur
+cmd r_motionblur 0
+cmd pause
+sleep 2
+cmd echo REPORT-ABOVE-BEGIN
+cmd gpu_unrouted
+cmd renderer_status
+cmd echo REPORT-ABOVE-END
+sleep 1
+
+# --- turning, paused, looking down at the cobbles: the view stays put
+# (paused, V_RenderView skips V_CalcRefdef) while +right turns
+# cl.viewangles, which the blur reads ---
+cmd setpos -918 -2034 0 80 45 0
+sleep 2
+cmd gpu_unrouted reset
+cmd pause
+cmd cl_yawspeed 360
+cmd +right
+shot 08-turn-noblur
+cmd r_motionblur 1
+shot 08-turn-blur
+cmd -right
+cmd r_motionblur 0
+cmd pause
+sleep 2
+cmd echo REPORT-TURN-BEGIN
+cmd gpu_unrouted
+cmd renderer_status
+cmd echo REPORT-TURN-END
+sleep 1
