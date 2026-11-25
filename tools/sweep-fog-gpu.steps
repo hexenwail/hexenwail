@@ -318,10 +318,9 @@ cmd gl_glows 0
 cmd r_drawentities 0
 
 # --- castle4: the lava pit, opaque and translucent ---
-cmd map castle4
-sleep 20
 console
-sleep 1
+enter map castle4
+sleep 20
 cmd god
 cmd notarget
 cmd noclip
@@ -345,11 +344,10 @@ cmd game sot
 sleep 60
 console
 sleep 2
-cmd map egypt
+console
+enter map egypt
 # 45 s, as tools/sweep-skybox-gpu.steps: egypt's load outran 25 there once
 sleep 45
-console
-sleep 1
 cmd god
 cmd notarget
 cmd noclip

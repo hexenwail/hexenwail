@@ -192,10 +192,9 @@ cmd echo REPORT-DEMO1-END
 sleep 1
 
 # --- castle4: the lava pit ---
-cmd map castle4
-sleep 20
 console
-sleep 1
+enter map castle4
+sleep 20
 cmd god
 cmd notarget
 cmd noclip
@@ -219,10 +218,9 @@ cmd echo REPORT-CASTLE4-END
 sleep 1
 
 # --- village3: the lava and *lowlight troughs ---
-cmd map village3
-sleep 20
 console
-sleep 1
+enter map village3
+sleep 20
 cmd god
 cmd notarget
 cmd noclip

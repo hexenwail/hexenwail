@@ -217,10 +217,16 @@ cmd echo REPORT-WALL-END
 sleep 1
 
 # --- demo1f: the graveyard's cobbles (rtex429, z = 0) ---
-cmd map demo1f
-sleep 20
+# Not `cmd map`: its closing toggle reaches the engine mid-load, and
+# Con_ToggleConsole_f ends the loading plaque, so the signon frames draw the
+# console forced up at full height.  Held at host_framerate 0.000001 it then
+# slides away at scr_conspeed a microsecond a frame, i.e. never, and covered
+# 10 - 12 on every binary (#553).  Host_Map_f closes the console itself.
+# One way back remains: a load past SCR_UpdateScreen's 25 s plaque timeout
+# ("load timeout." in qconsole.log) forces the console up the same way.
 console
-sleep 1
+enter map demo1f
+sleep 20
 cmd god
 cmd notarget
 cmd noclip
