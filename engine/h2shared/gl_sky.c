@@ -1732,6 +1732,7 @@ FIXME: eliminate cracks by adding an extra vert on tjuncs
 void Sky_DrawSkyBox (void)
 {
 	int		i;
+	double		znear, zfar, zsky;
 	qboolean	use_cubemap;
 	glprogram_t	*skyprog = &gl_shader_sky_boxside;
 
@@ -1750,9 +1751,13 @@ void Sky_DrawSkyBox (void)
 	sky_box_scroll = (float)fmod(cl.time * r_skybox_speed.value * (1.0 / 128.0), 1.0);
 	sky_box_rot = sky_box_scroll * (float)(M_PI * 0.5);
 
-	// Force skybox to render at maximum depth (always behind everything).
-	// Reversed-Z: max-depth is 0.0; standard: 1.0.
-	R_SetDepthRange (gl_clipcontrol_able ? 0.0f : 1.0f, gl_clipcontrol_able ? 0.0f : 1.0f);
+	/* Pin the box to the far end of the frame's range, not of the window's:
+	 * at r_mirroralpha < 1 R_Clear gives this view half of window Z and the
+	 * reflection the other half, and both ends here have to stay inside it.
+	 * Reversed-Z puts far at the range's near value.  GitHub #552. */
+	R_GetDepthRange (&znear, &zfar);
+	zsky = gl_clipcontrol_able ? znear : zfar;
+	R_SetDepthRange (zsky, zsky);
 
 	// Disable face culling so faces are visible from inside
 	R_SetCull (false);
@@ -1817,10 +1822,9 @@ void Sky_DrawSkyBox (void)
 		}
 	}
 
-	// Restore GL state — full window-Z range is symmetric, no flip needed
 	if (use_cubemap)
 		R_BindTextureTarget (0, GL_TEXTURE_CUBE_MAP, 0);
-	R_SetDepthRange (0.0, 1.0);
+	R_SetDepthRange (znear, zfar);
 	R_SetCull (true);
 }
 

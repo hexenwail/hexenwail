@@ -37,7 +37,15 @@
 #   * at 0.5, hiz is no more than at 1 plus SLACK (default 5) surfaces, the
 #     few the D24 depth buffer's 23 bits in half the range can round across;
 #   * at 1 and at 0.5, hiz is not 0 (the cull runs, and a "fix" that turns
-#     Hi-Z off at 0.5 does not pass).
+#     Hi-Z off at 0.5 does not pass);
+#   * at 0.5 with a skybox loaded (`sky hizmirror`, six 8x8 TGAs written into
+#     the game here), hiz is exactly what it was without one.  The box draws
+#     with depth writes off, so it adds nothing to the pyramid; what it can
+#     change is the depth range everything after it draws in.  Before #552,
+#     Sky_DrawSkyBox put back (0, 1), not the view's half, so the entities
+#     drawn after it wrote depth across all of window Z, and the pyramid the
+#     next frame culls against held it: the floor camera fell from 164 to 61
+#     surfaces culled, in both depth conventions.
 # Every sampled frame of a phase must agree (the camera is static): one
 # that varies fails.  Three runs a side on the P4 never varied.
 #
@@ -64,6 +72,15 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/hiz-mirror.XXXXXX")
 mkdir -p "$work/base"
 ln -s "$BASEDIR/data1" "$work/base/data1"
 python3 "$HERE/mk-mirror-testgame.py" "$work/base" >/dev/null
+# A skybox for the a05sky phase: uncompressed 24-bit TGAs, a flat colour each.
+python3 - "$work/base/mirror/gfx/env" <<'PY'
+import os, struct, sys
+os.makedirs(sys.argv[1], exist_ok=True)
+for i, suf in enumerate(("rt", "bk", "lf", "ft", "up", "dn")):
+    with open(os.path.join(sys.argv[1], "hizmirror_" + suf + ".tga"), "wb") as f:
+        f.write(struct.pack("<BBBHHBHHHHBB", 0, 0, 2, 0, 0, 0, 0, 0, 8, 8, 24, 0))
+        f.write(bytes((40 * i, 120, 200)) * 64)
+PY
 
 w() { local i; for i in $(seq "$1"); do echo wait; done; }
 st() { echo "echo PHASE-$1"; echo "gl_hiz_stats 1"; w 30; echo "gl_hiz_stats 0"; w 5; }
@@ -79,6 +96,7 @@ run() {
 		echo "r_drawviewmodel 0"; echo "gl_cull 1"
 		echo "setpos $2"; echo "r_mirroralpha 1"; w 60; st a1
 		echo "r_mirroralpha 0.5"; w 60; st a05
+		echo "sky hizmirror"; w 60; st a05sky
 		echo quit
 	} >"$ud/mirror/probe.cfg"
 	env -u LD_LIBRARY_PATH SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-offscreen}" SDL_AUDIODRIVER=dummy \
@@ -101,23 +119,24 @@ for cam in "demo1|-312 -2128 284 0 0 0" "demo1f|-860 -1990 30 10 40 0"; do
 	map=${cam%%|*}; pos=${cam##*|}
 	declare -A h=()
 	while read -r p v; do h[$p]=$v; done < <(run "$map" "$pos" "$z")
-	a1=${h[a1]:-?}; a05=${h[a05]:-?}
+	a1=${h[a1]:-?}; a05=${h[a05]:-?}; a05sky=${h[a05sky]:-?}
 	want=$([ "$z" = 1 ] && echo reversed || echo forward)
 	name="$map/$want-Z"
 	bad=
-	for v in "$a1" "$a05"; do
-		case "$v" in ''|'?'|varies) bad="no steady hiz (a1=$a1 a05=$a05)";; esac
+	for v in "$a1" "$a05" "$a05sky"; do
+		case "$v" in ''|'?'|varies) bad="no steady hiz (a1=$a1 a05=$a05 a05sky=$a05sky)";; esac
 	done
 	[ "${h[zmode]:-?}" = "$want" ] || bad="${bad:+$bad; }ran ${h[zmode]:-?}-Z, wanted $want (no ARB_clip_control?)"
 	if [ -z "$bad" ]; then
 		[ "$a1" -gt 0 ] || bad="hiz=0 at r_mirroralpha 1: the cull is not running"
 		[ "$a05" -gt 0 ] || bad="${bad:+$bad; }hiz=0 at r_mirroralpha 0.5: Hi-Z is off with the mirror"
 		[ "$a05" -le $((a1 + SLACK)) ] || bad="${bad:+$bad; }r_mirroralpha 0.5 culls $a05 against $a1 at 1: compared outside the view's depth range"
+		[ "$a05sky" = "$a05" ] || bad="${bad:+$bad; }a skybox moves hiz at 0.5 from $a05 to $a05sky: depth drawn after the sky left the view's half (#552)"
 	fi
 	if [ -n "$bad" ]; then
 		echo "FAIL $name: hiz at 1 = $a1, at 0.5 = $a05 -- $bad"; fail=1
 	else
-		echo "ok   $name: hiz at 1 = $a1, at 0.5 = $a05"
+		echo "ok   $name: hiz at 1 = $a1, at 0.5 = $a05, with a skybox $a05sky"
 	fi
 	unset h
 done
