@@ -2080,6 +2080,10 @@ static void GL_Init_NullGL (void)
 	 * -gpu (GitHub #521).  SDL_GPU's Metal driver ignores mip_lod_bias
 	 * (SDL_gpu.h), so there the bias is accepted and has no effect. */
 	gl_renderer_caps.texture_lod_bias = true;
+	/* r_hdr's RGBA16F targets: SDL_GPU requires every driver to render to
+	 * R16G16B16A16_FLOAT, and RGT_Format maps GL_RGBA16F to it (#340 P4e).
+	 * Before GL_PostProcess_Init, which reads it. */
+	gl_renderer_caps.float_color_buffer = true;
 	Con_SafeDPrintf ("[RENDERER] Profile: %s\n", gl_renderer_caps.profile_name);
 	gl_max_anisotropy = 1;
 

@@ -532,6 +532,35 @@ static void storage (void)
 	EndFrame ();
 }
 
+/* RG_Buf_Bufferless (#340 P4e): RG_DrawArrays draws only from a VAO this
+ * backend made with no attribute enabled -- bloom's empty VAO. */
+static void bufferless (void)
+{
+	GLuint	vao[2];
+
+	unhandled = 0;
+	RG_BindVertexArray (0);
+	CHECK (!RG_Buf_Bufferless () && unhandled == 1, "VAO 0: GL core draws nothing, counted");
+	RG_BindVertexArray (7);
+	CHECK (!RG_Buf_Bufferless (), "a name SDL_GPU never made: refused");
+	RG_GenVertexArrays (2, vao);
+	RG_BindVertexArray (vao[0]);
+	CHECK (RG_Buf_Bufferless (), "an empty VAO: drawn");
+	RG_EnableVertexAttribArray (ATTR_TEXCOORD, true);
+	unhandled = 0;
+	CHECK (!RG_Buf_Bufferless () && unhandled == 1, "a VAO with an array enabled: refused, counted");
+	RG_EnableVertexAttribArray (ATTR_TEXCOORD, false);
+	CHECK (RG_Buf_Bufferless (), "enabled then disabled again: drawn");
+	RG_BindVertexArray (vao[1]);
+	RG_EnableVertexAttribArray (15, true);
+	CHECK (!RG_Buf_Bufferless (), "the last attribute location counts too");
+	RG_BindVertexArray (0);
+	RG_DeleteVertexArrays (2, vao);
+	RG_BindVertexArray (vao[0]);
+	CHECK (!RG_Buf_Bufferless (), "a deleted VAO: refused");
+	RG_BindVertexArray (0);
+}
+
 int main (void)
 {
 	RG_Buf_Init ();
@@ -541,6 +570,7 @@ int main (void)
 	stale_name ();
 	skeletal_layout ();
 	storage ();
+	bufferless ();
 	RG_Buf_Shutdown ();
 	if (failures)
 		return 1;

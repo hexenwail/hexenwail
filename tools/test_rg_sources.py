@@ -233,28 +233,29 @@ Checked, from the sources (stock python3, lint.yml):
     * no gl*_fp call is left in gl_postprocess.c outside the OIT functions
       (P6) and the GPU palette-LUT builder (compute, P5), except where an
       SDL_GPU arm excludes it and PP_RAW_OK's few, each counted: MSAA's
-      multisampled storage (P6), bloom's bufferless draws (P4e), and
-      shutdown's program and buffer deletes; a function GPU_GATES gates whole
-      gets no credit for its gate;
+      multisampled storage (P6) and shutdown's program and buffer deletes
+      (bloom's three bufferless draws are R_DrawArrays since P4e); a
+      function GPU_GATES gates whole gets no credit for its gate;
     * the gates: OIT_InitShader returns false (GPU_GATES),
       PP_SceneSamples (PP_CreateFBO's sample count) forces 0 samples after
       the gl_max_samples clamp, and an FBO failure under -gpu returns from BeginFrame
       before the copyback fallback turns post-process on; the soft-particle
       snapshot is valid only if R_BlitFramebuffer says the copy was made;
-    * PpVert (pp_vert_mvp, float[16]) and PpParams (pp_params) are registered
-      as mirrors in PP_InitShader's SDL_GPU arm, PP_PushParams flushes both
-      after GL_GetMVP and returns, PP_BindUniformBlock returns under -gpu
-      before any GL call, and the blocks registered engine-wide leave room
-      under RG_MAX_BLOCKS for P4e's BloomParams.
+    * PpVert (pp_vert_mvp, float[16]), PpParams (pp_params) and, since P4e,
+      BloomParams (bloom_params) are registered as mirrors in PP_InitShader's
+      SDL_GPU arms, PP_PushParams flushes the first two after GL_GetMVP and
+      returns, PP_BindUniformBlock returns under -gpu before any GL call,
+      and the blocks registered engine-wide, BloomParams among them, fit
+      under RG_MAX_BLOCKS.
   the post-process chain on SDL_GPU render targets (#340 P4a-2,
   check_render_targets), which tools/sweep-pp-gpu.steps and tools/pp-diff.sh
   draw:
     * the chain runs under -gpu: PP_NeedsPostProcess names no backend, and
       GL_Init_NullGL reports the postprocess capability as
       GL_PostProcess_Available () says, not false;
-    * bloom stays off under -gpu until P4e: every "is bloom on" in
-      gl_postprocess.c is PP_BloomOn (), which returns false under R_GPU ()
-      and r_bloom.integer != 0 otherwise, so GL asks what it asked before;
+    * every "is bloom on" in gl_postprocess.c is PP_BloomOn (), which is
+      r_bloom.integer != 0 on both backends since P4e (it returned false
+      under R_GPU () until then), so GL asks what it asked before;
     * rg_target.c is in RG_SOURCES; glCheckFramebufferStatus says
       GL_FRAMEBUFFER_UNSUPPORTED for a second colour attachment before it
       can say COMPLETE (OIT's MRT, P6: never silently one attachment);
@@ -308,6 +309,25 @@ Checked, from the sources (stock python3, lint.yml):
       alone, and gl_rsurf.c's legacy vertex wobble stays `r_waterwarp &&
       !GL_PostProcess_Active()` at its three sites, naming no backend: the
       fallback for no chain, which under -gpu before P4a-2 was every frame.
+  bloom and HDR under -gpu (#340 P4e, check_bloom), which
+  tools/sweep-bloom-gpu.steps and tools/bloom-diff.sh draw:
+    * PP_BloomOn names no backend; PP_PushBloomParams writes the static
+      bloom_params mirror and, under -gpu, flushes "BloomParams" and
+      returns before any GL call; each of the three passes (bright,
+      downsample, upsample) sets its viewport, binds its pyramid level and
+      pushes its parameters before its R_DrawArrays (GL_TRIANGLES, 0, 3),
+      and the upsamples draw between R_SetBlend (true) / R_SetBlendFunc
+      (GL_ONE, GL_ONE) and the resting pair;
+    * the pyramid levels are colour-only (no depth attachment), and
+      RG_MakeKey turns the depth test off for a target with no depth, as GL
+      runs none there;
+    * RG_DrawArrays records from an empty VAO alone (RG_Buf_Bufferless)
+      with the RG_VL_NONE layout, which RG_Pipeline_Init interns second,
+      and the replay draws from the recorded first vertex and binds no
+      vertex buffer for a draw with none;
+    * GL_Init_NullGL turns float_color_buffer on before
+      GL_PostProcess_Init, and RGT_Format maps GL_RGBA16F to
+      R16G16B16A16_FLOAT (a colour target SDL_GPU guarantees).
 
 Usage: test_rg_sources.py [--root DIR]
 """
@@ -1494,6 +1514,8 @@ BUFFER_SEAMS = {
     "R_DrawElementsInstanced": ("gl_vbo.c",
                                 "glDrawElementsInstanced_fp (mode, count, type, indices, instancecount)",
                                 "RG_DrawIndexed (mode, count, type, indices, instancecount)"),
+    # bloom's bufferless fullscreen triangles (#340 P4e)
+    "R_DrawArrays": ("gl_vbo.c", "glDrawArrays_fp (mode, first, count)", "RG_DrawArrays (mode, first, count)"),
 }
 
 # rg_*.c lines P2d rests on: (file, function or None for the file, regex, why).
@@ -1692,10 +1714,11 @@ def check_storage(root):
     b = body_named(root, "engine/h2shared/gl_vidsdl.c", "GL_Init_NullGL")
     if b is not None:
         on = sorted(set(re.findall(r"\bgl_renderer_caps\.(\w+)\s*=\s*true\s*;", b)))
-        if on != ["shader_storage", "skeletal_animation", "texture_lod_bias"]:
+        if on != ["float_color_buffer", "shader_storage", "skeletal_animation", "texture_lod_bias"]:
             fail("engine/h2shared/gl_vidsdl.c: GL_Init_NullGL turns on %s; under -gpu exactly "
-                 "shader_storage, skeletal_animation (#340 P2e) and texture_lod_bias (sampler "
-                 "mip_lod_bias, GitHub #521) are real -- compute_shaders would "
+                 "shader_storage, skeletal_animation (#340 P2e), texture_lod_bias (sampler "
+                 "mip_lod_bias, GitHub #521) and float_color_buffer (r_hdr's RGBA16F targets, P4e) "
+                 "are real -- compute_shaders would "
                  "run the light cluster, culling and SSAO against the null table (P5)" % (on or "nothing"))
         # postprocess is the one that follows the chain (#340 P4a-2, check_render_targets).
         other = [c for c in re.findall(r"\bgl_renderer_caps\.(\w+)\s*=\s*([^;]+);", b)
@@ -2657,8 +2680,6 @@ PP_RAW_FUNCS = {
 PP_RAW_OK = {
     ("PP_CreateFBO", "glRenderbufferStorageMultisample"):
         (2, "the MSAA branch's storage, P6: -gpu forces 0 samples ahead of it"),
-    ("GL_PostProcess_EndFrame", "glDrawArrays"):
-        (3, "bloom's bufferless fullscreen triangles: R_DrawArrays is P4e"),
     ("GL_PostProcess_Shutdown", "glDeleteProgram"):
         (3, "programs at shutdown, restart-only under -gpu (P4 decision 9)"),
     ("GL_PostProcess_Shutdown", "glDeleteBuffers"):
@@ -2814,14 +2835,16 @@ def check_postprocess(root):
         reg = [(m.start(), m.group(1), re.sub(r"\s+", "", m.group(2)), re.sub(r"\s+", "", m.group(3)))
                for m in re.finditer(r"\bRG_UniformBlockRegister\s*\(\s*\"(\w+)\"\s*,\s*([^,]+),\s*"
                                     r"sizeof\s*\(([^)]*)\)\s*\)", b)]
-        want = {("PpVert", "pp_vert_mvp", "pp_vert_mvp"), ("PpParams", "&pp_params", "pp_params")}
+        want = {("PpVert", "pp_vert_mvp", "pp_vert_mvp"), ("PpParams", "&pp_params", "pp_params"),
+                ("BloomParams", "&bloom_params", "bloom_params")}
         arms = gpu_arms(b)
         inarm = all(any(not neg and tb <= pos < te for _, neg, (tb, te), _ in arms)
                     for pos, *_ in reg)
-        if {r[1:] for r in reg} != want or len(reg) != 2 or not inarm:
+        if {r[1:] for r in reg} != want or len(reg) != 3 or not inarm:
             fail("%s: PP_InitShader must register exactly RG_UniformBlockRegister (\"PpVert\", "
-                 "pp_vert_mvp, sizeof(pp_vert_mvp)) and (\"PpParams\", &pp_params, sizeof(pp_params)) "
-                 "inside its `if (R_GPU ())` arm (#340 P4a-1)" % rel)
+                 "pp_vert_mvp, sizeof(pp_vert_mvp)), (\"PpParams\", &pp_params, sizeof(pp_params)) "
+                 "(#340 P4a-1) and (\"BloomParams\", &bloom_params, sizeof(bloom_params)) (P4e), each "
+                 "inside an `if (R_GPU ())` arm" % rel)
     b = body("PP_PushParams")
     if b is not None:
         arm = re.search(r"#\s*ifdef\s+USE_SDL_GPU\s*\n\s*if\s*\(\s*R_GPU\s*\(\s*\)\s*\)\s*\{\s*"
@@ -2838,7 +2861,7 @@ def check_postprocess(root):
         fail("%s: PP_BindUniformBlock must return under R_GPU () before any GL call: the program's "
              "reflection fixes the slots, and the null glGetUniformBlockIndex answers 0, so its size "
              "query warned at every -gpu boot (#340 P4a-1)" % rel)
-    # RG_MAX_BLOCKS: what is registered, and room for P4e's BloomParams.
+    # RG_MAX_BLOCKS: what is registered, BloomParams (P4e) among it.
     fr = (root / "engine/h2shared/rg_frame.c").read_text(errors="replace")
     mx = re.search(r"#\s*define\s+RG_MAX_BLOCKS\s+(\d+)", fr)
     blocks = set()
@@ -2850,9 +2873,9 @@ def check_postprocess(root):
             blocks.add(m.group(1))
     if not mx:
         fail("rg_frame.c: no #define RG_MAX_BLOCKS")
-    elif len(blocks) < 9 or len(blocks) + 1 > int(mx.group(1)):
-        fail("RG_MAX_BLOCKS is %s and %d distinct blocks are registered (%s): it needs room for P4e's "
-             "BloomParams, and fewer than 9 means the scan is broken (#340 P4a-1)"
+    elif len(blocks) < 10 or '"BloomParams"' not in blocks or len(blocks) > int(mx.group(1)):
+        fail("RG_MAX_BLOCKS is %s and %d distinct blocks are registered (%s): every one needs a slot, "
+             "BloomParams among them (#340 P4e), and fewer than 10 means the scan is broken (#340 P4a-1)"
              % (mx.group(1), len(blocks), ", ".join(sorted(blocks))))
 
 
@@ -2878,17 +2901,16 @@ def check_render_targets(root):
             fail("%s: PP_NeedsPostProcess must wake the chain for bloom through PP_BloomOn () "
                  "(#340 P4a-2)" % pp)
     b = body_named(root, pp, "PP_BloomOn")
-    if b is not None and squash(b).rstrip("}") != squash(
-            "{#ifdef USE_SDL_GPU\nif (R_GPU ())\nreturn false;\n#endif\nreturn r_bloom.integer != 0;"):
-        fail("%s: PP_BloomOn must be exactly `#ifdef USE_SDL_GPU / if (R_GPU ()) return false; / #endif "
-             "/ return r_bloom.integer != 0;` -- bloom under -gpu is P4e (bufferless draws, no "
-             "BloomParams mirror), and on GL it must ask what r_bloom.integer asked (#340 P4a-2)" % pp)
+    if b is not None and squash(b).rstrip("}") != squash("{return r_bloom.integer != 0;"):
+        fail("%s: PP_BloomOn must be exactly `return r_bloom.integer != 0;` -- bloom runs under -gpu "
+             "since P4e, and on GL it must ask what r_bloom.integer asked (#340 P4a-2, P4e)" % pp)
     if (root / pp).is_file():
         code = strip_c_comments((root / pp).read_text(errors="replace"))
         uses = [code.count("\n", 0, m.start()) + 1 for m in re.finditer(r"\br_bloom\s*\.\s*(?:integer|value)\b", code)]
         if len(uses) != 1:
-            fail("%s: r_bloom is read at lines %s; only PP_BloomOn may read it, or -gpu builds the "
-                 "pyramid P4e has not routed (#340 P4a-2)" % (pp, ", ".join(map(str, uses)) or "none"))
+            fail("%s: r_bloom is read at lines %s; only PP_BloomOn may read it, so the wake, the "
+                 "pyramid, the passes and the composite agree (#340 P4a-2)"
+                 % (pp, ", ".join(map(str, uses)) or "none"))
         if len(re.findall(r"\bPP_BloomOn\s*\(\s*\)", code)) < 5:
             fail("%s: fewer than five callers of PP_BloomOn -- the wake, the pyramid, the passes, the "
                  "composite's texture and its strength each ask it (#340 P4a-2)" % pp)
@@ -3182,6 +3204,134 @@ def check_screen_warp(root):
         fail("%s: missing -- the #340 P4c check has nothing to read" % rs)
 
 
+def check_bloom(root):
+    """#340 P4e: bloom and HDR under -gpu."""
+    pp = "engine/h2shared/gl_postprocess.c"
+    rf = "engine/h2shared/rg_frame.c"
+    rb = "engine/h2shared/rg_buffer.c"
+    rp = "engine/h2shared/rg_pipeline.c"
+    rr = "engine/h2shared/rg_resource.c"
+    vid = "engine/h2shared/gl_vidsdl.c"
+    ri = "engine/h2shared/rg_internal.h"
+
+    if (root / pp).is_file():
+        code = strip_c_comments((root / pp).read_text(errors="replace"))
+        if not re.search(r"^static\s+bloom_params_t\s+bloom_params\s*;", code, re.M):
+            fail("%s: no `static bloom_params_t bloom_params;` -- the BloomParams mirror -gpu registers "
+                 "must outlive the push that fills it (#340 P4e)" % pp)
+    b = body_named(root, pp, "PP_PushBloomParams")
+    if b is not None:
+        fills = [re.search(r"\bbloom_params\.p\[%d\]\s*=\s*%s\s*;" % (i, v), b)
+                 for i, v in enumerate(("rcp_w", "rcp_h", "threshold", r"0\.0f"))]
+        arm = re.search(r"#\s*ifdef\s+USE_SDL_GPU\s*\n\s*if\s*\(\s*R_GPU\s*\(\s*\)\s*\)\s*\{\s*"
+                        r"RG_UniformBlockFlushed\s*\(\s*\"BloomParams\"\s*\)\s*;\s*return\s*;\s*\}\s*#\s*endif", b)
+        gl = re.search(r"\bglBufferSubData_fp\s*\(\s*GL_UNIFORM_BUFFER\s*,\s*0\s*,\s*sizeof\s*\(\s*bloom_params\s*\)"
+                       r"\s*,\s*&\s*bloom_params\s*\)", b)
+        if not (all(fills) and arm and gl and max(f.end() for f in fills) <= arm.start() < gl.start()) \
+                or re.search(r"\bRG_NoteUnhandled\b", b):
+            fail("%s: PP_PushBloomParams must fill bloom_params.p[0..3] (rcp_w, rcp_h, threshold, 0), then "
+                 "`#ifdef USE_SDL_GPU / if (R_GPU ()) { RG_UniformBlockFlushed (\"BloomParams\"); return; } / "
+                 "#endif`, then upload the same bytes to bloom_ubo -- a flush before the fill pushes the last "
+                 "pass's step and threshold (#340 P4e)" % pp)
+    b = body_named(root, pp, "GL_PostProcess_EndFrame")
+    if b is not None:
+        m = re.search(r"\bif\s*\(\s*PP_BloomOn\s*\(\s*\)\s*&&\s*bloom_fbo\s*\[\s*0\s*\]\s*&&\s*bloom_bright_prog\s*&&"
+                      r"\s*bloom_down_prog\s*&&\s*bloom_up_prog\s*\)\s*\{", b)
+        if not m:
+            fail("%s: GL_PostProcess_EndFrame's bloom block must be `if (PP_BloomOn () && bloom_fbo[0] && "
+                 "bloom_bright_prog && bloom_down_prog && bloom_up_prog)` -- PP_InitShader stops at the first "
+                 "program that fails, before the VAO and BloomParams exist (#340 P4e)" % pp)
+        blk = b[m.end() - 1:stmt_end(b, m.end() - 1)] if m else ""
+        draws = [d.start() for d in re.finditer(r"\bR_DrawArrays\s*\(\s*GL_TRIANGLES\s*,\s*0\s*,\s*3\s*\)\s*;", blk)]
+        if len(draws) != 3 or len(re.findall(r"\bR_DrawArrays\s*\(", b)) != 3 or re.search(r"\bglDrawArrays", b):
+            fail("%s: GL_PostProcess_EndFrame's bloom block must make exactly three `R_DrawArrays "
+                 "(GL_TRIANGLES, 0, 3);` (the bright pass, the downsample and the upsample loops) and no "
+                 "raw glDrawArrays (#340 P4e)" % pp)
+        else:
+            prev = 0
+            for i, d in enumerate(draws):
+                seg = blk[prev:d]
+                for what, rx in (("R_SetViewport", r"\bR_SetViewport\s*\(\s*0\s*,\s*0\s*,\s*bloom_w\s*\[\s*i?0?\s*\]\s*,"
+                                                    r"\s*bloom_h\s*\[\s*i?0?\s*\]\s*\)"),
+                                 ("R_BindFramebuffer", r"\bR_BindFramebuffer\s*\(\s*GL_FRAMEBUFFER\s*,\s*bloom_fbo\s*\["),
+                                 ("R_BindTextureSlot (0", r"\bR_BindTextureSlot\s*\(\s*0\s*,"),
+                                 ("PP_PushBloomParams", r"\bPP_PushBloomParams\s*\(")):
+                    if not re.search(rx, seg):
+                        fail("%s: bloom pass %d sets no %s before its R_DrawArrays -- the pyramid level's "
+                             "viewport, target, source and parameters are each pass's own (#340 P4e)"
+                             % (pp, i + 1, what))
+                prev = d
+            up = blk[draws[1]:draws[2]]
+            on = re.search(r"\bR_SetBlend\s*\(\s*true\s*\)\s*;\s*R_SetBlendFunc\s*\(\s*GL_ONE\s*,\s*GL_ONE\s*\)\s*;", up)
+            rest = re.search(r"\bR_SetBlendFunc\s*\(\s*GL_SRC_ALPHA\s*,\s*GL_ONE_MINUS_SRC_ALPHA\s*\)\s*;\s*"
+                             r"R_SetBlend\s*\(\s*false\s*\)\s*;", blk[draws[2]:])
+            if not (on and rest):
+                fail("%s: the bloom upsamples must draw under `R_SetBlend (true); R_SetBlendFunc (GL_ONE, "
+                     "GL_ONE);` and put back `R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); "
+                     "R_SetBlend (false);` after them -- additive into the level below (#340 P4e, #547)" % pp)
+        if re.search(r"\bR_GPU\s*\(|\bUSE_SDL_GPU\b", blk):
+            fail("%s: the bloom passes name the backend -- one path, which tools/sweep-bloom-gpu.steps "
+                 "compares frame by frame (#340 P4e)" % pp)
+    b = body_named(root, pp, "PP_CreateBloomFBOs")
+    if b is not None and (re.search(r"\bR_FramebufferRenderbuffer\s*\(|GL_DEPTH", b) or
+                          len(re.findall(r"\bR_FramebufferTexture2D\s*\(\s*GL_FRAMEBUFFER\s*,\s*GL_COLOR_ATTACHMENT0\b", b)) != 1):
+        fail("%s: PP_CreateBloomFBOs must attach one colour texture per level and no depth: the "
+             "pyramid's pipelines are keyed colour-only (#340 P4e)" % pp)
+
+    b = body_named(root, rp, "RG_MakeKey")
+    if b is not None and not re.search(
+            r"\bif\s*\(\s*depth\s*==\s*SDL_GPU_TEXTUREFORMAT_INVALID\s*\)\s*\{\s*k->depth_test\s*=\s*k->depth_write\s*=\s*0\s*;"
+            r"\s*k->depth_func\s*=\s*GL_LESS\s*;\s*\}", b):
+        fail("%s: RG_MakeKey must turn the depth test and write off for a target with no depth "
+             "(`if (depth == SDL_GPU_TEXTUREFORMAT_INVALID) { k->depth_test = k->depth_write = 0; "
+             "k->depth_func = GL_LESS; }`): GL runs none there (#340 P4e)" % rp)
+    b = body_named(root, rp, "RG_Pipeline_Init")
+    if b is not None and not re.search(
+            r"!=\s*RG_VL_IMM\s*\)\s*Sys_Error\s*\([^;]*;\s*memset\s*\(\s*&imm\s*,\s*0\s*,\s*sizeof\s*\(\s*imm\s*\)\s*\)\s*;"
+            r"\s*if\s*\(\s*RG_LayoutIntern\s*\(\s*&imm\s*\)\s*!=\s*RG_VL_NONE\s*\)\s*Sys_Error", b):
+        fail("%s: RG_Pipeline_Init must intern the empty layout right after the immediate one and check "
+             "it is RG_VL_NONE (#340 P4e)" % rp)
+    if (root / ri).is_file():
+        hdr = strip_c_comments((root / ri).read_text(errors="replace"))
+        if not re.search(r"#\s*define\s+RG_VL_IMM\s+0u\b", hdr) or not re.search(r"#\s*define\s+RG_VL_NONE\s+1u\b", hdr):
+            fail("%s: RG_VL_IMM must be 0u and RG_VL_NONE 1u, the order RG_Pipeline_Init interns them" % ri)
+    b = body_named(root, rf, "RG_DrawArrays")
+    if b is None:
+        fail("%s: no RG_DrawArrays -- R_DrawArrays's -gpu arm (#340 P4e)" % rf)
+    else:
+        guard = re.search(r"\bif\s*\(\s*!\s*RG_Buf_Bufferless\s*\(\s*\)\s*\)\s*\{\s*rgf_dropped\+\+\s*;\s*return\s*;\s*\}", b)
+        begin = re.search(r"\bd\s*=\s*RGF_BeginDraw\s*\(\s*prog\s*,\s*prim\s*,\s*RG_VL_NONE\s*\)\s*;", b)
+        rec = re.search(r"\bd->nvb\s*=\s*0\s*;\s*d->indexed\s*=\s*RGD_ARRAYS\s*;\s*d->first_vertex\s*=\s*\(Uint32\)\s*first\s*;"
+                        r"\s*d->count\s*=\s*\(Uint32\)\s*count\s*;\s*RGF_CommitDraw\s*\(\s*d\s*,\s*ps\s*\)\s*;", b)
+        if not (guard and begin and rec and guard.end() <= begin.start() < rec.start()):
+            fail("%s: RG_DrawArrays must drop (counted) unless RG_Buf_Bufferless (), then record through "
+                 "RGF_BeginDraw (prog, prim, RG_VL_NONE) with no vertex buffer, RGD_ARRAYS, the first "
+                 "vertex and the count (#340 P4e)" % rf)
+    b = body_named(root, rf, "RGF_Replay")
+    if b is not None and not (
+            re.search(r"\bif\s*\(\s*d->nvb\s*\)\s*SDL_BindGPUVertexBuffers\s*\(", b) and
+            re.search(r"\bSDL_DrawGPUPrimitives\s*\(\s*pass\s*,\s*d->count\s*,\s*d->instances\s*,\s*d->first_vertex\s*,\s*0\s*\)", b)):
+        fail("%s: RGF_Replay must bind vertex buffers only when the draw has some and draw an array "
+             "draw from d->first_vertex (#340 P4e)" % rf)
+    b = body_named(root, rb, "RG_Buf_Bufferless")
+    if b is None or not re.search(r"\bif\s*\(\s*v->attr\s*\[\s*i\s*\]\.enabled\s*\)", b) or \
+            not re.search(r"\(\s*rgb_vao\s*!=\s*0\s*\)\s*\?\s*RGB_Vao\s*\(\s*rgb_vao\s*\)\s*:\s*NULL", b):
+        fail("%s: RG_Buf_Bufferless must refuse VAO 0, a VAO SDL_GPU never made, and one with any "
+             "attribute enabled (#340 P4e)" % rb)
+
+    b = body_named(root, vid, "GL_Init_NullGL")
+    if b is not None:
+        on = re.search(r"\bgl_renderer_caps\.float_color_buffer\s*=\s*true\s*;", b)
+        init = re.search(r"\bGL_PostProcess_Init\s*\(\s*\)\s*;", b)
+        if not (on and init and on.end() <= init.start()):
+            fail("%s: GL_Init_NullGL must set gl_renderer_caps.float_color_buffer = true before "
+                 "GL_PostProcess_Init () -- r_hdr's RGBA16F targets (#340 P4e)" % vid)
+    b = body_named(root, rr, "RGT_Format")
+    if b is not None and not re.search(r"\bcase\s+GL_RGBA16F\s*:\s*\*fmt\s*=\s*SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT\s*;", b):
+        fail("%s: RGT_Format must map GL_RGBA16F to SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT -- an 8-bit "
+             "target clips r_hdr's overbright scene (#340 P4e)" % rr)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     ap.add_argument("--root", type=Path, default=ROOT)
@@ -3208,6 +3358,7 @@ def main(argv=None):
     check_render_targets(root)
     check_soft_particles(root)
     check_screen_warp(root)
+    check_bloom(root)
     nfiles = 0
     rg_files = []
     for p in sorted(eng.rglob("*")):

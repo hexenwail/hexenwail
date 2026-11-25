@@ -199,6 +199,13 @@ static qboolean RG_MakeKey (rgpipekey_t *k, const rgprog_t *prog, SDL_GPUPrimiti
 	k->depth_test = s->depth_test;
 	k->depth_write = s->depth_mask;
 	k->depth_func = (s->depth_func == RP_ENUM_UNKNOWN) ? GL_LESS : s->depth_func;
+	/* GL runs no depth test on a target without depth: it passes and writes
+	 * nothing (the bloom pyramid's colour-only targets, #340 P4e). */
+	if (depth == SDL_GPU_TEXTUREFORMAT_INVALID)
+	{
+		k->depth_test = k->depth_write = 0;
+		k->depth_func = GL_LESS;
+	}
 	if (s->cull)
 	{
 		if (s->cull_face == GL_FRONT_AND_BACK)
@@ -415,6 +422,9 @@ void RG_Pipeline_Init (void)
 	imm.attr[3].offset = 7 * sizeof(float);
 	if (RG_LayoutIntern (&imm) != RG_VL_IMM)
 		Sys_Error ("SDL_GPU: the immediate layout is not layout %u", RG_VL_IMM);
+	memset (&imm, 0, sizeof(imm));
+	if (RG_LayoutIntern (&imm) != RG_VL_NONE)
+		Sys_Error ("SDL_GPU: the empty layout is not layout %u", RG_VL_NONE);
 }
 
 void RG_Pipeline_Shutdown (void)

@@ -360,6 +360,9 @@ typedef struct {
 /* immvert_t (gl_vbo.c): pos3 tc2 lm2 color4, 44 bytes, interned first by
  * RG_Pipeline_Init. */
 #define RG_VL_IMM	0u
+/* No vertex buffer and no attribute: RG_DrawArrays's bufferless fullscreen
+ * passes (#340 P4e), interned second. */
+#define RG_VL_NONE	1u
 
 void	RG_Pipeline_Init (void);
 void	RG_Pipeline_Shutdown (void);
@@ -402,6 +405,10 @@ void	RG_Buf_Shutdown (void);
  * RG_Buf_MarkRead stamps those buffers as read by the open segment, once
  * the draw is recorded, so an upload into one ends the segment first. */
 qboolean RG_Buf_ForDraw (int index_bytes, rgvinput_t *in);
+/* Whether the bound VAO is one RG_DrawArrays can draw from: made, and with
+ * no attribute enabled (#340 P4e); false, and counted, otherwise.  GL core
+ * draws nothing with VAO 0 bound, so neither does this. */
+qboolean RG_Buf_Bufferless (void);
 void	RG_Buf_MarkRead (const rgvinput_t *in);
 /* Queued buffer uploads, as RG_Res_PendingBytes / StageUploads /
  * IssueUploads, and the buffers retired during the frame. */

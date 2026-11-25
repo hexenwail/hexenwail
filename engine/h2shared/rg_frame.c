@@ -176,6 +176,7 @@ typedef struct {
 	SDL_GPUBuffer			*ib;		/* RGD_BUFFER */
 	SDL_GPUIndexElementSize		ib_size;
 	Uint32				first_index;	/* RGD_BUFFER */
+	Uint32				first_vertex;	/* RGD_ARRAYS: RG_DrawArrays's first */
 	Uint32				instances;
 	Uint32				count;		/* vertices, or indices */
 	int				nvs, nfs;
@@ -903,6 +904,56 @@ void RG_DrawIndexed (GLenum mode, GLsizei count, GLenum type, const void *indice
 	RGF_CommitDraw (d, ps);
 }
 
+void RG_DrawArrays (GLenum mode, GLint first, GLsizei count)
+{
+	const rpipestate_t	*ps = R_PipelineState ();
+	const rgprog_t		*prog = RG_Program (ps->program);
+	SDL_GPUPrimitiveType	prim;
+	rgdraw_t		*d;
+
+	if (count <= 0 || first < 0)
+		return;
+	if (!prog || prog->compute)
+	{
+		RG_NoteUnhandled ("array draw with no SDL_GPU program bound");
+		return;
+	}
+	switch (mode)
+	{
+	case GL_TRIANGLES:
+		count -= count % 3;
+		prim = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+		break;
+	case GL_TRIANGLE_STRIP:	prim = SDL_GPU_PRIMITIVETYPE_TRIANGLESTRIP; break;
+	case GL_LINES:
+		count -= count % 2;
+		prim = SDL_GPU_PRIMITIVETYPE_LINELIST;
+		break;
+	case GL_LINE_STRIP:	prim = SDL_GPU_PRIMITIVETYPE_LINESTRIP; break;
+	case GL_POINTS:		prim = SDL_GPU_PRIMITIVETYPE_POINTLIST; break;
+	default:
+		RG_NoteUnhandled ("array draw in a GL primitive mode with no SDL_GPU equivalent (dropped)");
+		return;
+	}
+	if (count <= 0)
+		return;
+	if (!rgf_active)
+		RG_BeginFrame (rgf_w, rgf_h);
+	if (!RG_Buf_Bufferless ())
+	{
+		rgf_dropped++;
+		return;
+	}
+	d = RGF_BeginDraw (prog, prim, RG_VL_NONE);
+	if (!d)
+		return;
+	d->nvb = 0;
+	d->indexed = RGD_ARRAYS;
+	d->first_vertex = (Uint32) first;
+	d->count = (Uint32) count;
+	RGF_CommitDraw (d, ps);
+}
+
 /* ------------------------------------------------------------------ */
 /* Segments                                                            */
 /* ------------------------------------------------------------------ */
@@ -1121,7 +1172,8 @@ static void RGF_Replay (SDL_GPURenderPass *pass)
 			vb[k].buffer = d->vb[k] ? d->vb[k] : rgf_vbuf;
 			vb[k].offset = d->vb_ofs[k];
 		}
-		SDL_BindGPUVertexBuffers (pass, 0, vb, d->nvb);
+		if (d->nvb)
+			SDL_BindGPUVertexBuffers (pass, 0, vb, d->nvb);
 		if (d->indexed != RGD_ARRAYS)
 		{
 			SDL_GPUBufferBinding	ib;
@@ -1133,7 +1185,7 @@ static void RGF_Replay (SDL_GPURenderPass *pass)
 			SDL_DrawGPUIndexedPrimitives (pass, d->count, d->instances, d->first_index, 0, 0);
 		}
 		else
-			SDL_DrawGPUPrimitives (pass, d->count, d->instances, 0, 0);
+			SDL_DrawGPUPrimitives (pass, d->count, d->instances, d->first_vertex, 0);
 	}
 }
 

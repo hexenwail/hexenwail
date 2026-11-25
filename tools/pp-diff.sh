@@ -14,7 +14,7 @@
 #
 #   0. Both sides have every frame, each 800x600, the size the masks and
 #      thresholds are for.
-#   1. Every frame but 20-gy-bloom (check 5's): PSNR against GL >= PSNR_MIN
+#   1. Every frame: PSNR against GL >= PSNR_MIN
 #      (default 42), as tools/shot-diff.sh's PSNR_MIN mode; the r_softemu
 #      frames 26-28 >= SOFTEMU_MIN (default 40), because snapping to the
 #      palette turns a rasterizer's last-bit differences into whole palette
@@ -37,14 +37,15 @@
 #      the upscale).  In 06 (0.75) the 3D view has at
 #      most 3/4 of its 560 rows distinct (+1%, 426), on each side: every
 #      fourth row repeats the one above.
-#   5. The gates that keep P6's and P4e's work off under -gpu, as frames that
-#      must be identical on -gpu: 13-pools-oit equals 09-pools (r_oit 1: OIT
-#      is P6, its gates off -- a removed gate loses every translucent), and
-#      20-gy-bloom equals 14-gy-gamma09 (r_bloom 1: bloom is P4e, PP_BloomOn
-#      false).  Bloom's GL pair must differ (else the check proves nothing);
-#      OIT's is printed, not checked: GL's OIT resolves one water layer to
-#      the pixels sorted blending gives (0 differ at gamma 0.9), so what
-#      shows the gate matters is the broken build without it, not GL.
+#   5. The gate that keeps P6's work off under -gpu, as frames that must be
+#      identical on -gpu: 13-pools-oit equals 09-pools (r_oit 1: OIT is P6,
+#      its gates off -- a removed gate loses every translucent).  GL's pair
+#      is printed, not checked: GL's OIT resolves one water layer to the
+#      pixels sorted blending gives (0 differ at gamma 0.9), so what shows
+#      the gate matters is the broken build without it, not GL.  Bloom runs
+#      under -gpu since P4e: 20-gy-bloom (r_bloom 1) differs from
+#      14-gy-gamma09 in at least MIN_CHANGED pixels on each side
+#      (tools/bloom-diff.sh checks the bloom itself).
 #
 # THE THRESHOLDS are tabled in tools/sweep-pp-gpu.steps' header: the honest
 # numbers they were set from and the broken builds that fail them.
@@ -124,7 +125,6 @@ done
 
 # 1
 for n in $FRAMES; do
-	[ "$n" = 20-gy-bloom ] && continue
 	min=$PSNR_MIN
 	case $n in 2[678]-gy-softemu*) min=$SOFTEMU_MIN ;; esac
 	p=$(psnr "$GL/$n.png" "$GPU/$n.png")
@@ -168,18 +168,19 @@ if has 06-gy-scale075; then
 fi
 
 # 5
-for pr in "13-pools-oit 09-pools oit" "20-gy-bloom 14-gy-gamma09 bloom"; do
-	set -- $pr
-	has "$1" "$2" || continue
-	c=$(changed "$GPU/$1.png" "$GPU/$2.png")
-	[ "${c:-1}" = 0 ]; report "$3 gate -gpu" $? "-gpu: $1 against $2, $c pixels differ, want 0"
-	c=$(changed "$GL/$1.png" "$GL/$2.png"); c=${c:-0}
-	if [ "$3" = oit ]; then
-		printf '%-32s INFO  (GL: %s against %s, %s pixels differ, not checked)\n' "$3 effect GL" "$1" "$2" "$c"
-		continue
-	fi
-	[ "$c" -ge "$MIN_CHANGED" ]; report "$3 effect GL" $? "GL: $1 against $2, $c pixels differ, min $MIN_CHANGED (else the gate check proves nothing)"
-done
+if has 13-pools-oit 09-pools; then
+	c=$(changed "$GPU/13-pools-oit.png" "$GPU/09-pools.png")
+	[ "${c:-1}" = 0 ]; report "oit gate -gpu" $? "-gpu: 13-pools-oit against 09-pools, $c pixels differ, want 0"
+	c=$(changed "$GL/13-pools-oit.png" "$GL/09-pools.png"); c=${c:-0}
+	printf '%-32s INFO  (GL: 13-pools-oit against 09-pools, %s pixels differ, not checked)\n' "oit effect GL" "$c"
+fi
+if has 20-gy-bloom 14-gy-gamma09; then
+	for side in GL GPU; do
+		eval d=\$$side
+		c=$(changed "$d/20-gy-bloom.png" "$d/14-gy-gamma09.png"); c=${c:-0}
+		[ "$c" -ge "$MIN_CHANGED" ]; report "bloom effect $side" $? "$side: 20-gy-bloom against 14-gy-gamma09, $c pixels differ, min $MIN_CHANGED"
+	done
+fi
 
 [ $rc -eq 0 ] && echo "pp-diff: all checks pass" || echo "pp-diff: DIFFERENCES FOUND"
 exit $rc
