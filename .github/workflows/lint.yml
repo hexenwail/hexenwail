@@ -570,6 +570,14 @@ jobs:
       - name: SDL_GPU soft-particle depth snapshot
         run: python3 tools/test_soft_depth_gpu.py
 
+      # r_pp_time, the screen warp's clock: -1 (the default) is exactly the
+      # realtime every warp-time write used before, so GL frames do not move;
+      # >= 0 holds the phase for tools/sweep-warp-gpu.steps, whose shots all
+      # run with it held, and whose warp model (tools/warp-model.py) tells
+      # the honest warp from a flipped, doubled or unfrozen one (#340 P4c).
+      - name: Post-process warp clock and the warp sweep's model
+        run: python3 tools/test_pp_time.py
+
       # tools/sweep-mirror-gpu.steps' test game: the miptex rename and each
       # refusal (two planes, a brush entity, a map that already has a
       # mirror ...) on a synthetic BSP, so the sweep's map cannot quietly

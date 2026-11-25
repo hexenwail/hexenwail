@@ -38,12 +38,11 @@
 # and r_softemu 1/2/3.  10 castle4's lava and 11 egypt's north camera (the
 # stencil in pp_fbo's depth texture) at gamma 0.9.  pp-diff.sh compares 01-14,
 # 22-24 and 26-28 against GL, and 20 against 14 on -gpu (the bloom gate); 21
-# and 25 wait for their phases (P4c the warp, P4e bloom).  22-24 joined at P4b
+# and 25 are not compared (21 waits for P4e bloom).  22-24 joined at P4b
 # (56.9 - 57.0 dB on its binary; tools/sweep-softpart-gpu.steps checks the
-# fade itself).  So
-# the 3D-effects pass (PP_BlitWith3DEffects: the underwater warp, motion
-# blur), which runs under -gpu since P4a-2, has no frame checked here until
-# P4c's r_pp_time makes one repeatable.
+# fade itself).  The 3D-effects pass (PP_BlitWith3DEffects: the underwater
+# warp, motion blur) is tools/sweep-warp-gpu.steps' since P4c, with
+# r_pp_time holding the warp's phase.
 #
 # GAMMA BELOW 1 ONLY.  V_UpdatePalette (view.c) puts any gamma above 1 back
 # to 1, so a "gamma 1.2" frame is the gamma-1 frame and proves nothing: the
@@ -58,8 +57,9 @@
 # tools/bloom-sky-check.sh.
 #
 # 25-underwater-warp is not repeatable: the warp's phase is realtime, which
-# pause does not stop (P4c adds r_pp_time).  Compare it against the run-to-run
-# spread of one binary, not against AE 0.
+# pause does not stop, and this sweep leaves r_pp_time at -1 so its frames
+# stay comparable with the ones before P4c.  Compare it against the
+# run-to-run spread of one binary, not against AE 0.
 #
 # Settings as sweep-liquid-gpu.steps, for the same reasons, plus
 # con_notifytime 0: each `cmd` echoes into the notify lines at the top of the

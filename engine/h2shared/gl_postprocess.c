@@ -365,6 +365,17 @@ cvar_t	r_bloom_threshold = {"r_bloom_threshold", "1.0", CVAR_ARCHIVE};	/* lumina
  * hard rectangular cut while leaving the flame at close to full brightness. */
 cvar_t	r_softparticles = {"r_softparticles", "0", CVAR_ARCHIVE};
 cvar_t	r_softparticles_scale = {"r_softparticles_scale", "8", CVAR_ARCHIVE};
+/* Test hook: the clock the screen warp's phase reads (#340 P4c).  -1, the
+ * default, is realtime, which a pause does not stop, so no two runs catch the
+ * warp at one phase; >= 0 holds it at that many seconds, which is what lets
+ * tools/sweep-warp-gpu.steps compare GL and -gpu frame by frame.  Not
+ * archived: a config left frozen would stop the warp for good. */
+cvar_t	r_pp_time = {"r_pp_time", "-1", CVAR_NONE};
+
+static float PP_Time (void)
+{
+	return (r_pp_time.value >= 0.0f) ? r_pp_time.value : (float)realtime;
+}
 
 /* r_hdr wants RGBA16F colour attachments, which are core on the desktop tier
  * but need EXT_color_buffer_float on ES/WebGL2.  Without it the FBO comes back
@@ -2329,6 +2340,7 @@ void GL_PostProcess_Init (void)
 	Cvar_RegisterVariable(&r_bloom_threshold);
 	Cvar_RegisterVariable(&r_softparticles);
 	Cvar_RegisterVariable(&r_softparticles_scale);
+	Cvar_RegisterVariable(&r_pp_time);
 
 	Cvar_SetCallback(&r_hdr, PP_FormatChanged);
 	Cvar_SetCallback(&r_bloom, PP_FormatChanged);
@@ -2631,7 +2643,7 @@ static void PP_BlitWith3DEffects (GLuint src_tex, int w, int h, float warp, floa
 	pp_params.p1[3] = 0.0f;			/* fxaa_on */
 	pp_params.p1[0] = scale;		/* scale */
 	pp_params.p1[1] = warp;			/* waterwarp */
-	pp_params.p1[2] = (float)realtime;	/* time */
+	pp_params.p1[2] = PP_Time ();		/* time */
 	pp_params.p2[0] = 1.0f / w;		/* rcpFrame */
 	pp_params.p2[1] = 1.0f / h;		/* rcpFrame.y */
 	/* No bloom here.  This pass (the 3D effects: motion blur, and water warp
@@ -3035,7 +3047,7 @@ apply_shader:
 		}
 		pp_params.p1[1] = warp;		/* waterwarp */
 	}
-	pp_params.p1[2] = (float)realtime;			/* time */
+	pp_params.p1[2] = PP_Time ();				/* time */
 	pp_params.p1[3] = Cvar_VariableValue("gl_fxaa");	/* fxaa_on */
 	pp_params.p2[0] = 1.0f / glwidth;			/* rcpFrame */
 	pp_params.p2[1] = 1.0f / glheight;			/* rcpFrame.y */
