@@ -1,0 +1,213 @@
+# sweep-softpart-gpu.steps -- soft particles through the SDL_GPU backend
+# (-gpu) against GL (#340 P4b).  r_softparticles fades a sprite where it cuts
+# into the opaque world: GL_SoftDepth_Capture (gl_postprocess.c) copies the
+# scene's depth after the opaque pass, and the sprite shader reads it back
+# with texelFetch at gl_FragCoord.  Under -gpu the copy is rg_target.c's
+# depth arm, from framebuffer 0 or pp_fbo, whichever the scene draws into.
+#
+# Run the SAME binary both ways, with identical settings, on the game
+# tools/mk-mirror-testgame.py writes (07 and 08 need its mirror; the rest is
+# demo1 as shipped, but for that one wall panel, which is out of their shot):
+#
+#   ./tools/mk-mirror-testgame.py $B          # $B holds data1 (see its header)
+#   A="-fsaa 0 +gamma 1 +host_framerate 0.000001 -game mirror +map demo1"
+#   STEPS=tools/sweep-softpart-gpu.steps ENGINE=$E ./tools/headless-drive.sh script /tmp/sp-gl  $B $A
+#   VK_ICD_FILENAMES=<lvp_icd json> VK_LAYER_PATH=<vulkan-validation-layers>/share/vulkan/explicit_layer.d \
+#       STEPS=tools/sweep-softpart-gpu.steps ENGINE=$E \
+#       ./tools/headless-drive.sh script /tmp/sp-gpu $B -gpu +gpu_allow_software 1 +gpu_debug 1 $A
+#   ./tools/softpart-diff.sh /tmp/sp-gl /tmp/sp-gpu
+#
+# softpart-diff.sh also reads /tmp/sp-gpu/qconsole.log: gpu_unrouted counts 0
+# in every REPORT-<name>-BEGIN / -END section (reset ahead of each section's
+# first shot) and there is no "Validation Error".  host_framerate holds game
+# time as tools/sweep-mirror-gpu.steps explains (the player in the mirror).
+#
+# CONTENT.  testentity sprites (P3b's fixed content), placed to cut into
+# the world; the steps set what they need on both sides, gamma 0.9 among it
+# so post-process is up unless a frame turns it off.
+#   01-05  demo1's graveyard: an s_light 2 units off the west wall, an
+#          s_explod frame and an s_light half into the cobbles, and a
+#          translucent tombstone (drawflags 128) in front of the explosion,
+#          which writes depth after the snapshot is taken: a snapshot taken
+#          after the translucents fades the explosion against it.
+#          01 r_softparticles 0, 02 1, 03 1 at r_softparticles_scale 24,
+#          04 1 at r_scale 0.5 (pp_fbo at half size is the source) and
+#          04-off at 0, 05 1 at gamma 1 (post-process off: framebuffer 0 is
+#          the source) and 05-off at 0.
+#   06     two translucent sprites in mid air, nothing within the fade
+#          distance: 06-clear at 1 must equal 06-clear-off at 0 exactly.
+#          Translucent because an opaque sprite gets blending turned on by
+#          the fade (R_DrawSpriteModel), which softens its filtered edge
+#          whatever the depth says.
+#   07-08  the mirror (r_mirroralpha 0.5): four sprites into the floor behind
+#          the viewer, seen in the reflection, whose pass has its own
+#          snapshot and draws into half the depth range, and two on the
+#          panel's wall in the view, the other half.  07 at scale 8, 08 at
+#          24, 07-off at 0.
+#
+# THE THRESHOLDS.  Measured 2026-11-24, 800x600, llvmpipe GL against
+# lavapipe -gpu (Mesa 26.2), ImageMagick 7.1.2, HUD masked, three runs a
+# side on the final binary, and for 01-06 three more on the binary before
+# review fixes that touched no draw path:
+#
+#   check                       GL vs -gpu        GL vs GL        Tesla P4 -gpu
+#   PSNR, every frame           72.6 - 79.5       identical, but  51.9 - 53.8
+#                                                 07/08 104.0
+#   fade 02 / 03 pixels         4472 / 7228, both sides, x6        4466 / 7237
+#   fade 04 / 05 pixels         4584 / 4474, both sides, x6        4596 / 4466
+#   fade 07 / 08 pixels         1399 / 2298, both sides, x3        1387 / 2292
+#   fade sums, -gpu vs GL       within 0.004%                      within 0.9%
+#   06 clear, pixels changed    0 / 0                              0
+#
+# -gpu against -gpu, 07 and 08 differ at 71.5 dB (the mirror's candle flames,
+# as in tools/sweep-mirror-gpu.steps); every other frame is identical.  GL
+# with this change against GL with master: every frame identical, but 07 and
+# 08's 0.001 AE, which GL also shows against itself.
+#
+# Broken builds (one -gpu run each, against honest GL run 1), every one
+# failing:
+#
+#   master (pre-P4b: the gate)          every fade 0 pixels; 02's PSNR is
+#                                       42.3 -- above the gate, which is why
+#                                       the fade is counted
+#   copy skipped, snapshot valid        02 4472 / 1474 (the edges blending
+#                                       turns on), sums 895 / 193; 03 = 02
+#   copy after the translucents         02 4472 / 6226, sums 895 / 1723,
+#                                       PSNR 40.1
+#   copy from framebuffer 0 while       02 4472 / 1474; 04 4584 / 0, and
+#     pp_fbo is bound                   369 declined copies in gpu_unrouted
+#   forward-Z branch in                 02 4472 / 10396, 06 0 / 27431,
+#     R_SoftParticleParams              PSNR 34.6
+#   depth range not folded              07 1399 / 1242, sums 182 / 156;
+#                                       08 2298 / 1658, sums 357 / 220;
+#                                       every other check passes
+#   framebuffer 0's snapshot as         05 4474 / 0, and 432 declined copies
+#     GL_DEPTH_COMPONENT24 (a format    in gpu_unrouted; every other check
+#     mismatch silently skipped)        passes
+#
+# So: PSNR 42 (the particles sweep's; 9.9 dB under the worst honest frame,
+# 7.4 over the best broken one); MIN_CHANGED 50 (the least honest fade is
+# 1399); FADE_TOL 10% (honest at most 0.9%, the nearest broken build 11.2%
+# on 07 and 27.9% on 08, which is there for that margin).  The gate is for
+# the Mesa pair; a hardware pair needs its own three runs.
+
+sleep 20
+cmd god
+cmd notarget
+cmd noclip
+cmd viewsize 120
+cmd crosshair 0
+cmd showpause 0
+cmd con_notifytime 0
+cmd r_skyspeed_back 0
+cmd r_skyspeed_front 0
+cmd r_skybox_speed 0
+cmd r_flatlightstyles 1
+cmd r_dynamic 0
+cmd r_gpulightstyles 0
+cmd r_ssao 0
+cmd r_bloom 0
+cmd r_dlight_occlusion 0
+cmd r_alias_gpu 0
+cmd fog 0
+cmd gl_texture_anisotropy 1
+cmd r_oit 0
+cmd r_waterwarp 0
+cmd r_softemu 0
+cmd r_scale 1
+cmd gl_fxaa 0
+cmd gl_waterwarp_speed 0
+cmd r_caustics 0
+cmd r_drawviewmodel 0
+cmd r_drawentities 1
+cmd r_drawparticles 0
+cmd gl_glows 0
+cmd gl_missile_glows 0
+cmd gl_other_glows 0
+cmd r_wateralpha 0.33
+cmd r_mirroralpha 1
+cmd gl_cull 1
+cmd r_softparticles 0
+cmd r_softparticles_scale 8
+cmd gamma 0.9
+sleep 2
+
+# --- the graveyard: sprites into the cobbles and the west wall ---
+cmd testentity models/s_light.spr -1318 -1700 40
+cmd testentity models/s_explod.spr -1250 -1800 8 0 0 0 3
+cmd testentity models/s_light.spr -1220 -1860 4
+cmd testentity models/tombstn1.mdl -1215 -1790 0 0 90 0 0 128
+cmd setpos -1100 -1800 20 10 175 0
+sleep 2
+cmd gpu_unrouted reset
+cmd pause
+shot 01-off
+cmd r_softparticles 1
+shot 02-soft
+cmd r_softparticles_scale 24
+shot 03-scale24
+cmd r_softparticles_scale 8
+cmd r_scale 0.5
+shot 04-rscale
+cmd r_softparticles 0
+shot 04-rscale-off
+cmd r_scale 1
+cmd gamma 1
+shot 05-nopp-off
+cmd r_softparticles 1
+shot 05-nopp
+cmd gamma 0.9
+cmd pause
+sleep 2
+cmd echo REPORT-GRAVEYARD-BEGIN
+cmd gpu_unrouted
+cmd renderer_status
+cmd echo REPORT-GRAVEYARD-END
+sleep 1
+
+# --- sprites with nothing within the fade distance ---
+cmd testentity models/s_light.spr -838 -2034 40 0 0 0 0 128
+cmd testentity models/s_explod.spr -818 -2000 60 0 0 0 3 128
+cmd setpos -918 -2034 20 0 0 0
+sleep 2
+cmd gpu_unrouted reset
+cmd pause
+shot 06-clear
+cmd r_softparticles 0
+shot 06-clear-off
+cmd r_softparticles 1
+cmd pause
+sleep 2
+cmd echo REPORT-CLEAR-BEGIN
+cmd gpu_unrouted
+cmd renderer_status
+cmd echo REPORT-CLEAR-END
+sleep 1
+
+# --- the mirror: sprites into the floor behind the viewer, seen reflected,
+# and two on the panel's wall in the view ---
+cmd testentity models/s_explod.spr -420 -2128 190 0 0 0 3
+cmd testentity models/s_explod.spr -480 -2185 195 0 0 0 3
+cmd testentity models/s_explod.spr -380 -2075 192 0 0 0 3
+cmd testentity models/s_light.spr -450 -2100 188
+cmd testentity models/s_light.spr -222 -2045 300
+cmd testentity models/s_explod.spr -224 -2212 250 0 0 0 3
+cmd r_mirroralpha 0.5
+cmd setpos -312 -2128 284 0 0 0
+sleep 2
+cmd gpu_unrouted reset
+cmd pause
+shot 07-mirror
+cmd r_softparticles_scale 24
+shot 08-mirror24
+cmd r_softparticles_scale 8
+cmd r_softparticles 0
+shot 07-mirror-off
+cmd r_softparticles 1
+cmd pause
+sleep 2
+cmd echo REPORT-MIRROR-BEGIN
+cmd gpu_unrouted
+cmd renderer_status
+cmd echo REPORT-MIRROR-END
+sleep 1

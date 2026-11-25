@@ -2202,17 +2202,10 @@ void GL_SoftDepth_Capture (void)
 	GLenum	fmt, attach, status;
 	GLuint	prev_draw = 0, prev_read = 0;
 	int	w = glwidth, h = glheight;	/* pp rebinds these to the scaled scene size */
+	qboolean	packed;
 
 	soft_depth_valid = false;
 
-#ifdef USE_SDL_GPU
-	/* The capture is FBOs and a depth blit, which -gpu routes at P4.  The
-	 * null glBlitFramebuffer is not NULL, so without this the snapshot
-	 * would be marked valid and sprites would fade against a texture
-	 * nothing wrote. */
-	if (R_GPU ())
-		return;
-#endif
 	if (!r_softparticles.integer || !glBlitFramebuffer_fp || w <= 0 || h <= 0)
 		return;
 
@@ -2227,8 +2220,22 @@ void GL_SoftDepth_Capture (void)
 	/* glBlitFramebuffer wants matching depth formats.  The scene FBO carries
 	 * packed depth/stencil; the default-framebuffer case mirrors the format
 	 * the Hi-Z standalone resolve has been blitting from fb 0 since
-	 * uhexen2-9912. */
-	if (GL_GetSceneFBO ())	{ fmt = GL_DEPTH24_STENCIL8;  attach = GL_DEPTH_STENCIL_ATTACHMENT; }
+	 * uhexen2-9912.  Under -gpu framebuffer 0 is a render target too, in
+	 * the scene's own depth format, which is what GL_DEPTH24_STENCIL8 names
+	 * there (rg_resource.c RGT_Format); the backend copies depth only
+	 * between textures of one format, so both sources take that (#340 P4b). */
+	packed = GL_GetSceneFBO () != 0;
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		/* A snapshot the device cannot sample binds a placeholder, read as
+		 * the near plane: every soft sprite would fade out entirely. */
+		if (!RG_DepthSampled ())
+			return;
+		packed = true;
+	}
+#endif
+	if (packed)	{ fmt = GL_DEPTH24_STENCIL8;  attach = GL_DEPTH_STENCIL_ATTACHMENT; }
 	else		{ fmt = GL_DEPTH_COMPONENT24; attach = GL_DEPTH_ATTACHMENT; }
 
 	if (soft_depth_tex && soft_depth_fbo &&

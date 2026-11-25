@@ -80,6 +80,7 @@ typedef unsigned int GLbitfield;
 #define GL_RGBA8 0x8058
 #define GL_UNSIGNED_BYTE 0x1401
 #define GL_DEPTH24_STENCIL8 0x88F0
+#define GL_DEPTH_COMPONENT24 0x81A6
 #define GL_NEAREST 0x2600
 #define GL_LINEAR 0x2601
 #define GL_COLOR_BUFFER_BIT 0x4000
@@ -105,7 +106,7 @@ typedef struct SDL_GPUTexture { int id; } SDL_GPUTexture;
 typedef struct SDL_GPUCommandBuffer SDL_GPUCommandBuffer;
 typedef struct SDL_GPUCopyPass SDL_GPUCopyPass;
 typedef enum { SDL_GPU_TEXTUREFORMAT_INVALID, SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
-	       SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT } SDL_GPUTextureFormat;
+	       SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT, SDL_GPU_TEXTUREFORMAT_D24_UNORM } SDL_GPUTextureFormat;
 typedef Uint32 SDL_GPUTextureUsageFlags;
 #define SDL_GPU_TEXTUREUSAGE_SAMPLER 1u
 #define SDL_GPU_TEXTUREUSAGE_COLOR_TARGET 2u
@@ -161,7 +162,8 @@ void RG_Target_Init (void);
 void RG_Target_Shutdown (void);
 '''
 
-HARNESS = r'''
+# The fakes alone, which tools/test_soft_depth_gpu.py builds on too.
+FAKES = r'''
 #include <stdarg.h>
 #include "rg_internal.h"
 
@@ -220,9 +222,12 @@ void RG_TexImage (GLenum target, GLuint t, GLint level, GLint ifmt, GLsizei w, G
 	tex[t].defined = 1;
 	tex[t].w = w;
 	tex[t].h = h;
-	if (ifmt == GL_DEPTH24_STENCIL8)
+	if (ifmt == GL_DEPTH24_STENCIL8 || ifmt == GL_DEPTH_COMPONENT24)
 	{
-		tex[t].fmt = SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT;
+		/* GL_DEPTH24_STENCIL8 is the scene's own format, as RGT_Format
+		 * maps it; GL_DEPTH_COMPONENT24 is not. */
+		tex[t].fmt = (ifmt == GL_DEPTH24_STENCIL8) ? SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT
+							   : SDL_GPU_TEXTUREFORMAT_D24_UNORM;
 		tex[t].usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
 	}
 	else
@@ -272,6 +277,7 @@ SDL_GPUCommandBuffer *RG_Frame_Break (void) { breaks++; Event ('B'); return cmdb
 /* SDL_GPU */
 static SDL_GPUBlitInfo last_blit;
 static int nblits, ncopies;
+static SDL_GPUTexture *last_copy_src, *last_copy_dst;
 void SDL_BlitGPUTexture (SDL_GPUCommandBuffer *cmd, const SDL_GPUBlitInfo *info)
 {
 	(void) cmd;
@@ -283,12 +289,16 @@ SDL_GPUCopyPass *SDL_BeginGPUCopyPass (SDL_GPUCommandBuffer *cmd) { (void) cmd; 
 void SDL_CopyGPUTextureToTexture (SDL_GPUCopyPass *p, const SDL_GPUTextureLocation *s,
 				  const SDL_GPUTextureLocation *d, Uint32 w, Uint32 h, Uint32 depth, qboolean cycle)
 {
-	(void) p; (void) s; (void) d; (void) w; (void) h; (void) depth; (void) cycle;
+	(void) p; (void) w; (void) h; (void) depth; (void) cycle;
+	last_copy_src = s->texture;
+	last_copy_dst = d->texture;
 	ncopies++;
 	Event ('D');
 }
 void SDL_EndGPUCopyPass (SDL_GPUCopyPass *p) { (void) p; }
+'''
 
+HARNESS = FAKES + r'''
 #define CHECK(c, what) do { if (!(c)) { printf ("FAIL %s:%d: %s\n", __func__, __LINE__, what); failures++; } } while (0)
 
 static GLuint ColorTex (int w, int h)

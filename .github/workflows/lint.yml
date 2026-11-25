@@ -547,6 +547,13 @@ jobs:
       - name: SDL_GPU framebuffers keep GL's rules
         run: python3 tools/test_rg_target.py
 
+      # GL_SoftDepth_Capture lifted out of gl_postprocess.c and run against
+      # rg_target.c and the same fakes: under -gpu the soft-particle snapshot
+      # is taken, from framebuffer 0 or pp_fbo (whichever is drawn into), at
+      # r_scale's size, and is valid only if the depth copy was made (#340 P4b).
+      - name: SDL_GPU soft-particle depth snapshot
+        run: python3 tools/test_soft_depth_gpu.py
+
       # tools/sweep-mirror-gpu.steps' test game: the miptex rename and each
       # refusal (two planes, a brush entity, a map that already has a
       # mirror ...) on a synthetic BSP, so the sweep's map cannot quietly

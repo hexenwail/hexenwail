@@ -63,7 +63,7 @@ MIN_CHANGED=${MIN_CHANGED:-2000}
 
 FRAMES=${FRAMES:-"01-gy-ppoff 02-gy-identity 03-gy-gamma07 04-gy-g085-c15 05-gy-scale050 06-gy-scale075
 07-gy-fxaa 08-gy-combo 14-gy-gamma09 20-gy-bloom 26-gy-softemu1 27-gy-softemu2 28-gy-softemu3
-09-pools 13-pools-oit 12-console 10-c4-lava 11-egypt-north"}
+24-sprites-hard 22-sprites-soft-ppoff 23-sprites-soft-pp 09-pools 13-pools-oit 12-console 10-c4-lava 11-egypt-north"}
 
 command -v magick >/dev/null || { echo "pp-diff: ImageMagick 'magick' not on PATH" >&2; exit 2; }
 T=$(mktemp -d)
