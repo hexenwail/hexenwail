@@ -3901,6 +3901,8 @@ void R_DrawWorld (void)
 		R_DispatchWorldCull();
 		R_DrawWorldCulled();
 	}
+	else if (!mirror)
+		R_HiZ_ForgetView ();
 #else
 	gpu_cull_active = false;
 #endif
