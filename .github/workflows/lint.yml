@@ -319,6 +319,11 @@ jobs:
       - name: Softemu LUT builder is exact
         run: python3 tools/test_softemu_lut.py
 
+      # The -gpu softemu sweep's palette dumper and membership counter, and
+      # its steps file and diff script naming the same frames (#340 P4d).
+      - name: Softemu sweep palette tools
+        run: python3 tools/test_softemu_palette.py
+
       # The AppImage's AppRun picks the basedir like the zip (#173).
       - name: AppImage AppRun
         run: python3 tools/test_appimage_apprun.py

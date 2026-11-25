@@ -1,0 +1,229 @@
+# sweep-softemu-gpu.steps -- r_softemu's palette emulation through the
+# SDL_GPU backend (-gpu) against GL (#340 P4d), on demo1.  Needs the retail
+# data in <basedir>/data1.
+#
+# r_softemu is the final post-process pass: spp_frag.glsl adds the bayer16
+# dither (mode 1, at gl_FragCoord * r_scale) and replaces every pixel with a
+# texelFetch from a 3D LUT on unit 1 -- the nearest-colour table (128^3,
+# rebuilt by PP_UpdatePaletteLUT when the metric changes) or, at mode 3, the
+# colormap one (32^3) -- with lutmax telling the shader which grid it reads.
+# Both tables hold d_8to24table colours.  Under -gpu all of it has run since
+# P4a-2 with no code of its own: the LUTs are built on the CPU (compute is
+# off under -gpu, P5) and uploaded at boot through R_TexImage3D, the
+# sampler is pinned to unit 1 (tools/test_rg_sampler_units.py), the 3D
+# textures define level 0 alone (tools/test_rg_sources.py, the SDL 3.4.12
+# defragmenter workaround).  This sweep is the check that it is right.
+#
+# Run the SAME binary both ways, with identical settings:
+#
+#   A="-fsaa 0 +gamma 1 +map demo1"
+#   STEPS=tools/sweep-softemu-gpu.steps ENGINE=$E ./tools/headless-drive.sh script /tmp/se-gl ~/hexen2 $A
+#   VK_ICD_FILENAMES=<lvp_icd json> VK_LAYER_PATH=<vulkan-validation-layers>/share/vulkan/explicit_layer.d \
+#       STEPS=tools/sweep-softemu-gpu.steps ENGINE=$E \
+#       ./tools/headless-drive.sh script /tmp/se-gpu ~/hexen2 -gpu +gpu_allow_software 1 +gpu_debug 1 $A
+#   ./tools/softemu-diff.sh /tmp/se-gl /tmp/se-gpu ~/hexen2/data1
+#
+# softemu-diff.sh dumps gfx/palette.lmp from the data1 it is given
+# (tools/softemu-palette.py) and reads /tmp/se-gpu/qconsole.log for the
+# REPORT sections and validation errors.
+#
+# THE FRAMES, on sweep-pp-gpu.steps' graveyard (01) and pools (09) cameras,
+# the same nine states on each (x = 0 the graveyard, 1 the pools):
+#   x1 r_softemu 0                 x6 1, r_softemu_metric 1 (Riemersma)
+#   x2 1 (metric -1: OKLab)        x7 1, back to -1: must equal x2
+#   x3 2                           x8 1, r_dither 0 (x2 is 0.5)
+#   x4 3 (the colormap LUT)        x9 1, r_scale 0.5 (bayer x scale)
+#   x5 1, r_softemu_metric 0 (naive)
+# x5 and x6 are a rebuild each, x7 a third back to OKLab, all inside one
+# REPORT section.  The pools' water animates under pause, so the exact
+# checks (the metric, the dither) are the graveyard's, where every frame
+# repeats; the pools have the PSNR, the palette and the 2x2 blocks.
+#
+# Settings as sweep-pp-gpu.steps, for the same reasons, plus every
+# r_softemu_* sub-cvar at its default: they are archived, and a config that
+# moved one would change what x2-x9 mean.
+#
+# THE THRESHOLDS -- see tools/softemu-diff.sh for the checks.  Measured
+# 2026-11-25, 800x600, llvmpipe GL (Mesa 26.2.0) against lavapipe -gpu,
+# ImageMagick 7.1, HUD masked, three runs a side on the P4c binary
+# (`feat(render): screen warp and motion blur under -gpu, r_pp_time (SDL_GPU
+# P4c)`: this change builds the identical store path), and three more a side
+# on the binary before it, whose graveyard frames are identical to P4c's
+# and whose pools sit in the same run-to-run spread.  Every pairing: the
+# six GL runs with each other and with the six -gpu runs, the two Tesla P4
+# runs with the six GL runs.  PSNR in dB:
+#
+#   frames                 GL vs -gpu     GL vs GL       Tesla P4 vs GL  gate
+#   01, 11 r_softemu 0     47.9 .. 75.3   47.9 .. inf    50.9 .. 54.3    42
+#   02-09 the graveyard    64.5 .. 69.7   inf            42.3 .. 43.2    40
+#   12-19 the pools        44.9 .. 66.7   44.9 .. inf    41.7 .. 43.3    40
+#
+# The pools' range is the water: each run, on either backend, lands on one
+# of a few phases of it under pause (0 to 4,100 pixels apart), and a pair
+# that drew different phases reads 44.9 whichever backends drew them.  The
+# graveyard repeats exactly, GL against GL and -gpu against -gpu.  So the
+# 40 gate sits 4.9 dB under the worst lavapipe pools pair and 1.7 dB under
+# the Tesla P4's worst (19 against two of the GL runs, 41.7; NVIDIA Vulkan,
+# two runs, one per binary, identical to each other outside the HUD, the
+# GPU shared with another job): palette snapping turns the two
+# rasterizers' last-bit differences (51-54 dB with r_softemu off) into
+# whole palette steps, as sweep-pp-gpu.steps' 26-28 found (41.7 there),
+# hence their gate of 40 here too.  The structural checks, on every honest run of both sides:
+# 0 pixels off the palette in all 16 r_softemu frames (and 447k-475k of
+# 480k off it in 01 and 11); the metric rebuilds 108-109k pixels from
+# OKLab to naive or Riemersma, 40k between those two, and back to -1 is
+# 0; r_dither 0 moves 183k; r_scale 0.5 is exact 2x2 blocks; gpu_unrouted
+# 0 in REPORT-GY and REPORT-POOLS; 0 validation errors.
+#
+# What the palette check cannot see: an emitted entry 255.  Retail
+# Hexen II's 255 (fcfcfc) is also entry 31, so it is a palette colour
+# either way (softemu-palette.py dump says so when it runs).
+#
+# REPORT-BOOT is printed, not checked: the -gpu boot still makes 15
+# null-table calls (glGenBuffers, glBufferData and glBindBuffer three each,
+# glGetString 3, glGetError 2, glGetIntegerv 1), P4a-1's residue, none of
+# them a texture call -- the LUT upload at boot is routed.  The validation
+# layers log five Warnings a run (VkImageSubresourceRange-layerCount-
+# compatibility): SDL's own barriers on the 3D textures, whose layerCount
+# of 1 means every depth slice until maintenance9; no Errors.
+#
+# Broken builds, one -gpu run each (BRK=<proxy> in a scratch build, never
+# committed), against honest GL, every one failing softemu-diff.sh:
+#
+#   proxy      what it breaks                          what fails
+#   unbound    the LUT never bound on unit 1           PSNR 9.5 .. 14.8 on all
+#                                                      16, 9k-48k pixels off
+#                                                      the palette, the
+#                                                      rebuild check (0)
+#   lutmax     lutmax 31 against the 128^3 table       PSNR 18.1 .. 21.1 on the
+#                                                      14 mode 1/2 frames
+#                                                      (palette: all pass)
+#   bayer      bayer16 not scaled by r_scale           2x2 blocks on 09 and 19
+#                                                      (168k / 135k pixels),
+#                                                      PSNR 35.5 / 35.4
+#   norebuild  a metric change builds but never        the rebuild check (0 /
+#              uploads                                 0 / 0), PSNR 35.3 .. 38.9
+#                                                      on 05, 06, 15, 16
+#   nocmap     r_softemu 3 reads the nearest-colour    PSNR 36.5 (04), 34.1-34.3 (14)
+#              LUT
+#   half       the final pass's softemu off, the       445k-476k pixels off the
+#              world shaders' u_softemu still on       palette on all 16, PSNR
+#              (the reference before P4a-2)            32.1 .. 39.2, the dither
+#                                                      check (0)
+#
+# nocmap is the one only the PSNR catches: both tables emit palette
+# colours, and mode 3's world shaders band the lightmaps either way.  Its
+# 3.5 dB under the gate is the thinnest margin here; the Tesla P4's honest
+# 04 and 14 sit 2.7 and 2.8 above it.
+
+sleep 20
+cmd echo REPORT-BOOT-BEGIN
+cmd gpu_unrouted
+cmd echo REPORT-BOOT-END
+cmd god
+cmd notarget
+cmd noclip
+cmd con_notifytime 0
+cmd viewsize 120
+cmd crosshair 0
+cmd showpause 0
+cmd r_skyspeed_back 0
+cmd r_skyspeed_front 0
+cmd r_flatlightstyles 1
+cmd r_dynamic 0
+cmd r_gpulightstyles 0
+cmd r_ssao 0
+cmd r_bloom 0
+cmd r_dlight_occlusion 0
+cmd r_alias_gpu 0
+cmd r_particles 0
+cmd fog 0
+cmd gl_texture_anisotropy 1
+cmd r_oit 0
+cmd r_waterwarp 0
+cmd r_motionblur 0
+cmd r_softparticles 0
+cmd r_scale 1
+cmd gl_fxaa 0
+cmd contrast 1
+cmd gl_waterwarp_speed 0
+cmd r_caustics 0
+cmd gl_glows 0
+cmd r_drawviewmodel 0
+cmd r_drawentities 0
+cmd r_wateralpha 0.33
+cmd r_lavaalpha 0
+cmd r_water_pixel_warp 0
+cmd r_softemu 0
+cmd r_softemu_metric -1
+cmd r_dither 0.5
+cmd r_softemu_dither_screen 1
+cmd r_softemu_dither_texture 1
+cmd r_softemu_lightmap_banding -1
+cmd r_softemu_mdl_warp -1
+cmd r_softemu_spans 0
+sleep 2
+
+# --- the graveyard (sweep-pp-gpu.steps' 01 camera) ---
+cmd setpos -918 -2034 0 -20 45 0
+sleep 2
+cmd pause
+cmd gpu_unrouted reset
+shot 01-gy-off
+cmd r_softemu 1
+shot 02-gy-se1
+cmd r_softemu 2
+shot 03-gy-se2
+cmd r_softemu 3
+shot 04-gy-se3
+cmd r_softemu 1
+cmd r_softemu_metric 0
+shot 05-gy-se1-naive
+cmd r_softemu_metric 1
+shot 06-gy-se1-riem
+cmd r_softemu_metric -1
+shot 07-gy-se1-auto
+cmd r_dither 0
+shot 08-gy-se1-dither0
+cmd r_dither 0.5
+cmd r_scale 0.5
+shot 09-gy-se1-scale050
+cmd r_scale 1
+cmd r_softemu 0
+cmd echo REPORT-GY-BEGIN
+cmd gpu_unrouted
+cmd echo REPORT-GY-END
+cmd pause
+
+# --- the pools (sweep-pp-gpu.steps' 09 camera) ---
+cmd setpos -1007 2200 -442 25 152 0
+sleep 2
+cmd pause
+cmd gpu_unrouted reset
+shot 11-pools-off
+cmd r_softemu 1
+shot 12-pools-se1
+cmd r_softemu 2
+shot 13-pools-se2
+cmd r_softemu 3
+shot 14-pools-se3
+cmd r_softemu 1
+cmd r_softemu_metric 0
+shot 15-pools-se1-naive
+cmd r_softemu_metric 1
+shot 16-pools-se1-riem
+cmd r_softemu_metric -1
+shot 17-pools-se1-auto
+cmd r_dither 0
+shot 18-pools-se1-dither0
+cmd r_dither 0.5
+cmd r_scale 0.5
+shot 19-pools-se1-scale050
+cmd r_scale 1
+cmd r_softemu 0
+cmd echo REPORT-POOLS-BEGIN
+cmd gpu_unrouted
+cmd renderer_status
+cmd echo REPORT-POOLS-END
+cmd pause
+sleep 1
