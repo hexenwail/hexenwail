@@ -608,6 +608,23 @@ void R_DrawArrays (GLenum mode, GLint first, GLsizei count)
 	glDrawArrays_fp (mode, first, count);
 }
 
+#ifndef USE_GLES
+/* The indirect indexed draw (#340 P5a-1): the GPU world cull's, one per
+ * texture bucket, its command at byte offset `indirect` of the buffer bound
+ * to GL_DRAW_INDIRECT_BUFFER.  SDL_GPU's is P5c. */
+void R_DrawElementsIndirect (GLenum mode, GLenum type, const void *indirect)
+{
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_NoteUnhandled ("R_DrawElementsIndirect (the indirect draw is P5c)");
+		return;
+	}
+#endif
+	glDrawElementsIndirect_fp (mode, type, indirect);
+}
+#endif
+
 /* GL_ImmEnd's and GL_ImmDraw's VAO bind and stream upload, ahead of the
  * program and its blocks as they always were.  Nothing under -gpu (#340
  * P1c): rg_frame.c copies the batch when it records the draw. */

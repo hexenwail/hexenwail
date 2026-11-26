@@ -28,6 +28,8 @@
 #include "gl_vbo.h"
 #include "gl_matrix.h"
 #include "gl_postprocess.h"
+#include "gl_fbo.h"	/* the Hi-Z depth resolve, through the seam (#340 P5a-1) */
+#include "gl_compute.h"	/* dispatch, barriers, readback, program deletes (#340 P5a-1) */
 #ifdef USE_SDL_GPU
 #include "rg_device.h"	/* R_GPU (): Hi-Z stays off under -gpu (#340 P5) */
 #endif
@@ -208,6 +210,11 @@ static void WC_BindCullParamsBlock (GLuint program)
 	GLuint	idx;
 	GLint	size = 0;
 
+#ifdef USE_SDL_GPU
+	/* The SPIR-V fixes the block's slot; the mirror is P5c's (#340). */
+	if (R_GPU ())
+		return;
+#endif
 	if (!program || !glGetUniformBlockIndex_fp || !glUniformBlockBinding_fp)
 		return;
 	idx = glGetUniformBlockIndex_fp(program, "CullParams");
@@ -224,6 +231,25 @@ static void WC_BindCullParamsBlock (GLuint program)
 	glUniformBlockBinding_fp(program, idx, CULL_PARAMS_UBO_BINDING);
 }
 
+/* hiz_copy's HizParams block to its binding point.  Safe to skip: an
+ * unassigned block already defaults to binding point 0, which is the point
+ * we ask for. */
+static void WC_BindHizParamsBlock (GLuint program)
+{
+	GLuint	blk;
+
+#ifdef USE_SDL_GPU
+	/* The SPIR-V fixes the block's slot; the mirror is P5d's (#340). */
+	if (R_GPU ())
+		return;
+#endif
+	if (!program || !glGetUniformBlockIndex_fp || !glUniformBlockBinding_fp)
+		return;
+	blk = glGetUniformBlockIndex_fp(program, "HizParams");
+	if (blk != GL_INVALID_INDEX)
+		glUniformBlockBinding_fp(program, blk, HIZ_PARAMS_UBO_BINDING);
+}
+
 void R_BuildWorldCull (void)
 {
 	qmodel_t	*m = cl.worldmodel;
@@ -236,10 +262,10 @@ void R_BuildWorldCull (void)
 	if (!m || !glDispatchCompute_fp)
 		return;
 #ifdef USE_SDL_GPU
-	/* Compute, P5 of #340, and its buffers and its indirect draw from
-	 * world_vao are raw GL the null table swallows.  The null table's
-	 * glDispatchCompute is not NULL, so the test above passes under -gpu:
-	 * say no here, and DrawTextureChains draws the whole world. */
+	/* Compute, P5 of #340: the dispatches, the readback and the indirect
+	 * draw go through seams whose -gpu arms are P5a-2's and P5c's.  The
+	 * null table's glDispatchCompute is not NULL, so the test above passes
+	 * under -gpu: say no here, and DrawTextureChains draws the whole world. */
 	if (R_GPU ())
 		return;
 #endif
@@ -345,9 +371,9 @@ void R_BuildWorldCull (void)
 	}
 
 	/* Upload surface SSBO */
-	glGenBuffers_fp(1, &cull_surf_ssbo);
-	glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, cull_surf_ssbo);
-	glBufferData_fp(GL_SHADER_STORAGE_BUFFER,
+	R_GenBuffers(1, &cull_surf_ssbo);
+	GL_BindBuffer(GL_SHADER_STORAGE_BUFFER, cull_surf_ssbo);
+	R_BufferData(GL_SHADER_STORAGE_BUFFER,
 			cull_num_surfs * sizeof(gpu_surface_t),
 			gpu_surfs, GL_STATIC_DRAW);
 	free(gpu_surfs);
@@ -378,9 +404,9 @@ void R_BuildWorldCull (void)
 	}
 	cull_num_marksurfs = ms_count;
 
-	glGenBuffers_fp(1, &cull_marksurf_ssbo);
-	glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, cull_marksurf_ssbo);
-	glBufferData_fp(GL_SHADER_STORAGE_BUFFER,
+	R_GenBuffers(1, &cull_marksurf_ssbo);
+	GL_BindBuffer(GL_SHADER_STORAGE_BUFFER, cull_marksurf_ssbo);
+	R_BufferData(GL_SHADER_STORAGE_BUFFER,
 			cull_num_marksurfs * sizeof(gpu_marksurf_t),
 			gpu_marks, GL_STATIC_DRAW);
 	free(gpu_marks);
@@ -421,9 +447,9 @@ void R_BuildWorldCull (void)
 		cull_total_indices = offset;
 		free(bucket_max);
 
-		glGenBuffers_fp(1, &cull_indirect_buf);
-		glBindBuffer_fp(GL_DRAW_INDIRECT_BUFFER, cull_indirect_buf);
-		glBufferData_fp(GL_DRAW_INDIRECT_BUFFER,
+		R_GenBuffers(1, &cull_indirect_buf);
+		GL_BindBuffer(GL_DRAW_INDIRECT_BUFFER, cull_indirect_buf);
+		R_BufferData(GL_DRAW_INDIRECT_BUFFER,
 				cull_num_buckets * sizeof(gpu_indirect_cmd_t),
 				cmds, GL_DYNAMIC_DRAW);
 		free(cmds);
@@ -443,9 +469,9 @@ void R_BuildWorldCull (void)
 
 		if (world_index_data && world_num_indices > 0)
 		{
-			glGenBuffers_fp(1, &cull_src_ibo);
-			glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, cull_src_ibo);
-			glBufferData_fp(GL_SHADER_STORAGE_BUFFER,
+			R_GenBuffers(1, &cull_src_ibo);
+			GL_BindBuffer(GL_SHADER_STORAGE_BUFFER, cull_src_ibo);
+			R_BufferData(GL_SHADER_STORAGE_BUFFER,
 					world_num_indices * sizeof(unsigned int),
 					world_index_data, GL_STATIC_DRAW);
 		}
@@ -461,9 +487,9 @@ void R_BuildWorldCull (void)
 	 * Sized to hold the worst case (all surfaces visible). */
 	if (cull_total_indices > 0)
 	{
-		glGenBuffers_fp(1, &cull_dst_ibo);
-		glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, cull_dst_ibo);
-		glBufferData_fp(GL_SHADER_STORAGE_BUFFER,
+		R_GenBuffers(1, &cull_dst_ibo);
+		GL_BindBuffer(GL_SHADER_STORAGE_BUFFER, cull_dst_ibo);
+		R_BufferData(GL_SHADER_STORAGE_BUFFER,
 				cull_total_indices * sizeof(unsigned int),
 				NULL, GL_DYNAMIC_DRAW);
 	}
@@ -471,9 +497,9 @@ void R_BuildWorldCull (void)
 	/* Dedup buffer: one int per surface, atomicExchange'd with framecount */
 	{
 		int *zeros = (int *) calloc(cull_num_surfs, sizeof(int));
-		glGenBuffers_fp(1, &cull_dedup_ssbo);
-		glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, cull_dedup_ssbo);
-		glBufferData_fp(GL_SHADER_STORAGE_BUFFER,
+		R_GenBuffers(1, &cull_dedup_ssbo);
+		GL_BindBuffer(GL_SHADER_STORAGE_BUFFER, cull_dedup_ssbo);
+		R_BufferData(GL_SHADER_STORAGE_BUFFER,
 				cull_num_surfs * sizeof(int),
 				zeros, GL_DYNAMIC_DRAW);
 		free(zeros);
@@ -482,14 +508,14 @@ void R_BuildWorldCull (void)
 	/* Stats buffer: 8 uints, zeroed each dispatch when stats enabled */
 	{
 		unsigned int zeros[8] = {0};
-		glGenBuffers_fp(1, &cull_stats_ssbo);
-		glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, cull_stats_ssbo);
-		glBufferData_fp(GL_SHADER_STORAGE_BUFFER,
+		R_GenBuffers(1, &cull_stats_ssbo);
+		GL_BindBuffer(GL_SHADER_STORAGE_BUFFER, cull_stats_ssbo);
+		R_BufferData(GL_SHADER_STORAGE_BUFFER,
 				sizeof(zeros), zeros, GL_DYNAMIC_DRAW);
 	}
 
-	glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, 0);
-	glBindBuffer_fp(GL_ELEMENT_ARRAY_BUFFER, 0);
+	GL_BindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+	GL_BindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 	cull_initialized = true;
 
 	/* Hi-Z reprojection lives across the map change only when the prior
@@ -502,16 +528,16 @@ void R_BuildWorldCull (void)
 
 void R_FreeWorldCull (void)
 {
-	if (cull_surf_ssbo) { GL_ForgetBuffer(cull_surf_ssbo); glDeleteBuffers_fp(1, &cull_surf_ssbo); cull_surf_ssbo = 0; }
-	if (cull_marksurf_ssbo) { GL_ForgetBuffer(cull_marksurf_ssbo); glDeleteBuffers_fp(1, &cull_marksurf_ssbo); cull_marksurf_ssbo = 0; }
-	if (cull_indirect_buf) { GL_ForgetBuffer(cull_indirect_buf); glDeleteBuffers_fp(1, &cull_indirect_buf); cull_indirect_buf = 0; }
-	if (cull_src_ibo) { GL_ForgetBuffer(cull_src_ibo); glDeleteBuffers_fp(1, &cull_src_ibo); cull_src_ibo = 0; }
-	if (cull_dst_ibo) { GL_ForgetBuffer(cull_dst_ibo); glDeleteBuffers_fp(1, &cull_dst_ibo); cull_dst_ibo = 0; }
-	if (cull_dedup_ssbo) { GL_ForgetBuffer(cull_dedup_ssbo); glDeleteBuffers_fp(1, &cull_dedup_ssbo); cull_dedup_ssbo = 0; }
-	if (cull_stats_ssbo) { GL_ForgetBuffer(cull_stats_ssbo); glDeleteBuffers_fp(1, &cull_stats_ssbo); cull_stats_ssbo = 0; }
+	if (cull_surf_ssbo) { GL_ForgetBuffer(cull_surf_ssbo); R_DeleteBuffers(1, &cull_surf_ssbo); cull_surf_ssbo = 0; }
+	if (cull_marksurf_ssbo) { GL_ForgetBuffer(cull_marksurf_ssbo); R_DeleteBuffers(1, &cull_marksurf_ssbo); cull_marksurf_ssbo = 0; }
+	if (cull_indirect_buf) { GL_ForgetBuffer(cull_indirect_buf); R_DeleteBuffers(1, &cull_indirect_buf); cull_indirect_buf = 0; }
+	if (cull_src_ibo) { GL_ForgetBuffer(cull_src_ibo); R_DeleteBuffers(1, &cull_src_ibo); cull_src_ibo = 0; }
+	if (cull_dst_ibo) { GL_ForgetBuffer(cull_dst_ibo); R_DeleteBuffers(1, &cull_dst_ibo); cull_dst_ibo = 0; }
+	if (cull_dedup_ssbo) { GL_ForgetBuffer(cull_dedup_ssbo); R_DeleteBuffers(1, &cull_dedup_ssbo); cull_dedup_ssbo = 0; }
+	if (cull_stats_ssbo) { GL_ForgetBuffer(cull_stats_ssbo); R_DeleteBuffers(1, &cull_stats_ssbo); cull_stats_ssbo = 0; }
 	R_PipelineForgetProgram ();	/* GL reuses program names */
-	if (cull_clear_prog) { glDeleteProgram_fp(cull_clear_prog); cull_clear_prog = 0; }
-	if (cull_mark_prog) { glDeleteProgram_fp(cull_mark_prog); cull_mark_prog = 0; }
+	if (cull_clear_prog) { R_DeleteProgram(cull_clear_prog); cull_clear_prog = 0; }
+	if (cull_mark_prog) { R_DeleteProgram(cull_mark_prog); cull_mark_prog = 0; }
 	if (cull_bucket_map) { free(cull_bucket_map); cull_bucket_map = NULL; }
 	R_FreeHiZ();
 	cull_initialized = false;
@@ -574,17 +600,7 @@ static qboolean R_HiZ_EnsureResources (int scene_w, int scene_h)
 	if (!hiz_copy_prog)
 	{
 		hiz_copy_prog = R_Program_Create(RPROG_HIZ_COPY);
-		/* Safe to skip: an unassigned block already defaults to binding
-		 * point 0, which is the point we ask for. */
-		if (hiz_copy_prog && glGetUniformBlockIndex_fp &&
-		    glUniformBlockBinding_fp)
-		{
-			GLuint blk = glGetUniformBlockIndex_fp(hiz_copy_prog,
-							       "HizParams");
-			if (blk != GL_INVALID_INDEX)
-				glUniformBlockBinding_fp(hiz_copy_prog, blk,
-							 HIZ_PARAMS_UBO_BINDING);
-		}
+		WC_BindHizParamsBlock(hiz_copy_prog);
 	}
 	if (!hiz_reduce_prog)
 	{
@@ -630,9 +646,9 @@ void R_FreeHiZ (void)
 {
 	R_PipelineForgetProgram ();	/* GL reuses program names */
 	if (hiz_pyramid_tex)   { R_DeleteTextures (1, &hiz_pyramid_tex); hiz_pyramid_tex = 0; }
-	if (hiz_copy_prog)     { glDeleteProgram_fp(hiz_copy_prog);        hiz_copy_prog = 0; }
-	if (hiz_reduce_prog)   { glDeleteProgram_fp(hiz_reduce_prog);      hiz_reduce_prog = 0; }
-	if (hiz_resolve_fbo)       { glDeleteFramebuffers_fp(1, &hiz_resolve_fbo);   hiz_resolve_fbo = 0; }
+	if (hiz_copy_prog)     { R_DeleteProgram(hiz_copy_prog);        hiz_copy_prog = 0; }
+	if (hiz_reduce_prog)   { R_DeleteProgram(hiz_reduce_prog);      hiz_reduce_prog = 0; }
+	if (hiz_resolve_fbo)       { R_DeleteFramebuffers(1, &hiz_resolve_fbo);   hiz_resolve_fbo = 0; }
 	if (hiz_resolve_depth_tex) { R_DeleteTextures (1, &hiz_resolve_depth_tex); hiz_resolve_depth_tex = 0; }
 	hiz_resolve_w = hiz_resolve_h = 0;
 	hiz_width = hiz_height = hiz_mip_count = 0;
@@ -667,7 +683,7 @@ static GLuint R_HiZ_ResolveStandaloneDepth (int scene_w, int scene_h)
 	}
 	if (hiz_resolve_fbo)
 	{
-		glDeleteFramebuffers_fp(1, &hiz_resolve_fbo);
+		R_DeleteFramebuffers(1, &hiz_resolve_fbo);
 		hiz_resolve_fbo = 0;
 	}
 
@@ -680,24 +696,24 @@ static GLuint R_HiZ_ResolveStandaloneDepth (int scene_w, int scene_h)
 	R_TexSetWrap(GL_TEXTURE_2D, hiz_resolve_depth_tex, GL_CLAMP_TO_EDGE);
 	R_BindTextureForEdit (GL_TEXTURE_2D, 0);
 
-	glGenFramebuffers_fp(1, &hiz_resolve_fbo);
-	glBindFramebuffer_fp(GL_DRAW_FRAMEBUFFER, hiz_resolve_fbo);
-	glFramebufferTexture2D_fp(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
-				  GL_TEXTURE_2D, hiz_resolve_depth_tex, 0);
+	R_GenFramebuffers(1, &hiz_resolve_fbo);
+	R_BindFramebuffer(GL_DRAW_FRAMEBUFFER, hiz_resolve_fbo);
+	R_FramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+			       GL_TEXTURE_2D, hiz_resolve_depth_tex, 0);
 	/* Depth-only FBO needs DRAW_BUFFER = NONE for completeness on strict
 	 * drivers.  READ_BUFFER state is irrelevant since we only ever bind
 	 * this fbo as the DRAW target of glBlitFramebuffer. */
 	{
 		GLenum none = GL_NONE;
-		glDrawBuffers_fp(1, &none);
+		R_DrawBuffers(1, &none);
 	}
 
-	status = glCheckFramebufferStatus_fp(GL_DRAW_FRAMEBUFFER);
-	glBindFramebuffer_fp(GL_DRAW_FRAMEBUFFER, 0);
+	status = R_CheckFramebufferStatus(GL_DRAW_FRAMEBUFFER);
+	R_BindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
 	if (status != GL_FRAMEBUFFER_COMPLETE)
 	{
 		Con_DPrintf("Hi-Z standalone resolve FBO incomplete (0x%x)\n", status);
-		glDeleteFramebuffers_fp(1, &hiz_resolve_fbo);
+		R_DeleteFramebuffers(1, &hiz_resolve_fbo);
 		R_DeleteTextures (1, &hiz_resolve_depth_tex);
 		hiz_resolve_fbo = 0;
 		hiz_resolve_depth_tex = 0;
@@ -712,13 +728,13 @@ blit:
 	 * fb is the source (id 0), our private fbo is the destination.  Blit
 	 * is a no-op for non-MSAA → non-MSAA except that it copies the data;
 	 * GL_NEAREST is the only valid filter for depth blits. */
-	glBindFramebuffer_fp(GL_READ_FRAMEBUFFER, 0);
-	glBindFramebuffer_fp(GL_DRAW_FRAMEBUFFER, hiz_resolve_fbo);
-	glBlitFramebuffer_fp(0, 0, scene_w, scene_h,
-			     0, 0, scene_w, scene_h,
-			     GL_DEPTH_BUFFER_BIT, GL_NEAREST);
-	glBindFramebuffer_fp(GL_DRAW_FRAMEBUFFER, 0);
-	glBindFramebuffer_fp(GL_READ_FRAMEBUFFER, 0);
+	R_BindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+	R_BindFramebuffer(GL_DRAW_FRAMEBUFFER, hiz_resolve_fbo);
+	R_BlitFramebuffer(0, 0, scene_w, scene_h,
+			  0, 0, scene_w, scene_h,
+			  GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+	R_BindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+	R_BindFramebuffer(GL_READ_FRAMEBUFFER, 0);
 
 	return hiz_resolve_depth_tex;
 }
@@ -789,8 +805,8 @@ void R_BuildHiZForNextFrame (void)
 		GL_BindBufferRange(GL_UNIFORM_BUFFER, HIZ_PARAMS_UBO_BINDING,
 				   ubo, ofs, sizeof(params));
 	}
-	glDispatchCompute_fp((scene_w + 7) / 8, (scene_h + 7) / 8, 1);
-	glMemoryBarrier_fp(GL_TEXTURE_FETCH_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+	R_DispatchCompute((scene_w + 7) / 8, (scene_h + 7) / 8, 1);
+	R_MemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
 
 	/* Reduce mip N -> mip N+1 */
 	R_UseProgram (hiz_reduce_prog);
@@ -820,8 +836,8 @@ void R_BuildHiZForNextFrame (void)
 			GL_Upload(GL_UNIFORM_BUFFER, &params, sizeof(params), &ubo, &ofs);
 			GL_BindBufferRange(GL_UNIFORM_BUFFER, CULL_PARAMS_UBO_BINDING,
 					   ubo, ofs, sizeof(params));
-			glDispatchCompute_fp((dst_w + 7) / 8, (dst_h + 7) / 8, 1);
-			glMemoryBarrier_fp(GL_TEXTURE_FETCH_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+			R_DispatchCompute((dst_w + 7) / 8, (dst_h + 7) / 8, 1);
+			R_MemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
 			src_w = dst_w;
 			src_h = dst_h;
 		}
@@ -900,8 +916,8 @@ void R_DispatchWorldCull (void)
 				   ubo, ofs, sizeof(params));
 	}
 	GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, cull_indirect_buf);
-	glDispatchCompute_fp((cull_num_buckets + 63) / 64, 1, 1);
-	glMemoryBarrier_fp(GL_SHADER_STORAGE_BARRIER_BIT);
+	R_DispatchCompute((cull_num_buckets + 63) / 64, 1, 1);
+	R_MemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
 
 	/* Pass 2: cull + mark surfaces */
 	R_UseProgram (cull_mark_prog);
@@ -943,7 +959,7 @@ void R_DispatchWorldCull (void)
 	{
 		unsigned int zeros[8] = {0};
 		GL_BindBuffer(GL_SHADER_STORAGE_BUFFER, cull_stats_ssbo);
-		glBufferSubData_fp(GL_SHADER_STORAGE_BUFFER, 0, sizeof(zeros), zeros);
+		R_BufferSubData(GL_SHADER_STORAGE_BUFFER, 0, sizeof(zeros), zeros);
 	}
 	GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 7, cull_stats_ssbo);
 
@@ -978,14 +994,14 @@ void R_DispatchWorldCull (void)
 				   ubo, ofs, sizeof(params));
 	}
 
-	glDispatchCompute_fp((cull_num_marksurfs + 63) / 64, 1, 1);
-	glMemoryBarrier_fp(GL_COMMAND_BARRIER_BIT | GL_ELEMENT_ARRAY_BARRIER_BIT |
-			   GL_SHADER_STORAGE_BARRIER_BIT);
+	R_DispatchCompute((cull_num_marksurfs + 63) / 64, 1, 1);
+	R_MemoryBarrier(GL_COMMAND_BARRIER_BIT | GL_ELEMENT_ARRAY_BARRIER_BIT |
+			GL_SHADER_STORAGE_BARRIER_BIT);
 
 	/* Gated stats readback: only every gl_hiz_stats frames, so the
 	 * implied glGetBufferSubData stall amortizes.  Print to console;
 	 * caller decides whether to leave running or set 0 after reading. */
-	if (gl_hiz_stats.integer > 0 && cull_stats_ssbo && glGetBufferSubData_fp)
+	if (gl_hiz_stats.integer > 0 && cull_stats_ssbo)
 	{
 		hiz_stats_frame_counter++;
 		if (hiz_stats_frame_counter >= gl_hiz_stats.integer)
@@ -994,20 +1010,21 @@ void R_DispatchWorldCull (void)
 			unsigned int post;
 			hiz_stats_frame_counter = 0;
 			GL_BindBuffer(GL_SHADER_STORAGE_BUFFER, cull_stats_ssbo);
-			glGetBufferSubData_fp(GL_SHADER_STORAGE_BUFFER, 0,
-					      sizeof(counts), counts);
-			post = counts[4] + counts[5] + counts[6];
-			Con_Printf("hiz_stats: total=%u pvs=%u flags=%u frust=%u "
-				   "hiz=%u accepted=%u dedup=%u\n",
-				   counts[0], counts[1], counts[2], counts[3],
-				   counts[4], counts[5], counts[6]);
-			if (post > 0)
-				Con_Printf("  hiz cull rate = %.1f%% of post-frustum "
-					   "(%u / %u; gate %.1f%%)\n",
-					   100.0 * counts[4] / (double)post,
-					   counts[4], post, 10.0);
-			else
-				Con_Printf("  hiz cull rate = (no post-frustum surfaces)\n");
+			if (R_ReadBuffer(GL_SHADER_STORAGE_BUFFER, 0, sizeof(counts), counts))
+			{
+				post = counts[4] + counts[5] + counts[6];
+				Con_Printf("hiz_stats: total=%u pvs=%u flags=%u frust=%u "
+					   "hiz=%u accepted=%u dedup=%u\n",
+					   counts[0], counts[1], counts[2], counts[3],
+					   counts[4], counts[5], counts[6]);
+				if (post > 0)
+					Con_Printf("  hiz cull rate = %.1f%% of post-frustum "
+						   "(%u / %u; gate %.1f%%)\n",
+						   100.0 * counts[4] / (double)post,
+						   counts[4], post, 10.0);
+				else
+					Con_Printf("  hiz cull rate = (no post-frustum surfaces)\n");
+			}
 		}
 	}
 
@@ -1040,9 +1057,9 @@ void R_DrawWorldCulled (void)
 		return;
 
 	/* Bind world VAO but replace its IBO with the compute-written dest IBO */
-	glBindVertexArray_fp(world_vao);
-	glBindBuffer_fp(GL_ELEMENT_ARRAY_BUFFER, cull_dst_ibo);
-	glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
+	R_BindVertexArray(world_vao);
+	GL_BindBuffer(GL_ELEMENT_ARRAY_BUFFER, cull_dst_ibo);
+	R_VertexAttrib4f(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
 
 	/* Set up world shader.  MDI cull path emits opaque world only — fence
 	 * surfaces flow through R_DrawBrushInstanced's fence sub-pass — so use
@@ -1071,7 +1088,7 @@ void R_DrawWorldCulled (void)
 	}
 
 	/* Draw each texture bucket via indirect commands */
-	glBindBuffer_fp(GL_DRAW_INDIRECT_BUFFER, cull_indirect_buf);
+	GL_BindBuffer(GL_DRAW_INDIRECT_BUFFER, cull_indirect_buf);
 
 	for (i = 0; i < cull_num_buckets; i++)
 	{
@@ -1084,20 +1101,20 @@ void R_DrawWorldCulled (void)
 		R_BindTextureSlot (2, t->gl_fb_texturenum ? t->gl_fb_texturenum : gl_null_fb_texture);
 
 		/* Issue indirect draw for this bucket */
-		glDrawElementsIndirect_fp(GL_TRIANGLES, GL_UNSIGNED_INT,
-					  (void *)((size_t)i * sizeof(gpu_indirect_cmd_t)));
+		R_DrawElementsIndirect(GL_TRIANGLES, GL_UNSIGNED_INT,
+				       (void *)((size_t)i * sizeof(gpu_indirect_cmd_t)));
 	}
 
-	glBindBuffer_fp(GL_DRAW_INDIRECT_BUFFER, 0);
+	GL_BindBuffer(GL_DRAW_INDIRECT_BUFFER, 0);
 
 	/* Restore original world IBO in the VAO so later code that
 	 * binds world_vao gets the correct element buffer */
 	{
 		extern GLuint world_ibo;
-		glBindBuffer_fp(GL_ELEMENT_ARRAY_BUFFER, world_ibo);
+		GL_BindBuffer(GL_ELEMENT_ARRAY_BUFFER, world_ibo);
 	}
 
-	glBindVertexArray_fp(0);
+	R_BindVertexArray(0);
 	R_UseProgram (0);
 
 	/* Capture this frame's world MVP for next-frame Hi-Z reprojection.

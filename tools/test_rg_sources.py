@@ -231,7 +231,8 @@ Checked, from the sources (stock python3, lint.yml):
       the one rg_target.c call of the same name, its parameters in order
       (P4a-2; P4a-1's arms noted the call and answered neutrally);
     * no gl*_fp call is left in gl_postprocess.c outside the OIT functions
-      (P6) and the GPU palette-LUT builder (compute, P5), except where an
+      (P6; the GPU palette-LUT builder through gl_compute.h since P5a-1,
+      check_compute), except where an
       SDL_GPU arm excludes it and PP_RAW_OK's few, each counted: MSAA's
       multisampled storage (P6) and shutdown's program and buffer deletes
       (bloom's three bufferless draws are R_DrawArrays since P4e); a
@@ -328,6 +329,35 @@ Checked, from the sources (stock python3, lint.yml):
     * GL_Init_NullGL turns float_color_buffer on before
       GL_PostProcess_Init, and RGT_Format maps GL_RGBA16F to
       R16G16B16A16_FLOAT (a colour target SDL_GPU guarantees).
+  the compute passes' GL calls through seams (#340 P5a-1, check_compute),
+  compute still off under -gpu:
+    * gl_compute.c is a seam (SEAMS), after gl_fbo.c in the client's source
+      list and inside `#ifndef USE_GLES` (the ES tier has no compute), and
+      each of R_DispatchCompute, R_MemoryBarrier, R_DeleteProgram,
+      R_MaxStorageBindings, R_ReadBuffer, R_ReadTexImage and
+      R_StorageFormatOk has the GL arm it is named for, its parameters in
+      order (COMPUTE_SEAMS); each SDL_GPU arm notes the call ("... (compute
+      is P5a-2)") and answers neutrally, except R_MaxStorageBindings
+      (RG_MaxStorageBindings, RGB_SSBO_POINTS, above LIGHT_SSBO_BINDING) and
+      R_StorageFormatOk (false until P5a-2 probes the formats);
+    * gl_pipeline.c's R_GetViewport is glGetIntegerv (GL_VIEWPORT) and,
+      under -gpu, rg_frame.c's shadowed viewport, (0, 0, the frame) before
+      one is set; gl_vbo.c's R_DrawElementsIndirect is the bare call, its
+      -gpu arm a note (P5c), under `#ifndef USE_GLES`;
+    * gl_lightcluster.c, gl_worldcull.c, gl_ssao.c and the palette LUT's
+      builder and free make no GL call an SDL_GPU arm does not exclude (the
+      uniform-block bindings return under R_GPU (): the SPIR-V fixes the
+      slots), each dispatch is followed at once by its barrier, groups and
+      bits as before (COMPUTE_DISPATCHES), the binds the readback and the
+      indirect draw read through stay right before them (COMPUTE_BINDS), the
+      storage-format probes sit ahead of what they guard (COMPUTE_FORMATS),
+      no other file reaches R_DeleteProgram or a dispatch, barrier or
+      readback seam, and R_DrawWorldCulled alone R_DrawElementsIndirect;
+    * the gates that keep the passes off stay, ahead of what they guard
+      (COMPUTE_GATES, besides
+      caps.compute_shaders, R_BuildWorldCull's and the light cluster's
+      STANDIN_PINS), and R_Shadow_Prepare returns under R_GPU () before the
+      cube maps (GPU_GATES), which P5b's cluster would otherwise wake.
 
 Usage: test_rg_sources.py [--root DIR]
 """
@@ -583,6 +613,8 @@ SEAMS = {
     "engine/h2shared/gl_texbind.c": None,
     # framebuffers and renderbuffers (#340 P4a-1)
     "engine/h2shared/gl_fbo.c": None,
+    # compute dispatch, barriers, readback (#340 P5a-1)
+    "engine/h2shared/gl_compute.c": None,
     "engine/h2shared/gl_pipeline.c": None,
     "engine/h2shared/gl_uniforms.c": None,
     "engine/h2shared/gl_vbo.c": None,
@@ -2042,6 +2074,11 @@ GPU_GATES = (
     ("engine/hexen2/r_part.c", "R_GPU_Particles_Init", "",
      r"\bGL_CreateParticleResources\s*\(", None,
      "the GPU particle buffers are raw GL, into the null table, for a path nothing draws"),
+    ("engine/h2shared/gl_shadow.c", "R_Shadow_Prepare", "",
+     r"\bSH_BuildPrograms\s*\(|\bSH_Select\s*\(", r"\bsh_ndraws\s*=\s*0\s*;",
+     "the cube shadow maps are P6: once P5b brings the light cluster up under -gpu, "
+     "R_LightCluster_Available stops holding them off at the default r_dlight_occlusion 2 "
+     "(#340 P5a-1); the frame's block is still cleared first, as R_Shadow_Draw flushes it"),
 )
 
 
@@ -2671,11 +2708,10 @@ def check_mirror(root):
         fail("%s: missing -- the #340 P3d mirror pin has nothing to read" % rp)
 
 
-# gl_postprocess.c functions that stay raw GL, and why.
-PP_RAW_FUNCS = {
-    "PP_BuildPaletteLUT_GPU": "the compute LUT builder, off under -gpu through compute_shaders (P5)",
-    "PP_FreePaletteGPU": "its program; 0 under -gpu, where the builder never links it (P5)",
-}
+# gl_postprocess.c functions that stay raw GL, and why.  Empty since P5a-1:
+# the GPU palette-LUT builder and its free go through gl_compute.h
+# (check_compute).
+PP_RAW_FUNCS = {}
 # (function, GL entry point) -> (calls, why) that stay raw in the rest.
 PP_RAW_OK = {
     ("PP_CreateFBO", "glRenderbufferStorageMultisample"):
@@ -3332,6 +3368,312 @@ def check_bloom(root):
              "target clips r_hdr's overbright scene (#340 P4e)" % rr)
 
 
+# The compute seams (#340 P5a-1): gl_compute.c's, whitespace dropped.  Each
+# entry: (parameters, the GL arm, the SDL_GPU arm as a regex).  A note arm
+# names the seam and the sub-phase that builds its backend.
+_NOTE = r'if\(R_GPU\(\)\)\{RG_NoteUnhandled\("%s\(compute is P5a-2\)"\);return%s;\}'
+COMPUTE_SEAMS = {
+    "R_DispatchCompute": ("groups_x,groups_y,groups_z",
+                          "{glDispatchCompute_fp(groups_x,groups_y,groups_z);}",
+                          _NOTE % ("R_DispatchCompute ", "")),
+    "R_MemoryBarrier": ("barriers", "{glMemoryBarrier_fp(barriers);}",
+                        _NOTE % ("R_MemoryBarrier ", "")),
+    "R_DeleteProgram": ("program", "{glDeleteProgram_fp(program);}",
+                        _NOTE % ("R_DeleteProgram ", "")),
+    "R_MaxStorageBindings": ("", "{GLintn=0;glGetIntegerv_fp(GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS,&n);"
+                                 "return(int)n;}",
+                             r"if\(R_GPU\(\)\)\{returnRG_MaxStorageBindings\(\);\}"),
+    "R_ReadBuffer": ("target,offset,size,data",
+                     "{if(!glGetBufferSubData_fp)returnfalse;"
+                     "glGetBufferSubData_fp(target,offset,size,data);returntrue;}",
+                     _NOTE % ("R_ReadBuffer ", "false")),
+    "R_ReadTexImage": ("target,texture,level,format,type,pixels",
+                       "{if(!glGetTexImage_fp)returnfalse;R_BindTextureForEdit(target,texture);"
+                       "glGetTexImage_fp(target,level,format,type,pixels);"
+                       "R_BindTextureForEdit(target,0);returntrue;}",
+                       _NOTE % ("R_ReadTexImage ", "false")),
+    "R_StorageFormatOk": ("internalformat,target,access",
+                          "{(void)internalformat;(void)target;(void)access;returntrue;}",
+                          r"if\(R_GPU\(\)\)\{returnfalse;\}"),
+}
+# Where the compute passes live: the whole of each file, or the functions named.
+COMPUTE_FILES = {
+    "engine/h2shared/gl_lightcluster.c": None,
+    "engine/h2shared/gl_worldcull.c": None,
+    "engine/h2shared/gl_ssao.c": None,
+    "engine/h2shared/gl_postprocess.c": {"PP_BuildPaletteLUT_GPU", "PP_FreePaletteGPU"},
+}
+# Each file's dispatches in source order, each followed at once by its
+# barrier: (the dispatch's groups, the barrier's bits), whitespace dropped.  A
+# dispatch lost in the routing is a pass that silently stops running, a bit
+# lost a pass that reads stale data (cull_mark's GL_COMMAND_BARRIER_BIT is
+# what the indirect draw waits on); P5a-2 turns each barrier into a pass
+# boundary, so the pairing is what it reads.
+COMPUTE_DISPATCHES = {
+    "engine/h2shared/gl_postprocess.c": [		# the softemu palette LUT
+        ("PP_LUT_DIM/8,PP_LUT_DIM/8,PP_LUT_DIM/4", "GL_TEXTURE_FETCH_BARRIER_BIT")],
+    "engine/h2shared/gl_lightcluster.c": [		# the froxel grid
+        ("LIGHT_TILES_X/8,LIGHT_TILES_Y/8,LIGHT_TILES_Z",
+         "GL_TEXTURE_FETCH_BARRIER_BIT|GL_SHADER_IMAGE_ACCESS_BARRIER_BIT")],
+    "engine/h2shared/gl_worldcull.c": [		# hiz_copy, hiz_reduce, cull_clear, cull_mark
+        ("(scene_w+7)/8,(scene_h+7)/8,1", "GL_TEXTURE_FETCH_BARRIER_BIT|GL_SHADER_IMAGE_ACCESS_BARRIER_BIT"),
+        ("(dst_w+7)/8,(dst_h+7)/8,1", "GL_TEXTURE_FETCH_BARRIER_BIT|GL_SHADER_IMAGE_ACCESS_BARRIER_BIT"),
+        ("(cull_num_buckets+63)/64,1,1", "GL_SHADER_STORAGE_BARRIER_BIT"),
+        ("(cull_num_marksurfs+63)/64,1,1",
+         "GL_COMMAND_BARRIER_BIT|GL_ELEMENT_ARRAY_BARRIER_BIT|GL_SHADER_STORAGE_BARRIER_BIT")],
+    "engine/h2shared/gl_ssao.c": [			# prepare, mip, evaluate, filter x2 (the composite draws)
+        ("(ss_aow+7)/8,(ss_aoh+7)/8,1", "GL_SHADER_IMAGE_ACCESS_BARRIER_BIT"),
+        ("(ss_aow+15)/16,(ss_aoh+15)/16,1", "GL_TEXTURE_FETCH_BARRIER_BIT|GL_SHADER_IMAGE_ACCESS_BARRIER_BIT"),
+        ("(ss_aow+7)/8,(ss_aoh+7)/8,1", "GL_TEXTURE_FETCH_BARRIER_BIT|GL_SHADER_IMAGE_ACCESS_BARRIER_BIT"),
+        ("(ss_aow+15)/16,(ss_aoh+7)/8,1", "GL_TEXTURE_FETCH_BARRIER_BIT|GL_SHADER_IMAGE_ACCESS_BARRIER_BIT"),
+        ("(ss_aow+15)/16,(ss_aoh+7)/8,1", "GL_TEXTURE_FETCH_BARRIER_BIT")],
+}
+# The storage-format probes, each ahead of what it guards: (file, function,
+# the probe whitespace dropped, what it must precede or None).  True on GL;
+# under -gpu, from P5a-2, the probe is what holds a pass off on a device
+# without the format (decision 12), so losing one is a pass run on a format
+# the device cannot write.
+COMPUTE_FORMATS = (
+    ("engine/h2shared/gl_postprocess.c", "PP_BuildPaletteLUT_GPU",
+     "R_StorageFormatOk(GL_RGBA8,GL_TEXTURE_3D,GL_WRITE_ONLY)", r"\bR_Program_Create\s*\("),
+    ("engine/h2shared/gl_lightcluster.c", "R_LightCluster_Build",
+     "R_StorageFormatOk(GL_RGBA32UI,GL_TEXTURE_3D,GL_WRITE_ONLY)", r"\bR_Program_Create\s*\("),
+    ("engine/h2shared/gl_ssao.c", "R_SSAO_WantsSceneFBO",
+     "R_StorageFormatOk(GL_RG16F,GL_TEXTURE_2D,GL_READ_WRITE)", None),
+    ("engine/h2shared/gl_ssao.c", "R_SSAO_WantsSceneFBO",
+     "R_StorageFormatOk(GL_R8,GL_TEXTURE_2D,GL_WRITE_ONLY)", None),
+    ("engine/h2shared/gl_ssao.c", "R_SSAO_WantsSceneFBO",
+     "R_StorageFormatOk(GL_R32UI,GL_TEXTURE_2D,GL_READ_WRITE)", None),
+)
+# The buffers each compute file makes (check_compute holds each to
+# gen, bind, fill).
+COMPUTE_BUFFERS = {
+    "engine/h2shared/gl_lightcluster.c": ["lc_ssbo"],
+    "engine/h2shared/gl_worldcull.c": ["cull_surf_ssbo", "cull_marksurf_ssbo", "cull_indirect_buf",
+                                       "cull_src_ibo", "cull_dst_ibo", "cull_dedup_ssbo", "cull_stats_ssbo"],
+    "engine/h2shared/gl_ssao.c": ["ss_ubo"],
+}
+# Binds a routed call reads through, each right before it in its function:
+# (file, function, the bind, the call it precedes), whitespace dropped.
+COMPUTE_BINDS = (
+    ("engine/h2shared/gl_worldcull.c", "R_DispatchWorldCull",
+     "GL_BindBuffer(GL_SHADER_STORAGE_BUFFER,cull_stats_ssbo);", "if(R_ReadBuffer(GL_SHADER_STORAGE_BUFFER,"),
+    ("engine/h2shared/gl_worldcull.c", "R_DrawWorldCulled",
+     "R_BindVertexArray(world_vao);GL_BindBuffer(GL_ELEMENT_ARRAY_BUFFER,cull_dst_ibo);",
+     "R_VertexAttrib4f(ATTR_COLOR,"),
+    ("engine/h2shared/gl_worldcull.c", "R_DrawWorldCulled",
+     "GL_BindBuffer(GL_DRAW_INDIRECT_BUFFER,cull_indirect_buf);", "for(i=0;i<cull_num_buckets;i++)"),
+)
+# The gates that keep each pass off under -gpu while caps.compute_shaders is
+# false there anyway: (file, function, regex, what it must precede, why).
+# Each sub-phase of P5 lifts its own.
+_ANSWER_GATE = r"\s*#\s*ifdef\s+USE_SDL_GPU\s*\n\s*if\s*\(\s*R_GPU\s*\(\s*\)\s*\)\s*return\s+false\s*;\s*#\s*endif"
+COMPUTE_GATES = (
+    ("engine/h2shared/gl_postprocess.c", "PP_BuildPaletteLUT_GPU",
+     r"if\s*\(\s*!\s*gl_renderer_caps\.compute_shaders\s*\|\|[^)]*\)\s*return\s+false\s*;",
+     r"\bR_Program_Create\s*\(|\bR_DispatchCompute\s*\(",
+     "the palette LUT: the CPU builder runs instead (P5a-2 lifts it)"),
+    ("engine/h2shared/gl_worldcull.c", "R_HiZ_Available", _ANSWER_GATE, r"\breturn\s*\(",
+     "Hi-Z (P5d lifts it)"),
+    ("engine/h2shared/gl_ssao.c", "R_SSAO_WantsSceneFBO", _ANSWER_GATE, r"\breturn\s+r_ssao\b",
+     "SSAO (P5e lifts it)"),
+)
+
+
+def check_compute(root):
+    """#340 P5a-1: the compute passes name no GL entry point; the seams' GL
+    arms are the bare calls; nothing they route is reachable under -gpu."""
+    rel = "engine/h2shared/gl_compute.c"
+    path = root / rel
+    if not path.is_file():
+        fail("%s: missing -- the #340 P5a-1 compute seam" % rel)
+        return
+    raw = path.read_text(errors="replace")
+    code = strip_c_comments(raw)
+    heads = {m.group(1): m.group(2) for m in
+             re.finditer(r"^\w[\w \t\*]*?\b(R_\w+)\s*\(([^;{}]*)\)\s*\{", code, re.M)}
+    bodies = {n: code[b:e + 1] for n, b, e in functions(code)}
+    for fn, (params, gl, arm_rx) in COMPUTE_SEAMS.items():
+        if fn not in bodies or fn not in heads:
+            fail("%s: no %s -- gl_compute.h's seam is gone" % (rel, fn))
+            continue
+        got = [re.findall(r"\w+", a)[-1] for a in heads[fn].split(",") if a.strip() and a.strip() != "void"]
+        if ",".join(got) != params:
+            fail("%s: %s takes (%s), the seam is (%s)" % (rel, fn, ",".join(got), params))
+        g = re.sub(r"\s+", "", gl_arm(bodies[fn]))
+        if g != gl:
+            fail("%s: %s's GL arm must be exactly the bare call, its parameters in order: want `%s`, "
+                 "found `%s` (whitespace dropped; #340 P5a-1)" % (rel, fn, gl, g))
+        m = re.search(r"#\s*ifdef\s+USE_SDL_GPU\b(.*?)#\s*endif", bodies[fn], re.S)
+        a = re.sub(r"\s+(?=[^\"]*(?:\"[^\"]*\"[^\"]*)*$)", "", m.group(1)) if m else ""
+        if not re.fullmatch(arm_rx, a):
+            fail("%s: %s's SDL_GPU arm must be `%s` (#340 P5a-1), found `%s`" % (rel, fn, arm_rx, a))
+    extra = set(heads) - set(COMPUTE_SEAMS)
+    if extra:
+        fail("%s: %s not in COMPUTE_SEAMS -- pin its arms" % (rel, ", ".join(sorted(extra))))
+    # all of it desktop-only: the ES tier has no compute entry points
+    g = re.search(r"^#\s*ifndef\s+USE_GLES\s*$", code, re.M)
+    at = [code.index(bodies[f]) for f in bodies]
+    if not g or not at or min(at) < g.end() or code.rfind("#endif") < max(at):
+        fail("%s: every seam must sit inside `#ifndef USE_GLES` -- the ES tier has no compute (#340 P5a-1)" % rel)
+    hdr = strip_c_comments((root / "engine/h2shared/gl_compute.h").read_text(errors="replace"))
+    if not re.search(r"#\s*ifndef\s+USE_GLES\b(?:(?!#\s*endif).)*\bR_DispatchCompute\b.*?R_StorageFormatOk\b"
+                     r"(?:(?!#\s*if).)*#\s*endif", hdr, re.S):
+        fail("engine/h2shared/gl_compute.h: the seams must be declared inside `#ifndef USE_GLES` (#340 P5a-1)")
+    cm = (root / "engine/CMakeLists.txt").read_text()
+    if not re.search(r"\$\{COMMONDIR\}/gl_fbo\.c\s*\n\s*\$\{COMMONDIR\}/gl_compute\.c\b", cm):
+        fail("engine/CMakeLists.txt: gl_compute.c must follow gl_fbo.c in the client's source list (#340 P5a-1)")
+    if "engine/h2shared/gl_compute.c" not in SEAMS:
+        fail("SEAMS: gl_compute.c is a seam (#340 P5a-1)")
+
+    # The two seams that live beside their siblings.
+    b = body_named(root, "engine/h2shared/gl_pipeline.c", "R_GetViewport")
+    if b is not None:
+        if re.sub(r"\s+", "", gl_arm(b + "}")) != "{glGetIntegerv_fp(GL_VIEWPORT,vp);}":
+            fail("gl_pipeline.c: R_GetViewport's GL arm must be exactly `glGetIntegerv_fp (GL_VIEWPORT, vp);` "
+                 "(#340 P5a-1)")
+        m = re.search(r"#\s*ifdef\s+USE_SDL_GPU\b(.*?)#\s*endif", b, re.S)
+        if not m or re.sub(r"\s+", "", m.group(1)) != "if(R_GPU()){RG_GetViewport(vp);return;}":
+            fail("gl_pipeline.c: R_GetViewport's SDL_GPU arm must be `RG_GetViewport (vp); return;` -- "
+                 "the viewport R_SetViewport shadowed (#340 P5a-1)")
+    b = body_named(root, "engine/h2shared/rg_frame.c", "RG_GetViewport")
+    if b is not None and not re.search(
+            r"if\s*\(\s*rgf_vp_set\s*\)\s*\{\s*vp\[0\]\s*=\s*rgf_vp\[0\]\s*;\s*vp\[1\]\s*=\s*rgf_vp\[1\]\s*;\s*"
+            r"vp\[2\]\s*=\s*rgf_vp\[2\]\s*;\s*vp\[3\]\s*=\s*rgf_vp\[3\]\s*;\s*return\s*;\s*\}\s*"
+            r"vp\[0\]\s*=\s*0\s*;\s*vp\[1\]\s*=\s*0\s*;\s*vp\[2\]\s*=\s*rgf_w\s*;\s*vp\[3\]\s*=\s*rgf_h\s*;", b):
+        fail("rg_frame.c: RG_GetViewport must answer the shadowed viewport, or (0, 0, the frame's size) "
+             "before one is set -- what RGF_BeginDraw draws with (#340 P5a-1)")
+    b = body_named(root, "engine/h2shared/rg_buffer.c", "RG_MaxStorageBindings")
+    rb = strip_c_comments((root / "engine/h2shared/rg_buffer.c").read_text(errors="replace"))
+    lh = (root / "engine/h2shared/gl_lightcluster.h").read_text(errors="replace")
+    pts = re.search(r"#\s*define\s+RGB_SSBO_POINTS\s+(\d+)", rb)
+    lsb = re.search(r"#\s*define\s+LIGHT_SSBO_BINDING\s+(\d+)", lh)
+    if b is not None and re.sub(r"\s+", "", b) != "{returnRGB_SSBO_POINTS;":
+        fail("rg_buffer.c: RG_MaxStorageBindings must return RGB_SSBO_POINTS, the points it shadows (#340 P5a-1)")
+    if not pts or not lsb or int(pts.group(1)) <= int(lsb.group(1)):
+        fail("rg_buffer.c: RGB_SSBO_POINTS must exceed LIGHT_SSBO_BINDING, or R_LightCluster_Build refuses "
+             "the cluster under -gpu (#340 P5a-1)")
+    b = body_named(root, "engine/h2shared/gl_vbo.c", "R_DrawElementsIndirect")
+    if b is not None:
+        if re.sub(r"\s+", "", gl_arm(b + "}")) != "{glDrawElementsIndirect_fp(mode,type,indirect);}":
+            fail("gl_vbo.c: R_DrawElementsIndirect's GL arm must be exactly "
+                 "`glDrawElementsIndirect_fp (mode, type, indirect);` (#340 P5a-1)")
+        m = re.search(r"#\s*ifdef\s+USE_SDL_GPU\b(.*?)#\s*endif", b, re.S)
+        if not m or not re.fullmatch(r'if\(R_GPU\(\)\)\{RG_NoteUnhandled\("R_DrawElementsIndirect[^"]*P5c[^"]*"\);'
+                                     r'return;\}', re.sub(r"\s+(?=[^\"]*(?:\"[^\"]*\"[^\"]*)*$)", "", m.group(1))):
+            fail("gl_vbo.c: R_DrawElementsIndirect's SDL_GPU arm must note the call (P5c) and return (#340 P5a-1)")
+        vbo = strip_c_comments((root / "engine/h2shared/gl_vbo.c").read_text(errors="replace"))
+        at = vbo.find(b)
+        head = vbo[:at]
+        if not re.search(r"#\s*ifndef\s+USE_GLES\s*\n(?:(?!#\s*(?:if|endif)).)*$", head, re.S):
+            fail("gl_vbo.c: R_DrawElementsIndirect must sit inside `#ifndef USE_GLES` (#340 P5a-1)")
+
+    # The consumers: no GL call -gpu could reach, every dispatch through the
+    # seam and followed by its barrier, R_DeleteProgram nowhere else.
+    for crel, only in COMPUTE_FILES.items():
+        cpath = root / crel
+        if not cpath.is_file():
+            fail("%s: missing -- the #340 P5a-1 compute pins have nothing to read" % crel)
+            continue
+        ccode = strip_c_comments(cpath.read_text(errors="replace"))
+        names = set()
+        disp = []
+        for name, b, e in functions(ccode):
+            if only is not None and name not in only:
+                continue
+            names.add(name)
+            body = ccode[b:e + 1]
+            arms = gpu_arms(body)
+            for m in GL_CALL.finditer(body):
+                if excluded(body, arms, m.start()):
+                    continue
+                ln = ccode.count("\n", 0, b + m.start()) + 1
+                fail("%s:%d: %s calls %s raw -- the compute passes go through gl_compute.h, gl_fbo.h, "
+                     "gl_buffer.c's and gl_vbo.c's seams, or an SDL_GPU arm excludes the call (#340 P5a-1)"
+                     % (crel, ln, name, m.group(0).rstrip("( ")))
+            for m in re.finditer(r"\bR_DispatchCompute\s*\(", body):
+                e = stmt_end(body, m.start())
+                nxt = body[e:]
+                bm = re.match(r"\s*R_MemoryBarrier\s*\(", nxt)
+                if not bm:
+                    ln = ccode.count("\n", 0, b + m.start()) + 1
+                    fail("%s:%d: %s's R_DispatchCompute is not followed at once by its R_MemoryBarrier "
+                         "(#340 P5a-1)" % (crel, ln, name))
+                    disp.append((squash(body[m.end():e]).rstrip(";").rstrip(")"), None))
+                    continue
+                be = stmt_end(nxt, bm.start())
+                disp.append((squash(body[m.end():e]).rstrip(";")[:-1],
+                             squash(nxt[bm.end():be]).rstrip(";")[:-1]))
+        for want in (only or ()):
+            if want not in names:
+                fail("%s: no %s -- the compute pin has nothing to read" % (crel, want))
+        if disp != COMPUTE_DISPATCHES[crel]:
+            fail("%s: the dispatches and their barriers are %s, COMPUTE_DISPATCHES says %s -- a pass or a "
+                 "barrier bit lost or added in the routing (#340 P5a-1)" % (crel, disp, COMPUTE_DISPATCHES[crel]))
+        if re.search(r"\bgl(?:DispatchCompute|MemoryBarrier)_fp\s*\(", ccode):
+            fail("%s: a raw glDispatchCompute / glMemoryBarrier is left (#340 P5a-1)" % crel)
+    for p in sorted((root / "engine").rglob("*.c")):
+        prel = p.relative_to(root).as_posix()
+        if "rust" in p.parts or prel in COMPUTE_FILES or prel == rel:
+            continue
+        pc = strip_c_comments(p.read_text(errors="replace"))
+        if re.search(r"\bR_DeleteProgram\s*\(", pc):
+            fail("%s: calls R_DeleteProgram -- its -gpu arm is a note until P5a-2, so only the compute "
+                 "passes, whose programs -gpu never builds, may (#340 P5a-1)" % prel)
+        if re.search(r"\bR_(?:DispatchCompute|MemoryBarrier|ReadBuffer|ReadTexImage)\s*\(", pc):
+            fail("%s: reaches a compute seam outside the compute passes (#340 P5a-1)" % prel)
+        # the indirect draw: its -gpu arm is a note until P5c, so the cull's draw alone
+        if prel == "engine/h2shared/gl_vbo.c":	# the definition, and its note
+            pc = re.sub(r"\bvoid\s+R_DrawElementsIndirect\s*\([^)]*\)\s*\{.*?\n\}", "", pc, flags=re.S)
+        if re.search(r"\bR_DrawElementsIndirect\s*\(", pc):
+            fail("%s: calls R_DrawElementsIndirect -- only gl_worldcull.c's R_DrawWorldCulled may, "
+                 "its -gpu arm being a note until P5c (#340 P5a-1)" % prel)
+    wcode = strip_c_comments((root / "engine/h2shared/gl_worldcull.c").read_text(errors="replace"))
+    owners = {n for n, b, e in functions(wcode) if re.search(r"\bR_DrawElementsIndirect\s*\(", wcode[b:e])}
+    if owners != {"R_DrawWorldCulled"}:
+        fail("gl_worldcull.c: R_DrawElementsIndirect is called from %s, R_DrawWorldCulled alone may "
+             "(#340 P5a-1)" % (sorted(owners) or "nowhere"))
+    for grel, fn, rx, first_rx, why in COMPUTE_GATES:
+        b = body_named(root, grel, fn)
+        if b is None:
+            continue
+        g = re.search(rx, b)
+        f = re.search(first_rx, b)
+        head = b[:g.start()] if g else ""
+        if not g or not f or g.start() > f.start() or head.count("{") - head.count("}") != 1:
+            fail("%s: %s lost the gate that keeps it off under -gpu, or moved it below what it guards: "
+                 "%s (#340 P5a-1)" % (grel, fn, why))
+    for frel, fn, probe, before in COMPUTE_FORMATS:
+        b = body_named(root, frel, fn)
+        if b is None:
+            continue
+        lim = re.search(before, b) if before else None
+        if probe not in squash(b[:lim.start()] if lim else b) or (before and not lim):
+            fail("%s: %s must ask %s%s -- under -gpu it is what holds the pass off on a device "
+                 "without the format (#340 P5a-1, decision 12)"
+                 % (frel, fn, probe, " before " + before.replace("\\b", "").replace("\\s*", " ")
+                    if before else ""))
+    # every buffer a pass makes: named, bound, filled through the target it
+    # was bound to, in that order and nothing between (GL fills what is
+    # bound; rg_buffer.c fills what its shadow says is bound)
+    for crel, want in COMPUTE_BUFFERS.items():
+        cc = squash(strip_c_comments((root / crel).read_text(errors="replace")))
+        got = re.findall(r"R_GenBuffers\(1,&(\w+)\);", cc)
+        if sorted(got) != sorted(want):
+            fail("%s: the passes make buffers %s, COMPUTE_BUFFERS says %s (#340 P5a-1)" % (crel, got, want))
+        for name in got:
+            if not re.search(r"R_GenBuffers\(1,&%s\);GL_BindBuffer\((GL_\w+),%s\);R_BufferData\(\1,"
+                             % (name, name), cc):
+                fail("%s: %s is not `R_GenBuffers (1, &%s); GL_BindBuffer (T, %s); R_BufferData (T, ...)` "
+                     "-- a fill through another binding fills another buffer (#340 P5a-1)"
+                     % (crel, name, name, name))
+    for brel, fn, bind, call in COMPUTE_BINDS:
+        b = body_named(root, brel, fn)
+        if b is not None and squash(bind) + call not in squash(b):
+            fail("%s: %s must make `%s` right before `%s...` -- the routed call reads through it "
+                 "(#340 P5a-1)" % (brel, fn, bind, call))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     ap.add_argument("--root", type=Path, default=ROOT)
@@ -3359,6 +3701,7 @@ def main(argv=None):
     check_soft_particles(root)
     check_screen_warp(root)
     check_bloom(root)
+    check_compute(root)
     nfiles = 0
     rg_files = []
     for p in sorted(eng.rglob("*")):

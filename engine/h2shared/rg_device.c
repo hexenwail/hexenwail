@@ -358,7 +358,7 @@ void RG_Status (void)
 	Con_Printf ("[RENDERER] SDL_GPU driver=%s device=%s present=%s swapchain=%s\n",
 		    RG_DriverName (), name, RG_PresentModeName (rg_present_mode),
 		    rg_dev ? "SDR" : "none");
-	Con_Printf ("[RENDERER] SDL_GPU P4e: 2D, world, brush and alias models, the stencilled sky, liquids, "
+	Con_Printf ("[RENDERER] SDL_GPU P5a-1: 2D, world, brush and alias models, the stencilled sky, liquids, "
 		    "particles, sprites, glows, fog and mirrors drawn, post-process (gamma, contrast, r_scale, FXAA, "
 		    "r_softemu, the underwater warp, motion blur, bloom, HDR) on render targets, soft particles, the world, "
 		    "brush models, sky pre-pass and alias meshes from their vertex buffers, instanced and "

@@ -72,6 +72,10 @@
 #include "gl_sky.h"		/* gl_farclip -- the projection far plane lives there */
 #include "gl_lightcluster.h"
 #include "gl_uniforms.h"	/* R_SetWorldDlight, R_SetAliasLightGrid -- see the two binds */
+#include "gl_compute.h"	/* dispatch, readback, the storage limits (#340 P5a-1) */
+#ifdef USE_SDL_GPU
+#include "rg_device.h"	/* R_GPU (): LcParams has no GL binding point there */
+#endif
 
 #ifndef USE_GLES
 
@@ -168,6 +172,37 @@ static int LC_PopCount (unsigned int v)
 /* Resources                                                           */
 /* ------------------------------------------------------------------ */
 
+/* Pin LcParams to its binding point, and check the driver laid the block
+ * out as lc_params_t does (the RU_CheckBlockSize practice).  The binding
+ * dies with the program, so vid_restart is covered by construction.  False:
+ * the program has no LcParams block. */
+static qboolean LC_BindParamsBlock (GLuint prog)
+{
+	GLuint	blk;
+	GLint	size = 0;
+
+#ifdef USE_SDL_GPU
+	/* The SPIR-V fixes the block's slot; the mirror is P5b's (#340). */
+	if (R_GPU ())
+		return true;
+#endif
+	if (!glGetUniformBlockIndex_fp || !glUniformBlockBinding_fp)
+		return true;
+	blk = glGetUniformBlockIndex_fp (prog, "LcParams");
+	if (blk == GL_INVALID_INDEX)
+		return false;
+	if (glGetActiveUniformBlockiv_fp)
+	{
+		glGetActiveUniformBlockiv_fp (prog, blk, GL_UNIFORM_BLOCK_DATA_SIZE, &size);
+		if (size != (GLint)sizeof(lc_params_t))
+			Con_Printf ("WARNING: uniform block LcParams is %d bytes on this driver, "
+				    "C mirror is %d -- light clustering will be wrong\n",
+				    (int)size, (int)sizeof(lc_params_t));
+	}
+	glUniformBlockBinding_fp (prog, blk, LC_PARAMS_UBO_BINDING);
+	return true;
+}
+
 static qboolean R_LightCluster_Build (void)
 {
 	if (lc_failed)
@@ -184,8 +219,7 @@ static qboolean R_LightCluster_Build (void)
 	 * is dynamic lights that do nothing, which reads as "the port doesn't
 	 * work" and not as "this driver is short of binding points". */
 	{
-		GLint maxbind = 0;
-		glGetIntegerv_fp (GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS, &maxbind);
+		int maxbind = R_MaxStorageBindings ();
 		if (maxbind <= LIGHT_SSBO_BINDING)
 		{
 			Con_SafePrintf ("LightCluster: disabled, driver has %d shader "
@@ -195,6 +229,13 @@ static qboolean R_LightCluster_Build (void)
 			return false;
 		}
 	}
+	if (!R_StorageFormatOk (GL_RGBA32UI, GL_TEXTURE_3D, GL_WRITE_ONLY))
+	{
+		Con_SafePrintf ("LightCluster: disabled, the device cannot write a 3D RGBA32UI "
+				"storage image\n");
+		lc_failed = true;
+		return false;
+	}
 
 	lc_prog = R_Program_Create (RPROG_LIGHTCLUSTER);
 	if (!lc_prog)
@@ -203,36 +244,18 @@ static qboolean R_LightCluster_Build (void)
 		return false;
 	}
 
-	/* Pin LcParams to its binding point, and check the driver laid the block
-	 * out as lc_params_t does (the RU_CheckBlockSize practice).  The binding
-	 * dies with the program, so vid_restart is covered by construction. */
-	if (glGetUniformBlockIndex_fp && glUniformBlockBinding_fp)
+	if (!LC_BindParamsBlock (lc_prog))
 	{
-		GLuint	blk = glGetUniformBlockIndex_fp (lc_prog, "LcParams");
-		GLint	size = 0;
-
-		if (blk == GL_INVALID_INDEX)
-		{
-			Con_SafePrintf ("LightCluster: disabled, no LcParams block in the program\n");
-			lc_failed = true;
-			return false;
-		}
-		if (glGetActiveUniformBlockiv_fp)
-		{
-			glGetActiveUniformBlockiv_fp (lc_prog, blk, GL_UNIFORM_BLOCK_DATA_SIZE, &size);
-			if (size != (GLint)sizeof(lc_params_t))
-				Con_Printf ("WARNING: uniform block LcParams is %d bytes on this driver, "
-					    "C mirror is %d -- light clustering will be wrong\n",
-					    (int)size, (int)sizeof(lc_params_t));
-		}
-		glUniformBlockBinding_fp (lc_prog, blk, LC_PARAMS_UBO_BINDING);
+		Con_SafePrintf ("LightCluster: disabled, no LcParams block in the program\n");
+		lc_failed = true;
+		return false;
 	}
 
-	glGenBuffers_fp (1, &lc_ssbo);
+	R_GenBuffers (1, &lc_ssbo);
 	GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, lc_ssbo);
-	glBufferData_fp (GL_SHADER_STORAGE_BUFFER,
-			 (GLsizeiptr)(MAX_LIGHTSTYLES * sizeof(float) + sizeof(lc_lights)),
-			 NULL, GL_DYNAMIC_DRAW);
+	R_BufferData (GL_SHADER_STORAGE_BUFFER,
+		      (GLsizeiptr)(MAX_LIGHTSTYLES * sizeof(float) + sizeof(lc_lights)),
+		      NULL, GL_DYNAMIC_DRAW);
 	GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, 0);
 
 	R_GenTextures (1, &lc_grid);
@@ -331,7 +354,7 @@ void R_LightCluster_Update (void)
 	 * dimension would make this a division by zero and every lookup a NaN;
 	 * it should not happen (R_SetupGL always leaves a non-empty viewport)
 	 * but a minimised window is exactly the sort of thing that produces one. */
-	glGetIntegerv_fp (GL_VIEWPORT, vp);
+	R_GetViewport (vp);
 	if (vp[2] <= 0 || vp[3] <= 0)
 		return;
 	lc_vp[0] = (float)vp[0];
@@ -379,11 +402,11 @@ static void LC_UploadAndDispatch (void)
 		float styles[MAX_LIGHTSTYLES];
 		for (i = 0; i < MAX_LIGHTSTYLES; i++)
 			styles[i] = d_lightstylevalue[i] * (1.0f / 256.0f);
-		glBufferSubData_fp (GL_SHADER_STORAGE_BUFFER, 0, sizeof(styles), styles);
+		R_BufferSubData (GL_SHADER_STORAGE_BUFFER, 0, sizeof(styles), styles);
 		if (lc_numlights > 0)
-			glBufferSubData_fp (GL_SHADER_STORAGE_BUFFER, sizeof(styles),
-					    (GLsizeiptr)(lc_numlights * sizeof(gpulight_t)),
-					    lc_lights);
+			R_BufferSubData (GL_SHADER_STORAGE_BUFFER, sizeof(styles),
+					 (GLsizeiptr)(lc_numlights * sizeof(gpulight_t)),
+					 lc_lights);
 	}
 	GL_BindBufferBase (GL_SHADER_STORAGE_BUFFER, LIGHT_SSBO_BINDING, lc_ssbo);
 	GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, 0);
@@ -406,8 +429,8 @@ static void LC_UploadAndDispatch (void)
 	}
 
 	R_BindImageTexture (0, lc_grid, 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_RGBA32UI);
-	glDispatchCompute_fp (LIGHT_TILES_X / 8, LIGHT_TILES_Y / 8, LIGHT_TILES_Z);
-	glMemoryBarrier_fp (GL_TEXTURE_FETCH_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+	R_DispatchCompute (LIGHT_TILES_X / 8, LIGHT_TILES_Y / 8, LIGHT_TILES_Z);
+	R_MemoryBarrier (GL_TEXTURE_FETCH_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
 	R_BindImageTexture (0, 0, 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_RGBA32UI);
 
 	R_UseProgram (0);
@@ -650,15 +673,11 @@ static void R_LightCluster_Verify_f (void)
 		LC_UploadAndDispatch ();
 		CON_Printf (_PRINT_NONOTIFY, "lightcluster_verify: clustering %d synthetic lights\n", want);
 	}
-	if (!glGetTexImage_fp)
+	if (!R_ReadTexImage (GL_TEXTURE_3D, lc_grid, 0, GL_RGBA_INTEGER, GL_UNSIGNED_INT, readback))
 	{
-		CON_Printf (_PRINT_NONOTIFY, "lightcluster_verify: glGetTexImage unavailable\n");
+		CON_Printf (_PRINT_NONOTIFY, "lightcluster_verify: the grid cannot be read back\n");
 		return;
 	}
-
-	R_BindTextureForEdit (GL_TEXTURE_3D, lc_grid);
-	glGetTexImage_fp (GL_TEXTURE_3D, 0, GL_RGBA_INTEGER, GL_UNSIGNED_INT, readback);
-	R_BindTextureForEdit (GL_TEXTURE_3D, 0);
 
 	/* The frustum straight from the field of view R_SetupGL built it with.
 	 * At view depth d, NDC x spans +/- tan(fov_x/2)*d.  Deliberately NOT the
@@ -748,8 +767,8 @@ void R_LightCluster_Init (void)
 void R_LightCluster_Shutdown (void)
 {
 	R_PipelineForgetProgram ();	/* GL reuses program names */
-	if (lc_prog) { glDeleteProgram_fp (lc_prog); lc_prog = 0; }
-	if (lc_ssbo) { GL_ForgetBuffer (lc_ssbo); glDeleteBuffers_fp (1, &lc_ssbo); lc_ssbo = 0; }
+	if (lc_prog) { R_DeleteProgram (lc_prog); lc_prog = 0; }
+	if (lc_ssbo) { GL_ForgetBuffer (lc_ssbo); R_DeleteBuffers (1, &lc_ssbo); lc_ssbo = 0; }
 	if (lc_grid) { R_DeleteTextures (1, &lc_grid); lc_grid = 0; }
 	lc_ready = false;
 	lc_failed = false;

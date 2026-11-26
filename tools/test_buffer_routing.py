@@ -13,8 +13,8 @@ R_DeleteBuffers, R_BufferData, R_BufferSubData, R_GenVertexArrays,
 R_DeleteVertexArrays, R_BindVertexArray, R_Enable/DisableVertexAttribArray,
 R_VertexAttribPointer, R_VertexAttribIPointer, R_VertexAttrib4f) and
 engine/h2shared/gl_vbo.c's (R_DrawElements, R_DrawElementsInstanced,
-R_DrawArrays since P4e, and GL_ImmEnd / GL_ImmDraw for the immediate
-batches).  Each GL arm is the bare
+R_DrawArrays since P4e, R_DrawElementsIndirect since P5a-1, and
+GL_ImmEnd / GL_ImmDraw for the immediate batches).  Each GL arm is the bare
 call; each -gpu arm reaches rg_buffer.c / rg_frame.c.  A raw call anywhere
 else is a buffer or a draw that backend never hears about: under -gpu it
 lands in the null table.
@@ -66,7 +66,11 @@ Allowed outside the two seam files:
     (engine/hexen2/gl_rsurf.c, gl_rmain.c) have no entry: every call there
     is routed.  Nor, since P2e, do the alias meshes (gl_mesh.c: the MDL /
     MD3 VAOs, the skeletal VAO, the pose and bone storage buffers) or the
-    instanced alias programs' ShadeDots buffer (gl_shader.c).
+    instanced alias programs' ShadeDots buffer (gl_shader.c).  Nor, since
+    P5a-1, do the compute passes (gl_worldcull.c's cull buffers, indirect
+    draw and world VAO rebind, gl_lightcluster.c's light buffer, gl_ssao.c's
+    uniform buffer and composite draw): their -gpu arms are P5's, and the
+    passes stay off under -gpu until each sub-phase lifts its gate.
   * engine/h2shared/gl_func.h, the loader table, which declares them;
   * engine/h2shared/rg_null.c, the generated null table, which stubs them;
   * engine/h2shared/web_canvas_gl2.c, the software renderer's WebGL2
@@ -98,6 +102,8 @@ OWNERS = {
     },
     "engine/h2shared/gl_vbo.c": {
         "R_DrawElements", "R_DrawElementsInstanced", "R_DrawArrays",
+        # the GPU world cull's indirect draw (#340 P5a-1; its -gpu arm is P5c)
+        "R_DrawElementsIndirect",
         # the immediate emulator's GL arms; test_rg_sources.py holds every GL
         # call in gl_vbo.c to an SDL_GPU arm
         "GL_VBO_Init", "GL_VBO_Shutdown", "GL_ImmBindVerts", "GL_ImmEnd", "GL_ImmDraw",
@@ -152,42 +158,21 @@ DRAWS = (
 
 # (file, function without gl/_fp/suffix) -> (times it appears, why it may
 # stay there).
-_CULL = "GPU world culling and Hi-Z: compute, P5 (R_BuildWorldCull returns under -gpu)"
-_LC = "the clustered-light froxel grid: compute and storage, P5"
 _PP_OIT = "the OIT resolve: P6 (OIT_InitShader and the resolve are gated off under -gpu)"
 _PP_DRAW = ("the OIT resolve's bufferless draw (P6); bloom's three go through R_DrawArrays (P4e) "
             "and its VAO through R_GenVertexArrays / R_BindVertexArray (P4a-1)")
 _PP_UBO = ("the post-process uniform buffers: under -gpu PpVert / PpParams are mirrors "
            "(P4a-1) and BloomParams (P4e), OitParams is P6; the deletes are "
            "shutdown's, under `if (*_ubo)`")
-_SSAO = "SSAO: compute and its composite pass, P4/P5"
 _SHADOW = "dlight shadow maps: P6 (gated off by R_LightCluster_Available under -gpu)"
 _UBO = ("uniform-block buffers: -gpu pushes gl_uniforms.c's CPU mirrors instead "
         "(RG_UniformBlockRegister), so the GL buffers behind them are never read there")
 ALLOWED = {
-    ("engine/h2shared/gl_worldcull.c", "BindBuffer"): (10, _CULL),
-    ("engine/h2shared/gl_worldcull.c", "BufferData"): (6, _CULL),
-    ("engine/h2shared/gl_worldcull.c", "BufferSubData"): (1, _CULL),
-    ("engine/h2shared/gl_worldcull.c", "BindVertexArray"): (2, _CULL),
-    ("engine/h2shared/gl_worldcull.c", "DeleteBuffers"): (7, _CULL),
-    ("engine/h2shared/gl_worldcull.c", "DrawElementsIndirect"): (1, _CULL),
-    ("engine/h2shared/gl_worldcull.c", "GenBuffers"): (7, _CULL),
-    ("engine/h2shared/gl_worldcull.c", "VertexAttrib4f"): (1, _CULL),
-    ("engine/h2shared/gl_lightcluster.c", "BufferData"): (1, _LC),
-    ("engine/h2shared/gl_lightcluster.c", "BufferSubData"): (2, _LC),
-    ("engine/h2shared/gl_lightcluster.c", "DeleteBuffers"): (1, _LC),
-    ("engine/h2shared/gl_lightcluster.c", "GenBuffers"): (1, _LC),
     ("engine/h2shared/gl_postprocess.c", "BindVertexArray"): (2, _PP_OIT),
     ("engine/h2shared/gl_postprocess.c", "DeleteBuffers"): (4, _PP_UBO),
     ("engine/h2shared/gl_postprocess.c", "DrawArrays"): (1, _PP_DRAW),
     ("engine/h2shared/gl_postprocess.c", "GenBuffers"): (4, _PP_UBO),
     ("engine/h2shared/gl_postprocess.c", "GenVertexArrays"): (1, _PP_OIT),
-    ("engine/h2shared/gl_ssao.c", "BindVertexArray"): (2, _SSAO),
-    ("engine/h2shared/gl_ssao.c", "DeleteBuffers"): (1, _SSAO),
-    ("engine/h2shared/gl_ssao.c", "DeleteVertexArrays"): (1, _SSAO),
-    ("engine/h2shared/gl_ssao.c", "DrawArrays"): (1, _SSAO),
-    ("engine/h2shared/gl_ssao.c", "GenBuffers"): (1, _SSAO),
-    ("engine/h2shared/gl_ssao.c", "GenVertexArrays"): (1, _SSAO),
     ("engine/h2shared/gl_shadow.c", "BindVertexArray"): (5, _SHADOW),
     ("engine/h2shared/gl_shadow.c", "DeleteBuffers"): (1, _SHADOW),
     ("engine/h2shared/gl_shadow.c", "DeleteVertexArrays"): (1, _SHADOW),

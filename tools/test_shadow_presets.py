@@ -35,8 +35,9 @@ software renderer, where a 2 renders as 1.  Checked here:
     renders now: M_DLOCCLUSION_MAX, except 1 on desktop when
     R_LightCluster_ShadesWorld () is false (r_lightclusters 0, or no compute),
     because the cube maps light only the clustered path's receivers and
-    gl_shadow.c builds none without it.  There the row's note says why
-    Shadows is missing, inside M_ROWNOTE_MAX;
+    gl_shadow.c builds none without it, and 1 under -gpu, where
+    R_Shadow_Prepare returns before the maps (P6 of #340, gated since P5a-1).
+    There the row's note says why Shadows is missing, inside M_ROWNOTE_MAX;
   * the defaults: r_dlight_occlusion 2 on desktop GL, 1 on the ES tier and in
     the software build, and r_shadow_casters 1 (alias casters only where a
     preset or the player asks).
@@ -254,13 +255,21 @@ if 'Cvar_VariableValue ("r_dlight_occlusion")' not in fn \
 # The ceiling that renders: the cube maps are gl_shadow.c's, which selects
 # lights only while the cluster grid is up (R_LightCluster_Available), so on
 # desktop the ceiling follows R_LightCluster_ShadesWorld, its frame-stable twin.
+# Under -gpu the ceiling is 1 whatever the cluster does: the cube maps are
+# P6 of #340 and R_Shadow_Prepare returns under R_GPU () (#340 P5a-1).
 cap = re.search(r"static int M_DlightOcclusionMax \(void\)\s*\{\s*"
                 r"#if defined\(GLQUAKE\) && !defined\(USE_GLES\)\s*"
+                r"#ifdef USE_SDL_GPU\s*if \(R_GPU \(\)\)[^\n]*\n\s*return 1;\s*#endif\s*"
                 r"if \(!R_LightCluster_ShadesWorld \(\)\)\s*return 1;\s*#endif\s*"
                 r"return M_DLOCCLUSION_MAX;\s*\}", menu)
 if not cap:
-    errors.append("M_DlightOcclusionMax must return 1 on desktop GL when R_LightCluster_ShadesWorld () is false, "
-                  "M_DLOCCLUSION_MAX otherwise")
+    errors.append("M_DlightOcclusionMax must return 1 under -gpu (#340 P5a-1: the cube maps are P6) and on "
+                  "desktop GL when R_LightCluster_ShadesWorld () is false, M_DLOCCLUSION_MAX otherwise")
+if not re.search(r"#ifdef USE_SDL_GPU\s*if \(R_GPU \(\)\)\s*return;\s*#endif\s*"
+                 r"if \(r_dlight_occlusion\.integer >= 2 && !sh_failed && R_LightCluster_Available \(\)",
+                 shadow):
+    errors.append("gl_shadow.c: R_Shadow_Prepare must return under R_GPU () right before the cube-map test -- "
+                  "the menu's -gpu ceiling of 1 follows that gate (#340 P5a-1)")
 if not re.search(r"r_dlight_occlusion\.integer >= 2 && !sh_failed && R_LightCluster_Available \(\)", shadow):
     errors.append("gl_shadow.c no longer gates the maps on R_LightCluster_Available (); the row's ceiling "
                   "(M_DlightOcclusionMax) must follow whatever it gates on now")
@@ -270,12 +279,15 @@ if not re.search(r'#if defined\(GLQUAKE\)\n(?:#include "[^"]+"\n)*#include "gl_l
 # Capped: the note says why -- the cvar when it is off, the GPU when it is on
 # (no compute, or the grid failed to build) -- each inside M_ROWNOTE_MAX.
 note = re.search(r'static const char \*M_Graphics_Note \(int row\)\s*\{\s*'
-                 r'if \(row == GFX_DLOCCLUSION && M_DlightOcclusionMax \(\) < M_DLOCCLUSION_MAX\)\s*'
-                 r'return Cvar_VariableValue \("r_lightclusters"\) \? "([^"]*)"\s*:\s*"([^"]*)";', menu)
+                 r'if \(row == GFX_DLOCCLUSION && M_DlightOcclusionMax \(\) < M_DLOCCLUSION_MAX\)\s*\{\s*'
+                 r'#ifdef USE_SDL_GPU\s*if \(R_GPU \(\)\)\s*return "([^"]*)";\s*#endif\s*'
+                 r'return Cvar_VariableValue \("r_lightclusters"\) \? "([^"]*)"\s*:\s*"([^"]*)";\s*\}', menu)
 rowmax = re.search(r"#define\s+M_ROWNOTE_MAX\s+(\d+)", menu)
-if not note or "r_lightclusters 1" not in note.group(2) or "GPU" not in note.group(1):
-    errors.append("M_Graphics_Note must say, while the row is capped below the tier, that Shadows need "
-                  "r_lightclusters 1 (cvar off) or that the GPU cannot draw them (cvar on)")
+if not note or "r_lightclusters 1" not in note.group(3) or "GPU" not in note.group(2) \
+        or "-gpu" not in note.group(1):
+    errors.append("M_Graphics_Note must say, while the row is capped below the tier, that Shadows are not on "
+                  "-gpu yet (#340 P5a-1), or need r_lightclusters 1 (cvar off), or that the GPU cannot draw "
+                  "them (cvar on)")
 else:
     for n in note.groups():
         if not rowmax or len(n) > int(rowmax.group(1)):

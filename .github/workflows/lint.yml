@@ -134,7 +134,8 @@ jobs:
       # whose SDL_GPU arms the backend draws from.  No raw glGenBuffers /
       # glBufferData on a vertex target / glBindVertexArray / glVertexAttrib*
       # / glDraw* elsewhere, bar a ledger of the paths -gpu does not run yet,
-      # each with an exact count.  GitHub #340 (P2d).
+      # each with an exact count; the compute passes left it at P5a-1
+      # (R_DrawElementsIndirect is gl_vbo.c's).  GitHub #340 (P2d).
       - name: No buffer, vertex-array or draw call bypasses the seams
         run: python3 tools/test_buffer_routing.py
 
@@ -601,7 +602,7 @@ jobs:
       # R_ProgramSamplerUnit, whose GL arms are the glGetUniformLocation /
       # glUniform1i pair and whose SDL_GPU arms write the unit into the
       # program's reflected samplers: no other caller but gl_postprocess.c's
-      # OIT resolve and gl_ssao.c (P6 / P5), every sampler of every routed program a
+      # OIT resolve (P6); the SSAO composite goes through the seam since P5a-1; every sampler of every routed program a
       # unit from the TMU constants, no two on one unit; and the backend's
       # reflection, unit seam and typed placeholders lifted and run
       # (#340 P2a).

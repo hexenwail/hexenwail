@@ -383,8 +383,9 @@ BLOCK_WRITERS = set(re.findall(r"\bvoid\s+(R_Set\w+)\s*\(", uh)) | {
 if not {"R_SetMVP", "R_SetModelView", "R_SetFog", "R_SetAliasDlight"} <= BLOCK_WRITERS:
     errors.append("cannot read the block setters out of gl_uniforms.h")
 # R_DrawElements / R_DrawElementsInstanced are gl_vbo.c's indexed-draw seam
-# (#340 P2d): a call to one is a draw here, as the glDraw*_fp it wraps was.
-DRAW = r"\bglDraw\w*_fp\b|\bR_DrawElements(?:Instanced)?\b|^\s*EMIT_BATCH\("
+# (#340 P2d), R_DrawElementsIndirect the GPU cull's (P5a-1): a call to one is
+# a draw here, as the glDraw*_fp it wraps was.
+DRAW = r"\bglDraw\w*_fp\b|\bR_DrawElements(?:Instanced|Indirect)?\b|^\s*EMIT_BATCH\("
 WORLD_PROG = r"\bgl_shader_world(?:_opaque|_oit)?\b"
 
 # function -> (file, mvp expr, mv expr, where the pair comes from, allowed enclosing heads)
@@ -650,7 +651,7 @@ CKEYS = {"if", "while", "for", "switch", "return", "sizeof", "do", "else", "case
          "struct", "union", "enum", "static", "extern", "register", "inline", "__inline", "__inline__"}
 BINDS = {"R_UseProgram", "glUseProgram_fp"}
 BINDS_RE = r"\b(?:R_UseProgram|glUseProgram_fp)\b"
-GLDRAW = r"\b(?:glDraw(?!Buffers?_)\w*_fp|glMultiDraw\w*_fp|R_DrawElements(?:Instanced)?)\b"
+GLDRAW = r"\b(?:glDraw(?!Buffers?_)\w*_fp|glMultiDraw\w*_fp|R_DrawElements(?:Instanced|Indirect)?)\b"
 CALL = re.compile(r"\b([A-Za-z_]\w*)\s*\(")
 PROTO = re.compile(r"\s*(?:(?:extern|static|const|struct|unsigned|signed)\s+)*\w+(?:\s+|\s*\*+\s*)\**\s*\w+\s*\([^=]*\)\s*")
 EMPTY = frozenset()

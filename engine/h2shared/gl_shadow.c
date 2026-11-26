@@ -1578,6 +1578,12 @@ void R_Shadow_Prepare (void)
 		GL_BindBuffer (GL_UNIFORM_BUFFER, 0);
 	}
 
+#ifdef USE_SDL_GPU
+	/* The cube maps are P6 (#340): once P5b brings the light cluster up
+	 * under -gpu, R_LightCluster_Available stops holding them off. */
+	if (R_GPU ())
+		return;
+#endif
 	if (r_dlight_occlusion.integer >= 2 && !sh_failed && R_LightCluster_Available () &&
 	    r_shadow_maxlights.integer > 0 && world_vao && cl.worldmodel &&
 	    SH_BuildPrograms () && SH_EnsureSurfaces () && SH_EnsureTexture ())

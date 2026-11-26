@@ -148,6 +148,8 @@ void	GL_SetPointSize (float size);
  * and the 3D view set it here.  GL-native coordinates, origin bottom-left.
  * #340 P1c. */
 void	R_SetViewport (int x, int y, int width, int height);
+/* The viewport R_SetViewport last set, as glGetIntegerv (GL_VIEWPORT). */
+void	R_GetViewport (GLint vp[4]);
 /* glClear and the values it clears to.  Unshadowed for GL like the viewport
  * (each GL arm is the bare call), but SDL_GPU has no clear command: a clear
  * is the load op of the render pass after it, so the values are kept here

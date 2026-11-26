@@ -550,6 +550,11 @@ void RG_BindBufferBase (GLenum target, GLuint index, GLuint buffer)
 	RG_BindBufferRange (target, index, buffer, 0, 0);
 }
 
+int RG_MaxStorageBindings (void)
+{
+	return RGB_SSBO_POINTS;
+}
+
 /* GL_Upload's -gpu arm.  GL streams into one ring buffer per frame and
  * binds each upload as a range of it; SDL_GPU binds a storage buffer whole,
  * with no offset, so each upload in a frame gets a buffer of its own and is

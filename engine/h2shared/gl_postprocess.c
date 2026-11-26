@@ -23,6 +23,7 @@
 #include "gl_vbo.h"
 #include "draw.h"
 #include "gl_fbo.h"	/* framebuffers and renderbuffers, through the seam (#340 P4a-1) */
+#include "gl_compute.h"	/* dispatch, barriers, program deletes, through the seam (#340 P5a-1) */
 #include "gl_ssao.h"	/* R_SSAO_WantsSceneFBO: SSAO draws through the scene FBO (#539) */
 #ifdef USE_SDL_GPU
 #include "rg_device.h"	/* R_GPU(): the chain's -gpu gates and uniform mirrors */
@@ -1614,6 +1615,8 @@ static qboolean PP_BuildPaletteLUT_GPU (softemu_metric_t metric)
 		return false;
 	if (!gl_renderer_caps.compute_shaders || !glBindImageTexture_fp)
 		return false;
+	if (!R_StorageFormatOk (GL_RGBA8, GL_TEXTURE_3D, GL_WRITE_ONLY))
+		return false;
 
 	if (!pp_palette_init_prog[metric])
 	{
@@ -1647,8 +1650,8 @@ static qboolean PP_BuildPaletteLUT_GPU (softemu_metric_t metric)
 	 * compiled in.  Nothing to upload. */
 
 	R_BindImageTexture (0, pp_palette_lut, 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_RGBA8);
-	glDispatchCompute_fp(PP_LUT_DIM / 8, PP_LUT_DIM / 8, PP_LUT_DIM / 4);
-	glMemoryBarrier_fp(GL_TEXTURE_FETCH_BARRIER_BIT);
+	R_DispatchCompute (PP_LUT_DIM / 8, PP_LUT_DIM / 8, PP_LUT_DIM / 4);
+	R_MemoryBarrier (GL_TEXTURE_FETCH_BARRIER_BIT);
 
 	R_BindImageTexture (0, 0, 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_RGBA8);
 	R_BindTextureSlot (0, 0);
@@ -1666,7 +1669,7 @@ static void PP_FreePaletteGPU (void)
 	{
 		if (pp_palette_init_prog[i])
 		{
-			glDeleteProgram_fp(pp_palette_init_prog[i]);
+			R_DeleteProgram (pp_palette_init_prog[i]);
 			pp_palette_init_prog[i] = 0;
 		}
 	}
