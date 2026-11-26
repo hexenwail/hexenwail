@@ -455,16 +455,11 @@ static GLuint	oit_ubo;
 
 /* ------------------------------------------------------------------ */
 
-/* Bloom is P4e of #340 under -gpu: its passes are bufferless draws
- * (glDrawArrays, no seam yet) and BloomParams has no mirror there, so -gpu
- * builds no pyramid and adds none.  Everywhere the chain asks "is bloom on",
- * it asks this. */
+/* Everywhere the chain asks "is bloom on", it asks this.  Under -gpu since
+ * #340 P4e: the passes are R_DrawArrays's bufferless draws and BloomParams
+ * is a registered mirror. */
 static qboolean PP_BloomOn (void)
 {
-#ifdef USE_SDL_GPU
-	if (R_GPU ())
-		return false;
-#endif
 	return r_bloom.integer != 0;
 }
 
@@ -872,24 +867,26 @@ static void PP_BindUniformBlock (GLuint prog, const char *block, GLuint binding,
  * glBufferSubData between draws is ordered against the earlier draws by GL
  * itself, so seven of them a frame are correct on every driver. */
 static GLuint	bloom_ubo;
+/* What bloom_ubo holds; under -gpu the registered BloomParams mirror, which
+ * each draw snapshots as it is recorded, so seven writes a frame stay seven
+ * blocks (#340 P4e). */
+static bloom_params_t	bloom_params;
 
 static void PP_PushBloomParams (float rcp_w, float rcp_h, float threshold)
 {
-	bloom_params_t	bp;
-
-	bp.p[0] = rcp_w;
-	bp.p[1] = rcp_h;
-	bp.p[2] = threshold;
-	bp.p[3] = 0.0f;
+	bloom_params.p[0] = rcp_w;
+	bloom_params.p[1] = rcp_h;
+	bloom_params.p[2] = threshold;
+	bloom_params.p[3] = 0.0f;
 #ifdef USE_SDL_GPU
 	if (R_GPU ())
 	{
-		RG_NoteUnhandled ("PP_PushBloomParams (BloomParams is P4e)");
+		RG_UniformBlockFlushed ("BloomParams");
 		return;
 	}
 #endif
 	GL_BindBuffer(GL_UNIFORM_BUFFER, bloom_ubo);
-	glBufferSubData_fp(GL_UNIFORM_BUFFER, 0, sizeof(bp), &bp);
+	glBufferSubData_fp(GL_UNIFORM_BUFFER, 0, sizeof(bloom_params), &bloom_params);
 	GL_BindBuffer(GL_UNIFORM_BUFFER, 0);
 	GL_BindBufferBase(GL_UNIFORM_BUFFER, BLOOM_PARAMS_UBO_BINDING, bloom_ubo);
 }
@@ -979,9 +976,11 @@ static qboolean PP_InitShader (void)
 	R_GenVertexArrays(1, &bloom_dummy_vao);
 
 	/* BloomParams storage; same lifetime as the programs and VAO above.
-	 * Under -gpu it becomes a mirror at P4e: no buffer until then. */
+	 * Under -gpu the block is bloom_params itself (#340 P4e). */
 #ifdef USE_SDL_GPU
-	if (!R_GPU ())
+	if (R_GPU ())
+		RG_UniformBlockRegister ("BloomParams", &bloom_params, sizeof(bloom_params));
+	else
 #endif
 	{
 		glGenBuffers_fp(1, &bloom_ubo);
@@ -2900,7 +2899,9 @@ void GL_PostProcess_EndFrame (void)
 	glheight = pp_saved_glheight;
 
 	/* Bloom post-process pass */
-	if (PP_BloomOn () && bloom_fbo[0] && bloom_bright_prog)
+	/* All three programs: PP_InitShader stops at the first that fails, before
+	 * the VAO and BloomParams exist. */
+	if (PP_BloomOn () && bloom_fbo[0] && bloom_bright_prog && bloom_down_prog && bloom_up_prog)
 	{
 		GLuint bloom_src = pp_native_active ? pp_native_color_tex : pp_color_tex;
 		int bloom_src_w = pp_native_active ? pp_native_w : pp_width;
@@ -2917,7 +2918,7 @@ void GL_PostProcess_EndFrame (void)
 		R_BindTextureSlot (0, bloom_src);
 		R_ProgramSamplerUnit(bloom_bright_prog, bloom_bright_loc_scene, "u_scene", 0);
 		PP_PushBloomParams(1.0f / bloom_src_w, 1.0f / bloom_src_h, r_bloom_threshold.value);
-		glDrawArrays_fp(GL_TRIANGLES, 0, 3);
+		R_DrawArrays(GL_TRIANGLES, 0, 3);
 
 		/* Downsample chain: level 0 → 1 → 2 → 3 */
 		for (i = 1; i < BLOOM_LEVELS; i++)
@@ -2928,7 +2929,7 @@ void GL_PostProcess_EndFrame (void)
 			R_BindTextureSlot (0, bloom_tex[i-1]);
 			R_ProgramSamplerUnit(bloom_down_prog, bloom_down_loc_scene, "u_scene", 0);
 			PP_PushBloomParams(1.0f / bloom_w[i-1], 1.0f / bloom_h[i-1], 0.0f);
-			glDrawArrays_fp(GL_TRIANGLES, 0, 3);
+			R_DrawArrays(GL_TRIANGLES, 0, 3);
 		}
 
 		/* Upsample + additive blend: level 3 → 2 → 1 → 0.
@@ -2947,7 +2948,7 @@ void GL_PostProcess_EndFrame (void)
 			R_BindTextureSlot (0, bloom_tex[i + 1]);
 			R_ProgramSamplerUnit(bloom_up_prog, bloom_up_loc_scene, "u_scene", 0);
 			PP_PushBloomParams(1.0f / bloom_w[i+1], 1.0f / bloom_h[i+1], 0.0f);
-			glDrawArrays_fp(GL_TRIANGLES, 0, 3);
+			R_DrawArrays(GL_TRIANGLES, 0, 3);
 		}
 		/* Back to the resting pair every other additive pass restores:
 		 * blended draws that set no func of their own (the sky's front

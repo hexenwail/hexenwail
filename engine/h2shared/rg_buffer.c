@@ -835,6 +835,28 @@ void RG_Buf_MarkRead (const rgvinput_t *in)
 		RGB_Stamp ((rgbuf_t *) in->reads[i]);
 }
 
+qboolean RG_Buf_Bufferless (void)
+{
+	rgvao_t		*v = (rgb_vao != 0) ? RGB_Vao (rgb_vao) : NULL;
+	int		i;
+
+	if (!v)
+	{
+		RG_NoteUnhandled (rgb_vao ? "array draw from a VAO SDL_GPU never made (dropped)"
+					  : "array draw with no VAO bound (dropped)");
+		return false;
+	}
+	for (i = 0; i < RG_MAX_VATTRS; i++)
+	{
+		if (v->attr[i].enabled)
+		{
+			RG_NoteUnhandled ("array draw from a VAO with vertex arrays (dropped)");
+			return false;
+		}
+	}
+	return true;
+}
+
 qboolean RG_Buf_ForDraw (int index_bytes, rgvinput_t *in)
 {
 	rgvao_t		*v = (rgb_vao != 0) ? RGB_Vao (rgb_vao) : NULL;

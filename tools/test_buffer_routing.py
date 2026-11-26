@@ -12,8 +12,9 @@ engine/h2shared/gl_buffer.c's seams (GL_BindBuffer, R_GenBuffers,
 R_DeleteBuffers, R_BufferData, R_BufferSubData, R_GenVertexArrays,
 R_DeleteVertexArrays, R_BindVertexArray, R_Enable/DisableVertexAttribArray,
 R_VertexAttribPointer, R_VertexAttribIPointer, R_VertexAttrib4f) and
-engine/h2shared/gl_vbo.c's (R_DrawElements, R_DrawElementsInstanced, and
-GL_ImmEnd / GL_ImmDraw for the immediate batches).  Each GL arm is the bare
+engine/h2shared/gl_vbo.c's (R_DrawElements, R_DrawElementsInstanced,
+R_DrawArrays since P4e, and GL_ImmEnd / GL_ImmDraw for the immediate
+batches).  Each GL arm is the bare
 call; each -gpu arm reaches rg_buffer.c / rg_frame.c.  A raw call anywhere
 else is a buffer or a draw that backend never hears about: under -gpu it
 lands in the null table.
@@ -96,7 +97,7 @@ OWNERS = {
         "GL_DrainGarbage", "GL_AllocFrameHostBuffers", "GL_DeleteFrameResources", "GL_Upload",
     },
     "engine/h2shared/gl_vbo.c": {
-        "R_DrawElements", "R_DrawElementsInstanced",
+        "R_DrawElements", "R_DrawElementsInstanced", "R_DrawArrays",
         # the immediate emulator's GL arms; test_rg_sources.py holds every GL
         # call in gl_vbo.c to an SDL_GPU arm
         "GL_VBO_Init", "GL_VBO_Shutdown", "GL_ImmBindVerts", "GL_ImmEnd", "GL_ImmDraw",
@@ -154,10 +155,10 @@ DRAWS = (
 _CULL = "GPU world culling and Hi-Z: compute, P5 (R_BuildWorldCull returns under -gpu)"
 _LC = "the clustered-light froxel grid: compute and storage, P5"
 _PP_OIT = "the OIT resolve: P6 (OIT_InitShader and the resolve are gated off under -gpu)"
-_PP_DRAW = ("bloom's three bufferless draws (R_DrawArrays is P4e) and the OIT resolve's (P6); "
-            "the bloom VAO goes through R_GenVertexArrays / R_BindVertexArray (P4a-1)")
+_PP_DRAW = ("the OIT resolve's bufferless draw (P6); bloom's three go through R_DrawArrays (P4e) "
+            "and its VAO through R_GenVertexArrays / R_BindVertexArray (P4a-1)")
 _PP_UBO = ("the post-process uniform buffers: under -gpu PpVert / PpParams are mirrors "
-           "(P4a-1), BloomParams has no buffer until P4e, OitParams is P6; the deletes are "
+           "(P4a-1) and BloomParams (P4e), OitParams is P6; the deletes are "
            "shutdown's, under `if (*_ubo)`")
 _SSAO = "SSAO: compute and its composite pass, P4/P5"
 _SHADOW = "dlight shadow maps: P6 (gated off by R_LightCluster_Available under -gpu)"
@@ -178,7 +179,7 @@ ALLOWED = {
     ("engine/h2shared/gl_lightcluster.c", "GenBuffers"): (1, _LC),
     ("engine/h2shared/gl_postprocess.c", "BindVertexArray"): (2, _PP_OIT),
     ("engine/h2shared/gl_postprocess.c", "DeleteBuffers"): (4, _PP_UBO),
-    ("engine/h2shared/gl_postprocess.c", "DrawArrays"): (4, _PP_DRAW),
+    ("engine/h2shared/gl_postprocess.c", "DrawArrays"): (1, _PP_DRAW),
     ("engine/h2shared/gl_postprocess.c", "GenBuffers"): (4, _PP_UBO),
     ("engine/h2shared/gl_postprocess.c", "GenVertexArrays"): (1, _PP_OIT),
     ("engine/h2shared/gl_ssao.c", "BindVertexArray"): (2, _SSAO),

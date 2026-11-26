@@ -36,6 +36,10 @@ void	GL_UnbindVertexArray (void);
 void	R_DrawElements (GLenum mode, GLsizei count, GLenum type, const void *indices);
 void	R_DrawElementsInstanced (GLenum mode, GLsizei count, GLenum type, const void *indices,
 				 GLsizei instancecount);
+/* glDrawArrays (#340 P4e).  Under -gpu only a draw from a VAO with no
+ * enabled attribute is routed (a bufferless fullscreen pass); anything else is
+ * counted and dropped. */
+void	R_DrawArrays (GLenum mode, GLint first, GLsizei count);
 void	GL_ImmBegin (void);
 void	GL_ImmVertex3f (float x, float y, float z);
 void	GL_ImmVertex2f (float x, float y);

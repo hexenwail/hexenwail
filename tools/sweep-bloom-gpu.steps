@@ -1,0 +1,221 @@
+# sweep-bloom-gpu.steps -- bloom (r_bloom) and HDR (r_hdr) through the
+# SDL_GPU backend (-gpu) against GL (#340 P4e).
+#
+# Bloom's three passes are bufferless fullscreen triangles (R_DrawArrays,
+# RG_VL_NONE) into a colour-only pyramid, with BloomParams a registered
+# mirror; r_hdr is RGBA16F targets (gl_renderer_caps.float_color_buffer) and
+# the final pass's ACES.  Run the SAME binary both ways, with identical
+# settings; host_framerate holds game time, so the torch flames and the
+# pause land alike run to run (sweep-mirror-gpu.steps explains it):
+#
+#   A="-fsaa 0 +gamma 1 +host_framerate 0.000001 +map demo1"
+#   STEPS=tools/sweep-bloom-gpu.steps ENGINE=$E ./tools/headless-drive.sh script /tmp/bl-gl ~/hexen2 $A
+#   VK_ICD_FILENAMES=<lvp_icd json> VK_LAYER_PATH=<vulkan-validation-layers>/share/vulkan/explicit_layer.d \
+#       STEPS=tools/sweep-bloom-gpu.steps ENGINE=$E \
+#       ./tools/headless-drive.sh script /tmp/bl-gpu ~/hexen2 -gpu +gpu_allow_software 1 +gpu_debug 1 $A
+#   ./tools/bloom-diff.sh /tmp/bl-gl /tmp/bl-gpu
+#
+# THE FRAMES.  g: demo1's graveyard, above any water.  t: the torch room by
+# the pools, gl_glows 1 and entities on (three light_flame_large_yellow and
+# a candle).  On each: 00 everything off; 01 the chain up with no effect
+# (r_waterwarp 1 above water), every bloom frame's partner; 02 r_bloom 1 at
+# threshold 1.0, which in LDR must equal 01 (nothing in RGBA8 is above
+# 1.0).  Graveyard: 03/05 threshold 0.3 at intensity 1/2, 04 threshold 0.8
+# (= 01: the brightest luminance there is 0.61, the clouds), 06/07 r_hdr 1
+# at exposure 1/2, 08 r_hdr 1 with bloom at 0.3, 09 everything back off
+# (= 00: bloom and HDR leave nothing behind, #547).  Torch room: 03/04
+# threshold 0.5 at intensity 1/2, 05/06 threshold 0.8 at intensity 2/1,
+# 07/08 r_hdr 1 at exposure 1/2, 09 r_hdr with bloom at 0.8, 10 r_hdr with
+# bloom at threshold 1.0, which keeps only what HDR holds above 1 (the
+# glows): an RGBA8 target clips it to nothing.
+#
+# WHY 0.3 IN THE GRAVEYARD.  At 0.5 only the cloud tops' last 0.11 passes,
+# and the Tesla P4 blooms half what Mesa does there (energy 0.53): the LDR
+# pyramid rounds that faint a glow to 8 bits its own way (an RGBA16F pyramid
+# brings it to 0.83).  At 0.2-0.4 the P4 agrees (0.95-0.97).  The torch room
+# carries 0.5 and 0.8.
+#
+# WHY NOT PIXEL FOR PIXEL.  The bright pass samples the NEAREST-filtered
+# native target at the centre of each half-size texel, which is a corner of
+# four source texels, and each implementation breaks that tie its own way:
+# with the sample moved a quarter texel in (a scratch build), lavapipe
+# matches llvmpipe bit for bit on every bloom frame, and the P4 comes within
+# 0.05-0.19 shape.  That is GL's own behaviour, unchanged here (GL must stay
+# pixel-identical); bloom-diff.sh compares the bloom by its sum and its
+# 16x16-block shape instead, which the tie leaves alone.
+#
+# THE THRESHOLDS -- see tools/bloom-diff.sh for the checks.  Measured
+# 2026-11-25, 800x600, llvmpipe GL against lavapipe -gpu (Mesa 26.2), three
+# runs a side, and the Tesla P4 (NVIDIA Vulkan) -gpu once against them:
+#
+#   check                       GL vs lavapipe   GL vs GL     Tesla P4       gate
+#   PSNR, frames without bloom  69.1 - 77.4      104.9 - inf  45.6 - 54.7    42
+#   PSNR, bloom frames          47.0 - 70.5      104.9 - inf  39.8 - 54.1    36
+#   bloom count apart           0.4 - 26.0%,     0            0.6 - 12.8%    10% or 2000 px
+#                               at most 1573 px
+#   bloom energy -gpu / GL      0.84 - 1.39      --           0.95 - 1.32    0.45 - 2.2
+#   bloom shape                 0.02 - 0.39      --           0.07 - 0.61    0.65
+#   intensity 2 / 1, GL / -gpu  1.69-1.91, same  --           within 0.02    1.5 - 2.1, 0.15
+#   g02 g04 t02 = 01, g09 = 00  0 px             0            0              0
+#   HDR counts apart            0.0%             --           0.0 - 0.2%     10%
+#
+# The three lavapipe runs are bit-identical to each other; so are the GL
+# runs on the graveyard, and on the torch room within 104.9 dB.  0
+# Validation Error lines and gpu_unrouted 0 in every report, lavapipe and
+# P4.
+#
+# Broken builds (one -gpu run each against GL run 1; BRK=<proxy> in a
+# scratch build, never committed), every one failing bloom-diff.sh:
+#
+#   proxy        what it breaks                       worst checks
+#   noblend      the upsample's additive blend off    energy 0.25-0.37, shape
+#                                                     0.71-0.86, PSNR to 23.1
+#   novp         the pyramid passes set no viewport   energy 0.03-1.84, shape
+#                                                     1.00-4.95, PSNR to 20.8
+#   nobloom      u_bloom unmapped (placeholder)       PSNR 0.9, every bloom
+#                                                     check, 4642 unhandled
+#   feedback     the bright pass samples its own      PSNR 0.9, every bloom
+#                target (RG_Res_ForDraw placeholder)  check, 2144 unhandled
+#   rgba8        GL_RGBA16F mapped to RGBA8           t10 count 0, energy 0;
+#                                                     t09 energy 0.40
+#   noflush      BloomParams never flushed (zeros)    PSNR 4.8, every bloom check
+#   nointensity  r_bloom_intensity ignored (1)        intensity 2 / 1 reads 1.000
+#                                                     on all three pairs; g05
+#                                                     PSNR 28.6
+#
+# rgba8 passes every LDR frame and the HDR frames without bloom (nothing in
+# the graveyard is above 1, so ACES of 8 bits reads like ACES of 16 there):
+# t10 is the frame that sees the clip.  The gates are for the Mesa pair and
+# hold on the P4; other hardware needs its own runs.
+
+sleep 20
+cmd god
+cmd notarget
+cmd noclip
+cmd con_notifytime 0
+cmd viewsize 120
+cmd crosshair 0
+cmd showpause 0
+cmd r_skyspeed_back 0
+cmd r_skyspeed_front 0
+cmd r_flatlightstyles 1
+cmd r_dynamic 0
+cmd r_gpulightstyles 0
+cmd r_ssao 0
+cmd r_bloom 0
+cmd r_bloom_threshold 1
+cmd r_bloom_intensity 1
+cmd r_hdr 0
+cmd r_hdr_exposure 1
+cmd r_dlight_occlusion 0
+cmd r_alias_gpu 0
+cmd r_particles 0
+cmd fog 0
+cmd gl_texture_anisotropy 1
+cmd r_oit 0
+cmd r_waterwarp 0
+cmd r_motionblur 0
+cmd r_softparticles 0
+cmd r_softemu 0
+cmd r_scale 1
+cmd gl_fxaa 0
+cmd contrast 1
+cmd gl_waterwarp_speed 0
+cmd r_caustics 0
+cmd gl_glows 0
+cmd gl_missile_glows 0
+cmd gl_other_glows 0
+cmd r_drawviewmodel 0
+cmd r_drawentities 0
+cmd r_wateralpha 0.33
+cmd r_lavaalpha 0
+cmd r_water_pixel_warp 0
+cmd gl_cshiftpercent_contents 0
+cmd r_pp_time 10
+sleep 2
+
+# --- demo1's graveyard (sweep-warp-gpu.steps' 06 camera), above any water ---
+cmd setpos -918 -2034 0 -20 45 0
+sleep 2
+cmd gpu_unrouted reset
+cmd pause
+shot g00-off
+cmd r_waterwarp 1
+shot g01-chain
+cmd r_waterwarp 0
+cmd r_bloom 1
+cmd r_bloom_threshold 1
+shot g02-ldr-t10
+cmd r_bloom_threshold 0.3
+shot g03-t03-i1
+cmd r_bloom_threshold 0.8
+shot g04-t08-i1
+cmd r_bloom_threshold 0.3
+cmd r_bloom_intensity 2
+shot g05-t03-i2
+cmd r_bloom_intensity 1
+cmd r_bloom 0
+cmd r_bloom_threshold 1
+cmd r_hdr 1
+shot g06-hdr-e1
+cmd r_hdr_exposure 2
+shot g07-hdr-e2
+cmd r_hdr_exposure 1
+cmd r_bloom 1
+cmd r_bloom_threshold 0.3
+shot g08-hdr-bloom
+cmd r_bloom 0
+cmd r_bloom_threshold 1
+cmd r_hdr 0
+shot g09-after
+cmd pause
+sleep 2
+cmd echo REPORT-GRAVEYARD-BEGIN
+cmd gpu_unrouted
+cmd renderer_status
+cmd echo REPORT-GRAVEYARD-END
+sleep 1
+
+# --- the torch room by demo1's pools (sweep-particles-gpu.steps' 06 camera) ---
+cmd r_drawentities 1
+cmd gl_glows 1
+cmd setpos -1536 1900 -450 0 90 0
+sleep 2
+cmd gpu_unrouted reset
+cmd pause
+shot t00-off
+cmd r_waterwarp 1
+shot t01-chain
+cmd r_waterwarp 0
+cmd r_bloom 1
+cmd r_bloom_threshold 1
+shot t02-ldr-t10
+cmd r_bloom_threshold 0.5
+shot t03-t05-i1
+cmd r_bloom_intensity 2
+shot t04-t05-i2
+cmd r_bloom_threshold 0.8
+shot t05-t08-i2
+cmd r_bloom_intensity 1
+shot t06-t08-i1
+cmd r_bloom 0
+cmd r_bloom_threshold 1
+cmd r_hdr 1
+shot t07-hdr-e1
+cmd r_hdr_exposure 2
+shot t08-hdr-e2
+cmd r_hdr_exposure 1
+cmd r_bloom 1
+cmd r_bloom_threshold 0.8
+shot t09-hdr-bloom
+cmd r_bloom_threshold 1
+shot t10-hdr-t10
+cmd r_bloom 0
+cmd r_hdr 0
+cmd pause
+sleep 2
+cmd echo REPORT-TORCH-BEGIN
+cmd gpu_unrouted
+cmd renderer_status
+cmd echo REPORT-TORCH-END
+sleep 1

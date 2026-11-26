@@ -37,8 +37,10 @@
 # depth snapshot) and on (pp_fbo's), the water warp from under the water,
 # and r_softemu 1/2/3.  10 castle4's lava and 11 egypt's north camera (the
 # stencil in pp_fbo's depth texture) at gamma 0.9.  pp-diff.sh compares 01-14,
-# 22-24 and 26-28 against GL, and 20 against 14 on -gpu (the bloom gate); 21
-# and 25 are not compared (21 waits for P4e bloom).  22-24 joined at P4b
+# 20, 22-24 and 26-28 against GL, and 20 against 14 on each side (the bloom
+# there); 21 and 25 are not compared (21's torch flames animate, bloom
+# spreads them: tools/sweep-bloom-gpu.steps checks bloom and HDR, the torch
+# room included, since P4e lifted the bloom gate).  22-24 joined at P4b
 # (56.9 - 57.0 dB on its binary; tools/sweep-softpart-gpu.steps checks the
 # fade itself).  The 3D-effects pass (PP_BlitWith3DEffects: the underwater
 # warp, motion blur) is tools/sweep-warp-gpu.steps' since P4c, with
@@ -106,7 +108,8 @@
 #   firstall   every target's first pass clears        02-28 at 4.8 .. 11.1
 #   oit        the OIT gates removed (P6)              13 at 24.7, oit gate,
 #                                                      4282 null-table calls
-#   bloom      the bloom gate removed (P4e)            bloom gate (89812 px)
+#   bloom      the bloom gate removed (P4e did that:   bloom gate (89812 px)
+#              the gate is gone, its check with it)
 #   fbofail    every framebuffer incomplete            03-28 at 19.2 .. 38.8,
 #                                                      every effect check
 #   nostencil  pp_fbo's depth without stencil          11 at 16.5

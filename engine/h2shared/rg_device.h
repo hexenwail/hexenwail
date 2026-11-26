@@ -158,6 +158,13 @@ void	RG_Upload (GLenum target, const void *data, size_t numbytes, GLuint *outbuf
  * GL; `type` the index width. */
 void	RG_DrawIndexed (GLenum mode, GLsizei count, GLenum type, const void *indices,
 			GLsizei instances);
+/* gl_vbo.c R_DrawArrays (rg_frame.c, #340 P4e): `count` vertices from
+ * `first`, with no vertex input.  The bound VAO must enable no attribute: the
+ * only callers are fullscreen passes that build their vertices from
+ * gl_VertexIndex, and a VAO with arrays is counted and dropped.  `first`
+ * reaches the shader as GL's gl_VertexID does on Vulkan (gl_VertexIndex
+ * includes it); D3D12's SV_VertexID does not (P7), and every caller passes 0. */
+void	RG_DrawArrays (GLenum mode, GLint first, GLsizei count);
 
 /* gl_fbo.c's framebuffer and renderbuffer seams (rg_target.c, #340 P4a-2),
  * with GL's signatures and binding rules; see gl_fbo.h. */
