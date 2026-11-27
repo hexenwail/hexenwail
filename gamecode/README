@@ -21,6 +21,25 @@ and recording it here with the upstream ref.  See gamecode/vendor/README.md.
 Hexenwail fork (diverges from 1.29c):
 =====================================
 
+2026-11-27 [GitHub #567]:
+- muzzle.hc (h2): NEW.  MuzzleFix(), called after every player weapon
+  missile is built: axe blades, both purifier missiles, the tomed vorpal
+  wave, the thrown hammer, ice shots and the blizzard ball, meteors, magic
+  missiles, both bone shard kinds, both raven staff shots, both grenades,
+  crossbow bolts, the scarab chainball and the pincer.  With the engine cvar
+  sv_muzzlespawn at 0, its default, MuzzleFix returns before reading or
+  writing anything and every missile is byte-for-byte vanilla.  At 1 the
+  missile starts at the weapon's muzzle (the retail view model's tip in its
+  fire frame) instead of at eye height, behind a trace from the eye with the
+  missile's own box so it cannot spawn through a wall, and is re-aimed at
+  what the vanilla shot was aimed at.  A target nearer than twice the muzzle
+  distance, or a re-aim of more than 15 degrees, leaves that shot exactly
+  vanilla.  No new entity fields, so gamecode/fieldsets is unchanged.
+  Melee, hitscan (sunstaff, bone shard primary), the meteor tornado,
+  artifacts and monster missiles are not touched.
+- ident.hc (h2, hw, portals, siege): restamped HexenwailGamecode_YYYYMMDD
+  from 20261028 to 20261127.
+
 2026-10-28 [jsHexen2-progs 8e88d1f]:
 - Bumped jsHexen2-progs vendored tree to 8e88d1f and ported the corresponding
   fixes into our gamecode (our .hc wins):

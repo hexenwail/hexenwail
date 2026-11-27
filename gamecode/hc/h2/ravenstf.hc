@@ -406,6 +406,7 @@ void launch_superraven (void)
 	newmis.velocity = newmis.velocity * 600;
 	newmis.angles = vectoangles(newmis.velocity);
 	setorigin(newmis, self.origin + self.proj_ofs  + v_forward*10);
+	MuzzleFix (newmis, self, '18 0 -7');	// ravenstf.mdl fire1
 
 	newmis.touch = ravenmissile_touch;
 	newmis.lifetime = time + .5;
@@ -497,6 +498,7 @@ void create_raven_shot1(vector location,float nexttime,void() nextfunc,vector fi
 	setmodel (missile, "models/vindsht1.mdl");
 	setsize (missile, '0 0 0', '0 0 0');
 	setorigin (missile, location);
+	MuzzleFix (missile, self, '18 0 -7');	// ravenstf.mdl fire3; launch_set is the only caller
 
 	missile.classname = "set_missile";
 

@@ -117,6 +117,7 @@ void launch_axe (vector dir_mod,vector angle_mod)
 	missile.lifetime = time + 2;  // Or lives for 2 seconds and then dies when it hits anything
 
 	setorigin (missile, self.origin + self.proj_ofs  + v_forward*10 + v_right * 1);
+	MuzzleFix (missile, self, '43 -4 -15');	// axe.mdl 1stAxe15
 
 //sound (missile, CHAN_VOICE, "paladin/axblade.wav", 1, ATTN_NORM);
 

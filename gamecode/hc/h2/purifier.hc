@@ -228,6 +228,7 @@ void launch_pmissile2 (void)
 
 //	setorigin (missile, self.origin + v_forward*10 + v_right * 1 + v_up * 40);
 	setorigin (missile, self.origin + self.proj_ofs + v_forward*10);
+	MuzzleFix (missile, self, '27 0 -11');	// purifier.mdl power2
 
 	missile.effects=EF_BRIGHTLIGHT;
 	missile.nextthink = time + .15;
@@ -292,9 +293,15 @@ void launch_pmissile1 (void)
 	setsize (missile, '0 0 0', '0 0 0');		
 
 	if ((self.cnt==1) || (self.cnt==3))
+	{
 		setorigin (missile, self.origin + self.proj_ofs + v_forward*6 + v_right * 10 );
+		MuzzleFix (missile, self, '38 8 -10');	// purifier.mdl 1Rshot1
+	}
 	else if ((self.cnt==0) || (self.cnt==2))
+	{
 		setorigin (missile, self.origin +self.proj_ofs + v_forward*6 - v_right * 10);
+		MuzzleFix (missile, self, '38 -8 -10');	// purifier.mdl 1Lshot1
+	}
 
 	sound (self, CHAN_WEAPON, "paladin/purfire.wav", 1, ATTN_NORM);
 

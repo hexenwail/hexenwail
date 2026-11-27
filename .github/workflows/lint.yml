@@ -467,6 +467,12 @@ jobs:
       - name: Menu row notes fit and stay true
         run: python3 tools/test_menu_row_notes.py
 
+      # sv_muzzlespawn: every player missile spawn calls MuzzleFix after
+      # Raven's own spawn expression, and MuzzleFix does nothing at the
+      # default 0, so stock behaviour stays byte-for-byte vanilla (#567).
+      - name: Player missiles go through MuzzleFix, vanilla by default
+        run: python3 tools/test_muzzle_spawn.py
+
       # EF_TRANSPARENT alias skins have r_wateralpha baked into their alpha,
       # so a change reached world water and never the models (GitHub #124).
       # Compiles the real cache test, clamp and callback.

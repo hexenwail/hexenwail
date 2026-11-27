@@ -181,6 +181,36 @@ That happens on installs where an older release's gamecode was hand-copied into
 retail `PROGS.DAT` inside `pak0.pak` is unreachable while it is there — either
 remove it, or use the `Pak` setting.
 
+## Shots from the weapon
+
+In stock Hexen II every player missile starts at eye height, a few units in
+front of the camera, so it seems to come out of the middle of the screen while
+the weapon is drawn below it. **Options → Game → Shots From** moves it:
+
+| Setting | Missiles start at |
+| --- | --- |
+| `eye` | the centre of the view, as Raven's gamecode does. The default. |
+| `weapon` | the weapon's muzzle, where the view model's tip is drawn when it fires. |
+
+The cvar behind the row is `sv_muzzlespawn` (0 = eye, 1 = weapon). It is a
+server setting, so in multiplayer the host's value applies to everyone.
+
+With `weapon`, a shot is still aimed at the same spot: it is re-aimed from
+the muzzle at whatever the stock shot would have hit, so aim does not change
+and spread shots keep their spread. The muzzle point is found by tracing from
+the eye, so firing into a wall never puts the missile on the far side of it.
+When the target is closer than about twice the muzzle's distance, or the
+re-aim would turn the shot more than 15 degrees, that shot fires exactly as
+stock instead, so nothing point blank is ever skipped.
+
+It covers every missile a player weapon fires in the base game. Melee, the
+sunstaff beam, the bone shards' instant hit and the tomed meteor staff's
+tornado (it rises from the ground, not the eye) do not move, and neither do
+artifacts such as the polymorph ram. It needs Hexenwail's bundled base-game
+gamecode from this release on: Raven's own `progs.dat`, a mod's gamecode, the
+Portal of Praevus gamecode and older hand-copied Hexenwail gamecode do not read
+it, and fire from the eye whatever it is set to.
+
 ## Server tick rate
 
 The server and physics run at 72 Hz, set by `sv_physfps` (default `72`, clamped
