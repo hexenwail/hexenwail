@@ -74,7 +74,7 @@
 #include "gl_uniforms.h"	/* R_SetWorldDlight, R_SetAliasLightGrid -- see the two binds */
 #include "gl_compute.h"	/* dispatch, readback, the storage limits (#340 P5a-1) */
 #ifdef USE_SDL_GPU
-#include "rg_device.h"	/* R_GPU (): LcParams has no GL binding point there */
+#include "rg_device.h"	/* R_GPU (): LcParams is a registered mirror there (#340 P5b) */
 #endif
 
 #ifndef USE_GLES
@@ -124,6 +124,11 @@ typedef struct {
 } lc_params_t;			/* 160 bytes */
 
 COMPILE_TIME_ASSERT(lcparams_size, sizeof(lc_params_t) == 160);
+
+/* What the dispatch reads.  GL takes a copy through GL_Upload's frame ring;
+ * under -gpu this is the registered LcParams mirror, flushed ahead of each
+ * dispatch, which pushes the flushed copy (#340 P5b). */
+static lc_params_t	lc_params;
 
 /* This frame's lights, in the order the shader indexes them, kept so the
  * verifier can recompute without guessing which dlights were live. */
@@ -182,9 +187,13 @@ static qboolean LC_BindParamsBlock (GLuint prog)
 	GLint	size = 0;
 
 #ifdef USE_SDL_GPU
-	/* The SPIR-V fixes the block's slot; the mirror is P5b's (#340). */
+	/* The SPIR-V fixes the block's slot; the dispatch pushes the mirror
+	 * by the block's name (#340 P5b). */
 	if (R_GPU ())
+	{
+		RG_UniformBlockRegister ("LcParams", &lc_params, sizeof(lc_params));
 		return true;
+	}
 #endif
 	if (!glGetUniformBlockIndex_fp || !glUniformBlockBinding_fp)
 		return true;
@@ -205,12 +214,6 @@ static qboolean LC_BindParamsBlock (GLuint prog)
 
 static qboolean R_LightCluster_Build (void)
 {
-#ifdef USE_SDL_GPU
-	/* The cluster is P5b of #340: its buffer, LcParams mirror and grid are
-	 * not routed yet.  R_LightCluster_ShadesWorld says no in lockstep. */
-	if (R_GPU ())
-		return false;
-#endif
 	if (lc_failed)
 		return false;
 	if (!gl_renderer_caps.compute_shaders || !gl_renderer_caps.shader_storage)
@@ -418,20 +421,24 @@ static void LC_UploadAndDispatch (void)
 	GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, 0);
 
 	R_UseProgram (lc_prog);
+	memset (&lc_params, 0, sizeof(lc_params));
+	memcpy (lc_params.view, lc_view, sizeof(lc_params.view));
+	memcpy (lc_params.tproj, lc_tproj, sizeof(lc_params.tproj));
+	lc_params.zlog[0] = lc_zlogscale;
+	lc_params.zlog[1] = lc_zlogbias;
+	lc_params.count[0] = lc_numlights;
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+		RG_UniformBlockFlushed ("LcParams");
+	else
+#endif
 	{
-		lc_params_t	params;
 		GLuint		ubo;
 		GLintptr	ofs;
 
-		memset (&params, 0, sizeof(params));
-		memcpy (params.view, lc_view, sizeof(params.view));
-		memcpy (params.tproj, lc_tproj, sizeof(params.tproj));
-		params.zlog[0] = lc_zlogscale;
-		params.zlog[1] = lc_zlogbias;
-		params.count[0] = lc_numlights;
-		GL_Upload (GL_UNIFORM_BUFFER, &params, sizeof(params), &ubo, &ofs);
+		GL_Upload (GL_UNIFORM_BUFFER, &lc_params, sizeof(lc_params), &ubo, &ofs);
 		GL_BindBufferRange (GL_UNIFORM_BUFFER, LC_PARAMS_UBO_BINDING,
-				    ubo, ofs, sizeof(params));
+				    ubo, ofs, sizeof(lc_params));
 	}
 
 	R_BindImageTexture (0, lc_grid, 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_RGBA32UI);
@@ -481,14 +488,11 @@ qboolean R_LightCluster_ShadesWorld (void)
 	 * already stood the CPU path down, so it renders once with no dynamic
 	 * light and every frame after takes the CPU path.  Losing dlights for a
 	 * frame on a driver that could not build the program is a better failure
-	 * than double-lighting the world on every healthy one. */
-#ifdef USE_SDL_GPU
-	/* In lockstep with R_LightCluster_Build's gate (#340 P5b lifts both):
-	 * a yes here with no grid would stand the CPU dlights down and leave
-	 * the world with no dynamic light at all. */
-	if (R_GPU ())
-		return false;
-#endif
+	 * than double-lighting the world on every healthy one.
+	 *
+	 * Under -gpu as on GL since #340 P5b; the format probe in
+	 * R_LightCluster_Build is that one-frame trip on a device that cannot
+	 * write the grid. */
 	return r_lightclusters.integer != 0 && !lc_failed &&
 	       gl_renderer_caps.compute_shaders && gl_renderer_caps.shader_storage;
 }

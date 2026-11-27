@@ -19,8 +19,8 @@
  * barrier is already met; the readbacks submit what is recorded and wait for
  * it; the storage formats are SDL_GPUTextureSupportsFormat's answer.
  * GL_Init_NullGL turns compute_shaders on, and the passes not routed yet --
- * the light cluster, the world cull, Hi-Z, SSAO -- keep a gate each, which
- * their sub-phases lift; the palette LUT runs.
+ * the world cull, Hi-Z, SSAO -- keep a gate each, which
+ * their sub-phases lift; the palette LUT and the light cluster (P5b) run.
  *
  * Desktop GL only: the ES tier has no compute and no image load/store, and
  * every consumer compiles out there, so does this. */

@@ -4437,34 +4437,78 @@ static void LM_BuildRawLayer (const msurface_t *surf, int map, byte *block, int 
 	LM_FillGutter (block, stride, smax, tmax);
 }
 
-/* Create the three layer atlases, cleared to "no style" (alpha 255), and
- * upload styles 2-4 of every surface that has them at that surface's own
- * atlas rect.  False on any GL error, and the caller falls back. */
+/* Create the three layer atlases, cleared to "no style" (alpha 255), with
+ * styles 2-4 of every surface that has them at that surface's own atlas
+ * rect.  Each layer is composed in client memory and uploaded whole, once:
+ * one glTexSubImage2D per surface and style was some 17,000 uploads on a
+ * big map, which under -gpu is that many copy regions into one texture and
+ * stalled egypt's load past ten minutes with sync validation on (#340 P5b).
+ * The surfaces are written in the order the per-surface uploads made, so a
+ * gutter two blocks share ends up as it did.  False on any GL error, or a
+ * rect outside the atlas (which glTexSubImage2D refused with an error), and
+ * the caller falls back. */
 static qboolean LM_BuildStyleLayers (void)
 {
 	static byte	blockbuf[BLOCK_WIDTH * BLOCK_HEIGHT * 4];
+	const size_t	stride = (size_t)LM_ATLAS_WIDTH * 4;
 	size_t		atlas_size, n;
-	byte		*clear;
-	int		i, j, k, map;
+	byte		*layer;
+	int		i, j, k, map, row;
+	qboolean	outside = false;
 	qmodel_t	*m;
 
 	if (!lm_atlas_texture || lm_atlas_height <= 0)
 		return false;
 
-	atlas_size = (size_t)LM_ATLAS_WIDTH * lm_atlas_height * 4;
-	clear = (byte *) malloc (atlas_size);
-	if (!clear)
+	atlas_size = stride * lm_atlas_height;
+	layer = (byte *) malloc (atlas_size);
+	if (!layer)
 		return false;
-	for (n = 0; n < atlas_size; n += 4)
-	{
-		clear[n] = clear[n + 1] = clear[n + 2] = 0;
-		clear[n + 3] = 255;
-	}
 
 	while (glGetError_fp () != GL_NO_ERROR)
 		;
 	for (k = 0; k < 3; k++)
 	{
+		for (n = 0; n < atlas_size; n += 4)
+		{
+			layer[n] = layer[n + 1] = layer[n + 2] = 0;
+			layer[n + 3] = 255;
+		}
+		for (j = 1; j < MAX_MODELS; j++)
+		{
+			m = cl.model_precache[j];
+			if (!m)
+				break;
+			if (m->name[0] == '*' || m->type != mod_brush)
+				continue;
+			for (i = 0; i < m->numsurfaces; i++)
+			{
+				const msurface_t *surf = m->surfaces + i;
+				const int	smax = (surf->extents[0] >> 4) + 1;
+				const int	tmax = (surf->extents[1] >> 4) + 1;
+				const int	w = smax + LM_GUTTER * 2, h = tmax + LM_GUTTER * 2;
+				const int	page = surf->lightmaptexturenum;
+				const int	x0 = (page % LM_ATLAS_COLS) * BLOCK_WIDTH + surf->light_s - LM_GUTTER;
+				const int	y0 = (page / LM_ATLAS_COLS) * BLOCK_HEIGHT + surf->light_t - LM_GUTTER;
+
+				if (surf->flags & SURF_DRAWTILED)
+					continue;
+				for (map = 1; map < MAXLIGHTMAPS && surf->styles[map] != 255; map++)
+				{
+					if (map - 1 != k)
+						continue;
+					if (x0 < 0 || y0 < 0 || x0 + w > LM_ATLAS_WIDTH || y0 + h > lm_atlas_height)
+					{
+						outside = true;
+						continue;
+					}
+					LM_BuildRawLayer (surf, map, blockbuf + ((size_t)LM_GUTTER * w + LM_GUTTER) * 4, w * 4);
+					for (row = 0; row < h; row++)
+						memcpy (layer + (size_t)(y0 + row) * stride + (size_t)x0 * 4,
+							blockbuf + (size_t)row * w * 4, (size_t)w * 4);
+				}
+			}
+		}
 		if (!lm_style_layers[k])
 			R_GenTextures (1, &lm_style_layers[k]);
 		R_BindTextureSlot (0, lm_style_layers[k]);
@@ -4472,40 +4516,11 @@ static qboolean LM_BuildStyleLayers (void)
 		R_TexSetWrap (GL_TEXTURE_2D, lm_style_layers[k], GL_CLAMP_TO_EDGE);
 		R_TexImage2D (GL_TEXTURE_2D, lm_style_layers[k], 0, lightmap_internalformat,
 				 LM_ATLAS_WIDTH, lm_atlas_height,
-				 GL_RGBA, GL_UNSIGNED_BYTE, clear);
+				 GL_RGBA, GL_UNSIGNED_BYTE, layer);
 	}
-	free (clear);
-
-	for (j = 1; j < MAX_MODELS; j++)
-	{
-		m = cl.model_precache[j];
-		if (!m)
-			break;
-		if (m->name[0] == '*' || m->type != mod_brush)
-			continue;
-		for (i = 0; i < m->numsurfaces; i++)
-		{
-			const msurface_t *surf = m->surfaces + i;
-			const int	smax = (surf->extents[0] >> 4) + 1;
-			const int	tmax = (surf->extents[1] >> 4) + 1;
-			const int	w = smax + LM_GUTTER * 2, h = tmax + LM_GUTTER * 2;
-			const int	page = surf->lightmaptexturenum;
-
-			if (surf->flags & SURF_DRAWTILED)
-				continue;
-			for (map = 1; map < MAXLIGHTMAPS && surf->styles[map] != 255; map++)
-			{
-				LM_BuildRawLayer (surf, map, blockbuf + ((size_t)LM_GUTTER * w + LM_GUTTER) * 4, w * 4);
-				R_BindTextureSlot (0, lm_style_layers[map - 1]);
-				R_TexSubImage2D (GL_TEXTURE_2D, lm_style_layers[map - 1], 0,
-						    (page % LM_ATLAS_COLS) * BLOCK_WIDTH + surf->light_s - LM_GUTTER,
-						    (page / LM_ATLAS_COLS) * BLOCK_HEIGHT + surf->light_t - LM_GUTTER,
-						    w, h, GL_RGBA, GL_UNSIGNED_BYTE, blockbuf);
-			}
-		}
-	}
+	free (layer);
 	R_ResetTextureBindings ();
-	if (glGetError_fp () != GL_NO_ERROR)
+	if (glGetError_fp () != GL_NO_ERROR || outside)
 	{
 		Con_Printf ("GPU lightstyles: the driver rejected the layer atlases\n");
 		return false;

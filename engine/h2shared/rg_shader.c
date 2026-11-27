@@ -176,7 +176,7 @@ static const struct {
 	{ "MD3PoseBuffer",	3, RG_SSBO_POSE, PV_MD3 },	/* gl_mesh.c ssbo_pose_md3 */
 	{ "BoneBuffer",		4, RG_SSBO_POSE, PV_IQM },	/* gl_mesh.c ssbo_bones */
 	{ "GpuParticleBuffer",	0, RG_SSBO_NEEDED, -1 },	/* r_part.c, never drawn */
-	{ "LightBuffer",	LIGHT_SSBO_BINDING, RG_SSBO_COMPUTE_FED, -1 },	/* gl_lightcluster.c, compute: P5 */
+	{ "LightBuffer",	LIGHT_SSBO_BINDING, RG_SSBO_COMPUTE_FED, -1 },	/* gl_lightcluster.c lc_ssbo (P5b) */
 };
 
 /* The compute stages' storage blocks, read-only and read-write, by name
