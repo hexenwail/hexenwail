@@ -79,6 +79,7 @@ entity missile;
 		missile.scale=0.77;
         setsize(missile,'0 0 0','0 0 0');
         setorigin(missile,missile.o_angle);
+		MuzzleFix (missile, self, '11 19 -3');	// v_assgr.mdl throw5
 		missile.think=grenade_trail;
 		thinktime missile : 0;
 };
@@ -184,6 +185,7 @@ entity missile;
 		missile.scale=2;
 		setsize (missile, '0 0 0', '0 0 0');
         setorigin(missile,missile.o_angle);
+		MuzzleFix (missile, self, '11 19 -3');	// v_assgr.mdl throw5
 
 		missile.lifetime=time+2;
         missile.think=grenade_trail;

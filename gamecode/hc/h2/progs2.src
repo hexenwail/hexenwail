@@ -45,6 +45,7 @@ breakabl.hc
 soul.hc
 
 explode.hc		//explosions, weapons.hc was checked out
+muzzle.hc		// sv_muzzlespawn: player missiles from the weapon (#567)
 
 gauntlet.hc		// Paladin Weapons
 vorpal.hc

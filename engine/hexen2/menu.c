@@ -4997,6 +4997,7 @@ enum
 	GAME_VIEWBOB,
 	GAME_VIEWROLL,
 	GAME_GUNKICK,
+	GAME_MUZZLE,
 	GAME_ANIMSMOOTH,
 	GAME_LERPVIEWMDL,
 	GAME_UIPREVIEW,
@@ -5028,6 +5029,7 @@ static const char *game_labels[GAME_ITEMS] = {
 	 * what it does, since this is the motion-sickness master switch.
 	 * Issue #280. */
 	"Screen Shake  :",	/* GAME_GUNKICK */
+	"Shots From    :",	/* GAME_MUZZLE */
 	"Anim Smoothing:",	/* GAME_ANIMSMOOTH */
 	"Smooth Weapon :",	/* GAME_LERPVIEWMDL */
 	"Live Preview  :",	/* GAME_UIPREVIEW */
@@ -5161,6 +5163,9 @@ static void M_Game_AdjustSliders (int dir)
 		else if (f > 2)	f = 0;
 		Cvar_SetValue ("v_gunkick", f);
 		break;
+	case GAME_MUZZLE:
+		Cvar_SetValue ("sv_muzzlespawn", !Cvar_VariableValue("sv_muzzlespawn"));
+		break;
 	case GAME_ANIMSMOOTH:
 		Cvar_SetValue ("r_lerpmodels", !Cvar_VariableValue("r_lerpmodels"));
 		break;
@@ -5234,6 +5239,18 @@ static void M_Game_AdjustSliders (int dir)
 			Cvar_SetValue ("sv_gamecode", avail[cur]);
 		}
 		break;
+	}
+}
+
+/* See M_DrawRowNote.  The row below the last one holds the "Gamecode loaded"
+ * status, so this menu's note sits one row lower and the search prompt one
+ * below that. */
+static const char *M_Game_Note (int row)
+{
+	switch (row)
+	{
+	case GAME_MUZZLE:	return "Hexenwail progs; not Portals or mods";	/* sv_muzzlespawn */
+	default:		return NULL;
 	}
 }
 
@@ -5349,6 +5366,13 @@ static void M_Game_Draw (void)
 		M_Print (220, 92 + 8*GAME_GUNKICK, name);
 	}
 
+	if (!M_Game_IsSkip(GAME_MUZZLE))
+	{
+		M_Print (76, 92 + 8*GAME_MUZZLE, game_labels[GAME_MUZZLE]);
+		M_Print (220, 92 + 8*GAME_MUZZLE,
+			Cvar_VariableValue("sv_muzzlespawn") ? "weapon" : "eye");
+	}
+
 	if (!M_Game_IsSkip(GAME_ANIMSMOOTH))
 	{
 		M_Print (76, 92 + 8*GAME_ANIMSMOOTH, game_labels[GAME_ANIMSMOOTH]);
@@ -5445,7 +5469,8 @@ static void M_Game_Draw (void)
 	if (!M_Game_IsSkip(game_cursor))
 		M_DrawCharacter (64, 92 + game_cursor*8, 12+((int)(realtime*4)&1));
 
-	M_Filter_Draw (76, 92 + 8*(GAME_ITEMS + 1));
+	M_DrawRowNote (92 + 8*(GAME_ITEMS + 1), M_Game_Note (game_cursor));
+	M_Filter_Draw (76, 92 + 8*(GAME_ITEMS + 2));
 }
 
 static void M_Game_Key (int k)

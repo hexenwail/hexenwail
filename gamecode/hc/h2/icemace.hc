@@ -233,6 +233,7 @@ void()FireFreeze=
 
     setsize (newmis, '0 0 0', '0 0 0');
     setorigin (newmis, self.origin+self.proj_ofs + v_forward*8);
+	MuzzleFix (newmis, self, '27 0 -9');	// icestaff.mdl fire1a..fire5a
 
 entity corona;
 	corona=spawn();
@@ -479,6 +480,7 @@ void FireBlizzard (void)
 //	newmis.effects(+)EF_NODRAW;
 	setsize(newmis,'0 0 0','0 0 0');
 	setorigin(newmis,self.origin+self.proj_ofs+v_forward*16);
+	MuzzleFix (newmis, self, '20 0 -10');	// icestaff.mdl power1
 	newmis.scale = .1;
 }
 

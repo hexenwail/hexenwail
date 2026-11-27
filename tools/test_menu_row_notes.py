@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The Options submenus' row notes fit the canvas and name the cvar the row sets (#98).
 
-M_Display_Note, M_Rendering_Note and M_Graphics_Note (engine/hexen2/menu.c)
+M_Display_Note, M_Rendering_Note, M_Graphics_Note and M_Game_Note (engine/hexen2/menu.c)
 return a one-line note for a highlighted row whose name does not say what it
 does.  Two ways one goes wrong without anyone noticing, both checked here:
 
@@ -26,7 +26,7 @@ if not m:
 limit = int(m.group(1))
 
 notes = 0
-for fn in ("M_Display_Note", "M_Rendering_Note", "M_Graphics_Note"):
+for fn in ("M_Display_Note", "M_Rendering_Note", "M_Graphics_Note", "M_Game_Note"):
     start = menu.index(f"static const char *{fn} (int row)")
     body = menu[start:menu.index("\n}\n", start)]
     for row, text, cvar in re.findall(

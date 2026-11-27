@@ -96,6 +96,13 @@ cvar_t	sv_maxdatagram		= {"sv_maxdatagram", "0", CVAR_NONE};
  * change it. */
 cvar_t	sv_cheats		= {"sv_cheats", "0", CVAR_NONE};
 
+/* Read by the gamecode, never by the engine: Hexenwail's progs ask for it with
+ * cvar("sv_muzzlespawn") on every player missile (gamecode/hc/h2/muzzle.hc).
+ * 0 is vanilla, shots from the eye; 1 starts them at the weapon's muzzle.
+ * Registered so it can be archived and shown in Options -> Game; any other
+ * progs never reads it.  GitHub #567. */
+static cvar_t	sv_muzzlespawn	= {"sv_muzzlespawn", "0", CVAR_ARCHIVE};
+
 /* max_edicts resolved and clamped, latched at map load.  Read this, not the
  * cvar, so a mid-map change cannot outrun the allocation. */
 int	sv_max_edicts = MAX_EDICTS;
@@ -248,6 +255,7 @@ void SV_Init (void)
 	Cvar_RegisterVariable (&sv_maxdatagram);
 	Cvar_SetCallback (&max_edicts, Max_Edicts_f);
 	Cvar_RegisterVariable (&sv_cheats);
+	Cvar_RegisterVariable (&sv_muzzlespawn);
 	Cvar_RegisterVariable (&sv_gameplayfix_random);
 	Cvar_RegisterVariable (&pr_checkextension);
 	Cvar_RegisterVariable (&hexenwail_version);

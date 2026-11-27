@@ -348,6 +348,7 @@ void launch_vorpal_missile(void)
 
 //	setorigin (missile, self.origin + v_up * 40);
 	setorigin (missile, self.origin + self.proj_ofs);
+	MuzzleFix (missile, self, '14 10 -1');	// vorpal.mdl 3rdSwd9
 	missile.scale = .5;
 
 	if (self.bluemana < 4)
