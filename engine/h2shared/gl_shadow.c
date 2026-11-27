@@ -1579,8 +1579,11 @@ void R_Shadow_Prepare (void)
 	}
 
 #ifdef USE_SDL_GPU
-	/* The cube maps are P6 (#340): once P5b brings the light cluster up
-	 * under -gpu, R_LightCluster_Available stops holding them off. */
+	/* The cube maps are P6 (#340).  The light cluster runs under -gpu
+	 * since P5b, so R_LightCluster_Available no longer holds them off at
+	 * the default r_dlight_occlusion 2: this does.  With no map drawn, the
+	 * frame's block names none and every light reads as unshadowed, which
+	 * is r_dlight_occlusion 1's picture. */
 	if (R_GPU ())
 		return;
 #endif

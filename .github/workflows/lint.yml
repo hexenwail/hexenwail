@@ -591,6 +591,14 @@ jobs:
       - name: Mirror test game generator refuses a bad mirror
         run: python3 tools/mk-mirror-testgame.py --self-test
 
+      # tools/sweep-dlight-gpu.steps' test game: three of demo2's torches
+      # named so they keep their dynamic light, the cast scene's torch and
+      # barrel added, every monster dropped, and each refusal (a torch
+      # missing, doubled or already named) on a synthetic BSP, so the
+      # sweep's cameras cannot quietly lose their lights (#340 P5b).
+      - name: Dlight test game generator names the sweep's torches
+        run: python3 tools/mk-dlight-testgame.py --self-test
+
       # R_Mirror puts back what the reflected pass derived from the reflected
       # view (the world frame's caustics, the light grid, the view matrix and
       # frustum) before the mirror's own surfaces draw, and r_speeds' counters

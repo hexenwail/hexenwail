@@ -55,8 +55,17 @@ for need in ("const qboolean	layered = lm_gpu_styles;", "if (layered)\n				scale
 if blm.count("dest[3] = lm_alpha;") != 2:
     errors.append("both lightmap writers must store the style index in alpha")
 
-if "clear[n + 3] = 255;" not in rs:
-    errors.append("the layer atlases must be cleared to alpha 255 (no style)")
+# each layer is composed in client memory and uploaded whole (#340 P5b):
+# cleared to "no style" before the surfaces are written in, once per layer
+bsl = rs[rs.find("static qboolean LM_BuildStyleLayers (void)"):]
+bsl = bsl[:bsl.find("\n}\n")]
+if "layer[n + 3] = 255;" not in bsl or not (0 <= bsl.find("layer[n + 3] = 255;") < bsl.find("LM_BuildRawLayer")
+                                             < bsl.find("R_TexImage2D (")):
+    errors.append("the layer atlases must be cleared to alpha 255 (no style), then the surfaces written "
+                  "in, then each uploaded")
+if "R_TexSubImage2D" in bsl:
+    errors.append("LM_BuildStyleLayers uploads per surface again -- some 17,000 copy regions into one "
+                  "texture on a big map, which stalls a -gpu load under sync validation (#340 P5b)")
 reb = rs[rs.find("static void LM_RebuildSurfaces (void)\n{"):] if "static void LM_RebuildSurfaces (void)\n{" in rs else ""
 reb = reb[:reb.find("\n}\n")]
 if "if (surf->flags & SURF_DRAWTILED)" not in reb or "SURF_DRAWTURB" in reb:

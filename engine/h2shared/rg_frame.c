@@ -282,6 +282,11 @@ static int			rgf_last_ssbo, rgf_frame_ssbo, rgf_last_standin, rgf_frame_standin;
  * boot-time palette LUT runs outside any frame */
 static int			rgf_last_cpasses, rgf_frame_cpasses, rgf_last_reads, rgf_frame_reads;
 static unsigned long		rgf_cpasses, rgf_reads;
+/* Submits mid-frame that wait on their fence (RGF_SubmitMidFrame): each
+ * readback's, and each dispatch's that samples (#340 P5b: the stall P5f
+ * measures, counted so a pass that starts paying it shows). */
+static int			rgf_last_waits, rgf_frame_waits;
+static unsigned long		rgf_waits;
 
 /* The storage buffers the draw being recorded reads, stamped once it is
  * committed (RG_Buf_StampRead), so an upload into one ends the segment. */
@@ -492,7 +497,7 @@ void RG_BeginFrame (int width, int height)
 	rgf_frame_draws = rgf_frame_segments = rgf_frame_indexed = 0;
 	rgf_frame_stream = 0;
 	rgf_frame_ssbo = rgf_frame_standin = 0;
-	rgf_frame_cpasses = rgf_frame_reads = 0;
+	rgf_frame_cpasses = rgf_frame_reads = rgf_frame_waits = 0;
 }
 
 /* Snapshot of block `b` in the open segment's uniform arena. */
@@ -1439,6 +1444,8 @@ static qboolean RGF_SubmitMidFrame (void)
 
 	if (!rgf_cmd)
 		return false;
+	rgf_frame_waits++;
+	rgf_waits++;
 	fence = SDL_SubmitGPUCommandBufferAndAcquireFence (rgf_cmd);
 	rgf_cmd = NULL;
 	if (!fence)
@@ -1657,6 +1664,7 @@ void RG_Frame_End (qboolean show)
 	rgf_last_standin = rgf_frame_standin;
 	rgf_last_cpasses = rgf_frame_cpasses;
 	rgf_last_reads = rgf_frame_reads;
+	rgf_last_waits = rgf_frame_waits;
 	rgf_frames++;
 }
 
@@ -1802,9 +1810,9 @@ void RG_Frame_Status (void)
 		    RG_LayoutCount (), rgf_dropped, rgf_frames);
 	Con_Printf ("[RENDERER] SDL_GPU storage slots last frame: %d bound to a buffer, %d to the "
 		    "stand-in\n", rgf_last_ssbo, rgf_last_standin);
-	Con_Printf ("[RENDERER] SDL_GPU compute last frame: %d passes, %d readbacks; since boot %lu "
-		    "passes, %lu readbacks; indirect draws none until P5c\n",
-		    rgf_last_cpasses, rgf_last_reads, rgf_cpasses, rgf_reads);
+	Con_Printf ("[RENDERER] SDL_GPU compute last frame: %d passes, %d readbacks, %d fence waits; "
+		    "since boot %lu passes, %lu readbacks, %lu fence waits; indirect draws none until P5c\n",
+		    rgf_last_cpasses, rgf_last_reads, rgf_last_waits, rgf_cpasses, rgf_reads, rgf_waits);
 	RG_Compute_Status ();
 	Con_Printf ("[RENDERER] SDL_GPU scene depth %s (%s); drawing into framebuffer %u (%dx%d%s)\n",
 		    RGF_DepthName (rgf_depth_fmt), rgf_depth_sampled ? "sampled too" : "not sampled",

@@ -164,7 +164,7 @@ _PP_DRAW = ("the OIT resolve's bufferless draw (P6); bloom's three go through R_
 _PP_UBO = ("the post-process uniform buffers: under -gpu PpVert / PpParams are mirrors "
            "(P4a-1) and BloomParams (P4e), OitParams is P6; the deletes are "
            "shutdown's, under `if (*_ubo)`")
-_SHADOW = "dlight shadow maps: P6 (gated off by R_LightCluster_Available under -gpu)"
+_SHADOW = "dlight shadow maps: P6 (R_Shadow_Prepare returns under R_GPU (), #340 P5b)"
 _UBO = ("uniform-block buffers: -gpu pushes gl_uniforms.c's CPU mirrors instead "
         "(RG_UniformBlockRegister), so the GL buffers behind them are never read there")
 ALLOWED = {

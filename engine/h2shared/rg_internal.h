@@ -210,8 +210,9 @@ typedef enum {
 
 /* The zeroed buffer a read-only storage-buffer slot of a graphics stage is
  * bound to when its GL binding point holds nothing SDL_GPU can bind (since
- * P2e; before it, every slot): LightBuffer while the light cluster is
- * compute (P5), an instanced batch's pose buffer of the format it is not.
+ * P2e; before it, every slot): LightBuffer before the light cluster's
+ * first build (point 8 keeps lc_ssbo after it), an instanced batch's pose
+ * buffer of the format it is not.
  * Big enough for the fixed part of every such block in engine/shaders --
  * the largest is salias_inst_vert's ShadeDots, float[4096]; the others end
  * in runtime arrays, whose minimum is empty.  tools/test_sdlgpu_bindings.py
@@ -312,7 +313,9 @@ typedef enum {
 				 * the same stage */
 	RG_SSBO_COMPUTE_FED	/* only the light cluster fills it, and every read is behind
 				 * a uniform C leaves 0 without a grid: unbound is expected
-				 * while R_LightCluster_Available () is false (#340 P5a-2) */
+				 * while R_LightCluster_Available () is false (#340 P5a-2);
+				 * since P5b the cluster runs under -gpu, and a frame it
+				 * ran finds lc_ssbo at the point */
 } rg_ssbokind_t;
 
 /* A read-only storage block (#340 P2e).  GL binds it by binding point and

@@ -1,0 +1,263 @@
+# sweep-dlight-gpu.steps -- clustered dynamic lights and GPU lightstyles
+# through the SDL_GPU backend (-gpu) against GL (#340 P5b), on demo2 with
+# torches that keep their dynamic light.
+#
+# Since P5b -gpu runs the light cluster: R_LightCluster_Update's dispatch is
+# a compute pass of rg_compute.c's (storage image unit 0 the 32x16x32
+# RGBA32UI froxel grid, LightBuffer at point 8 read-only, LcParams a
+# registered mirror pushed from its flushed copy), and the world and alias
+# fragment stages read the grid on unit 5 and LightBuffer's lights and
+# styles.  Before it, -gpu lit every dynamic light on the CPU (lightmap
+# blocks rewritten each frame, the flat per-entity term on models) and GL on
+# the GPU, so the two pictures could not match.  Now both cluster, and
+# lightcluster_verify says by number that the grids do.
+#
+# THE TEST GAME.  Stock wall torches cast no dynamic light (Init_Torch calls
+# makestatic); one with a targetname stays a real entity, and its flame
+# model's XF_TORCH_GLOW gives it the torch dlight, radius 150.  So
+# tools/mk-dlight-testgame.py writes demo2's own entity lump as
+# <basedir>/dlight/maps/demo2.ent with three of the leak check's torches
+# named, its cast scene's free-standing torch and barrel appended, and every
+# monster dropped, since one turning between two frames of a view is a
+# difference neither backend made (the docstring has the list).  Nothing is committed: build it from the retail
+# data each time.  The basedir must hold data1 as a directory, or a link that
+# resolves inside headless-drive.sh's sandbox (tools/mk-alias-testgame.py).
+#
+# Run the SAME binary both ways, with identical settings; host_framerate
+# holds game time, so the torch flames and the frozen
+# lightstyles land alike run to run (sweep-mirror-gpu.steps explains it):
+#
+#   ./tools/mk-dlight-testgame.py <basedir>
+#   A="-fsaa 0 +gamma 1 +host_framerate 0.000001 -game dlight +map demo2"
+#   STEPS=tools/sweep-dlight-gpu.steps ENGINE=$E ./tools/headless-drive.sh script /tmp/dl-gl <basedir> $A
+#   VK_ICD_FILENAMES=<lvp_icd json> VK_LAYER_PATH=<vulkan-validation-layers>/share/vulkan/explicit_layer.d \
+#       VK_KHRONOS_VALIDATION_VALIDATE_SYNC=true VK_KHRONOS_VALIDATION_ENABLE_MESSAGE_LIMIT=false \
+#       STEPS=tools/sweep-dlight-gpu.steps ENGINE=$E \
+#       ./tools/headless-drive.sh script /tmp/dl-gpu <basedir> -gpu +gpu_allow_software 1 +gpu_debug 1 $A
+#   ./tools/dlight-diff.sh /tmp/dl-gl /tmp/dl-gpu [/tmp/dl-gpu-master]
+#
+# The third directory, optional, is the same sweep under -gpu on the binary
+# before P5b: frame 07 must be its 07 (r_dynamic 0, where the cluster is
+# valid and empty and the CPU adds nothing either).
+#
+# THE FRAMES, every one at r_dynamic 1, r_dlight_occlusion 1 (the cube
+# shadow maps are P6), r_lightclusters 1 and r_lightclusters_models 1 unless
+# it says otherwise.  "lit" is the leak check's lit scene, the named torch at
+# 170 312 80 on its own wall, seen from 210 200 99 looking down at it:
+#   01  lit, r_lightclusters 0: the CPU path, on both sides
+#   02  lit, r_lightclusters 1: the grid
+#   03  the cast scene's barrel inside the free-standing torch's light,
+#       r_lightclusters_models 1: the alias consumer
+#   04  the same at r_lightclusters_models 0: the flat per-entity term
+#   03g 04g 03 and 04 at r_alias_gpu 1, the desktop default: the instanced
+#       alias stages (AliasVert's lc_view, LightBuffer) as the consumer
+#   05  the cauldron room's flames (styles 2 and 5), r_flatlightstyles 0,
+#       r_gpulightstyles 1: LightStyles[] out of the light buffer
+#   05f the same at r_flatlightstyles 1, so the camera is shown to see
+#       styled light at all
+#   06  05 at r_gpulightstyles 0: the styles baked on the CPU
+#   07  lit, r_dynamic 0: the grid valid and empty, so it adds nothing to
+#       the world.  With r_gpulightstyles 0 and r_lightclusters_models 0 the
+#       binary before P5b draws this view the same way bar the grid, so its
+#       07 is this one exactly: GPU lightstyles round a few luxels their own
+#       way (1112 pixels), and the CPU per-entity term lights models from
+#       dlights even at r_dynamic 0 where the empty grid does not (952
+#       pixels on the barrel, the chair and the torch -- GL's behaviour,
+#       which -gpu now shares)
+#   08  lit, gl_flashblend 1: the grid valid and empty, blend bubbles
+#   09  lit, r_fullbright 1
+#   10  lit, r_scale 0.5: the froxel columns against a scaled viewport
+#   11a the leak check's scene 1 (the far side of the named torch's wall)
+#   11b its scene 3 (a back face in the named torch's PVS)
+#   12  lit, r_dlight_occlusion 2: THE TRAP FRAME.  The cube maps are P6
+#       and R_Shadow_Prepare returns under -gpu, so with no map drawn every
+#       light reads as unshadowed: under -gpu 12 must be 02 exactly.  On GL
+#       the maps draw, and 12 is GL's own.
+# then a map change (demo2 again) and the lit camera's grid checked once
+# more.  No frame there: the console's state after a load is the harness's
+# timing (#553), not the cluster.
+#
+# setpos is the server's, so every camera move is made unpaused: a paused
+# server never moves the player.
+#
+# THE NUMBERS, measured 2026-11-27 on the P5b binary, 800x600, llvmpipe GL
+# (Mesa 26.2) against lavapipe -gpu with sync validation, three runs a side
+# and all nine pairings, then the Tesla P4 (NVIDIA GL through SDL's offscreen
+# driver against NVIDIA Vulkan, 640x480: offscreen offers no larger mode):
+#
+#   check                        GL vs lavapipe        Tesla P4 GL vs Vk   gate
+#   PSNR, every frame but 05-06  67.5 - 80.3           76.3 - inf          42
+#   PSNR, 05 05f 06              47.6 - 70.9           66.7 - 66.9         42
+#   02 vs 01 changed pixels      1426 / 1427           952 / 952           10%
+#   03 vs 04, 03g vs 04g         121 / 121             77 / 77             10%
+#   05 vs 05f (styled light)     4581 - 4728           2958 / 2958         2000
+#   07 = before P5b, 12 = 02     0, 0                  -, 0                0
+#   lightcluster_verify          identical, 0 off      identical, 0 off
+#
+# Each run repeats itself exactly except the cauldron room (05, 05f, 06),
+# which moves by up to 648 pixels run to run on either backend: where the
+# frozen flame and style phase lands is the harness's timing.  The minimum
+# counts are 800x600's: at 640x480 pass MIN_CHANGED=500 MIN_ALIAS=50.
+#
+# THE REPORTS.  REPORT-BOOT holds the boot's gpu_unrouted; REPORT-LIT (from
+# 02) and REPORT-CPU (from 01) renderer_status and lightcluster_verify, real
+# lights and 64 synthetic; REPORT-ALL spans 01-12; REPORT-MAP the map change.
+# Each gpu_unrouted section is reset at its start.  tools/dlight-diff.sh's
+# header has the checks, the thresholds and the broken builds.
+
+sleep 20
+cmd echo REPORT-BOOT-BEGIN
+cmd gpu_unrouted
+cmd echo REPORT-BOOT-END
+cmd god
+cmd notarget
+cmd noclip
+cmd con_notifytime 0
+cmd viewsize 120
+cmd crosshair 0
+cmd showpause 0
+cmd cl_bob 0
+cmd cl_rollangle 0
+cmd r_skyspeed_back 0
+cmd r_skyspeed_front 0
+cmd r_flatlightstyles 1
+cmd r_dynamic 1
+cmd gl_flashblend 0
+cmd r_fullbright 0
+cmd gl_torch_dlight 1
+cmd r_lightclusters 1
+cmd r_lightclusters_models 1
+cmd r_gpulightstyles 1
+cmd r_dlight_occlusion 1
+cmd r_gpucull 0
+cmd gl_hiz_cull 0
+cmd r_ssao 0
+cmd r_bloom 0
+cmd r_hdr 0
+cmd r_alias_gpu 0
+cmd r_particles 0
+cmd fog 0
+cmd gl_texture_anisotropy 1
+cmd r_oit 0
+cmd r_waterwarp 0
+cmd r_motionblur 0
+cmd r_softparticles 0
+cmd r_softemu 0
+cmd r_scale 1
+cmd gl_fxaa 0
+cmd contrast 1
+cmd gl_waterwarp_speed 0
+cmd r_caustics 0
+cmd gl_glows 0
+cmd gl_missile_glows 0
+cmd gl_other_glows 0
+cmd r_drawviewmodel 0
+cmd r_drawentities 1
+cmd r_pp_time 10
+sleep 2
+
+cmd setpos 210 200 99 20 90 0
+sleep 2
+cmd gpu_unrouted reset
+cmd pause
+cmd r_lightclusters 0
+shot 01-lit-cpu
+cmd echo REPORT-CPU-BEGIN
+cmd gpu_unrouted
+cmd renderer_status
+cmd echo REPORT-CPU-END
+cmd r_lightclusters 1
+shot 02-lit-gpu
+cmd echo REPORT-LIT-BEGIN
+cmd renderer_status
+cmd lightcluster_verify
+cmd lightcluster_verify 64
+cmd gpu_unrouted
+cmd echo REPORT-LIT-END
+
+cmd pause
+cmd setpos 120 150 100 25 90 0
+sleep 2
+cmd pause
+shot 03-cast-models
+cmd r_lightclusters_models 0
+shot 04-cast-nomodels
+cmd r_lightclusters_models 1
+cmd r_alias_gpu 1
+shot 03g-cast-models-inst
+cmd r_lightclusters_models 0
+shot 04g-cast-nomodels-inst
+cmd r_lightclusters_models 1
+cmd r_alias_gpu 0
+
+cmd pause
+cmd setpos 632 40 300 15 90 0
+sleep 2
+cmd pause
+cmd r_flatlightstyles 0
+shot 05-styles-gpu
+cmd r_flatlightstyles 1
+shot 05f-styles-flat
+cmd r_flatlightstyles 0
+cmd r_gpulightstyles 0
+shot 06-styles-cpu
+cmd r_gpulightstyles 1
+cmd r_flatlightstyles 1
+
+cmd pause
+cmd setpos 210 200 99 20 90 0
+sleep 2
+cmd pause
+cmd r_gpulightstyles 0
+cmd r_lightclusters_models 0
+cmd r_dynamic 0
+shot 07-lit-dynamic0
+cmd r_dynamic 1
+cmd r_lightclusters_models 1
+cmd r_gpulightstyles 1
+cmd gl_flashblend 1
+shot 08-lit-flashblend
+cmd gl_flashblend 0
+cmd r_fullbright 1
+shot 09-lit-fullbright
+cmd r_fullbright 0
+cmd r_scale 0.5
+shot 10-lit-scale050
+cmd r_scale 1
+
+cmd pause
+cmd setpos -830 32 150 0 -90 0
+sleep 2
+cmd pause
+shot 11a-leak1
+cmd pause
+cmd setpos -811 1088 247 17 -90 0
+sleep 2
+cmd pause
+shot 11b-leak3
+
+cmd pause
+cmd setpos 210 200 99 20 90 0
+sleep 2
+cmd pause
+cmd r_dlight_occlusion 2
+shot 12-lit-occl2
+cmd r_dlight_occlusion 1
+cmd echo REPORT-ALL-BEGIN
+cmd gpu_unrouted
+cmd renderer_status
+cmd echo REPORT-ALL-END
+
+cmd pause
+cmd gpu_unrouted reset
+console
+enter map demo2
+sleep 25
+cmd echo REPORT-MAP-BEGIN
+cmd setpos 210 200 99 20 90 0
+sleep 2
+cmd lightcluster_verify 64
+cmd renderer_status
+cmd gpu_unrouted
+cmd echo REPORT-MAP-END
+sleep 1

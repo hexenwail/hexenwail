@@ -357,7 +357,8 @@ Checked, from the sources (stock python3, lint.yml):
       (COMPUTE_GATES, besides
       caps.compute_shaders, R_BuildWorldCull's and the light cluster's
       STANDIN_PINS), and R_Shadow_Prepare returns under R_GPU () before the
-      cube maps (GPU_GATES), which P5b's cluster would otherwise wake.
+      cube maps (GPU_GATES), which the cluster, running under -gpu since
+      P5b, would otherwise wake.
   the compute backend and the GPU palette LUT under -gpu (#340 P5a-2,
   check_compute_backend), which tools/sweep-lut-gpu.steps and
   tools/lut-diff.sh check:
@@ -365,10 +366,8 @@ Checked, from the sources (stock python3, lint.yml):
       parameters in order (COMPUTE_SEAMS), and R_BindImageTexture's is
       RG_BindImageTexture: the image units are shadowed, not noted;
     * GL_Init_NullGL turns compute_shaders and indirect_draw on before
-      GL_PostProcess_Init (which builds the LUT); the light cluster's Build
-      and ShadesWorld return false under R_GPU () in lockstep (GPU_GATES:
-      a yes from ShadesWorld with no grid stands the CPU dlights down), and
-      the cull, Hi-Z and SSAO gates stay; RGF_StandinExpected excuses
+      GL_PostProcess_Init (which builds the LUT); the cull, Hi-Z and SSAO
+      gates stay (the light cluster's lifted in P5b); RGF_StandinExpected excuses
       LightBuffer while R_LightCluster_Available () is false, the per-frame
       truth, which is lc_valid_this_frame;
     * RG_CheckStage reads a compute stage's set 1 (RG_MakeCompute passes
@@ -400,6 +399,24 @@ Checked, from the sources (stock python3, lint.yml):
     * gl_postprocess.c's builder names u_palette's unit (R_ProgramSamplerUnit)
       before it dispatches, and r_softemu_lutcheck reads the LUT through
       R_ReadTexImage and no GL entry point.
+  clustered dynamic lights and GPU lightstyles under -gpu (#340 P5b,
+  check_light_cluster), which tools/sweep-dlight-gpu.steps and
+  tools/dlight-diff.sh check:
+    * no function in gl_lightcluster.c but LC_BindParamsBlock and
+      LC_UploadAndDispatch names R_GPU: R_LightCluster_Build's gate and
+      R_LightCluster_ShadesWorld's went together (a yes from ShadesWorld
+      with no grid stands the CPU dlights down and the world goes unlit; a
+      grid with ShadesWorld still no lights it twice);
+    * LcParams is a registered mirror under -gpu: LC_BindParamsBlock
+      registers lc_params by the name lightcluster_comp.glsl gives the
+      block, and LC_UploadAndDispatch fills every member, then flushes it
+      (-gpu) or uploads it (GL), the light buffer's styles and lights land
+      and are bound at LIGHT_SSBO_BINDING, and only then the grid is bound
+      and the pass dispatched;
+    * the pass samples nothing, so its dispatch never pays the submit and
+      fence wait a sampling one does (RG_Frame_ComputeBegin), and
+      RGF_SubmitMidFrame counts every wait it makes (renderer_status);
+    * R_Shadow_Prepare's -gpu gate (GPU_GATES) stays until P6.
 
 Usage: test_rg_sources.py [--root DIR]
 """
@@ -2141,19 +2158,11 @@ GPU_GATES = (
     ("engine/hexen2/r_part.c", "R_GPU_Particles_Init", "",
      r"\bGL_CreateParticleResources\s*\(", None,
      "the GPU particle buffers are raw GL, into the null table, for a path nothing draws"),
-    ("engine/h2shared/gl_lightcluster.c", "R_LightCluster_Build", "false",
-     r"\bR_MaxStorageBindings\s*\(|\bR_Program_Create\s*\(|\bif\s*\(\s*lc_failed\b", None,
-     "the light cluster is P5b: compute is on under -gpu since P5a-2, and its buffer, LcParams "
-     "mirror and grid are not routed yet"),
-    ("engine/h2shared/gl_lightcluster.c", "R_LightCluster_ShadesWorld", "false",
-     r"\breturn\s+r_lightclusters\b", None,
-     "in lockstep with R_LightCluster_Build's: a yes with no grid stands the CPU dlights down and the "
-     "world goes unlit (#340 P5a-2)"),
     ("engine/h2shared/gl_shadow.c", "R_Shadow_Prepare", "",
      r"\bSH_BuildPrograms\s*\(|\bSH_Select\s*\(", r"\bsh_ndraws\s*=\s*0\s*;",
-     "the cube shadow maps are P6: once P5b brings the light cluster up under -gpu, "
-     "R_LightCluster_Available stops holding them off at the default r_dlight_occlusion 2 "
-     "(#340 P5a-1); the frame's block is still cleared first, as R_Shadow_Draw flushes it"),
+     "the cube shadow maps are P6: the light cluster runs under -gpu since P5b, so "
+     "R_LightCluster_Available no longer holds them off at the default r_dlight_occlusion 2 "
+     "(#340 P5a-1, P5b); the frame's block is still cleared first, as R_Shadow_Draw flushes it"),
 )
 
 
@@ -4039,6 +4048,107 @@ def check_compute_backend(root):
                  "-- the image unit, shadowed (#340 P5a-2)")
 
 
+# LC_UploadAndDispatch, whitespace dropped (#340 P5b): what reaches the
+# dispatch, in this order.  The styles and the lights land in the light
+# buffer and it is bound at its point before the pass reads it; every
+# LcParams member is written, then the mirror flushed (-gpu) or uploaded
+# (GL), before the grid is bound and the pass dispatched.
+LC_DISPATCH_ORDER = (
+    "GL_BindBuffer(GL_SHADER_STORAGE_BUFFER,lc_ssbo);",
+    # one string: the styles land every frame, straight after the loop that
+    # fills them, not only when there are lights
+    "styles[i]=d_lightstylevalue[i]*(1.0f/256.0f);"
+    "R_BufferSubData(GL_SHADER_STORAGE_BUFFER,0,sizeof(styles),styles);if(lc_numlights>0)"
+    "R_BufferSubData(GL_SHADER_STORAGE_BUFFER,sizeof(styles),(GLsizeiptr)(lc_numlights*sizeof(gpulight_t)),"
+    "lc_lights);",
+    "GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER,LIGHT_SSBO_BINDING,lc_ssbo);",
+    "R_UseProgram(lc_prog);",
+    "memset(&lc_params,0,sizeof(lc_params));",
+    "memcpy(lc_params.view,lc_view,sizeof(lc_params.view));",
+    "memcpy(lc_params.tproj,lc_tproj,sizeof(lc_params.tproj));",
+    "lc_params.zlog[0]=lc_zlogscale;",
+    "lc_params.zlog[1]=lc_zlogbias;",
+    "lc_params.count[0]=lc_numlights;",
+    "#ifdefUSE_SDL_GPUif(R_GPU())RG_UniformBlockFlushed(\"LcParams\");else#endif{",
+    "GL_Upload(GL_UNIFORM_BUFFER,&lc_params,sizeof(lc_params),&ubo,&ofs);",
+    "GL_BindBufferRange(GL_UNIFORM_BUFFER,LC_PARAMS_UBO_BINDING,ubo,ofs,sizeof(lc_params));",
+    "R_BindImageTexture(0,lc_grid,0,GL_TRUE,0,GL_WRITE_ONLY,GL_RGBA32UI);",
+    "R_DispatchCompute(LIGHT_TILES_X/8,LIGHT_TILES_Y/8,LIGHT_TILES_Z);",
+)
+
+
+def check_light_cluster(root):
+    """#340 P5b: clustered dynamic lights and GPU lightstyles under -gpu."""
+    rel = "engine/h2shared/gl_lightcluster.c"
+    if not (root / rel).is_file():
+        fail("%s: missing -- the #340 P5b pins have nothing to read" % rel)
+        return
+    code = strip_c_comments((root / rel).read_text(errors="replace"))
+    named = sorted({n for n, b, e in functions(code) if re.search(r"\bR_GPU\s*\(", code[b:e])})
+    if named != ["LC_BindParamsBlock", "LC_UploadAndDispatch"]:
+        fail("%s: R_GPU () is named in %s; only LC_BindParamsBlock and LC_UploadAndDispatch may (the "
+             "LcParams mirror) -- a gate left in R_LightCluster_Build without ShadesWorld's stands the CPU "
+             "dlights down with no grid, one left in ShadesWorld without Build's lights the world twice "
+             "(#340 P5b)" % (rel, named))
+    b = body_named(root, rel, "LC_BindParamsBlock")
+    if b is not None:
+        m = re.search(r"#\s*ifdef\s+USE_SDL_GPU\b(.*?)#\s*endif", b, re.S)
+        g = re.search(r"\bgl\w+_fp\b", b)
+        if not m or squash(m.group(1)) != ('if(R_GPU()){RG_UniformBlockRegister("LcParams",&lc_params,'
+                                           'sizeof(lc_params));returntrue;}') or not g or g.start() < m.start():
+            fail("%s: LC_BindParamsBlock's SDL_GPU arm must be exactly `if (R_GPU ()) { "
+                 "RG_UniformBlockRegister (\"LcParams\", &lc_params, sizeof(lc_params)); return true; }`, "
+                 "ahead of every GL call -- the dispatch pushes the block by name from its flushed mirror "
+                 "(#340 P5b)" % rel)
+    if not re.search(r"^static\s+lc_params_t\s+lc_params\s*;", code, re.M):
+        fail("%s: lc_params must be a file-scope lc_params_t: the registered mirror outlives the call "
+             "(#340 P5b)" % rel)
+    sh = "engine/shaders/lightcluster_comp.glsl"
+    if (root / sh).is_file():
+        src = strip_c_comments((root / sh).read_text(errors="replace"))
+        if not re.search(r"\bUBO\s*\(\s*0\s*\)\s*uniform\s+LcParams\s*\{", src):
+            fail("%s: the pass's uniform block must be `UBO(0) uniform LcParams` -- the name the mirror is "
+                 "registered by (#340 P5b)" % sh)
+        if re.search(r"\b[iu]?sampler\w*\s+\w+\s*;", src):
+            fail("%s: the light cluster samples a texture -- under -gpu every dispatch that samples pays a "
+                 "submit and a fence wait (RG_Frame_ComputeBegin), once a frame and once more per mirror "
+                 "(#340 P5b)" % sh)
+    else:
+        fail("%s: missing -- the #340 P5b pins have nothing to read" % sh)
+    b = body_named(root, rel, "LC_UploadAndDispatch")
+    if b is not None:
+        s = squash(b)
+        at = 0
+        for step in LC_DISPATCH_ORDER:
+            i = s.find(step, at)
+            if i < 0:
+                fail("%s: LC_UploadAndDispatch must make `%s` after the steps before it -- the light "
+                     "buffer lands and is bound, LcParams is filled and flushed, then the grid is bound "
+                     "and dispatched (#340 P5b)" % (rel, step))
+                break
+            at = i + len(step)
+        if len(re.findall(r"\bRG_UniformBlockFlushed\s*\(", b)) != 1 or \
+                len(re.findall(r"\bR_DispatchCompute\s*\(", b)) != 1:
+            fail("%s: LC_UploadAndDispatch flushes LcParams once and dispatches once (#340 P5b)" % rel)
+    b = body_named(root, rel, "R_LightCluster_Update")
+    if b is not None and (not re.search(r"\bR_GetViewport\s*\(\s*vp\s*\)\s*;", b) or
+                          re.search(r"\bglGetIntegerv", b)):
+        fail("%s: R_LightCluster_Update reads the viewport through R_GetViewport -- a raw glGetIntegerv "
+             "answers zeros under -gpu and the update returns with nothing lit (#340 P5b)" % rel)
+    rf = "engine/h2shared/rg_frame.c"
+    b = body_named(root, rf, "RGF_SubmitMidFrame")
+    if b is not None and "rgf_frame_waits++;rgf_waits++;fence=SDL_SubmitGPUCommandBufferAndAcquireFence(rgf_cmd);" \
+            not in squash(b):
+        fail("%s: RGF_SubmitMidFrame must count each wait (rgf_frame_waits, rgf_waits) as it submits -- the "
+             "stall renderer_status reports (#340 P5b)" % rf)
+    b = body_named(root, rf, "RG_Frame_Status")
+    if b is not None and not all(k in squash(b) for k in (
+            "%dreadbacks,%dfencewaits;", "%lureadbacks,%lufencewaits;",
+            "rgf_last_cpasses,rgf_last_reads,rgf_last_waits,rgf_cpasses,rgf_reads,rgf_waits);")):
+        fail("%s: RG_Frame_Status must print the last frame's fence waits and the boot's, beside the "
+             "readbacks (#340 P5b)" % rf)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     ap.add_argument("--root", type=Path, default=ROOT)
@@ -4068,6 +4178,7 @@ def main(argv=None):
     check_bloom(root)
     check_compute(root)
     check_compute_backend(root)
+    check_light_cluster(root)
     nfiles = 0
     rg_files = []
     for p in sorted(eng.rglob("*")):
