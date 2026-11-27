@@ -1373,6 +1373,12 @@ void Key_Event (int key, qboolean down)
 			break;
 		case key_game:
 		case key_console:
+			/* Esc over a loading plaque drops it, as the console key does,
+			 * or the menu opens invisible under it until signon ends.  Here
+			 * and not in M_ToggleMenu_f: CL_StopPlayback calls that mid-load.
+			 * GitHub #571. */
+			if (key_dest == key_game && scr_disabled_for_loading)
+				SCR_EndLoadingPlaque ();
 			M_ToggleMenu_f ();
 			break;
 		default:

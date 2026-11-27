@@ -352,6 +352,7 @@ static void Host_Map_f (void)
 
 	Key_SetDest (key_game);		// remove console or menu
 	SCR_BeginLoadingPlaque ();
+	SCR_SetLoadingStatus ("Loading map %s", Cmd_Argv(1));
 
 	info_mask = 0;
 	if (!coop.integer && deathmatch.integer)
@@ -647,12 +648,23 @@ static void Host_Connect_f (void)
 		CL_Disconnect ();
 	}
 	q_strlcpy (name, Cmd_Argv(1), sizeof(name));
+	/* Up before the handshake, so the connect and its retries are on the
+	 * plaque's status line too, not just the signon after it.  A failed
+	 * connect drops it again through Host_Error.  Disconnect first: leaving
+	 * a HexenWorld server ends the plaque (HWCL_Disconnect).  GitHub #571. */
+	if (cls.state == ca_connected)
+		CL_Disconnect ();
+	SCR_BeginLoadingPlaque ();
+	SCR_SetLoadingStatus ("Connecting to %s...", name);
 	CL_EstablishConnection (name);
 #if defined(H2W_INTEGRATED)
-	/* A rejected hw:// address has already reported itself; raising the
-	 * plaque now would only freeze the screen until "load timeout". */
+	/* A rejected hw:// address has already reported itself; leaving the
+	 * plaque up would only freeze the screen until "load timeout". */
 	if (!q_strncasecmp (name, "hw://", 5) && !HWCL_Active ())
+	{
+		SCR_EndLoadingPlaque ();
 		return;
+	}
 #endif
 	Host_Reconnect_f ();
 }

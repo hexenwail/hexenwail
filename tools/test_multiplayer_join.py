@@ -142,6 +142,7 @@ static void CL_DemoKeyframe(void) {}	/* demo rewind keyframes, #76 */
 static void Host_Error(const char *fmt,...) { (void)fmt; longjmp(abort_join,1); }
 static void Con_Printf(const char *fmt,...) { (void)fmt; }
 #define Con_DPrintf Con_Printf
+static void SCR_SetLoadingStatus(const char *fmt,...) { (void)fmt; }	/* #571 */
 static void MSG_WriteByte(int *m,int b) { *m=b; }
 static void reset(void) {
     memset(&cls,0,sizeof(cls)); memset(&cl,0,sizeof(cl));

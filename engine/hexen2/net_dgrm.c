@@ -1233,6 +1233,10 @@ static qsocket_t *_Datagram_Connect (const char *host)
 
 	for (reps = 0; reps < 3; reps++)
 	{
+		if (reps)
+			SCR_SetLoadingStatus ("Connecting to %s... (retry %d)", host, reps);
+		else
+			SCR_SetLoadingStatus ("Connecting to %s...", host);
 		SZ_Clear(&net_message);
 		// save space for the header, filled in later
 		MSG_WriteLong(&net_message, 0);
@@ -1244,6 +1248,7 @@ static qsocket_t *_Datagram_Connect (const char *host)
 		SZ_Clear(&net_message);
 		do
 		{
+			SCR_LoadingTick ();	/* the elapsed count, while this blocks */
 			ret = dfunc.Read (newsock, net_message.data, net_message.maxsize, &readaddr);
 			// if we got something, validate it
 			if (ret > 0)

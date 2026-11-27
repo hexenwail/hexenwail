@@ -348,6 +348,7 @@ void CL_EstablishConnection (const char *host)
 	cls.demonum = -1;			// not in the demo loop now
 	cls.state = ca_connected;
 	cls.signon = 0;				// need all the signon messages before playing
+	SCR_SetLoadingStatus ("Waiting for server info");
 
 	MSG_WriteByte (&cls.message, clc_nop);	// fixes connection getting stuck after displaying
 								// the "Connection accepted" msg..
@@ -371,6 +372,7 @@ void CL_SignonReply (void)
 	case 1:
 		MSG_WriteByte (&cls.message, clc_stringcmd);
 		MSG_WriteString (&cls.message, "prespawn");
+		SCR_SetLoadingStatus ("Signon 1/4: receiving entities");
 		break;
 
 	case 2:
@@ -394,11 +396,13 @@ void CL_SignonReply (void)
 		MSG_WriteByte (&cls.message, clc_stringcmd);
 		q_snprintf (str, sizeof(str), "spawn %s", cls.spawnparms);
 		MSG_WriteString (&cls.message, str);
+		SCR_SetLoadingStatus ("Signon 2/4: spawning");
 		break;
 
 	case 3:
 		MSG_WriteByte (&cls.message, clc_stringcmd);
 		MSG_WriteString (&cls.message, "begin");
+		SCR_SetLoadingStatus ("Signon 3/4: entering game");
 		Cache_Report ();		// print remaining memory
 		break;
 
