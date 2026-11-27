@@ -17,11 +17,11 @@ python3 plus a C compiler (lint.yml):
       is then `glUniform1i_fp (loc, unit);`; each SDL_GPU arm is under
       #ifdef USE_SDL_GPU / if (R_GPU ()) and calls RG_ProgramSampler /
       RG_ProgramSamplerUnit with the same arguments.
-    * no other glGetUniformLocation or glUniform1i call in the engine,
-      except gl_postprocess.c's OIT resolve (P6), raw GL until that phase
-      routes its programs (RAW_OK, by function where it names them; each
-      entry must still have such calls).  gl_ssao.c's composite goes through
-      the seam since P5a-1;
+    * no other glGetUniformLocation or glUniform1i call in the engine
+      (RAW_OK, by function where it names them, for a program not routed
+      yet; each entry must still have such calls; empty since P6a, when the
+      OIT resolve went through the seam).  gl_ssao.c's composite goes
+      through the seam since P5a-1;
   the call sites
     * each R_ProgramSamplerUnit (prog, loc, "name", unit) names the sampler
       its location was looked up for -- `p->u_x` was assigned from
@@ -46,7 +46,7 @@ python3 plus a C compiler (lint.yml):
     * every name a set-up function assigns is a sampler of one of its
       programs, so a misspelt name cannot pass as "not declared here";
     * a graphics program with samplers and no set-up function is one of
-      RAW_PROGRAMS (P5 / P6);
+      RAW_PROGRAMS (empty since P6a);
   the backend (rg_shader.c, rg_resource.c, rg_frame.c), compiled and run
     * RG_Reflect, lifted with a stub prelude and fed SPIR-V assembled here:
       each sampler's dimensionality (cube arrays included), sampled class
@@ -95,14 +95,11 @@ NOT_SITES = {"engine/h2shared/gl_func.h", "engine/h2shared/gl_vidsdl.c",
              "engine/h2shared/rg_null.c", "engine/h2shared/web_canvas_gl2.c"}
 # Raw GL sampler set-up, by phase: their programs do not draw under -gpu yet.
 # file -> (why, the functions it may sit in, or None for anywhere in the file).
-RAW_OK = {
-    "engine/h2shared/gl_postprocess.c": ("the OIT resolve, P6 on #340 (gated off under -gpu)",
-                                         {"OIT_InitShader", "OIT_EndTranslucency"}),
-}
+RAW_OK = {}
 # The programs those files set up, which therefore have no seam set-up.  The
 # post-process and bloom programs went through the seam at P4a-1, the SSAO
-# composite at P5a-1.
-RAW_PROGRAMS = {"oit_resolve", "oit_resolve_msaa"}
+# composite at P5a-1, the OIT resolve and its MSAA twin at P6a.
+RAW_PROGRAMS = set()
 # Files whose functions set sampler units through the seam.
 SETUP_FILES = (SHADER_C, SHADOW_C, "engine/h2shared/gl_postprocess.c", "engine/h2shared/gl_ssao.c")
 
@@ -134,6 +131,9 @@ CANON.update({
     # every program to, see CANON_AT
     "world_depth": "SSAO_TEX_UNIT", "hilbert_lut": "SSAO_TEX_UNIT + 1",
     "depth_mismatch": "SSAO_TEX_UNIT + 2",
+    # the OIT resolve and its MSAA twin (OIT_EndTranslucency, #340 P6a): the
+    # accumulation target at 0, revealage or MBOIT's b0 at 1
+    "TexAccum": "0", "TexReveal": "1",
 })
 # (set-up function, program, sampler) -> its unit, where one sampler name is
 # bound at different units by different programs: ssao_mip reads the scene's

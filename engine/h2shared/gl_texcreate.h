@@ -102,6 +102,13 @@ void	R_TexSetWrap (GLenum target, GLuint tex, GLint wrap);
 void	R_TexParameteri (GLenum target, GLuint tex, GLenum pname, GLint value);
 void	R_TexParameterf (GLenum target, GLuint tex, GLenum pname, GLfloat value);
 
+#ifndef USE_GLES
+/* glGetIntegerv (GL_MAX_CUBE_MAP_TEXTURE_SIZE), 0 for no answer: the cube
+ * shadow maps' size cap (#340 P6a).  The -gpu arm is P6b's; it answers 0,
+ * which the caller reads as no cap. */
+int	R_MaxCubeMapSize (void);
+#endif
+
 /* How many entry-point calls named a texture other than the one bound for
  * edit (see GL ARM above); `renderer_status` prints it.  Zero is the only
  * correct value.  The check is blind where the shadow is: the untracked

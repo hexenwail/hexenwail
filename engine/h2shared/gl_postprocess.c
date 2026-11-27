@@ -445,6 +445,9 @@ typedef struct {
 COMPILE_TIME_ASSERT(oitparams_size, sizeof(oit_params_t) == 16);
 
 static GLuint	oit_ubo;
+/* What the resolve uploads: oit_ubo's contents on GL, the registered mirror
+ * under -gpu (#340 P6a). */
+static oit_params_t	oit_params;
 
 /* ------------------------------------------------------------------ */
 /* Bloom post-process shaders                                          */
@@ -722,11 +725,11 @@ static qboolean PP_CreateFBO (int width, int height)
 		/* multisampled render FBO */
 		R_GenRenderbuffers(1, &pp_color_rb);
 		R_BindRenderbuffer(GL_RENDERBUFFER, pp_color_rb);
-		glRenderbufferStorageMultisample_fp(GL_RENDERBUFFER, samples, color_fmt, width, height);
+		R_RenderbufferStorageMultisample(GL_RENDERBUFFER, samples, color_fmt, width, height);
 
 		R_GenRenderbuffers(1, &pp_depth_rb);
 		R_BindRenderbuffer(GL_RENDERBUFFER, pp_depth_rb);
-		glRenderbufferStorageMultisample_fp(GL_RENDERBUFFER, samples, GL_DEPTH24_STENCIL8, width, height);
+		R_RenderbufferStorageMultisample(GL_RENDERBUFFER, samples, GL_DEPTH24_STENCIL8, width, height);
 		R_BindRenderbuffer(GL_RENDERBUFFER, 0);
 
 		R_GenFramebuffers(1, &pp_fbo);
@@ -1842,10 +1845,10 @@ static void OIT_DeleteFBO (void)
 {
 	if (oit_accum_tex) { R_DeleteTextures (1, &oit_accum_tex); oit_accum_tex = 0; }
 	if (oit_revealage_tex) { R_DeleteTextures (1, &oit_revealage_tex); oit_revealage_tex = 0; }
-	if (oit_fbo) { glDeleteFramebuffers_fp(1, &oit_fbo); oit_fbo = 0; }
+	if (oit_fbo) { R_DeleteFramebuffers(1, &oit_fbo); oit_fbo = 0; }
 	if (mboit_b0_tex) { R_DeleteTextures (1, &mboit_b0_tex); mboit_b0_tex = 0; }
 	if (mboit_mom_tex) { R_DeleteTextures (1, &mboit_mom_tex); mboit_mom_tex = 0; }
-	if (mboit_fbo) { glDeleteFramebuffers_fp(1, &mboit_fbo); mboit_fbo = 0; }
+	if (mboit_fbo) { R_DeleteFramebuffers(1, &mboit_fbo); mboit_fbo = 0; }
 	mboit_available = false;
 	oit_samples = 0;
 	oit_available = false;
@@ -1912,22 +1915,22 @@ static qboolean OIT_CreateFBO (int width, int height, GLuint depth_stencil_rb, G
 	 * FBO supplies depth as either a multisampled renderbuffer (MSAA
 	 * branch) or a sampler-readable texture (non-MSAA, lets Hi-Z compute
 	 * read it). */
-	glGenFramebuffers_fp(1, &oit_fbo);
-	glBindFramebuffer_fp(GL_FRAMEBUFFER, oit_fbo);
-	glFramebufferTexture2D_fp(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-				  textarget, oit_accum_tex, 0);
-	glFramebufferTexture2D_fp(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1,
-				  textarget, oit_revealage_tex, 0);
+	R_GenFramebuffers(1, &oit_fbo);
+	R_BindFramebuffer(GL_FRAMEBUFFER, oit_fbo);
+	R_FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+			       textarget, oit_accum_tex, 0);
+	R_FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1,
+			       textarget, oit_revealage_tex, 0);
 	if (depth_stencil_tex)
-		glFramebufferTexture2D_fp(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
-					  GL_TEXTURE_2D, depth_stencil_tex, 0);
+		R_FramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
+				       GL_TEXTURE_2D, depth_stencil_tex, 0);
 	else
-		glFramebufferRenderbuffer_fp(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
-					     GL_RENDERBUFFER, depth_stencil_rb);
-	glDrawBuffers_fp(2, drawbufs);
+		R_FramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
+					  GL_RENDERBUFFER, depth_stencil_rb);
+	R_DrawBuffers(2, drawbufs);
 
-	status = glCheckFramebufferStatus_fp(GL_FRAMEBUFFER);
-	glBindFramebuffer_fp(GL_FRAMEBUFFER, 0);
+	status = R_CheckFramebufferStatus(GL_FRAMEBUFFER);
+	R_BindFramebuffer(GL_FRAMEBUFFER, 0);
 
 	if (status != GL_FRAMEBUFFER_COMPLETE)
 	{
@@ -1964,19 +1967,19 @@ static qboolean OIT_CreateFBO (int width, int height, GLuint depth_stencil_rb, G
 				R_TexSetFilter(GL_TEXTURE_2D, *texs[k], GL_NEAREST, GL_NEAREST);
 			}
 		}
-		glGenFramebuffers_fp(1, &mboit_fbo);
-		glBindFramebuffer_fp(GL_FRAMEBUFFER, mboit_fbo);
-		glFramebufferTexture2D_fp(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, textarget, mboit_b0_tex, 0);
-		glFramebufferTexture2D_fp(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, textarget, mboit_mom_tex, 0);
+		R_GenFramebuffers(1, &mboit_fbo);
+		R_BindFramebuffer(GL_FRAMEBUFFER, mboit_fbo);
+		R_FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, textarget, mboit_b0_tex, 0);
+		R_FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, textarget, mboit_mom_tex, 0);
 		if (depth_stencil_tex)
-			glFramebufferTexture2D_fp(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
-						  GL_TEXTURE_2D, depth_stencil_tex, 0);
+			R_FramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
+					       GL_TEXTURE_2D, depth_stencil_tex, 0);
 		else
-			glFramebufferRenderbuffer_fp(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
-						     GL_RENDERBUFFER, depth_stencil_rb);
-		glDrawBuffers_fp(2, drawbufs);
-		status = glCheckFramebufferStatus_fp(GL_FRAMEBUFFER);
-		glBindFramebuffer_fp(GL_FRAMEBUFFER, 0);
+			R_FramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
+						  GL_RENDERBUFFER, depth_stencil_rb);
+		R_DrawBuffers(2, drawbufs);
+		status = R_CheckFramebufferStatus(GL_FRAMEBUFFER);
+		R_BindFramebuffer(GL_FRAMEBUFFER, 0);
 		R_BindTextureForEdit (textarget, 0);
 		mboit_available = (status == GL_FRAMEBUFFER_COMPLETE);
 		if (!mboit_available)
@@ -1988,8 +1991,6 @@ static qboolean OIT_CreateFBO (int width, int height, GLuint depth_stencil_rb, G
 
 static qboolean OIT_InitShader (void)
 {
-	GLuint prog;
-
 #ifdef USE_SDL_GPU
 	/* OIT is P6 (see OIT_CreateFBO).  Gated here as well because this runs
 	 * at every -gpu boot: the null glBlendFunci is not NULL, so
@@ -1997,19 +1998,27 @@ static qboolean OIT_InitShader (void)
 	if (R_GPU ())
 		return false;
 #endif
-	prog = R_Program_Create(RPROG_OIT_RESOLVE);
-	if (!prog)
+	/* Created into the file-scope names, which OIT_EndTranslucency's
+	 * per-frame sampler re-set names (tools/test_rg_sampler_units.py). */
+	oit_resolve_prog = R_Program_Create(RPROG_OIT_RESOLVE);
+	if (!oit_resolve_prog)
 		return false;
 
-	oit_resolve_prog = prog;
-	oit_resolve_loc_accum = glGetUniformLocation_fp(prog, "TexAccum");
-	oit_resolve_loc_reveal = glGetUniformLocation_fp(prog, "TexReveal");
-	PP_BindUniformBlock(prog, "OitParams", OIT_PARAMS_UBO_BINDING, sizeof(oit_params_t));
+	oit_resolve_loc_accum = R_ProgramSamplerLoc(oit_resolve_prog, "TexAccum");
+	oit_resolve_loc_reveal = R_ProgramSamplerLoc(oit_resolve_prog, "TexReveal");
+	PP_BindUniformBlock(oit_resolve_prog, "OitParams", OIT_PARAMS_UBO_BINDING, sizeof(oit_params_t));
+	memset(&oit_params, 0, sizeof(oit_params));
+#ifdef USE_SDL_GPU
+	/* The block is oit_params itself, as BloomParams is bloom_params. */
+	if (R_GPU ())
+		RG_UniformBlockRegister ("OitParams", &oit_params, sizeof(oit_params));
+	else
+#endif
 	if (!oit_ubo)
 	{
-		glGenBuffers_fp(1, &oit_ubo);
+		R_GenBuffers(1, &oit_ubo);
 		GL_BindBuffer(GL_UNIFORM_BUFFER, oit_ubo);
-		glBufferData_fp(GL_UNIFORM_BUFFER, sizeof(oit_params_t), NULL, GL_DYNAMIC_DRAW);
+		R_BufferData(GL_UNIFORM_BUFFER, sizeof(oit_params_t), NULL, GL_DYNAMIC_DRAW);
 		GL_BindBuffer(GL_UNIFORM_BUFFER, 0);
 	}
 
@@ -2017,18 +2026,18 @@ static qboolean OIT_InitShader (void)
 	/* MSAA per-sample resolve variant — best-effort. If it fails to build
 	 * the MSAA OIT path is simply never selected, since oit_samples stays 0
 	 * then.  Not built at all on the ES tier — see oit_resolve_frag_msaa. */
-	prog = R_Program_Create(RPROG_OIT_RESOLVE_MSAA);
-	if (prog)
+	oit_resolve_prog_msaa = R_Program_Create(RPROG_OIT_RESOLVE_MSAA);
+	if (oit_resolve_prog_msaa)
 	{
-		oit_resolve_prog_msaa = prog;
-		oit_resolve_msaa_loc_accum = glGetUniformLocation_fp(prog, "TexAccum");
-		oit_resolve_msaa_loc_reveal = glGetUniformLocation_fp(prog, "TexReveal");
-		PP_BindUniformBlock(prog, "OitParams", OIT_PARAMS_UBO_BINDING, sizeof(oit_params_t));
+		oit_resolve_msaa_loc_accum = R_ProgramSamplerLoc(oit_resolve_prog_msaa, "TexAccum");
+		oit_resolve_msaa_loc_reveal = R_ProgramSamplerLoc(oit_resolve_prog_msaa, "TexReveal");
+		PP_BindUniformBlock(oit_resolve_prog_msaa, "OitParams", OIT_PARAMS_UBO_BINDING,
+				    sizeof(oit_params_t));
 	}
 #endif /* !USE_GLES */
 
 	/* GL 4.3 core profile requires a VAO bound for any draw call. */
-	glGenVertexArrays_fp(1, &oit_resolve_vao);
+	R_GenVertexArrays(1, &oit_resolve_vao);
 
 	Con_SafePrintf("OIT: resolve shader OK\n");
 	return true;
@@ -2053,9 +2062,9 @@ void OIT_BeginTranslucency (void)
 	if (r_oit.integer >= 2 && mboit_available)
 	{
 		mboit_pass = 1;
-		glBindFramebuffer_fp(GL_FRAMEBUFFER, mboit_fbo);
-		glClearBufferfv_fp(GL_COLOR, 0, zeroes);
-		glClearBufferfv_fp(GL_COLOR, 1, zeroes);
+		R_BindFramebuffer(GL_FRAMEBUFFER, mboit_fbo);
+		R_ClearBufferfv(GL_COLOR, 0, zeroes);
+		R_ClearBufferfv(GL_COLOR, 1, zeroes);
 		R_SetBlend (true);
 		R_SetBlendFuncIndexed (0, GL_ONE, GL_ONE);
 		R_SetBlendFuncIndexed (1, GL_ONE, GL_ONE);
@@ -2066,9 +2075,9 @@ void OIT_BeginTranslucency (void)
 
 	mboit_pass = 0;
 	R_SetOITMode (0, false);
-	glBindFramebuffer_fp(GL_FRAMEBUFFER, oit_fbo);
-	glClearBufferfv_fp(GL_COLOR, 0, zeroes);
-	glClearBufferfv_fp(GL_COLOR, 1, ones);
+	R_BindFramebuffer(GL_FRAMEBUFFER, oit_fbo);
+	R_ClearBufferfv(GL_COLOR, 0, zeroes);
+	R_ClearBufferfv(GL_COLOR, 1, ones);
 
 	/* Per-buffer blending for WBOIT */
 	R_SetBlend (true);
@@ -2094,9 +2103,9 @@ qboolean OIT_NextPass (void)
 		return false;
 
 	mboit_pass = 2;
-	glBindFramebuffer_fp(GL_FRAMEBUFFER, oit_fbo);
-	glDrawBuffers_fp(1, &one);
-	glClearBufferfv_fp(GL_COLOR, 0, zeroes);
+	R_BindFramebuffer(GL_FRAMEBUFFER, oit_fbo);
+	R_DrawBuffers(1, &one);
+	R_ClearBufferfv(GL_COLOR, 0, zeroes);
 	R_SetBlend (true);
 	R_SetBlendFuncIndexed (0, GL_ONE, GL_ONE);
 	R_SetDepthMask (false);
@@ -2121,7 +2130,6 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 {
 	GLenum textarget;
 	GLuint prog;
-	GLint loc_accum, loc_reveal;
 	qboolean cull_was_on, mboit;
 	GLint saved_viewport[4];
 
@@ -2134,8 +2142,6 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 
 	textarget = (oit_samples > 1) ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D;
 	prog = (oit_samples > 1) ? oit_resolve_prog_msaa : oit_resolve_prog;
-	loc_accum = (oit_samples > 1) ? oit_resolve_msaa_loc_accum : oit_resolve_loc_accum;
-	loc_reveal = (oit_samples > 1) ? oit_resolve_msaa_loc_reveal : oit_resolve_loc_reveal;
 
 	oit_in_pass = false;
 
@@ -2147,8 +2153,8 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 		GLenum	two[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
 		GLenum	mt = (oit_samples > 1) ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D;
 
-		glBindFramebuffer_fp(GL_FRAMEBUFFER, oit_fbo);
-		glDrawBuffers_fp(2, two);
+		R_BindFramebuffer(GL_FRAMEBUFFER, oit_fbo);
+		R_DrawBuffers(2, two);
 		R_BindTextureTarget ((oit_samples > 1) ? MBOIT_TMU_B0_MS : MBOIT_TMU_B0, mt, 0);
 		R_BindTextureTarget ((oit_samples > 1) ? MBOIT_TMU_MOM_MS : MBOIT_TMU_MOM, mt, 0);
 		R_SetOITMode (0, false);
@@ -2156,9 +2162,9 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 	}
 
 	cull_was_on = R_GetCull();
-	glGetIntegerv_fp(GL_VIEWPORT, saved_viewport);
+	R_GetViewport(saved_viewport);
 
-	glBindFramebuffer_fp(GL_FRAMEBUFFER, scene_fbo);
+	R_BindFramebuffer(GL_FRAMEBUFFER, scene_fbo);
 
 	R_UseProgram (prog);
 
@@ -2170,13 +2176,25 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 	R_BindTextureTarget (0, textarget, oit_accum_tex);
 	R_BindTextureTarget (1, textarget, mboit ? mboit_b0_tex : oit_revealage_tex);
 
-	if (loc_accum >= 0) glUniform1i_fp(loc_accum, 0);
-	if (loc_reveal >= 0) glUniform1i_fp(loc_reveal, 1);
+	if (oit_samples > 1)
 	{
-		oit_params_t	op = {{ mboit ? 1 : 0, 0, 0, 0 }};
-
+		R_ProgramSamplerUnit(oit_resolve_prog_msaa, oit_resolve_msaa_loc_accum, "TexAccum", 0);
+		R_ProgramSamplerUnit(oit_resolve_prog_msaa, oit_resolve_msaa_loc_reveal, "TexReveal", 1);
+	}
+	else
+	{
+		R_ProgramSamplerUnit(oit_resolve_prog, oit_resolve_loc_accum, "TexAccum", 0);
+		R_ProgramSamplerUnit(oit_resolve_prog, oit_resolve_loc_reveal, "TexReveal", 1);
+	}
+	oit_params.p[0] = mboit ? 1 : 0;
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+		RG_UniformBlockFlushed ("OitParams");
+	else
+#endif
+	{
 		GL_BindBuffer(GL_UNIFORM_BUFFER, oit_ubo);
-		glBufferSubData_fp(GL_UNIFORM_BUFFER, 0, sizeof(op), &op);
+		R_BufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(oit_params), &oit_params);
 		GL_BindBuffer(GL_UNIFORM_BUFFER, 0);
 		GL_BindBufferBase(GL_UNIFORM_BUFFER, OIT_PARAMS_UBO_BINDING, oit_ubo);
 	}
@@ -2220,9 +2238,9 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 	R_SetCull (false);
 
 	/* GL 4.3 core profile requires a VAO bound for glDrawArrays. */
-	glBindVertexArray_fp(oit_resolve_vao);
-	glDrawArrays_fp(GL_TRIANGLES, 0, 3);
-	glBindVertexArray_fp(0);
+	R_BindVertexArray(oit_resolve_vao);
+	R_DrawArrays(GL_TRIANGLES, 0, 3);
+	R_BindVertexArray(0);
 
 	if (cull_was_on)
 		R_SetCull (true);

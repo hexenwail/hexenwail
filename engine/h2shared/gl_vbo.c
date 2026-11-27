@@ -624,6 +624,21 @@ void R_DrawElementsIndirect (GLenum mode, GLenum type, const void *indirect)
 #endif
 	glDrawElementsIndirect_fp (mode, type, indirect);
 }
+
+/* Each run will be one RG_DrawIndexed at P6b; until then nothing under -gpu
+ * reaches it (R_Shadow_Prepare's gate). */
+void R_MultiDrawElements (GLenum mode, const GLsizei *counts, GLenum type,
+			  const void *const *offsets, GLsizei drawcount)
+{
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_NoteUnhandled ("R_MultiDrawElements (P6b)");
+		return;
+	}
+#endif
+	glMultiDrawElements_fp (mode, counts, type, offsets, drawcount);
+}
 #endif
 
 /* GL_ImmEnd's and GL_ImmDraw's VAO bind and stream upload, ahead of the

@@ -241,12 +241,13 @@ if table:
 dm = re.search(r"static void SH_DrawMap \([^)]*\)\s*\{(.*?)\n\}", code, re.S)
 dm = dm.group(1) if dm else ""
 if not re.search(r"for \(f = 0; f < 6; f\+\+\)", dm) \
-        or "glBindFramebuffer_fp (GL_FRAMEBUFFER, sh_fbos[slot * 6 + f]);" not in dm \
+        or "R_BindFramebuffer (GL_FRAMEBUFFER, sh_fbos[slot * 6 + f]);" not in dm \
         or "memcpy (pass.vp, sh_facevp[f], sizeof(pass.vp));" not in dm:
     errors.append("SH_DrawMap must draw face f of `slot` into layer-face slot * 6 + f with sh_facevp[f]")
 et = re.search(r"static qboolean SH_EnsureTexture \(void\)\s*\{(.*?)\n\}", code, re.S)
-if not et or not re.search(r"for \(i = 0; i < maps \* 6[^)]*\)\s*\{\s*glBindFramebuffer_fp \(GL_FRAMEBUFFER, sh_fbos\[i\]\);"
-                            r"\s*glDrawBuffers_fp \(1, &none\);\s*glFramebufferTextureLayer_fp \(GL_FRAMEBUFFER, "
+# through gl_fbo.h's seams since #340 P6a
+if not et or not re.search(r"for \(i = 0; i < maps \* 6[^)]*\)\s*\{\s*R_BindFramebuffer \(GL_FRAMEBUFFER, sh_fbos\[i\]\);"
+                            r"\s*R_DrawBuffers \(1, &none\);\s*R_FramebufferTextureLayer \(GL_FRAMEBUFFER, "
                             r"GL_DEPTH_ATTACHMENT, sh_tex, 0, i\);", et.group(1)):
     errors.append("SH_EnsureTexture must attach layer-face i, and only it, to sh_fbos[i]")
 if dm.count("Mat4_ApplyTranslation") < 2 or "-org[0], -org[1], -org[2]" not in dm \

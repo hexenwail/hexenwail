@@ -104,6 +104,8 @@ OWNERS = {
         "R_DrawElements", "R_DrawElementsInstanced", "R_DrawArrays",
         # the GPU world cull's indirect draw (#340 P5a-1; its -gpu arm since P5c)
         "R_DrawElementsIndirect",
+        # the shadow maps' multi-draw (#340 P6a; its -gpu arm is P6b)
+        "R_MultiDrawElements",
         # the immediate emulator's GL arms; test_rg_sources.py holds every GL
         # call in gl_vbo.c to an SDL_GPU arm
         "GL_VBO_Init", "GL_VBO_Shutdown", "GL_ImmBindVerts", "GL_ImmEnd", "GL_ImmDraw",
@@ -158,29 +160,16 @@ DRAWS = (
 
 # (file, function without gl/_fp/suffix) -> (times it appears, why it may
 # stay there).
-_PP_OIT = "the OIT resolve: P6 (OIT_InitShader and the resolve are gated off under -gpu)"
-_PP_DRAW = ("the OIT resolve's bufferless draw (P6); bloom's three go through R_DrawArrays (P4e) "
-            "and its VAO through R_GenVertexArrays / R_BindVertexArray (P4a-1)")
+# The OIT resolve's VAO and bufferless draw and the shadow maps' buffers,
+# VAOs and draws go through the seams since P6a; so does oit_ubo's creation.
 _PP_UBO = ("the post-process uniform buffers: under -gpu PpVert / PpParams are mirrors "
-           "(P4a-1) and BloomParams (P4e), OitParams is P6; the deletes are "
+           "(P4a-1), BloomParams (P4e) and OitParams (P6a); the deletes are "
            "shutdown's, under `if (*_ubo)`")
-_SHADOW = "dlight shadow maps: P6 (R_Shadow_Prepare returns under R_GPU (), #340 P5b)"
 _UBO = ("uniform-block buffers: -gpu pushes gl_uniforms.c's CPU mirrors instead "
         "(RG_UniformBlockRegister), so the GL buffers behind them are never read there")
 ALLOWED = {
-    ("engine/h2shared/gl_postprocess.c", "BindVertexArray"): (2, _PP_OIT),
     ("engine/h2shared/gl_postprocess.c", "DeleteBuffers"): (4, _PP_UBO),
-    ("engine/h2shared/gl_postprocess.c", "DrawArrays"): (1, _PP_DRAW),
-    ("engine/h2shared/gl_postprocess.c", "GenBuffers"): (4, _PP_UBO),
-    ("engine/h2shared/gl_postprocess.c", "GenVertexArrays"): (1, _PP_OIT),
-    ("engine/h2shared/gl_shadow.c", "BindVertexArray"): (5, _SHADOW),
-    ("engine/h2shared/gl_shadow.c", "DeleteBuffers"): (1, _SHADOW),
-    ("engine/h2shared/gl_shadow.c", "DeleteVertexArrays"): (1, _SHADOW),
-    ("engine/h2shared/gl_shadow.c", "DrawArrays"): (1, _SHADOW),
-    ("engine/h2shared/gl_shadow.c", "DrawElements"): (1, _SHADOW),
-    ("engine/h2shared/gl_shadow.c", "GenBuffers"): (1, _SHADOW),
-    ("engine/h2shared/gl_shadow.c", "GenVertexArrays"): (1, _SHADOW),
-    ("engine/h2shared/gl_shadow.c", "MultiDrawElements"): (2, _SHADOW),
+    ("engine/h2shared/gl_postprocess.c", "GenBuffers"): (3, _PP_UBO),
     ("engine/h2shared/gl_uniforms.c", "DeleteBuffers"): (6, _UBO),
     ("engine/h2shared/gl_uniforms.c", "GenBuffers"): (6, _UBO),
 }

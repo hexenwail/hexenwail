@@ -485,14 +485,15 @@ for s in ("R_UseProgram (sh_aprog);", "Mat4_Multiply (t, c->model, pass->model);
           "pass->light[1] = SH_ALIAS_PUSH;", "pass->light[2] = r_shadow_bias.value * 2.0f / (float)sh_res;",
           "pass->light[3] = c->blend;", "pass->pose[0] = c->pose0;", "pass->pose[1] = c->pose1;",
           "pass->pose[2] = c->format;",
-          "glBindVertexArray_fp (c->gm->vao);",
-          "glDrawElements_fp (GL_TRIANGLES, c->gm->num_indices, GL_UNSIGNED_SHORT, NULL);",
+          # through the VAO and draw seams since #340 P6a
+          "R_BindVertexArray (c->gm->vao);",
+          "R_DrawElements (GL_TRIANGLES, c->gm->num_indices, GL_UNSIGNED_SHORT, NULL);",
           "pass->light[1] = pass->light[2] = pass->light[3] = 0.0f;",
           "pass->pose[0] = pass->pose[1] = pass->pose[2] = 0;",
-          "R_UseProgram (sh_prog);", "glBindVertexArray_fp (world_vao);"):
+          "R_UseProgram (sh_prog);", "R_BindVertexArray (world_vao);"):
     if s not in af:
         errors.append(f"SH_DrawAliasFace no longer does `{s}`")
-if af.find("SH_Pass (pass);") < 0 or af.find("SH_Pass (pass);") > af.find("glDrawElements_fp"):
+if af.find("SH_Pass (pass);") < 0 or af.find("SH_Pass (pass);") > af.find("R_DrawElements ("):
     errors.append("SH_DrawAliasFace must upload ShadowPass before each alias draw")
 if not re.search(r"if \(c->format == PV_IQM\)\s*GL_BindBufferBase \(GL_SHADER_STORAGE_BUFFER, 4, c->gm->ssbo_bones\);\s*"
                  r"else if \(c->format == PV_MD3\)\s*GL_BindBufferBase \(GL_SHADER_STORAGE_BUFFER, 3, c->gm->ssbo_pose_md3\);\s*"
