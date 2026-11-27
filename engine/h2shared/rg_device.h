@@ -171,6 +171,11 @@ void	RG_DrawIndexed (GLenum mode, GLsizei count, GLenum type, const void *indice
  * reaches the shader as GL's gl_VertexID does on Vulkan (gl_VertexIndex
  * includes it); D3D12's SV_VertexID does not (P7), and every caller passes 0. */
 void	RG_DrawArrays (GLenum mode, GLint first, GLsizei count);
+/* gl_vbo.c R_DrawElementsIndirect (rg_frame.c, #340 P5c): an indexed draw
+ * from the bound VAO whose count, first index and instances are the
+ * GL_DrawElementsIndirectCommand at byte offset `indirect` of the buffer
+ * bound to GL_DRAW_INDIRECT_BUFFER, as a compute pass left it. */
+void	RG_DrawElementsIndirect (GLenum mode, GLenum type, const void *indirect);
 
 /* gl_fbo.c's framebuffer and renderbuffer seams (rg_target.c, #340 P4a-2),
  * with GL's signatures and binding rules; see gl_fbo.h. */
@@ -209,6 +214,22 @@ void	RG_DispatchCompute (GLuint groups_x, GLuint groups_y, GLuint groups_z);
 void	RG_MemoryBarrier (GLbitfield barriers);
 void	RG_ProgramDelete (GLuint program);
 qboolean RG_ReadBuffer (GLenum target, GLintptr offset, GLsizeiptr size, void *data);
+/* An asynchronous glGetBufferSubData (#340 P5c): the bytes are downloaded in
+ * the frame's command buffer and handed over by RG_ReadbackCollect once its
+ * fence has signalled, a frame or two later, so nothing stalls.  0 when no
+ * read could be queued (counted; outside a frame, the ring full).  Collect
+ * answers 1 with the bytes in `data`, 0 while the read is in flight, -1 for
+ * a ticket that failed or was never issued; 1 and -1 spend the ticket.  A
+ * ticket nobody collects is reclaimed a few frames after it completes. */
+unsigned int RG_ReadBufferAsync (GLenum target, GLintptr offset, GLsizeiptr size);
+int	RG_ReadbackCollect (unsigned int ticket, void *data, Uint32 size);
+/* The caller will not collect `ticket` (a map change): its slot is freed as
+ * soon as its download is done, not RG_READBACK_ABANDON frames later. */
+void	RG_ReadbackDiscard (unsigned int ticket);
+/* Dispatches dropped since boot (rg_compute.c): a pass whose dispatch went
+ * missing leaves its outputs as the last one wrote them, which a caller
+ * that draws from them has to know (#340 P5c). */
+unsigned long RG_ComputeDropped (void);
 qboolean RG_ReadTexture (GLenum target, GLuint texture, GLint level, GLenum format,
 			 GLenum type, void *pixels);
 /* Whether a texture of `internalformat` on `target` can be sampled and bound

@@ -31,7 +31,7 @@
 #include "gl_fbo.h"	/* the Hi-Z depth resolve, through the seam (#340 P5a-1) */
 #include "gl_compute.h"	/* dispatch, barriers, readback, program deletes (#340 P5a-1) */
 #ifdef USE_SDL_GPU
-#include "rg_device.h"	/* R_GPU (): Hi-Z stays off under -gpu (#340 P5) */
+#include "rg_device.h"	/* R_GPU (), the CullParams mirror, the stats readback (#340 P5c) */
 #endif
 
 /* ------------------------------------------------------------------ */
@@ -131,9 +131,19 @@ static GLuint	cull_mark_prog;		/* cull_mark compute shader */
 static int	cull_num_surfs;		/* total world surfaces */
 static int	cull_num_marksurfs;	/* total marksurface entries */
 static int	cull_num_buckets;	/* texture buckets (= numtextures) */
+static int	cull_drawn_buckets;	/* those with a texture: R_DrawWorldCulled's draws */
 static int	cull_num_leaves;	/* total BSP leaves */
 
 static int	*cull_bucket_map;	/* surface index -> texture bucket */
+/* What the passes were given, kept for worldcull_verify (#340 P5c): the
+ * surface and marksurface arrays as uploaded, each bucket's first index, and
+ * the last dispatch's view leaf, frustum and Hi-Z switch. */
+static gpu_surface_t	*cull_cpu_surfs;
+static gpu_marksurf_t	*cull_cpu_marks;
+static unsigned int	*cull_bucket_first;
+static mleaf_t		*wc_last_leaf;
+static float		wc_last_frust[16];
+static qboolean		wc_last_hiz;
 
 static qboolean	cull_initialized;
 
@@ -195,6 +205,23 @@ typedef struct {
 
 COMPILE_TIME_ASSERT(cullparams_size, sizeof(cull_params_t) == 240);
 
+/* What each cull dispatch reads: GL uploads it, -gpu pushes it as the
+ * registered mirror of the block (#340 P5c, the LcParams pattern). */
+static cull_params_t	cull_params;
+
+#ifdef USE_SDL_GPU
+/* Under -gpu, whether this frame's two cull dispatches both ran: one the
+ * backend dropped leaves the indirect buffer as an older frame left it
+ * (counts the clear never reset, or no counts at all), so the indirect
+ * draws are skipped and the chain pass draws the world alone (#340 P5c). */
+static qboolean		wc_cull_ran;
+static unsigned long	wc_cull_skipped;
+/* gl_hiz_stats' asynchronous readbacks, oldest first (RG_ReadBufferAsync). */
+#define WC_STATS_PENDING	8
+static unsigned int	wc_stats_ticket[WC_STATS_PENDING];
+static int		wc_stats_npending;
+#endif
+
 
 /* ------------------------------------------------------------------ */
 /* Build GPU data at map load                                          */
@@ -211,9 +238,13 @@ static void WC_BindCullParamsBlock (GLuint program)
 	GLint	size = 0;
 
 #ifdef USE_SDL_GPU
-	/* The SPIR-V fixes the block's slot; the mirror is P5c's (#340). */
+	/* The SPIR-V fixes the block's slot; each dispatch pushes the mirror
+	 * by the block's name (#340 P5c). */
 	if (R_GPU ())
+	{
+		RG_UniformBlockRegister ("CullParams", &cull_params, sizeof(cull_params));
 		return;
+	}
 #endif
 	if (!program || !glGetUniformBlockIndex_fp || !glUniformBlockBinding_fp)
 		return;
@@ -259,16 +290,10 @@ void R_BuildWorldCull (void)
 	gpu_marksurf_t	*gpu_marks;
 	int		i, j, ms_count;
 
+	/* Under -gpu the null table's glDispatchCompute is not NULL, and the
+	 * dispatches, the readback and the indirect draw are routed (#340 P5c). */
 	if (!m || !glDispatchCompute_fp)
 		return;
-#ifdef USE_SDL_GPU
-	/* Compute, P5 of #340: the dispatches, the readback and the indirect
-	 * draw go through seams whose -gpu arms are P5a-2's and P5c's.  The
-	 * null table's glDispatchCompute is not NULL, so the test above passes
-	 * under -gpu: say no here, and DrawTextureChains draws the whole world. */
-	if (R_GPU ())
-		return;
-#endif
 
 	R_FreeWorldCull();
 
@@ -288,6 +313,16 @@ void R_BuildWorldCull (void)
 	 * against the C mirror. */
 	WC_BindCullParamsBlock(cull_clear_prog);
 	WC_BindCullParamsBlock(cull_mark_prog);
+	/* u_hiz_pyramid reads unit 1, which TEXBIND2(1, 0) already says to GL;
+	 * the Vulkan SPIR-V keeps only its slot, so -gpu is told (#340 P5c). */
+	{
+		GLint	loc;
+
+		R_UseProgram (cull_mark_prog);
+		loc = R_ProgramSamplerLoc (cull_mark_prog, "u_hiz_pyramid");
+		R_ProgramSamplerUnit (cull_mark_prog, loc, "u_hiz_pyramid", 1);
+		R_UseProgram (0);
+	}
 
 	cull_num_surfs = m->numsurfaces;
 	cull_num_leaves = m->numleafs;
@@ -376,7 +411,7 @@ void R_BuildWorldCull (void)
 	R_BufferData(GL_SHADER_STORAGE_BUFFER,
 			cull_num_surfs * sizeof(gpu_surface_t),
 			gpu_surfs, GL_STATIC_DRAW);
-	free(gpu_surfs);
+	cull_cpu_surfs = gpu_surfs;	/* worldcull_verify's; R_FreeWorldCull frees it */
 
 	/* Build marksurface entries: flatten (leaf, surface) pairs */
 	ms_count = 0;
@@ -409,7 +444,7 @@ void R_BuildWorldCull (void)
 	R_BufferData(GL_SHADER_STORAGE_BUFFER,
 			cull_num_marksurfs * sizeof(gpu_marksurf_t),
 			gpu_marks, GL_STATIC_DRAW);
-	free(gpu_marks);
+	cull_cpu_marks = gpu_marks;	/* as cull_cpu_surfs */
 
 	/* PVS buffer is streamed per-frame via GL_Upload (uhexen2-o35n) —
 	 * no static allocation needed. */
@@ -434,12 +469,18 @@ void R_BuildWorldCull (void)
 
 		/* Allocate contiguous regions in the dest IBO per bucket */
 		cmds = (gpu_indirect_cmd_t *) calloc(cull_num_buckets, sizeof(gpu_indirect_cmd_t));
+		cull_bucket_first = (unsigned int *) calloc(cull_num_buckets, sizeof(unsigned int));
 		offset = 0;
+		cull_drawn_buckets = 0;
+		for (i = 0; i < cull_num_buckets; i++)
+			cull_drawn_buckets += (m->textures && m->textures[i]) ? 1 : 0;
 		for (i = 0; i < cull_num_buckets; i++)
 		{
 			cmds[i].count = 0;		/* filled by compute each frame */
 			cmds[i].instanceCount = 1;
 			cmds[i].firstIndex = offset;	/* fixed region start */
+			if (cull_bucket_first)
+				cull_bucket_first[i] = offset;
 			cmds[i].baseVertex = 0;
 			cmds[i].baseInstance = 0;
 			offset += bucket_max[i];
@@ -484,12 +525,26 @@ void R_BuildWorldCull (void)
 	}
 
 	/* Dest index buffer: written by compute, read as GL_ELEMENT_ARRAY_BUFFER.
-	 * Sized to hold the worst case (all surfaces visible). */
+	 * Sized to hold the worst case (all surfaces visible).  Under -gpu made
+	 * through the element target, so SDL_GPU reads it as indices after the
+	 * pass that writes it, which a buffer made through any other target
+	 * would be read unsynchronised as (rg_buffer.c RGB_Usage, #340 P5c).
+	 * The element target is the bound VAO's: VAO 0's here, which the bind
+	 * to 0 below empties again. */
 	if (cull_total_indices > 0)
 	{
+		GLenum	dst_target = GL_SHADER_STORAGE_BUFFER;
+
+#ifdef USE_SDL_GPU
+		if (R_GPU ())
+		{
+			dst_target = GL_ELEMENT_ARRAY_BUFFER;
+			R_BindVertexArray(0);
+		}
+#endif
 		R_GenBuffers(1, &cull_dst_ibo);
-		GL_BindBuffer(GL_SHADER_STORAGE_BUFFER, cull_dst_ibo);
-		R_BufferData(GL_SHADER_STORAGE_BUFFER,
+		GL_BindBuffer(dst_target, cull_dst_ibo);
+		R_BufferData(dst_target,
 				cull_total_indices * sizeof(unsigned int),
 				NULL, GL_DYNAMIC_DRAW);
 	}
@@ -522,8 +577,9 @@ void R_BuildWorldCull (void)
 	 * map's last-frame MVP is meaningful here — it isn't, so reset. */
 	R_BuildHiZ();
 
-	Con_SafePrintf("GPU world cull: %d surfs, %d marksurfs, %d buckets, %d max indices\n",
-		       cull_num_surfs, cull_num_marksurfs, cull_num_buckets, cull_total_indices);
+	Con_SafePrintf("GPU world cull: %d surfs, %d marksurfs, %d buckets (%d with a texture, "
+		       "drawn), %d max indices\n", cull_num_surfs, cull_num_marksurfs, cull_num_buckets,
+		       cull_drawn_buckets, cull_total_indices);
 }
 
 void R_FreeWorldCull (void)
@@ -539,9 +595,21 @@ void R_FreeWorldCull (void)
 	if (cull_clear_prog) { R_DeleteProgram(cull_clear_prog); cull_clear_prog = 0; }
 	if (cull_mark_prog) { R_DeleteProgram(cull_mark_prog); cull_mark_prog = 0; }
 	if (cull_bucket_map) { free(cull_bucket_map); cull_bucket_map = NULL; }
+	free(cull_cpu_surfs); cull_cpu_surfs = NULL;
+	free(cull_cpu_marks); cull_cpu_marks = NULL;
+	free(cull_bucket_first); cull_bucket_first = NULL;
+	wc_last_leaf = NULL;
 	R_FreeHiZ();
 	cull_initialized = false;
 	cull_total_indices = 0;
+	cull_drawn_buckets = 0;
+#ifdef USE_SDL_GPU
+	/* reads still in flight are the old map's: their slots are freed as
+	 * they land, so the new map's requests find room */
+	while (wc_stats_npending > 0)
+		RG_ReadbackDiscard (wc_stats_ticket[--wc_stats_npending]);
+	wc_cull_ran = false;
+#endif
 }
 
 /* ------------------------------------------------------------------ */
@@ -853,6 +921,59 @@ qboolean R_WorldCullAvailable (void)
 	return cull_initialized;
 }
 
+/* The gl_hiz_stats line from the eight counters cull_mark_comp keeps. */
+static void WC_PrintStats (const unsigned int counts[8])
+{
+	unsigned int	post = counts[4] + counts[5] + counts[6];
+
+	Con_Printf("hiz_stats: total=%u pvs=%u flags=%u frust=%u "
+		   "hiz=%u accepted=%u dedup=%u\n",
+		   counts[0], counts[1], counts[2], counts[3],
+		   counts[4], counts[5], counts[6]);
+	if (post > 0)
+		Con_Printf("  hiz cull rate = %.1f%% of post-frustum "
+			   "(%u / %u; gate %.1f%%)\n",
+			   100.0 * counts[4] / (double)post,
+			   counts[4], post, 10.0);
+	else
+		Con_Printf("  hiz cull rate = (no post-frustum surfaces)\n");
+}
+
+#ifdef USE_SDL_GPU
+/* gl_hiz_stats under -gpu (#340 P5c, open question 5): this frame's counters
+ * are downloaded in the frame's command buffer, after the dispatch that
+ * counts them, and printed once its fence has signalled -- a frame or two
+ * late, where GL's glGetBufferSubData stalls the frame for them. */
+static void WC_StatsRequest (void)
+{
+	unsigned int	t;
+
+	if (wc_stats_npending == WC_STATS_PENDING)
+		return;		/* the reads in flight are what it would print */
+	GL_BindBuffer(GL_SHADER_STORAGE_BUFFER, cull_stats_ssbo);
+	t = RG_ReadBufferAsync(GL_SHADER_STORAGE_BUFFER, 0, 8 * sizeof(unsigned int));
+	if (t)
+		wc_stats_ticket[wc_stats_npending++] = t;
+}
+
+/* Every read that has landed, in the order they were asked for. */
+static void WC_StatsCollect (void)
+{
+	while (wc_stats_npending > 0)
+	{
+		unsigned int	counts[8] = {0};
+		int		r = RG_ReadbackCollect(wc_stats_ticket[0], counts, sizeof(counts));
+
+		if (r == 0)
+			break;
+		if (r > 0)
+			WC_PrintStats(counts);
+		wc_stats_npending--;
+		memmove(wc_stats_ticket, wc_stats_ticket + 1, wc_stats_npending * sizeof(wc_stats_ticket[0]));
+	}
+}
+#endif
+
 /* ------------------------------------------------------------------ */
 /* Per-frame dispatch                                                  */
 /* ------------------------------------------------------------------ */
@@ -869,9 +990,16 @@ void R_DispatchWorldCull (void)
 	 * but written into the mirror in one place, before the dispatch. */
 	qboolean	hiz_on, stats_on;
 	float		frust[16];	/* 4 vec4s */
+#ifdef USE_SDL_GPU
+	unsigned long	dropped = 0;
+#endif
 
 	if (!cull_initialized)
 		return;
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+		dropped = RG_ComputeDropped ();
+#endif
 
 	framecount++;
 
@@ -902,18 +1030,22 @@ void R_DispatchWorldCull (void)
 
 	/* Pass 1: clear indirect buffer */
 	R_UseProgram (cull_clear_prog);
+	/* CullParams, zero-filled (the HizParams pattern): only u_ccounts0.z
+	 * is read by this program. */
+	memset(&cull_params, 0, sizeof(cull_params));
+	cull_params.counts0[2] = cull_num_buckets;
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+		RG_UniformBlockFlushed ("CullParams");
+	else
+#endif
 	{
-		/* CullParams, zero-filled (the HizParams pattern): only
-		 * u_ccounts0.z is read by this program. */
-		cull_params_t params;
 		GLuint ubo;
 		GLintptr ofs;
 
-		memset(&params, 0, sizeof(params));
-		params.counts0[2] = cull_num_buckets;
-		GL_Upload(GL_UNIFORM_BUFFER, &params, sizeof(params), &ubo, &ofs);
+		GL_Upload(GL_UNIFORM_BUFFER, &cull_params, sizeof(cull_params), &ubo, &ofs);
 		GL_BindBufferRange(GL_UNIFORM_BUFFER, CULL_PARAMS_UBO_BINDING,
-				   ubo, ofs, sizeof(params));
+				   ubo, ofs, sizeof(cull_params));
 	}
 	GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, cull_indirect_buf);
 	R_DispatchCompute((cull_num_buckets + 63) / 64, 1, 1);
@@ -928,6 +1060,14 @@ void R_DispatchWorldCull (void)
 	hiz_on = gl_hiz_cull.integer && hiz_pyramid_tex && hiz_pyramid_valid && hiz_prev_mvp_valid;
 	if (hiz_on)
 		R_BindTextureSlot (1, hiz_pyramid_tex);
+#ifdef USE_SDL_GPU
+	/* With Hi-Z off nothing on unit 1 is read, but the pass declares the
+	 * sampler and is bound whatever the unit holds: empty, that is a
+	 * placeholder, and a dispatch sampling only placeholders pays no
+	 * submit-and-wait first (rg_compute.c).  GL leaves the unit alone. */
+	else if (R_GPU ())
+		R_BindTextureSlot (1, 0);
+#endif
 
 	/* Frustum planes (negate: shader uses dot(n,p)+d, engine uses
 	 * dot(n,p)-dist). */
@@ -941,6 +1081,10 @@ void R_DispatchWorldCull (void)
 			frust[i*4+3] = -frustum[i].dist;
 		}
 	}
+
+	wc_last_leaf = r_viewleaf;
+	memcpy(wc_last_frust, frust, sizeof(wc_last_frust));
+	wc_last_hiz = hiz_on;
 
 	GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, cull_surf_ssbo);
 	GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, cull_marksurf_ssbo);
@@ -966,37 +1110,45 @@ void R_DispatchWorldCull (void)
 	/* CullParams: one per-dispatch upload, zero-filled so the members
 	 * this program never reads are zero, never stale ring data (the
 	 * HizParams pattern). */
+	memset(&cull_params, 0, sizeof(cull_params));
+	cull_params.counts0[0] = framecount;
+	cull_params.counts0[1] = cull_num_marksurfs;
+	cull_params.counts0[2] = cull_num_buckets;
+	cull_params.counts0[3] = cull_total_indices;
+	cull_params.counts1[0] = hiz_mip_count;
+	cull_params.counts1[1] = hiz_on ? 1 : 0;
+	cull_params.counts1[2] = gl_clipcontrol_able ? 1 : 0;
+	cull_params.counts1[3] = stats_on ? 1 : 0;
+	cull_params.vieworg[0] = r_origin[0];
+	cull_params.vieworg[1] = r_origin[1];
+	cull_params.vieworg[2] = r_origin[2];
+	memcpy(cull_params.frustum, frust, sizeof(cull_params.frustum));
+	memcpy(cull_params.prevmvp, hiz_prev_mvp, sizeof(cull_params.prevmvp));
+	cull_params.hizsize[0] = (float)hiz_width;
+	cull_params.hizsize[1] = (float)hiz_height;
+	cull_params.depthrange[0] = hiz_prev_depthrange[0];
+	cull_params.depthrange[1] = hiz_prev_depthrange[1];
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+		RG_UniformBlockFlushed ("CullParams");
+	else
+#endif
 	{
-		cull_params_t params;
 		GLuint ubo;
 		GLintptr ofs;
 
-		memset(&params, 0, sizeof(params));
-		params.counts0[0] = framecount;
-		params.counts0[1] = cull_num_marksurfs;
-		params.counts0[2] = cull_num_buckets;
-		params.counts0[3] = cull_total_indices;
-		params.counts1[0] = hiz_mip_count;
-		params.counts1[1] = hiz_on ? 1 : 0;
-		params.counts1[2] = gl_clipcontrol_able ? 1 : 0;
-		params.counts1[3] = stats_on ? 1 : 0;
-		params.vieworg[0] = r_origin[0];
-		params.vieworg[1] = r_origin[1];
-		params.vieworg[2] = r_origin[2];
-		memcpy(params.frustum, frust, sizeof(params.frustum));
-		memcpy(params.prevmvp, hiz_prev_mvp, sizeof(params.prevmvp));
-		params.hizsize[0] = (float)hiz_width;
-		params.hizsize[1] = (float)hiz_height;
-		params.depthrange[0] = hiz_prev_depthrange[0];
-		params.depthrange[1] = hiz_prev_depthrange[1];
-		GL_Upload(GL_UNIFORM_BUFFER, &params, sizeof(params), &ubo, &ofs);
+		GL_Upload(GL_UNIFORM_BUFFER, &cull_params, sizeof(cull_params), &ubo, &ofs);
 		GL_BindBufferRange(GL_UNIFORM_BUFFER, CULL_PARAMS_UBO_BINDING,
-				   ubo, ofs, sizeof(params));
+				   ubo, ofs, sizeof(cull_params));
 	}
 
 	R_DispatchCompute((cull_num_marksurfs + 63) / 64, 1, 1);
 	R_MemoryBarrier(GL_COMMAND_BARRIER_BIT | GL_ELEMENT_ARRAY_BARRIER_BIT |
 			GL_SHADER_STORAGE_BARRIER_BIT);
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+		wc_cull_ran = (RG_ComputeDropped () == dropped);
+#endif
 
 	/* Gated stats readback: only every gl_hiz_stats frames, so the
 	 * implied glGetBufferSubData stall amortizes.  Print to console;
@@ -1006,27 +1158,26 @@ void R_DispatchWorldCull (void)
 		hiz_stats_frame_counter++;
 		if (hiz_stats_frame_counter >= gl_hiz_stats.integer)
 		{
-			unsigned int counts[8] = {0};
-			unsigned int post;
 			hiz_stats_frame_counter = 0;
-			GL_BindBuffer(GL_SHADER_STORAGE_BUFFER, cull_stats_ssbo);
-			if (R_ReadBuffer(GL_SHADER_STORAGE_BUFFER, 0, sizeof(counts), counts))
+#ifdef USE_SDL_GPU
+			if (R_GPU ())
+				WC_StatsRequest ();
+			else
+#endif
 			{
-				post = counts[4] + counts[5] + counts[6];
-				Con_Printf("hiz_stats: total=%u pvs=%u flags=%u frust=%u "
-					   "hiz=%u accepted=%u dedup=%u\n",
-					   counts[0], counts[1], counts[2], counts[3],
-					   counts[4], counts[5], counts[6]);
-				if (post > 0)
-					Con_Printf("  hiz cull rate = %.1f%% of post-frustum "
-						   "(%u / %u; gate %.1f%%)\n",
-						   100.0 * counts[4] / (double)post,
-						   counts[4], post, 10.0);
-				else
-					Con_Printf("  hiz cull rate = (no post-frustum surfaces)\n");
+				unsigned int counts[8] = {0};
+				GL_BindBuffer(GL_SHADER_STORAGE_BUFFER, cull_stats_ssbo);
+				if (R_ReadBuffer(GL_SHADER_STORAGE_BUFFER, 0, sizeof(counts), counts))
+					WC_PrintStats(counts);
 			}
 		}
 	}
+#ifdef USE_SDL_GPU
+	/* collected whatever gl_hiz_stats is now: a read in flight when it was
+	 * set to 0 still prints, as GL's had already */
+	if (R_GPU ())
+		WC_StatsCollect ();
+#endif
 
 	R_UseProgram (0);
 }
@@ -1034,6 +1185,23 @@ void R_DispatchWorldCull (void)
 /* ------------------------------------------------------------------ */
 /* Draw with indirect commands after compute cull                      */
 /* ------------------------------------------------------------------ */
+
+/* Whether this frame's cull dispatches left something to draw from: under
+ * -gpu not when the backend dropped one (#340 P5c), which renderer_status
+ * also counts as a dropped dispatch. */
+static qboolean WC_CullRan (void)
+{
+#ifdef USE_SDL_GPU
+	if (R_GPU () && !wc_cull_ran)
+	{
+		if (!wc_cull_skipped++)
+			Con_Printf("GPU world cull: a cull dispatch was dropped; the indirect draws are "
+				   "skipped and the chain pass draws the world alone\n");
+		return false;
+	}
+#endif
+	return true;
+}
 
 void R_DrawWorldCulled (void)
 {
@@ -1054,6 +1222,8 @@ void R_DrawWorldCulled (void)
 	 * caller already declines to set gpu_cull_active in that case; this is
 	 * the invariant stated where it is actually relied upon.  uhexen2-qt7s. */
 	if (!lm_atlas_texture)
+		return;
+	if (!WC_CullRan ())
 		return;
 
 	/* Bind world VAO but replace its IBO with the compute-written dest IBO */
@@ -1132,6 +1302,179 @@ void R_DrawWorldCulled (void)
 }
 
 
+/* ------------------------------------------------------------------ */
+/* worldcull_verify (#340 P5c)                                         */
+/* ------------------------------------------------------------------ */
+
+static int WC_CompareUint (const void *a, const void *b)
+{
+	unsigned int	x = *(const unsigned int *) a, y = *(const unsigned int *) b;
+
+	return (x > y) - (x < y);
+}
+
+/* cull_mark_comp's tests on the CPU, Hi-Z off: the surface marksurface `ms`
+ * draws, or NULL.  `pvs` is the view leaf's, decompressed; `seen` the dedup
+ * across leaves. */
+static const gpu_surface_t *WC_CpuAccepts (const gpu_marksurf_t *ms, const byte *pvs, byte *seen)
+{
+	extern int		world_num_indices;
+	const gpu_surface_t	*s;
+	int			leaf = ms->leaf_idx, k;
+
+	if (leaf < 1 || !(pvs[(leaf - 1) >> 3] & (1 << ((leaf - 1) & 7))))
+		return NULL;
+	if (ms->surf_idx < 0 || ms->surf_idx >= cull_num_surfs)
+		return NULL;
+	s = &cull_cpu_surfs[ms->surf_idx];
+	if ((s->flags & 0xB34) || s->numindices <= 0)
+		return NULL;
+	for (k = 0; k < 4; k++)
+	{
+		const float	*fn = &wc_last_frust[k * 4];
+		float		pv[3];
+
+		pv[0] = fn[0] >= 0.0f ? s->maxs[0] : s->mins[0];
+		pv[1] = fn[1] >= 0.0f ? s->maxs[1] : s->mins[1];
+		pv[2] = fn[2] >= 0.0f ? s->maxs[2] : s->mins[2];
+		if (fn[0] * pv[0] + fn[1] * pv[1] + fn[2] * pv[2] + fn[3] < -512.0f)
+			return NULL;
+	}
+	if (seen[ms->surf_idx])
+		return NULL;
+	seen[ms->surf_idx] = 1;
+	if (s->tex_bucket < 0 || s->tex_bucket >= cull_num_buckets ||
+	    s->firstindex < 0 || s->firstindex + s->numindices > world_num_indices)
+		return NULL;
+	return s;
+}
+
+/* Reads the last frame's indirect commands and compacted indices back and
+ * checks them against cull_mark_comp's tests run on the CPU over the same
+ * inputs: per bucket the count, the first index (fixed at the build) and the
+ * indices as a multiset, since the atomicAdd compaction orders them however
+ * the invocations land.  The chain pass draws every surface the cull draws,
+ * after it, so a cull that draws the wrong thing or nothing hardly shows in
+ * a frame; this is what does.  Both backends, and the same line on each. */
+static void R_WorldCull_Verify_f (void)
+{
+	qmodel_t		*m = cl.worldmodel;
+	gpu_indirect_cmd_t	*cmds = NULL;
+	unsigned int		*dst = NULL, *want = NULL;
+	int			*nwant = NULL, *first = NULL;
+	byte			*seen = NULL;
+	int			i, b, pass, total = 0, accepted = 0;
+	int			bad_count = 0, bad_first = 0, bad_cmd = 0, bad_idx = 0;
+	unsigned int		gpu_total = 0;
+	extern unsigned int	*world_index_data;
+	extern cvar_t		r_gpucull;
+	const byte		*pvs;
+
+	if (!cull_initialized || !m || !cull_cpu_surfs || !cull_cpu_marks || !cull_bucket_first ||
+	    !cull_dst_ibo || !wc_last_leaf || !world_index_data)
+	{
+		CON_Printf (_PRINT_NONOTIFY, "worldcull_verify: no cull this frame (r_gpucull %d, built %d)\n",
+			    r_gpucull.integer, cull_initialized);
+		return;
+	}
+	if (wc_last_hiz)
+	{
+		CON_Printf (_PRINT_NONOTIFY, "worldcull_verify: the last dispatch had Hi-Z on, which the CPU "
+			    "cannot follow; set gl_hiz_cull 0\n");
+		return;
+	}
+	cmds = (gpu_indirect_cmd_t *) malloc (cull_num_buckets * sizeof(gpu_indirect_cmd_t));
+	dst = (unsigned int *) malloc (cull_total_indices * sizeof(unsigned int));
+	want = (unsigned int *) malloc (cull_total_indices * sizeof(unsigned int));
+	nwant = (int *) calloc (cull_num_buckets, sizeof(int));
+	first = (int *) calloc (cull_num_buckets, sizeof(int));
+	seen = (byte *) calloc (cull_num_surfs, 1);
+	if (!cmds || !dst || !want || !nwant || !first || !seen)
+	{
+		CON_Printf (_PRINT_NONOTIFY, "worldcull_verify: out of memory\n");
+		goto done;
+	}
+	GL_BindBuffer(GL_DRAW_INDIRECT_BUFFER, cull_indirect_buf);
+	i = R_ReadBuffer(GL_DRAW_INDIRECT_BUFFER, 0, cull_num_buckets * sizeof(gpu_indirect_cmd_t), cmds);
+	GL_BindBuffer(GL_DRAW_INDIRECT_BUFFER, 0);
+	GL_BindBuffer(GL_SHADER_STORAGE_BUFFER, cull_dst_ibo);
+	i = i && R_ReadBuffer(GL_SHADER_STORAGE_BUFFER, 0, cull_total_indices * sizeof(unsigned int), dst);
+	GL_BindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+	if (!i)
+	{
+		CON_Printf (_PRINT_NONOTIFY, "worldcull_verify: the cull's buffers cannot be read back\n");
+		goto done;
+	}
+
+	/* cull_mark_comp's tests over the same marksurfaces, in its order:
+	 * the counts per bucket first, then where each bucket's indices go */
+	pvs = Mod_LeafPVS (wc_last_leaf, m);
+	for (pass = 0; pass < 2; pass++)
+	{
+		memset (nwant, 0, cull_num_buckets * sizeof(int));
+		memset (seen, 0, cull_num_surfs);
+		for (i = 0; i < cull_num_marksurfs; i++)
+		{
+			const gpu_surface_t	*s = WC_CpuAccepts (&cull_cpu_marks[i], pvs, seen);
+
+			if (!s)
+				continue;
+			if (pass)
+				memcpy (want + first[s->tex_bucket] + nwant[s->tex_bucket],
+					world_index_data + s->firstindex, s->numindices * sizeof(unsigned int));
+			else
+				accepted++;
+			nwant[s->tex_bucket] += s->numindices;
+		}
+		if (pass)
+			break;
+		for (b = 0; b < cull_num_buckets; b++)
+		{
+			first[b] = total;
+			total += nwant[b];
+		}
+	}
+
+	for (b = 0; b < cull_num_buckets; b++)
+	{
+		unsigned int	n = cmds[b].count, f = cmds[b].firstIndex;
+
+		gpu_total += n;
+		if (f != cull_bucket_first[b])
+			bad_first++;
+		if (cmds[b].instanceCount != 1 || cmds[b].baseVertex != 0 || cmds[b].baseInstance != 0)
+			bad_cmd++;
+		if (n != (unsigned int) nwant[b])
+		{
+			bad_count++;
+			continue;
+		}
+		if (!n || f != cull_bucket_first[b] || (size_t) f + n > (size_t) cull_total_indices)
+			continue;
+		qsort (dst + f, n, sizeof(unsigned int), WC_CompareUint);
+		qsort (want + first[b], n, sizeof(unsigned int), WC_CompareUint);
+		if (memcmp (dst + f, want + first[b], n * sizeof(unsigned int)))
+			bad_idx++;
+	}
+	CON_Printf (_PRINT_NONOTIFY, "worldcull_verify: %d surfaces accepted, %d indices on the CPU, %u on the "
+		    "GPU; of %d buckets %d disagree on the count, %d on the first index, %d on the rest of "
+		    "the command, %d on the indices\n", accepted, total, gpu_total, cull_num_buckets,
+		    bad_count, bad_first, bad_cmd, bad_idx);
+done:
+	free (cmds);
+	free (dst);
+	free (want);
+	free (nwant);
+	free (first);
+	free (seen);
+}
+
+void R_WorldCull_Init (void)
+{
+	Cmd_AddCommand ("worldcull_verify", R_WorldCull_Verify_f);
+}
+
+
 #else	/* USE_GLES — GPU culling needs compute shaders and SSBOs, which
 	 * WebGL2 lacks, so the whole module is compiled out.  Only the
 	 * shutdown hook is reachable from live code (gl_vidsdl.c); stub it so
@@ -1139,6 +1482,7 @@ void R_DrawWorldCulled (void)
 	 * gl_buffer.c treatment. */
 
 void R_FreeWorldCull (void) {}
+void R_WorldCull_Init (void) {}
 
 #endif /* !USE_GLES */
 #endif /* GLQUAKE */

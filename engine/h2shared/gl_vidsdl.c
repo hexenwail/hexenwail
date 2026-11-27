@@ -2075,12 +2075,12 @@ static void GL_Init_NullGL (void)
 	gl_renderer_caps.skeletal_animation = true;
 	/* Compute (#340 P5a-2): rg_compute.c runs each dispatch as a compute
 	 * pass, so the palette LUT is built on the GPU, as on GL, and so is
-	 * the light cluster's froxel grid (P5b).  The passes not routed yet
-	 * keep a gate each, which their sub-phase lifts: the world
-	 * cull (R_BuildWorldCull, P5c), Hi-Z (R_HiZ_Available, P5d) and SSAO
-	 * (R_SSAO_WantsSceneFBO, P5e); the GPU particles stay off on every
-	 * tier.  Indirect draws come with the cull: nothing issues one until
-	 * P5c.  Before GL_PostProcess_Init, which builds the LUT. */
+	 * the light cluster's froxel grid (P5b) and the world cull, whose
+	 * indirect draws are SDL_DrawGPUIndexedPrimitivesIndirect (P5c).  The
+	 * passes not routed yet keep a gate each, which their sub-phase
+	 * lifts: Hi-Z (R_HiZ_Available, P5d) and SSAO (R_SSAO_WantsSceneFBO,
+	 * P5e); the GPU particles stay off on every tier.  Before
+	 * GL_PostProcess_Init, which builds the LUT. */
 	gl_renderer_caps.compute_shaders = true;
 	gl_renderer_caps.indirect_draw = true;
 	/* RG_TexParameter carries GL_TEXTURE_LOD_BIAS into the sampler's

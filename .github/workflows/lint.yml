@@ -146,6 +146,14 @@ jobs:
       - name: rg_buffer.c shadows GL buffer and vertex-array state
         run: python3 tools/test_rg_buffer_shadow.py
 
+      # rg_frame.c's asynchronous readback ring (gl_hiz_stats under -gpu),
+      # lifted and run against a fake SDL_GPU whose fences signal on cue: a
+      # read is mapped only after its download ran, one fence per submit is
+      # released once and never queried after, slots are freed when done,
+      # discarded or abandoned and never while in flight.  GitHub #340 (P5c).
+      - name: rg_frame.c's readback ring keeps its promises
+        run: python3 tools/test_rg_readback_ring.py
+
       # Every GPU program is built by id (gl_progid.h) through
       # R_Program_Create, from its row of gl_shader.c's program table: no
       # glCreateShader / glShaderSource / glCompileShader / glCreateProgram /

@@ -25,9 +25,10 @@
  * pass runs ahead of its segment's draws, so an upload into a buffer that a
  * draw already recorded in the open segment reads would change what that
  * draw sees: the upload first ends the segment (RG_Frame_Flush), as
- * rg_resource.c does for textures.  Every buffer is created with vertex,
- * index and graphics storage-read usage: GL does not say which a name will
- * be until it is drawn from.
+ * rg_resource.c does for textures.  Every buffer is created with the usage
+ * of everything it may be read as, less what the target it was made
+ * through rules out (RGB_Usage): GL does not say which a name will be until
+ * it is drawn from.
  *
  * Storage (#340 P2e).  GL_SHADER_STORAGE_BUFFER's generic binding is
  * context state glBufferData fills through, as GL_ARRAY_BUFFER is; its
@@ -461,17 +462,23 @@ static rgbuf_t *RGB_Bound (GLenum target, const char *what)
 }
 
 /* b's SDL_GPUBuffer, made `size` bytes now through `target`; the old one
- * retired.  Every buffer can be read as indices and read-only storage, read
- * and written by a compute pass, and read as indirect draw commands, and
- * every one but an element buffer drawn from as vertices: GL does not say
- * which a name will be until it is bound (#340 P2e, P5a-2; whether D3D12 and
- * Metal mind the union is P7's question).
+ * retired.  Every buffer can be read as read-only storage, read and written
+ * by a compute pass, and read as indirect draw commands, and every one but
+ * an indirect buffer as indices, and every one but those and element
+ * buffers drawn from as vertices: GL does not say which a name will be
+ * until it is bound (#340 P2e, P5a-2; whether D3D12 and Metal mind the
+ * union is P7's question).
  *
- * Not an element buffer: SDL's Vulkan backend returns a buffer to the first
- * usage it has after each copy into it, vertex before index, and makes the
- * copy visible to that usage alone.  With both, the first indexed draw after
- * an upload read indices the barrier never covered, which sync validation
- * reports as a read-after-write hazard (#340 P5a-2). */
+ * Why the target takes usage away: SDL's Vulkan backend returns a buffer to
+ * the first usage it has -- vertex, then index, then indirect -- after each
+ * copy into it and each compute pass that wrote it, and makes the write
+ * visible to that usage alone; a draw's vertex, index and indirect reads add
+ * no barrier of their own.  So a buffer is read unsynchronised as anything
+ * but its first usage, which sync validation reports as a read-after-write
+ * hazard: an element buffer with vertex usage, after an upload (#340 P5a-2),
+ * and the world cull's indirect buffer with either, after the compute pass
+ * that counts into it (P5c).  The cull's destination index buffer is made
+ * through the element target under -gpu for the same reason. */
 static SDL_GPUBufferUsageFlags RGB_Usage (GLenum target)
 {
 	SDL_GPUBufferUsageFlags	usage = SDL_GPU_BUFFERUSAGE_VERTEX | SDL_GPU_BUFFERUSAGE_INDEX |
@@ -482,6 +489,8 @@ static SDL_GPUBufferUsageFlags RGB_Usage (GLenum target)
 
 	if (target == GL_ELEMENT_ARRAY_BUFFER)
 		usage &= ~SDL_GPU_BUFFERUSAGE_VERTEX;
+	else if (target == GL_DRAW_INDIRECT_BUFFER)
+		usage &= ~(SDL_GPU_BUFFERUSAGE_VERTEX | SDL_GPU_BUFFERUSAGE_INDEX);
 	return usage;
 }
 
@@ -513,7 +522,8 @@ static qboolean RGB_Create (rgbuf_t *b, Uint32 size, GLenum target)
 void RG_BufferData (GLenum target, GLsizeiptr size, const void *data, GLenum usage)
 {
 	rgbuf_t			*b = RGB_Bound (target, "glBufferData on a target other than "
-						"GL_ARRAY_BUFFER / ELEMENT_ARRAY / SHADER_STORAGE (dropped)");
+						"GL_ARRAY_BUFFER / ELEMENT_ARRAY / SHADER_STORAGE / "
+						"DRAW_INDIRECT (dropped)");
 
 	(void) usage;	/* SDL_GPU has no usage hint; the cycling below is the stream case */
 	if (!b)
@@ -537,7 +547,7 @@ void RG_BufferData (GLenum target, GLsizeiptr size, const void *data, GLenum usa
 void RG_BufferSubData (GLenum target, GLintptr offset, GLsizeiptr size, const void *data)
 {
 	rgbuf_t	*b = RGB_Bound (target, "glBufferSubData on a target other than "
-				"GL_ARRAY_BUFFER / ELEMENT_ARRAY / SHADER_STORAGE (dropped)");
+				"GL_ARRAY_BUFFER / ELEMENT_ARRAY / SHADER_STORAGE / DRAW_INDIRECT (dropped)");
 
 	if (!b || size <= 0 || !data)
 		return;
@@ -612,6 +622,53 @@ qboolean RG_ReadBuffer (GLenum target, GLintptr offset, GLsizeiptr size, void *d
 	r.size = (Uint32) size;
 	/* the queued uploads land first: RG_Frame_Readback ends the segment */
 	return RG_Frame_Readback (NULL, &r, data, (Uint32) size);
+}
+
+/* glGetBufferSubData without the wait (#340 P5c): the download goes into the
+ * frame's command buffer and RG_ReadbackCollect hands the bytes over once
+ * its fence has signalled. */
+unsigned int RG_ReadBufferAsync (GLenum target, GLintptr offset, GLsizeiptr size)
+{
+	rgbuf_t			*b = RGB_Bound (target, "an asynchronous read on a target other than "
+						"GL_ARRAY_BUFFER / ELEMENT_ARRAY / SHADER_STORAGE / "
+						"DRAW_INDIRECT (nothing read)");
+	SDL_GPUBufferRegion	r;
+
+	if (!b)
+		return 0;
+	if (!b->buf || offset < 0 || size <= 0 || (Uint64) offset + (Uint64) size > b->size)
+	{
+		RG_NoteUnhandled ("asynchronous read outside the buffer's data store (nothing read)");
+		return 0;
+	}
+	SDL_zero (r);
+	r.buffer = b->buf;
+	r.offset = (Uint32) offset;
+	r.size = (Uint32) size;
+	return RG_Frame_ReadbackRequest (&r);
+}
+
+SDL_GPUBuffer *RG_Buf_Indirect (GLintptr offset, Uint32 bytes, void **read)
+{
+	rgbuf_t	*b = RGB_Buf (rgb_indirect_buffer);
+
+	*read = NULL;
+	if (!b || !b->buf)
+	{
+		RG_NoteUnhandled ("indirect draw with no SDL_GPU buffer bound to GL_DRAW_INDIRECT_BUFFER (dropped)");
+		return NULL;
+	}
+	/* GL_INVALID_VALUE / INVALID_OPERATION in GL: nothing is drawn. */
+	if (offset < 0 || offset % 4 || (Uint64) offset + bytes > b->size)
+	{
+		RG_NoteUnhandled ("indirect draw command outside its buffer, or not 4-byte aligned (dropped)");
+		return NULL;
+	}
+	if (b->usage & (SDL_GPU_BUFFERUSAGE_VERTEX | SDL_GPU_BUFFERUSAGE_INDEX))
+		RG_NoteUnhandled ("indirect draw from a buffer not made through GL_DRAW_INDIRECT_BUFFER "
+				  "(its commands are read unsynchronised)");
+	*read = b;
+	return b->buf;
 }
 
 /* GL_Upload's -gpu arm.  GL streams into one ring buffer per frame and
@@ -946,6 +1003,7 @@ qboolean RG_Buf_ForDraw (int index_bytes, rgvinput_t *in)
 		return false;
 	}
 	in->ib = b->buf;
+	in->ib_usage = b->usage;
 	in->ib_count = b->size / (Uint32) index_bytes;
 	in->reads[in->nreads++] = b;
 

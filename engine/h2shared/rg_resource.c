@@ -1264,6 +1264,15 @@ qboolean RG_Res_ImageIsTarget (int unit)
 	return t && t->tex && RG_Frame_TargetHolds (t->tex);
 }
 
+qboolean RG_Res_UnitHolds (GLuint unit, rg_textype_t type)
+{
+	rgtex_t	*t = (unit < RT_MAX_TEXTURE_UNITS && (int) type < RG_TT_COUNT)
+		     ? RGT_Get (rgt_units[unit][type]) : NULL;
+
+	/* RG_Res_ForDraw's first test: anything less is a placeholder there */
+	return t && t->defined && t->type == type;
+}
+
 qboolean RG_Res_StorageImage (int unit, rg_textype_t type, const Uint32 cover[3],
 			      SDL_GPUStorageTextureReadWriteBinding *out)
 {

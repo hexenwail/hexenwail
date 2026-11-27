@@ -57,6 +57,8 @@ on:
       - 'tools/test_vk_flip_y.py'
       - 'tools/gen_program_reflection.py'
       - 'tools/test_embed_spirv.py'
+      - 'tools/test_rg_compute_reflect.py'
+      - 'engine/h2shared/rg_shader.c'
       - 'engine/h2shared/gl_progid_refl.h'
       - 'engine/h2shared/rg_internal.h'
   push:
@@ -76,6 +78,8 @@ on:
       - 'tools/test_vk_flip_y.py'
       - 'tools/gen_program_reflection.py'
       - 'tools/test_embed_spirv.py'
+      - 'tools/test_rg_compute_reflect.py'
+      - 'engine/h2shared/rg_shader.c'
       - 'engine/h2shared/gl_progid_refl.h'
       - 'engine/h2shared/rg_internal.h'
 
@@ -145,6 +149,15 @@ jobs:
           set -euo pipefail
           python3 tools/test_sdlgpu_bindings.py /tmp/shader-build/engine/generated/spirv \
             --sources /tmp/shader-build/engine/generated/vk -v
+
+      # The backend's own reflection (rg_shader.c RG_CheckStage, lifted) on
+      # the compute blobs this build made: every storage block at the slot
+      # and GL point its source names (#340 P5c).  Needs cc only.
+      - name: Check the backend's compute reflection
+        run: |
+          set -euo pipefail
+          python3 tools/test_rg_compute_reflect.py --spirv-dir /tmp/shader-build/engine/generated/spirv \
+            --vk-dir /tmp/shader-build/engine/generated/vk
 
       # SDL_CreateGPUShader / SDL_CreateGPUComputePipeline take each stage's
       # resource counts (and a compute stage's threadcount), which cannot be

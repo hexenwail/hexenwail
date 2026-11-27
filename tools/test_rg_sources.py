@@ -89,8 +89,8 @@ Checked, from the sources (stock python3, lint.yml):
       -gpu arm returns, the value setters' RP_GL (glClear*_fp (...)) with
       their own arguments -- and R_ClearBuffers' -gpu arm hands RG_Clear
       the mask and the three values;
-    * R_BuildWorldCull returns under R_GPU () before its programs (compute is
-      P5); alias instancing and GL_DrawAliasSkeletal need
+    * R_BuildWorldCull does not return under R_GPU () before its programs
+      (the cull runs under -gpu since P5c); alias instancing and GL_DrawAliasSkeletal need
       gl_renderer_caps.shader_storage, which GL_Init_NullGL leaves false.
       (Through P2c R_BuildWorldVBO and R_BuildSkyStencilVBO returned too, and
       the world took the GL_ImmEnd fallbacks; P2d below turns that round.)
@@ -343,7 +343,7 @@ Checked, from the sources (stock python3, lint.yml):
     * gl_pipeline.c's R_GetViewport is glGetIntegerv (GL_VIEWPORT) and,
       under -gpu, rg_frame.c's shadowed viewport, (0, 0, the frame) before
       one is set; gl_vbo.c's R_DrawElementsIndirect is the bare call, its
-      -gpu arm a note (P5c), under `#ifndef USE_GLES`;
+      -gpu arm RG_DrawElementsIndirect (P5c), under `#ifndef USE_GLES`;
     * gl_lightcluster.c, gl_worldcull.c, gl_ssao.c and the palette LUT's
       builder and free make no GL call an SDL_GPU arm does not exclude (the
       uniform-block bindings return under R_GPU (): the SPIR-V fixes the
@@ -417,6 +417,41 @@ Checked, from the sources (stock python3, lint.yml):
       fence wait a sampling one does (RG_Frame_ComputeBegin), and
       RGF_SubmitMidFrame counts every wait it makes (renderer_status);
     * R_Shadow_Prepare's -gpu gate (GPU_GATES) stays until P6.
+  the GPU world cull and its indirect draws under -gpu, Hi-Z still off
+  (#340 P5c, check_world_cull), which tools/sweep-cull-gpu.steps and
+  tools/cull-diff.sh check:
+    * R_BuildWorldCull no longer returns under R_GPU (); CullParams is a
+      registered mirror (WC_BindCullParamsBlock registers cull_params, a
+      file-scope cull_params_t, by the name cull.inc gives the block, ahead
+      of every GL call), and u_hiz_pyramid is named unit 1 for -gpu
+      through R_ProgramSamplerUnit;
+    * R_DispatchWorldCull, in order: the dropped-dispatch count read; the
+      PVS streamed and bound at point 2; the clear's CullParams filled, then
+      flushed (-gpu) or uploaded (GL), the indirect buffer bound and the
+      clear dispatched; the mark's: unit 1 emptied under -gpu when Hi-Z is
+      off (a sampled placeholder costs no submit and wait), the counters
+      zeroed, the block filled -- framecount among it -- and flushed or
+      uploaded, the dispatch; whether either dispatch was dropped; the
+      counters read (GL: R_ReadBuffer, -gpu: RG_ReadBufferAsync) and, under
+      -gpu, every landed read collected and printed in order;
+    * R_DrawWorldCulled draws nothing on a frame a cull dispatch was dropped
+      (WC_CullRan, ahead of its first bind), and under -gpu the destination
+      index buffer is made through the element target with VAO 0 bound;
+    * the backend: RG_DrawElementsIndirect takes the bound
+      GL_DRAW_INDIRECT_BUFFER's command (RG_Buf_Indirect, inside the
+      buffer) and the VAO's element buffer, stamps both read and records an
+      RGD_INDIRECT draw, which the replay draws with
+      SDL_DrawGPUIndexedPrimitivesIndirect, one command; renderer_status
+      counts them per frame, with the dispatches dropped in it;
+    * the asynchronous readbacks: a request lands what is recorded first
+      and downloads in the frame's command buffer; the frame's submit takes
+      a fence only when one is aboard, a mid-frame submit marks them done
+      once its wait returns (and failed when it fails), each frame's start
+      ages them, a collect maps only a completed one, and shutdown waits
+      for the device before releasing them;
+    * a dispatch waits for the queue only when a sampler would read an
+      engine texture rather than a placeholder (RG_Res_UnitHolds, exactly
+      RG_Res_ForDraw's first test).
 
 Usage: test_rg_sources.py [--root DIR]
 """
@@ -1368,9 +1403,9 @@ def check_world_imm(root):
             if w not in b:
                 fail("%s: %s no longer makes its objects through the seams, `%s` (#340 P2d)" % (rs, fn, w))
     b = body_named(root, "engine/h2shared/gl_worldcull.c", "R_BuildWorldCull")
-    if b is not None and not gpu_return_before(b, r"\bR_Program_Create\s*\("):
-        fail("gl_worldcull.c: R_BuildWorldCull must return under R_GPU () before its programs -- the "
-             "null glDispatchCompute is not NULL, and culling is compute (P5) drawn from world_vao")
+    if b is not None and gpu_return_before(b, r"\bR_Program_Create\s*\("):
+        fail("gl_worldcull.c: R_BuildWorldCull returns under R_GPU () before its programs -- P5c routes "
+             "the cull's dispatches, readback and indirect draws, and lifted that gate (#340 P5c)")
     rm = "engine/hexen2/gl_rmain.c"
     code = strip_c_comments((root / rm).read_text(errors="replace"))
     ui = re.findall(r"\buse_instancing\s*=\s*([^;]*);", code)
@@ -1668,8 +1703,11 @@ BUFFER_PINS = (
      r"d\s*=\s*RGF_BeginDraw\s*\(\s*prog\s*,\s*prim\s*,\s*layout\s*\)\s*;",
      "the pipeline is the one for this VAO's interned layout"),
     ("rg_frame.c", "RGF_Replay", r"\bSDL_BindGPUIndexBuffer\s*\(\s*pass\s*,\s*&ib\s*,\s*d->ib_size\s*\)\s*;\s*"
-     r"SDL_DrawGPUIndexedPrimitives\s*\(\s*pass\s*,\s*d->count\s*,\s*d->instances\s*,\s*d->first_index\s*,",
-     "the replay binds the recorded index size and draws from the recorded first index"),
+     r"if\s*\(\s*d->indexed\s*==\s*RGD_INDIRECT\s*\)\s*"
+     r"SDL_DrawGPUIndexedPrimitivesIndirect\s*\(\s*pass\s*,\s*d->indirect\s*,\s*d->indirect_ofs\s*,\s*1\s*\)\s*;\s*"
+     r"else\s+SDL_DrawGPUIndexedPrimitives\s*\(\s*pass\s*,\s*d->count\s*,\s*d->instances\s*,\s*d->first_index\s*,",
+     "the replay binds the recorded index size and draws from the recorded first index, or (#340 P5c) "
+     "the one command at the recorded offset of the recorded indirect buffer"),
     ("rg_pipeline.c", "RG_MakeKey", r"\bk->layout\s*=\s*layout\s*;",
      "the vertex layout id is part of the pipeline key: two layouts never share a pipeline"),
     ("rg_pipeline.c", "RG_CreatePipeline", r"\bconst\s+rgvlayout_t\s*\*\s*l\s*=\s*&rg_layouts\s*\[\s*k->layout\s*\]\s*;",
@@ -1727,12 +1765,16 @@ STORAGE_PINS = (
      r"\s*SDL_GPU_BUFFERUSAGE_INDEX\s*\|\s*SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ\s*\|"
      r"\s*SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ\s*\|\s*SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE\s*\|"
      r"\s*SDL_GPU_BUFFERUSAGE_INDIRECT\s*;\s*if\s*\(\s*target\s*==\s*GL_ELEMENT_ARRAY_BUFFER\s*\)\s*"
-     r"usage\s*&=\s*~\s*SDL_GPU_BUFFERUSAGE_VERTEX\s*;\s*return\s+usage\s*;\s*\}?\s*$",
-     "every buffer is made with index, graphics and compute storage and indirect usage, and vertex "
-     "unless it is an element buffer: GL does not say which a name will be, a slot bound to a buffer "
-     "without the usage is a validation error, and SDL returns a buffer to its first usage after a "
-     "copy -- vertex before index -- so an element buffer with both is read as indices unsynced "
-     "(#340 P5a-2, sync validation)"),
+     r"usage\s*&=\s*~\s*SDL_GPU_BUFFERUSAGE_VERTEX\s*;\s*"
+     r"else\s+if\s*\(\s*target\s*==\s*GL_DRAW_INDIRECT_BUFFER\s*\)\s*"
+     r"usage\s*&=\s*~\s*\(\s*SDL_GPU_BUFFERUSAGE_VERTEX\s*\|\s*SDL_GPU_BUFFERUSAGE_INDEX\s*\)\s*;\s*"
+     r"return\s+usage\s*;\s*\}?\s*$",
+     "every buffer is made with graphics and compute storage and indirect usage, index unless it is an "
+     "indirect buffer, and vertex unless it is that or an element buffer: GL does not say which a name "
+     "will be, a slot bound to a buffer without the usage is a validation error, and SDL returns a "
+     "buffer to its first usage -- vertex, index, indirect -- after a copy or a compute pass, which a "
+     "draw's vertex, index and indirect reads never barrier, so an element buffer with vertex usage is "
+     "read as indices unsynced (#340 P5a-2), and an indirect buffer with either as commands (P5c)"),
     ("rg_buffer.c", "RG_BufferData", r"if\s*\(\s*\(\s*!\s*b->buf\s*\|\|\s*b->size\s*!=\s*\(Uint32\)\s*size\s*\|\|"
      r"\s*b->usage\s*!=\s*RGB_Usage\s*\(\s*target\s*\)\s*\)\s*&&\s*!\s*RGB_Create\s*\(\s*b\s*,"
      r"\s*\(Uint32\)\s*size\s*,\s*target\s*\)\s*\)",
@@ -3642,9 +3684,9 @@ def check_compute(root):
             fail("gl_vbo.c: R_DrawElementsIndirect's GL arm must be exactly "
                  "`glDrawElementsIndirect_fp (mode, type, indirect);` (#340 P5a-1)")
         m = re.search(r"#\s*ifdef\s+USE_SDL_GPU\b(.*?)#\s*endif", b, re.S)
-        if not m or not re.fullmatch(r'if\(R_GPU\(\)\)\{RG_NoteUnhandled\("R_DrawElementsIndirect[^"]*P5c[^"]*"\);'
-                                     r'return;\}', re.sub(r"\s+(?=[^\"]*(?:\"[^\"]*\"[^\"]*)*$)", "", m.group(1))):
-            fail("gl_vbo.c: R_DrawElementsIndirect's SDL_GPU arm must note the call (P5c) and return (#340 P5a-1)")
+        if not m or re.sub(r"\s+", "", m.group(1)) != "if(R_GPU()){RG_DrawElementsIndirect(mode,type,indirect);return;}":
+            fail("gl_vbo.c: R_DrawElementsIndirect's SDL_GPU arm must be `RG_DrawElementsIndirect (mode, type, "
+                 "indirect); return;` -- SDL_DrawGPUIndexedPrimitivesIndirect (#340 P5c)")
         vbo = strip_c_comments((root / "engine/h2shared/gl_vbo.c").read_text(errors="replace"))
         at = vbo.find(b)
         head = vbo[:at]
@@ -3705,12 +3747,12 @@ def check_compute(root):
                  "only the compute passes may (#340 P5a-2)" % prel)
         if re.search(r"\bR_(?:DispatchCompute|MemoryBarrier|ReadBuffer|ReadTexImage)\s*\(", pc):
             fail("%s: reaches a compute seam outside the compute passes (#340 P5a-1)" % prel)
-        # the indirect draw: its -gpu arm is a note until P5c, so the cull's draw alone
+        # the indirect draw: the cull's alone (its -gpu arm is P5c's)
         if prel == "engine/h2shared/gl_vbo.c":	# the definition, and its note
             pc = re.sub(r"\bvoid\s+R_DrawElementsIndirect\s*\([^)]*\)\s*\{.*?\n\}", "", pc, flags=re.S)
         if re.search(r"\bR_DrawElementsIndirect\s*\(", pc):
-            fail("%s: calls R_DrawElementsIndirect -- only gl_worldcull.c's R_DrawWorldCulled may, "
-                 "its -gpu arm being a note until P5c (#340 P5a-1)" % prel)
+            fail("%s: calls R_DrawElementsIndirect -- only gl_worldcull.c's R_DrawWorldCulled may: "
+                 "RG_DrawElementsIndirect draws GL_TRIANGLES alone, the cull's (#340 P5a-1, P5c)" % prel)
     wcode = strip_c_comments((root / "engine/h2shared/gl_worldcull.c").read_text(errors="replace"))
     owners = {n for n, b, e in functions(wcode) if re.search(r"\bR_DrawElementsIndirect\s*\(", wcode[b:e])}
     if owners != {"R_DrawWorldCulled"}:
@@ -3745,7 +3787,7 @@ def check_compute(root):
         if sorted(got) != sorted(want):
             fail("%s: the passes make buffers %s, COMPUTE_BUFFERS says %s (#340 P5a-1)" % (crel, got, want))
         for name in got:
-            if not re.search(r"R_GenBuffers\(1,&%s\);GL_BindBuffer\((GL_\w+),%s\);R_BufferData\(\1,"
+            if not re.search(r"R_GenBuffers\(1,&%s\);GL_BindBuffer\((\w+),%s\);R_BufferData\(\1,"
                              % (name, name), cc):
                 fail("%s: %s is not `R_GenBuffers (1, &%s); GL_BindBuffer (T, %s); R_BufferData (T, ...)` "
                      "-- a fill through another binding fills another buffer (#340 P5a-1)"
@@ -3760,7 +3802,8 @@ def check_compute(root):
 # rg_compute.c, whitespace dropped (#340 P5a-2): what each dispatch does, in
 # this order inside RG_DispatchCompute.
 COMPUTE_DISPATCH_ORDER = (
-    "cmd=RG_Frame_ComputeBegin(target,st->num_samplers>0);",
+    "samples|=RG_Res_UnitHolds(st->samplers[i].unit,(rg_textype_t)st->samplers[i].type);",
+    "cmd=RG_Frame_ComputeBegin(target,samples);",
     "if(!RGC_Bind(st,cover,img,rw,smp,ro))",
     "pass=SDL_BeginGPUComputePass(cmd,img,(Uint32)st->num_images,rw,(Uint32)st->num_rwssbos);",
     "SDL_BindGPUComputePipeline(pass,prog->cs);",
@@ -4015,8 +4058,9 @@ def check_compute_backend(root):
             fail("%s: the stream must be a VERTEX-only buffer and its indices an INDEX-only copy, "
                  "rgf_ibuf: SDL syncs a copy for the first usage alone (#340 P5a-2, sync validation)" % rf)
     b = body_named(root, rf, "RGF_Replay")
-    if b is not None and "(d->indexed==RGD_BUFFER)?d->ib:rgf_ibuf;" not in squash(b):
-        fail("%s: RGF_Replay must draw the stream's indices from rgf_ibuf (#340 P5a-2)" % rf)
+    if b is not None and "(d->indexed==RGD_BUFFER||d->indexed==RGD_INDIRECT)?d->ib:rgf_ibuf;" not in squash(b):
+        fail("%s: RGF_Replay must draw the stream's indices from rgf_ibuf, a buffer draw's and an indirect "
+             "one's from their element buffer (#340 P5a-2, P5c)" % rf)
 
     # the LUT
     pp = "engine/h2shared/gl_postprocess.c"
@@ -4143,10 +4187,231 @@ def check_light_cluster(root):
              "stall renderer_status reports (#340 P5b)" % rf)
     b = body_named(root, rf, "RG_Frame_Status")
     if b is not None and not all(k in squash(b) for k in (
-            "%dreadbacks,%dfencewaits;", "%lureadbacks,%lufencewaits;",
+            "%dreadbacks,%dfencewaits;", "%lureadbacks,%lufencewaits",
             "rgf_last_cpasses,rgf_last_reads,rgf_last_waits,rgf_cpasses,rgf_reads,rgf_waits);")):
         fail("%s: RG_Frame_Status must print the last frame's fence waits and the boot's, beside the "
              "readbacks (#340 P5b)" % rf)
+
+
+# gl_worldcull.c R_DispatchWorldCull, whitespace dropped (#340 P5c): what each
+# frame's cull does, in this order.
+WC_DISPATCH_ORDER = (
+    "dropped=RG_ComputeDropped();",
+    "GL_Upload(GL_SHADER_STORAGE_BUFFER,vis_bits,vis_bytes,&vis_buf,&vis_ofs);"
+    "GL_BindBufferRange(GL_SHADER_STORAGE_BUFFER,2,vis_buf,vis_ofs,vis_bytes);",
+    "R_UseProgram(cull_clear_prog);memset(&cull_params,0,sizeof(cull_params));"
+    "cull_params.counts0[2]=cull_num_buckets;",
+    'if(R_GPU())RG_UniformBlockFlushed("CullParams");else',
+    "GL_Upload(GL_UNIFORM_BUFFER,&cull_params,sizeof(cull_params),&ubo,&ofs);",
+    "GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER,3,cull_indirect_buf);"
+    "R_DispatchCompute((cull_num_buckets+63)/64,1,1);",
+    "R_UseProgram(cull_mark_prog);",
+    "if(hiz_on)R_BindTextureSlot(1,hiz_pyramid_tex);",
+    "elseif(R_GPU())R_BindTextureSlot(1,0);",
+    "R_BufferSubData(GL_SHADER_STORAGE_BUFFER,0,sizeof(zeros),zeros);",
+    "memset(&cull_params,0,sizeof(cull_params));cull_params.counts0[0]=framecount;",
+    'if(R_GPU())RG_UniformBlockFlushed("CullParams");else',
+    "GL_Upload(GL_UNIFORM_BUFFER,&cull_params,sizeof(cull_params),&ubo,&ofs);",
+    "R_DispatchCompute((cull_num_marksurfs+63)/64,1,1);",
+    "if(R_GPU())wc_cull_ran=(RG_ComputeDropped()==dropped);",
+    "if(R_GPU())WC_StatsRequest();else",
+    "GL_BindBuffer(GL_SHADER_STORAGE_BUFFER,cull_stats_ssbo);"
+    "if(R_ReadBuffer(GL_SHADER_STORAGE_BUFFER,0,sizeof(counts),counts))WC_PrintStats(counts);",
+    "if(R_GPU())WC_StatsCollect();",
+    "R_UseProgram(0);",
+)
+# rg_frame.c RG_DrawElementsIndirect, whitespace dropped.
+RG_INDIRECT_ORDER = (
+    "cmdbuf=RG_Buf_Indirect((GLintptr)(uintptr_t)indirect,RG_INDIRECT_CMD_BYTES,&cmdread);",
+    "if(!cmdbuf||!RG_Buf_ForDraw((int)isize,&in))",
+    "if(in.ib_usage&SDL_GPU_BUFFERUSAGE_VERTEX)",
+    "d=RGF_BeginDraw(prog,SDL_GPU_PRIMITIVETYPE_TRIANGLELIST,layout);",
+    "RG_Buf_MarkRead(&in);RG_Buf_StampRead(cmdread);",
+    "d->vb_ofs[in.const_slot]=RGF_ConstRecord(&in,1);",
+    "d->indexed=RGD_INDIRECT;d->ib=in.ib;",
+    "d->indirect=cmdbuf;d->indirect_ofs=(Uint32)(uintptr_t)indirect;RGF_CommitDraw(d,ps);",
+)
+# (function, what it must hold, whitespace dropped, why) in rg_frame.c.
+RG_READBACK_PINS = (
+    ("RG_BeginFrame", "RGF_ReadbacksAge();", "each frame's start finds the reads whose fence signalled"),
+    ("RGF_Submit", "if(rgf_cmd&&RGF_ReadbacksRecorded()){SDL_GPUFence*fence="
+     "SDL_SubmitGPUCommandBufferAndAcquireFence(rgf_cmd);",
+     "the frame's submit takes a fence when a download is aboard: nothing else says it landed"),
+    ("RGF_Submit", "RGF_ReadbacksSubmitted(fence,false);",
+     "the reads it carried wait on that fence (none: they failed)"),
+    ("RGF_ReadbacksSubmitted", "if(waited)RGF_ReadbackDone(r,RGR_READY);elseif(!fence)RGF_ReadbackDone(r,RGR_FAILED);"
+     "else{r->state=RGR_SUBMITTED;r->fence=fence;}",
+     "a read the submit carried is done only when the submit waited; otherwise it waits on the fence, "
+     "and with none it failed -- mapped any sooner it holds whatever the transfer buffer held"),
+    ("RGF_SubmitMidFrame", "SDL_ReleaseGPUFence(rg_dev,fence);RGF_ReadbacksSubmitted(NULL,true);returntrue;",
+     "a mid-frame submit waits on its own fence, so what it carried is complete when the wait returns"),
+    ("RG_Frame_ReadbackRequest", "if(!rgf_active||!buf||!buf->size){rgr_refused++;return0;}",
+     "outside a frame there is no frame fence to read by"),
+    ("RG_Frame_ReadbackRequest", "if(rgf_numdraws)RGF_EndSegment();elseif(!RGF_CopyOnly())",
+     "what is recorded lands before the download, as RG_Frame_Readback's: queued uploads into the read "
+     "buffer included"),
+    ("RG_Frame_ReadbackRequest", "SDL_DownloadFromGPUBuffer(copy,buf,&d);SDL_EndGPUCopyPass(copy);",
+     "the download is recorded into the frame's command buffer"),
+    ("RG_Frame_ReadbackRequest", "r->state=RGR_RECORDED;", "a request is in rgf_cmd until it is submitted"),
+    ("RG_ReadbackCollect", "if(r->state==RGR_RECORDED||r->state==RGR_SUBMITTED)return0;",
+     "a read in flight is not mapped: its transfer buffer is still being written"),
+    ("RGF_ReadbackFenceDone", "SDL_ReleaseGPUFence(rg_dev,fence);",
+     "one fence carries every read of a submit, and is released once, when it signalled"),
+    ("RG_Frame_Shutdown", "SDL_WaitForGPUIdle(rg_dev);RGF_ReadbacksShutdown();",
+     "the download buffers are released only after the device is idle"),
+    ("RGF_EndSegment", "rgf_frame_indirect+=(rgf_draws[i].indexed==RGD_INDIRECT);",
+     "renderer_status counts the indirect draws each frame replays"),
+    ("RG_Frame_End", "rgf_last_cdropped=RG_ComputeDropped()-rgf_cdropped_base;",
+     "renderer_status shows the dispatches a frame dropped"),
+    ("RG_Frame_Status", "%dindirectdraws,%ludispatchesdropped,",
+     "renderer_status prints the last frame's indirect draws and dropped dispatches"),
+)
+
+
+def check_world_cull(root):
+    """#340 P5c: the GPU world cull and its indirect draws under -gpu."""
+    rel = "engine/h2shared/gl_worldcull.c"
+    if not (root / rel).is_file():
+        fail("%s: missing -- the #340 P5c pins have nothing to read" % rel)
+        return
+    code = strip_c_comments((root / rel).read_text(errors="replace"))
+    if not re.search(r"^static\s+cull_params_t\s+cull_params\s*;", code, re.M):
+        fail("%s: cull_params must be a file-scope cull_params_t: the registered mirror outlives the call "
+             "(#340 P5c)" % rel)
+    b = body_named(root, rel, "WC_BindCullParamsBlock")
+    if b is not None:
+        m = re.search(r"#\s*ifdef\s+USE_SDL_GPU\b(.*?)#\s*endif", b, re.S)
+        g = re.search(r"\bgl\w+_fp\b", b)
+        if not m or squash(m.group(1)) != ('if(R_GPU()){RG_UniformBlockRegister("CullParams",&cull_params,'
+                                           'sizeof(cull_params));return;}') or not g or g.start() < m.start():
+            fail("%s: WC_BindCullParamsBlock's SDL_GPU arm must be exactly `if (R_GPU ()) { "
+                 "RG_UniformBlockRegister (\"CullParams\", &cull_params, sizeof(cull_params)); return; }`, "
+                 "ahead of every GL call -- each dispatch pushes the block by name from its flushed mirror "
+                 "(#340 P5c)" % rel)
+    inc = "engine/shaders/cull.inc"
+    if (root / inc).is_file():
+        if not re.search(r"\bUBO\s*\(\s*0\s*\)\s*uniform\s+CullParams\s*\{",
+                         strip_c_comments((root / inc).read_text(errors="replace"))):
+            fail("%s: the cull's uniform block must be `UBO(0) uniform CullParams` -- the name the mirror is "
+                 "registered by (#340 P5c)" % inc)
+    else:
+        fail("%s: missing -- the #340 P5c pins have nothing to read" % inc)
+    b = body_named(root, rel, "R_BuildWorldCull")
+    if b is not None:
+        sb = squash(b)
+        if 'loc=R_ProgramSamplerLoc(cull_mark_prog,"u_hiz_pyramid");' \
+           'R_ProgramSamplerUnit(cull_mark_prog,loc,"u_hiz_pyramid",1);' not in sb:
+            fail("%s: R_BuildWorldCull must name u_hiz_pyramid's unit, 1, through R_ProgramSamplerUnit -- the "
+                 "Vulkan SPIR-V keeps only its slot, and an unmapped sampler is counted every dispatch "
+                 "(#340 P5c)" % rel)
+        if "if(R_GPU()){dst_target=GL_ELEMENT_ARRAY_BUFFER;R_BindVertexArray(0);}#endif" \
+           "R_GenBuffers(1,&cull_dst_ibo);GL_BindBuffer(dst_target,cull_dst_ibo);R_BufferData(dst_target," \
+           not in sb or "GLenumdst_target=GL_SHADER_STORAGE_BUFFER;" not in sb:
+            fail("%s: under -gpu cull_dst_ibo must be made through GL_ELEMENT_ARRAY_BUFFER with VAO 0 bound, "
+                 "on GL through GL_SHADER_STORAGE_BUFFER as always -- SDL reads a buffer as its first usage "
+                 "after a compute pass, and one with vertex usage is read as indices unsynced (#340 P5c)"
+                 % rel)
+    b = body_named(root, rel, "R_DispatchWorldCull")
+    if b is not None:
+        sb = squash(b)
+        at = 0
+        for step in WC_DISPATCH_ORDER:
+            i = sb.find(step, at)
+            if i < 0:
+                fail("%s: R_DispatchWorldCull must make `%s` after the steps before it -- the PVS lands, "
+                     "each pass's CullParams is filled and flushed before its dispatch, the counters are "
+                     "zeroed before the mark and read after it, a dropped dispatch is noticed (#340 P5c)"
+                     % (rel, step))
+                break
+            at = i + len(step)
+        if sb.count('RG_UniformBlockFlushed("CullParams")') != 2:
+            fail("%s: R_DispatchWorldCull must flush CullParams once per dispatch, twice (#340 P5c)" % rel)
+    b = body_named(root, rel, "R_DrawWorldCulled")
+    if b is not None:
+        sb = squash(b)
+        g, f = sb.find("if(!WC_CullRan())return;"), sb.find("R_BindVertexArray(world_vao);")
+        if g < 0 or f < 0 or g > f:
+            fail("%s: R_DrawWorldCulled must ask WC_CullRan () before its first bind -- a dropped dispatch "
+                 "leaves the indirect buffer as an older frame left it (#340 P5c)" % rel)
+    b = body_named(root, rel, "WC_CullRan")
+    if b is not None and "if(R_GPU()&&!wc_cull_ran)" not in squash(b):
+        fail("%s: WC_CullRan must answer no under -gpu when the frame's cull dispatches did not both run "
+             "(#340 P5c)" % rel)
+    b = body_named(root, rel, "WC_StatsRequest")
+    if b is not None and "GL_BindBuffer(GL_SHADER_STORAGE_BUFFER,cull_stats_ssbo);" \
+            "t=RG_ReadBufferAsync(GL_SHADER_STORAGE_BUFFER,0,8*sizeof(unsignedint));" not in squash(b):
+        fail("%s: WC_StatsRequest must read the eight counters of cull_stats_ssbo asynchronously (#340 P5c, "
+             "open question 5)" % rel)
+    b = body_named(root, rel, "WC_StatsCollect")
+    if b is not None and "RG_ReadbackCollect(wc_stats_ticket[0],counts,sizeof(counts));" not in squash(b):
+        fail("%s: WC_StatsCollect must collect the oldest read first, so the lines print in frame order "
+             "(#340 P5c)" % rel)
+    b = body_named(root, rel, "R_FreeWorldCull")
+    if b is not None:
+        sb = squash(b)
+        for prog in ("cull_clear_prog", "cull_mark_prog"):
+            if "R_DeleteProgram(%s);" % prog not in sb:
+                fail("%s: R_FreeWorldCull must delete %s through R_DeleteProgram -- it runs at every map "
+                     "load, and a raw delete under -gpu is a routed call left behind (#340 P5c)" % (rel, prog))
+        if "while(wc_stats_npending>0)RG_ReadbackDiscard(wc_stats_ticket[--wc_stats_npending]);" not in sb:
+            fail("%s: R_FreeWorldCull must discard the gl_hiz_stats reads in flight -- left to the ring's abandon "
+                 "timeout they hold slots the new map's requests are refused for (#340 P5c)" % rel)
+        for kept in ("cull_cpu_surfs", "cull_cpu_marks", "cull_bucket_first"):
+            if not re.search(r"\bfree\(%s\);%s=NULL;" % (kept, kept), sb):
+                fail("%s: R_FreeWorldCull must free %s, what worldcull_verify reads -- it runs at every map "
+                     "load (#340 P5c)" % (rel, kept))
+        for buf in COMPUTE_BUFFERS[rel]:
+            if "R_DeleteBuffers(1,&%s);" % buf not in sb:
+                fail("%s: R_FreeWorldCull must delete %s through R_DeleteBuffers (#340 P5c)" % (rel, buf))
+
+    rf = "engine/h2shared/rg_frame.c"
+    b = body_named(root, rf, "RG_DrawElementsIndirect")
+    if b is not None:
+        sb = squash(b)
+        at = 0
+        for step in RG_INDIRECT_ORDER:
+            i = sb.find(step, at)
+            if i < 0:
+                fail("%s: RG_DrawElementsIndirect must make `%s` after the steps before it -- the command is "
+                     "inside the bound indirect buffer, both buffers are stamped read, the draw is RGD_INDIRECT "
+                     "(#340 P5c)" % (rf, step))
+                break
+            at = i + len(step)
+    fr = strip_c_comments((root / rf).read_text(errors="replace"))
+    if not re.search(r"#\s*define\s+RG_INDIRECT_CMD_BYTES\s+20u\b", fr):
+        fail("%s: RG_INDIRECT_CMD_BYTES must be 20, GL's DrawElementsIndirectCommand and "
+             "SDL_GPUIndexedIndirectDrawCommand (#340 P5c)" % rf)
+    wc = strip_c_comments((root / rel).read_text(errors="replace"))
+    if not re.search(r"\}\s*gpu_indirect_cmd_t\s*;\s*/\*\s*20 bytes", (root / rel).read_text(errors="replace")) or \
+            len(re.findall(r"\bunsigned\s+int\s+\w+\s*;", wc[wc.find("typedef struct {\n\tunsigned int\tcount;"):
+                                                             wc.find("gpu_indirect_cmd_t;")])) != 5:
+        fail("%s: gpu_indirect_cmd_t must be five unsigned ints, 20 bytes -- what RG_DrawElementsIndirect "
+             "hands SDL as a command (#340 P5c)" % rel)
+    for fn, want, why in RG_READBACK_PINS:
+        b = body_named(root, rf, fn)
+        if b is not None and want not in squash(b):
+            fail("%s: %s must make `%s` -- %s (#340 P5c)" % (rf, fn, want, why))
+    b = body_named(root, rf, "RGF_SubmitMidFrame")
+    if b is not None and squash(b).count("RGF_ReadbacksSubmitted(NULL,false);") != 2:
+        fail("%s: RGF_SubmitMidFrame must fail the reads it carried on each failure, the submit's and the "
+             "wait's (#340 P5c)" % rf)
+    rr = "engine/h2shared/rg_resource.c"
+    b = body_named(root, rr, "RG_Res_UnitHolds")
+    fd = body_named(root, rr, "RG_Res_ForDraw")
+    if b is not None and fd is not None and (
+            "returnt&&t->defined&&t->type==type;" not in squash(b) or
+            "if(t&&t->defined&&t->type==type)" not in squash(fd)):
+        fail("%s: RG_Res_UnitHolds must be RG_Res_ForDraw's first test, `t && t->defined && t->type == "
+             "type`: a dispatch skips the submit and wait only when every sampler gets a placeholder "
+             "(#340 P5c)" % rr)
+    rb = "engine/h2shared/rg_buffer.c"
+    b = body_named(root, rb, "RG_Buf_Indirect")
+    if b is not None and "if(offset<0||offset%4||(Uint64)offset+bytes>b->size)" not in squash(b):
+        fail("%s: RG_Buf_Indirect must refuse a command outside its buffer or off 4-byte alignment -- "
+             "GL draws nothing then, a Vulkan read past the buffer is undefined (#340 P5c)" % rb)
+    b = body_named(root, rb, "RG_ReadBufferAsync")
+    if b is not None and "returnRG_Frame_ReadbackRequest(&r);" not in squash(b):
+        fail("%s: RG_ReadBufferAsync must hand the region to RG_Frame_ReadbackRequest (#340 P5c)" % rb)
 
 
 def main(argv=None):
@@ -4179,6 +4444,7 @@ def main(argv=None):
     check_compute(root)
     check_compute_backend(root)
     check_light_cluster(root)
+    check_world_cull(root)
     nfiles = 0
     rg_files = []
     for p in sorted(eng.rglob("*")):

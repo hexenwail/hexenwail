@@ -102,7 +102,7 @@ OWNERS = {
     },
     "engine/h2shared/gl_vbo.c": {
         "R_DrawElements", "R_DrawElementsInstanced", "R_DrawArrays",
-        # the GPU world cull's indirect draw (#340 P5a-1; its -gpu arm is P5c)
+        # the GPU world cull's indirect draw (#340 P5a-1; its -gpu arm since P5c)
         "R_DrawElementsIndirect",
         # the immediate emulator's GL arms; test_rg_sources.py holds every GL
         # call in gl_vbo.c to an SDL_GPU arm

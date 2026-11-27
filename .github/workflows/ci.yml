@@ -113,6 +113,14 @@ jobs:
       - name: Test the embedded SPIR-V generator
         run: nix develop -c python3 tools/test_embed_spirv.py
 
+      # rg_shader.c's RG_CheckStage, lifted and run on every compute stage
+      # compiled as the build does: each storage block at the slot and GL
+      # binding point its source names, the world cull's four read-write
+      # buffers where gl_worldcull.c binds them, and broken modules refused
+      # (#340 P5c).  Needs cmake, glslangValidator and cc, hence the dev shell.
+      - name: Test compute reflection on real SPIR-V
+        run: nix develop -c python3 tools/test_rg_compute_reflect.py
+
       - name: Build Linux
         run: nix build .#nixos --print-build-logs
 
