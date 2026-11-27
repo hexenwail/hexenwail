@@ -16,8 +16,11 @@
  * A segment ends at the present, and early whenever something recorded next
  * cannot share its passes: an upload into a texture one of its draws reads
  * (RG_Frame_Flush), a different render target bound (RG_Frame_BindTarget,
- * #340 P4a-2), a blit or a copy between targets (RG_Frame_Break).  P5's
- * compute will be more segment breaks of the same kind.
+ * #340 P4a-2), a blit or a copy between targets (RG_Frame_Break), a compute
+ * dispatch (RG_Frame_ComputeBegin, P5a-2: with no draws in the segment, its
+ * copy pass alone, the pending clear kept) and a readback
+ * (RG_Frame_Readback, which also submits and waits, the frame going on in a
+ * new command buffer).
  *
  * The render target is GL's draw framebuffer: 0 is the SCENE target, any
  * other a framebuffer rg_target.c resolves to its attachments.  The frame
@@ -71,6 +74,7 @@
 #include "rg_internal.h"
 #include "gl_vbo.h"		/* GL_IMM_MAX_VERTS */
 #include "gl_uniforms.h"	/* r_vertparams_t: the pose type a draw reads (#520) */
+#include "gl_lightcluster.h"	/* R_LightCluster_Available: LightBuffer's excuse (#340 P5a-2) */
 #include <stddef.h>		/* offsetof */
 
 /* ------------------------------------------------------------------ */
@@ -132,6 +136,14 @@ int RG_Frame_BlockIndex (const char *name)
 			return i;
 	}
 	return -1;
+}
+
+const void *RG_Frame_BlockFlushed (int block, int *size)
+{
+	if (block < 0 || block >= rgb_count)
+		return NULL;
+	*size = rgb_blocks[block].size;
+	return rgb_blocks[block].flushed;
 }
 
 void RG_UniformBlockFlushed (const char *name)
@@ -221,8 +233,16 @@ static Uint8			*rgf_uarena;	/* uniform snapshots */
 static Uint32			rgf_ulen, rgf_umax;
 
 /* GPU-side */
-static SDL_GPUBuffer		*rgf_vbuf;	/* the stream, vertex + index usage */
+static SDL_GPUBuffer		*rgf_vbuf;	/* the stream, vertex usage */
 static Uint32			rgf_vbuf_size;
+/* The stream again, index usage, for the draws whose indices are in it.
+ * One buffer with both usages is read as indices after a copy SDL syncs
+ * for vertex reads alone: SDL's Vulkan backend returns a buffer to the first
+ * of its usages after each write, and syncval reports every such draw as a
+ * read-after-write hazard (#340 P5a-2). */
+static SDL_GPUBuffer		*rgf_ibuf;
+static Uint32			rgf_ibuf_size;
+static qboolean			rgf_stream_indices;	/* the open segment has RGD_STREAM draws */
 static SDL_GPUBuffer		*rgf_quadbuf;	/* static quad indices */
 static qboolean			rgf_quad_uploaded;
 /* RG_SSBO_STANDIN_BYTES of zeros, for a storage slot with nothing bound */
@@ -258,6 +278,10 @@ static Uint32			rgf_last_stream, rgf_frame_stream;	/* stream arena bytes */
 /* Storage slots bound per frame: to a GL binding point's buffer, and to the
  * stand-in (#340 P2e) */
 static int			rgf_last_ssbo, rgf_frame_ssbo, rgf_last_standin, rgf_frame_standin;
+/* Compute passes and readbacks per frame, and since boot (#340 P5a-2); the
+ * boot-time palette LUT runs outside any frame */
+static int			rgf_last_cpasses, rgf_frame_cpasses, rgf_last_reads, rgf_frame_reads;
+static unsigned long		rgf_cpasses, rgf_reads;
 
 /* The storage buffers the draw being recorded reads, stamped once it is
  * committed (RG_Buf_StampRead), so an upload into one ends the segment. */
@@ -468,6 +492,7 @@ void RG_BeginFrame (int width, int height)
 	rgf_frame_draws = rgf_frame_segments = rgf_frame_indexed = 0;
 	rgf_frame_stream = 0;
 	rgf_frame_ssbo = rgf_frame_standin = 0;
+	rgf_frame_cpasses = rgf_frame_reads = 0;
 }
 
 /* Snapshot of block `b` in the open segment's uniform arena. */
@@ -517,7 +542,7 @@ static qboolean RGF_StandinExpected (const rgstage_t *st, const rgssbo_t *sb)
 	switch (sb->kind)
 	{
 	case RG_SSBO_COMPUTE_FED:
-		return !gl_renderer_caps.compute_shaders;
+		return !R_LightCluster_Available ();
 	case RG_SSBO_POSE:
 		/* Excused only when the pose type names ANOTHER pose block of this
 		 * stage: salias_inst_vert reads MD3PoseBuffer at PV_MD3 and
@@ -786,6 +811,7 @@ void RG_DrawImm (GLenum mode, const void *verts, int count, int stride)
 	{
 		Uint16	*ix;
 
+		rgf_stream_indices = true;
 		d->ib_ofs = RGF_StreamAlloc (nidx * sizeof(Uint16));
 		ix = (Uint16 *)(rgf_stream + d->ib_ofs);
 		if (mode == GL_LINE_LOOP)
@@ -1045,8 +1071,10 @@ static qboolean RGF_CopyPass (void)
 		return true;
 	if (!RGF_EnsureTransfer (total))
 		return false;
-	if (stream && !RGF_EnsureBuffer (&rgf_vbuf, &rgf_vbuf_size, stream,
-					 SDL_GPU_BUFFERUSAGE_VERTEX | SDL_GPU_BUFFERUSAGE_INDEX))
+	if (stream && !RGF_EnsureBuffer (&rgf_vbuf, &rgf_vbuf_size, stream, SDL_GPU_BUFFERUSAGE_VERTEX))
+		return false;
+	if (stream && rgf_stream_indices &&
+	    !RGF_EnsureBuffer (&rgf_ibuf, &rgf_ibuf_size, stream, SDL_GPU_BUFFERUSAGE_INDEX))
 		return false;
 	if (quad && !rgf_quadbuf)
 	{
@@ -1096,6 +1124,11 @@ static qboolean RGF_CopyPass (void)
 		dst.size = stream;
 		/* cycle: an earlier segment's draws still read the old contents */
 		SDL_UploadToGPUBuffer (copy, &src, &dst, true);
+		if (rgf_stream_indices)
+		{
+			dst.buffer = rgf_ibuf;
+			SDL_UploadToGPUBuffer (copy, &src, &dst, true);
+		}
 	}
 	if (quad)
 	{
@@ -1195,7 +1228,7 @@ static void RGF_Replay (SDL_GPURenderPass *pass)
 			SDL_GPUBufferBinding	ib;
 
 			ib.buffer = (d->indexed == RGD_QUADS) ? rgf_quadbuf :
-				    (d->indexed == RGD_BUFFER) ? d->ib : rgf_vbuf;
+				    (d->indexed == RGD_BUFFER) ? d->ib : rgf_ibuf;
 			ib.offset = (d->indexed == RGD_STREAM) ? d->ib_ofs : 0;
 			SDL_BindGPUIndexBuffer (pass, &ib, d->ib_size);
 			SDL_DrawGPUIndexedPrimitives (pass, d->count, d->instances, d->first_index, 0, 0);
@@ -1212,6 +1245,7 @@ static void RGF_ResetSegment (void)
 {
 	rgf_numdraws = 0;
 	rgf_streamlen = 0;
+	rgf_stream_indices = false;
 	rgf_ulen = 0;
 	rgf_segment++;
 }
@@ -1376,16 +1410,180 @@ void RG_Clear (GLbitfield mask, const float color[4], float depth, int stencil)
 		rgf_clear_stencil = (Uint8) stencil;
 }
 
-static void RGF_Submit (void)
+/* What a frame's end releases and rewinds, once its command buffer is
+ * submitted. */
+static void RGF_EndOfFrame (void)
 {
-	if (rgf_cmd && !SDL_SubmitGPUCommandBuffer (rgf_cmd))
-		RGF_Warn ("SDL_GPU: submit failed (%s)\n", SDL_GetError ());
-	rgf_cmd = NULL;
 	/* Released now, SDL keeps each alive until the submitted work retires. */
 	RG_Res_EndFrame ();
 	RG_Buf_EndFrame ();
 	while (rgf_numretired_bufs)
 		SDL_ReleaseGPUBuffer (rg_dev, rgf_retired_bufs[--rgf_numretired_bufs]);
+}
+
+static void RGF_Submit (void)
+{
+	if (rgf_cmd && !SDL_SubmitGPUCommandBuffer (rgf_cmd))
+		RGF_Warn ("SDL_GPU: submit failed (%s)\n", SDL_GetError ());
+	rgf_cmd = NULL;
+	RGF_EndOfFrame ();
+}
+
+/* Submit what is recorded and wait for it to finish, the frame staying open
+ * (#340 P5a-2): none of RGF_EndOfFrame's work, since RG_Buf_EndFrame would
+ * rewind the storage stream that this frame's later draws still take buffers
+ * from.  The next pass acquires a fresh command buffer (RGF_EnsureCmd). */
+static qboolean RGF_SubmitMidFrame (void)
+{
+	SDL_GPUFence	*fence;
+
+	if (!rgf_cmd)
+		return false;
+	fence = SDL_SubmitGPUCommandBufferAndAcquireFence (rgf_cmd);
+	rgf_cmd = NULL;
+	if (!fence)
+	{
+		RGF_Warn ("SDL_GPU: submit failed (%s)\n", SDL_GetError ());
+		return false;
+	}
+	if (!SDL_WaitForGPUFences (rg_dev, true, &fence, 1))
+	{
+		RGF_Warn ("SDL_GPU: waiting for submitted work failed (%s)\n", SDL_GetError ());
+		SDL_ReleaseGPUFence (rg_dev, fence);
+		return false;
+	}
+	SDL_ReleaseGPUFence (rg_dev, fence);
+	return true;
+}
+
+/* ------------------------------------------------------------------ */
+/* Compute and readback (#340 P5a-2)                                   */
+/* ------------------------------------------------------------------ */
+
+/* The segment's copy pass with no render pass after it: the uploads a
+ * dispatch reads land, and a pending clear stays pending, so a compute pass
+ * between a clear and the first draw does not cost an empty render pass. */
+static qboolean RGF_CopyOnly (void)
+{
+	qboolean	ok;
+
+	if (!RGF_EnsureCmd ())
+		return false;
+	RG_Res_ClearTargets (rgf_cmd);
+	ok = RGF_CopyPass ();
+	RG_Res_ClearPlaceholders (rgf_cmd);
+	/* The stream is the draws', and there are none; what it held went out
+	 * in that pass, so it starts again. */
+	rgf_frame_stream += rgf_streamlen;
+	rgf_streamlen = 0;
+	rgf_stream_indices = false;
+	return ok;
+}
+
+SDL_GPUCommandBuffer *RG_Frame_ComputeBegin (qboolean touches_target, qboolean samples)
+{
+	if (rgf_numdraws || (rgf_clear_mask && touches_target))
+		RGF_EndSegment ();
+	else if (!RGF_CopyOnly ())
+		return NULL;
+	/* SDL 3.4.12 returns a texture to SAMPLER after a copy or a render pass
+	 * with a barrier whose second scope is the vertex and fragment stages
+	 * alone, and SDL_BindGPUComputeSamplers adds none: a compute read of
+	 * what this command buffer wrote would race it.  A submit and its fence
+	 * make the writes visible to the next submit; the dispatches that sample
+	 * are rare (the palette LUT at a metric change), so the stall is too. */
+	if (samples && !RGF_SubmitMidFrame ())
+		return NULL;
+	if (!RGF_EnsureCmd ())
+		return NULL;
+	return rgf_cmd;
+}
+
+void RG_Frame_ComputeEnd (qboolean dispatched)
+{
+	if (dispatched)
+	{
+		rgf_frame_cpasses++;
+		rgf_cpasses++;
+	}
+	if (!rgf_active)
+		RGF_Submit ();
+}
+
+SDL_GPUBuffer *RG_Frame_Standin (void)
+{
+	return rgf_ssbo;
+}
+
+qboolean RG_Frame_Readback (const SDL_GPUTextureRegion *tex, const SDL_GPUBufferRegion *buf,
+			    void *dst, Uint32 bytes)
+{
+	SDL_GPUTransferBufferCreateInfo	ci;
+	SDL_GPUTransferBuffer		*tb;
+	SDL_GPUCopyPass			*copy;
+	qboolean			ok;
+	void				*map;
+
+	if (!bytes)
+		return true;
+	RGF_EndSegment ();
+	if (!rgf_cmd)
+		return false;
+	SDL_zero (ci);
+	ci.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
+	ci.size = bytes;
+	tb = SDL_CreateGPUTransferBuffer (rg_dev, &ci);
+	if (!tb)
+	{
+		RGF_Warn ("SDL_GPU: cannot create a %u-byte download buffer (%s)\n",
+			  (unsigned int) bytes, SDL_GetError ());
+		if (!rgf_active)
+			RGF_Submit ();	/* what the segment's end recorded, as RG_Frame_Flush */
+		return false;
+	}
+	copy = SDL_BeginGPUCopyPass (rgf_cmd);
+	if (tex)
+	{
+		SDL_GPUTextureTransferInfo	d;
+
+		SDL_zero (d);
+		d.transfer_buffer = tb;
+		d.pixels_per_row = tex->w;
+		d.rows_per_layer = tex->h;
+		SDL_DownloadFromGPUTexture (copy, tex, &d);
+	}
+	else
+	{
+		SDL_GPUTransferBufferLocation	d;
+
+		SDL_zero (d);
+		d.transfer_buffer = tb;
+		SDL_DownloadFromGPUBuffer (copy, buf, &d);
+	}
+	SDL_EndGPUCopyPass (copy);
+	ok = RGF_SubmitMidFrame ();
+	if (ok)
+	{
+		map = SDL_MapGPUTransferBuffer (rg_dev, tb, false);
+		ok = (map != NULL);
+		if (ok)
+		{
+			memcpy (dst, map, bytes);
+			SDL_UnmapGPUTransferBuffer (rg_dev, tb);
+		}
+		else
+			RGF_Warn ("SDL_GPU: cannot map the download buffer (%s)\n", SDL_GetError ());
+	}
+	SDL_ReleaseGPUTransferBuffer (rg_dev, tb);
+	/* Outside a frame the submit was the whole of one, as RG_Frame_Flush's. */
+	if (!rgf_active)
+		RGF_EndOfFrame ();
+	if (ok)
+	{
+		rgf_frame_reads++;
+		rgf_reads++;
+	}
+	return ok;
 }
 
 void RG_Frame_Flush (void)
@@ -1457,6 +1655,8 @@ void RG_Frame_End (qboolean show)
 	rgf_last_stream = rgf_frame_stream;
 	rgf_last_ssbo = rgf_frame_ssbo;
 	rgf_last_standin = rgf_frame_standin;
+	rgf_last_cpasses = rgf_frame_cpasses;
+	rgf_last_reads = rgf_frame_reads;
 	rgf_frames++;
 }
 
@@ -1547,7 +1747,8 @@ void RG_Frame_Init (void)
 		SDL_GPUBufferCreateInfo	ci;
 
 		SDL_zero (ci);
-		ci.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
+		/* compute's read-only slots too (#340 P5a-2) */
+		ci.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ;
 		ci.size = RG_SSBO_STANDIN_BYTES;
 		rgf_ssbo = SDL_CreateGPUBuffer (rg_dev, &ci);
 		if (!rgf_ssbo)
@@ -1570,6 +1771,9 @@ void RG_Frame_Shutdown (void)
 	while (rgf_numretired_bufs)
 		SDL_ReleaseGPUBuffer (rg_dev, rgf_retired_bufs[--rgf_numretired_bufs]);
 	if (rgf_vbuf)	SDL_ReleaseGPUBuffer (rg_dev, rgf_vbuf);
+	if (rgf_ibuf)	SDL_ReleaseGPUBuffer (rg_dev, rgf_ibuf);
+	rgf_ibuf = NULL;
+	rgf_ibuf_size = 0;
 	if (rgf_quadbuf) SDL_ReleaseGPUBuffer (rg_dev, rgf_quadbuf);
 	if (rgf_ssbo)	SDL_ReleaseGPUBuffer (rg_dev, rgf_ssbo);
 	rgf_ssbo = NULL;
@@ -1598,6 +1802,10 @@ void RG_Frame_Status (void)
 		    RG_LayoutCount (), rgf_dropped, rgf_frames);
 	Con_Printf ("[RENDERER] SDL_GPU storage slots last frame: %d bound to a buffer, %d to the "
 		    "stand-in\n", rgf_last_ssbo, rgf_last_standin);
+	Con_Printf ("[RENDERER] SDL_GPU compute last frame: %d passes, %d readbacks; since boot %lu "
+		    "passes, %lu readbacks; indirect draws none until P5c\n",
+		    rgf_last_cpasses, rgf_last_reads, rgf_cpasses, rgf_reads);
+	RG_Compute_Status ();
 	Con_Printf ("[RENDERER] SDL_GPU scene depth %s (%s); drawing into framebuffer %u (%dx%d%s)\n",
 		    RGF_DepthName (rgf_depth_fmt), rgf_depth_sampled ? "sampled too" : "not sampled",
 		    rgf_fbo, rgf_tgt.w, rgf_tgt.h, rgf_tgt_ok ? "" : ", incomplete");

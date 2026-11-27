@@ -14,12 +14,13 @@
  * names a GL entry point: the GL arm of each is the bare call it replaced, so
  * a GL build issues what it issued before, call for call (#340 P5a-1).
  *
- * Under -gpu the compute passes are still off (gl_renderer_caps.
- * compute_shaders is false in GL_Init_NullGL, and each consumer has its own
- * gate), so the SDL_GPU arms are never reached.  Each one that would need the
- * backend P5a-2 builds notes the call (RG_NoteUnhandled, so gpu_unrouted
- * shows a gate leak) and answers neutrally; R_MaxStorageBindings and
- * R_StorageFormatOk already answer for SDL_GPU.
+ * Under -gpu each SDL_GPU arm is the backend call of the same name (#340
+ * P5a-2): a dispatch is a compute pass of its own (rg_compute.c), so a
+ * barrier is already met; the readbacks submit what is recorded and wait for
+ * it; the storage formats are SDL_GPUTextureSupportsFormat's answer.
+ * GL_Init_NullGL turns compute_shaders on, and the passes not routed yet --
+ * the light cluster, the world cull, Hi-Z, SSAO -- keep a gate each, which
+ * their sub-phases lift; the palette LUT runs.
  *
  * Desktop GL only: the ES tier has no compute and no image load/store, and
  * every consumer compiles out there, so does this. */
@@ -31,14 +32,15 @@
 
 /* glDispatchCompute with the program bound by R_UseProgram. */
 void	R_DispatchCompute (GLuint groups_x, GLuint groups_y, GLuint groups_z);
-/* glMemoryBarrier.  Under -gpu (P5a-2) a pass boundary. */
+/* glMemoryBarrier.  Under -gpu met by the pass boundary every dispatch has. */
 void	R_MemoryBarrier (GLbitfield barriers);
 /* glDeleteProgram of a program R_Program_Create made. */
 void	R_DeleteProgram (GLuint program);
 /* glGetIntegerv (GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS). */
 int	R_MaxStorageBindings (void);
 /* glGetBufferSubData from the buffer bound to `target`.  False when nothing
- * was read: the GL arm without the entry point, the -gpu arm until P5a-2. */
+ * was read: the GL arm without the entry point, the -gpu arm when the range
+ * is outside the buffer or the device fails. */
 qboolean R_ReadBuffer (GLenum target, GLintptr offset, GLsizeiptr size, void *data);
 /* glGetTexImage of `texture`'s `level`, binding it for edit around the read
  * as the callers did.  False when nothing was read, as R_ReadBuffer. */
@@ -47,7 +49,7 @@ qboolean R_ReadTexImage (GLenum target, GLuint texture, GLint level, GLenum form
 /* Whether a texture of `internalformat` on `target` can be bound as a
  * storage image with `access` (GL_WRITE_ONLY / GL_READ_WRITE).  GL 4.3
  * guarantees every format the passes use, so the GL arm says yes; SDL_GPU
- * guarantees few of them, and its arm says no until P5a-2 probes them. */
+ * guarantees few of them, and its arm asks the device. */
 qboolean R_StorageFormatOk (GLenum internalformat, GLenum target, GLenum access);
 
 #endif	/* !USE_GLES */

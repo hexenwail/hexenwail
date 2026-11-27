@@ -124,6 +124,9 @@ CANON.update({
     # SS_BindTex / R_SSAO_Apply bind its four textures on, in sampler order
     "u_world_depth": "SSAO_TEX_UNIT", "u_scene_depth": "SSAO_TEX_UNIT + 1",
     "filtered_ao": "SSAO_TEX_UNIT + 2", "prepared_depth": "SSAO_TEX_UNIT + 3",
+    # the softemu palette LUT's compute builder (PP_BuildPaletteLUT_GPU, #340
+    # P5a-2): the 256x1 palette, bound at 0 as TEXBIND(0) says
+    "u_palette": "0",
 })
 # (program, sampler) left without a unit, and why that is right.  Empty
 # since #532: an unset sampler reads unit 0 on GL and is counted under -gpu
@@ -468,10 +471,19 @@ def setup_functions(root, rows):
     # program variable -> the ids it is created from, per function, so a
     # local `prog` in two functions is never read as one variable
     create_rx = r"\b(\w+)\s*=\s*R_Program_Create\s*\(\s*(RPROG_\w+)\s*\)"
+    # an array of programs made from an array of ids (gl_postprocess.c's
+    # palette LUT builders, one per metric): every id in that table
+    table_rx = r"\b(\w+)\s*\[\s*\w+\s*\]\s*=\s*R_Program_Create\s*\(\s*(\w+)\s*\[\s*\w+\s*\]\s*\)"
     created_in = {}     # (file, variable) -> {function: {ids}}
     for fname, (rel, body) in allfns.items():
         for var, pid in re.findall(create_rx, body):
             created_in.setdefault((rel, var), {}).setdefault(fname, set()).add(pid)
+        for var, tab in re.findall(table_rx, body):
+            t = re.search(r"\b%s\s*\[[^\]]*\]\s*=\s*\{(.*?)\};" % re.escape(tab), files[rel], re.S)
+            ids = set(re.findall(r"\b(RPROG_(?!LINK_)\w+)", t.group(1))) if t else set()
+            if not ids:
+                fail("%s: %s is made from %s[], whose ids are not found" % (fname, var, tab))
+            created_in.setdefault((rel, var + "[]"), {}).setdefault(fname, set()).update(ids)
     if "R_ProgramSamplerUnit" not in allfns:
         fail("gl_shader.c: no R_ProgramSamplerUnit")
     out = {}
@@ -492,7 +504,7 @@ def setup_functions(root, rows):
         # this function's own creation of it, else the one function that
         # creates it (a file-scope program)
         for _, prog, _, _, _ in assigns:
-            where = created_in.get((rel, prog), {})
+            where = created_in.get((rel, re.sub(r"\[\s*\w+\s*\]$", "[]", prog)), {})
             if name in where:
                 ids |= where[name]
             elif len(where) == 1:
@@ -564,8 +576,12 @@ def check_programs(root, rows, setups, defs):
     helpers = {fn for fn in setups if not setups[fn][3]}
     checked = 0
     for pid, (pname, link, stages) in sorted(rows.items()):
-        if link == "RPROG_LINK_COMPUTE":
-            continue        # GL fixes compute units with TEXBIND2; SDL_GPU compute is P5
+        # GL fixes compute units with TEXBIND / TEXBIND2; SDL_GPU needs each
+        # named, which every pass's own sub-phase does as it is routed (#340
+        # P5a-2: the palette LUT), so a compute program is held to this once
+        # a set-up function gives it units at all.
+        if link == "RPROG_LINK_COMPUTE" and pid not in by_id:
+            continue
         samplers = []
         for header, body_sym, blob in stages:
             got = stage_samplers(root, body_sym, header_defines(header))
@@ -678,6 +694,8 @@ static size_t q_strlcpy (char *d, const char *s, size_t n) { snprintf (d, n, "%s
 /* the storage blocks' GL points (#340 P2e) are tools/test_rg_sources.py's */
 static int RG_StoragePoint (const char *block) { (void) block; return -1; }
 static int RG_StorageKind (const char *block, int *format) { (void) block; *format = -1; return 0; }
+static int RG_ComputeStoragePoint (const char *block) { (void) block; return -1; }
+#define RG_SSBO_NEEDED 0
 """
 
 HARNESS = r"""
@@ -741,9 +759,9 @@ int main (int argc, char **argv)
 
 	/* 1. reflection: argv[1] a fragment stage, argv[2] a vertex stage */
 	w = load (argv[1], &n);
-	if (!RG_Reflect (w, n, 2, 3, &prog.stage[RPROG_STAGE_FRAGMENT], "frag")) { puts ("REFLECT-FAIL frag"); return 1; }
+	if (!RG_Reflect (w, n, 2, 3, -1, &prog.stage[RPROG_STAGE_FRAGMENT], "frag")) { puts ("REFLECT-FAIL frag"); return 1; }
 	w = load (argv[2], &n);
-	if (!RG_Reflect (w, n, 0, 1, &prog.stage[RPROG_STAGE_VERTEX], "vert")) { puts ("REFLECT-FAIL vert"); return 1; }
+	if (!RG_Reflect (w, n, 0, 1, -1, &prog.stage[RPROG_STAGE_VERTEX], "vert")) { puts ("REFLECT-FAIL vert"); return 1; }
 	printf ("NOTES-AT-REFLECT %d\n", notes);
 	for (s = 0; s < 2; s++)
 		for (i = 0; i < prog.stage[s].num_samplers; i++)
@@ -880,13 +898,13 @@ def check_backend(root, verbose):
     parts = [lift(rgi, r"^typedef enum \{\s*RG_TT_2D,", "rg_textype_t"),
              lift(rgi, r"^typedef enum \{\s*RG_SC_FLOAT,", "rg_sampclass_t")]
     for d in ("RG_UNIT_NONE", "RG_MAX_STAGE_SAMPLERS", "RG_MAX_STAGE_UBOS", "RG_MAX_STAGE_SSBOS",
-              "RG_SSBO_STANDIN_BYTES"):
+              "RG_MAX_STAGE_IMAGES", "RG_SSBO_STANDIN_BYTES"):
         m = re.search(r"^#define %s\s+\S+" % d, rgi, re.M)
         if not m:
             fail("rg_internal.h: no %s" % d)
         else:
             parts.append(m.group(0))
-    for t in ("rgsampler_t", "rgubo_t", "rgssbo_t", "rgstage_t"):
+    for t in ("rgsampler_t", "rgubo_t", "rgssbo_t", "rgimage_t", "rgstage_t"):
         m = re.search(r"typedef struct \{[^{}]*\} %s;" % t, rgi)
         if not m:
             fail("rg_internal.h: cannot lift %s" % t)
@@ -1101,8 +1119,10 @@ def check_backend(root, verbose):
     if "slots[sb->slot] = rgf_ssbo;" not in rs:
         fail("RGF_RecordStage must bind the stand-in to a storage slot with nothing at its GL point")
     init = lift(rgf, r"^void RG_Frame_Init \(", "RG_Frame_Init")
-    if not re.search(r"ci\.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;\s*ci\.size = RG_SSBO_STANDIN_BYTES;", init):
-        fail("RG_Frame_Init must create the RG_SSBO_STANDIN_BYTES stand-in")
+    if not re.search(r"ci\.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ \| SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ;"
+                     r"\s*ci\.size = RG_SSBO_STANDIN_BYTES;", init):
+        fail("RG_Frame_Init must create the RG_SSBO_STANDIN_BYTES stand-in, readable by a graphics or a "
+             "compute stage (#340 P5a-2)")
     cps = lift(rgf, r"^static qboolean RGF_CopyPass \(", "RGF_CopyPass")
     if "memset (map + stream + quad, 0, ssbo);" not in cps or "rgf_ssbo_uploaded = true;" not in cps:
         fail("RGF_CopyPass must upload the stand-in's zeros once")

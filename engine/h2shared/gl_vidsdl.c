@@ -2070,11 +2070,19 @@ static void GL_Init_NullGL (void)
 	gl_renderer_caps.profile_name = "SDL_GPU";
 	/* Read-only storage buffers in graphics stages (#340 P2e): rg_buffer.c
 	 * binds each GL binding point at its block's slot, so instanced alias
-	 * models and skeletal skinning draw as on GL.  Compute (the light
-	 * cluster, culling, SSAO, GPU particles) is P5 and stays off: it tests
-	 * compute_shaders, which stays false. */
+	 * models and skeletal skinning draw as on GL. */
 	gl_renderer_caps.shader_storage = true;
 	gl_renderer_caps.skeletal_animation = true;
+	/* Compute (#340 P5a-2): rg_compute.c runs each dispatch as a compute
+	 * pass, so the palette LUT is built on the GPU, as on GL.  The passes
+	 * not routed yet keep a gate each, which their sub-phase lifts: the
+	 * light cluster (R_LightCluster_Build / _ShadesWorld, P5b), the world
+	 * cull (R_BuildWorldCull, P5c), Hi-Z (R_HiZ_Available, P5d) and SSAO
+	 * (R_SSAO_WantsSceneFBO, P5e); the GPU particles stay off on every
+	 * tier.  Indirect draws come with the cull: nothing issues one until
+	 * P5c.  Before GL_PostProcess_Init, which builds the LUT. */
+	gl_renderer_caps.compute_shaders = true;
+	gl_renderer_caps.indirect_draw = true;
 	/* RG_TexParameter carries GL_TEXTURE_LOD_BIAS into the sampler's
 	 * mip_lod_bias; without this GL_ApplyLodBias dropped gl_lodbias under
 	 * -gpu (GitHub #521).  SDL_GPU's Metal driver ignores mip_lod_bias

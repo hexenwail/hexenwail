@@ -205,6 +205,12 @@ static qboolean LC_BindParamsBlock (GLuint prog)
 
 static qboolean R_LightCluster_Build (void)
 {
+#ifdef USE_SDL_GPU
+	/* The cluster is P5b of #340: its buffer, LcParams mirror and grid are
+	 * not routed yet.  R_LightCluster_ShadesWorld says no in lockstep. */
+	if (R_GPU ())
+		return false;
+#endif
 	if (lc_failed)
 		return false;
 	if (!gl_renderer_caps.compute_shaders || !gl_renderer_caps.shader_storage)
@@ -476,6 +482,13 @@ qboolean R_LightCluster_ShadesWorld (void)
 	 * light and every frame after takes the CPU path.  Losing dlights for a
 	 * frame on a driver that could not build the program is a better failure
 	 * than double-lighting the world on every healthy one. */
+#ifdef USE_SDL_GPU
+	/* In lockstep with R_LightCluster_Build's gate (#340 P5b lifts both):
+	 * a yes here with no grid would stand the CPU dlights down and leave
+	 * the world with no dynamic light at all. */
+	if (R_GPU ())
+		return false;
+#endif
 	return r_lightclusters.integer != 0 && !lc_failed &&
 	       gl_renderer_caps.compute_shaders && gl_renderer_caps.shader_storage;
 }

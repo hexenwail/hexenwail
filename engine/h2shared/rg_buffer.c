@@ -90,6 +90,9 @@
 #ifndef GL_SHADER_STORAGE_BUFFER
 #define GL_SHADER_STORAGE_BUFFER	0x90D2
 #endif
+#ifndef GL_DRAW_INDIRECT_BUFFER
+#define GL_DRAW_INDIRECT_BUFFER		0x8F3F
+#endif
 
 /* GL_SHADER_STORAGE_BUFFER binding points shadowed: the engine's highest is
  * LIGHT_SSBO_BINDING, 8, past GL 4.3's minimum of 8 in all. */
@@ -115,6 +118,7 @@ typedef struct {
 	qboolean		alive;
 	SDL_GPUBuffer		*buf;		/* NULL until glBufferData gives it a size */
 	Uint32			size;
+	SDL_GPUBufferUsageFlags	usage;		/* buf's, RGB_Usage's for the target that made it */
 	rgbupload_t		*uploads, **uploads_tail;
 	unsigned int		read_segment;	/* RG_Frame_Segment () of the last draw */
 	qboolean		read_ever;
@@ -151,6 +155,7 @@ static rgnames_t	rgb_vaonames = { NULL, sizeof(rgvao_t), 0, 0, NULL, 0, 0 };
 
 static GLuint		rgb_array_buffer;	/* GL_ARRAY_BUFFER */
 static GLuint		rgb_storage_buffer;	/* GL_SHADER_STORAGE_BUFFER, the generic binding */
+static GLuint		rgb_indirect_buffer;	/* GL_DRAW_INDIRECT_BUFFER (#340 P5a-2) */
 static GLuint		rgb_vao;		/* GL_VERTEX_ARRAY_BINDING */
 
 /* The indexed GL_SHADER_STORAGE_BUFFER binding points, context state as in
@@ -382,6 +387,8 @@ void RG_DeleteBuffers (GLsizei n, const GLuint *buffers)
 			rgb_array_buffer = 0;
 		if (rgb_storage_buffer == buffers[i])
 			rgb_storage_buffer = 0;
+		if (rgb_indirect_buffer == buffers[i])
+			rgb_indirect_buffer = 0;
 		/* and every indexed binding point it occupied goes back to 0 */
 		for (k = 0; k < RGB_SSBO_POINTS; k++)
 		{
@@ -412,6 +419,9 @@ void RG_BindBuffer (GLenum target, GLuint buffer)
 	case GL_SHADER_STORAGE_BUFFER:
 		rgb_storage_buffer = buffer;
 		break;
+	case GL_DRAW_INDIRECT_BUFFER:
+		rgb_indirect_buffer = buffer;
+		break;
 	case GL_ELEMENT_ARRAY_BUFFER:
 		v = RGB_Vao (rgb_vao);
 		if (v)
@@ -432,6 +442,8 @@ static rgbuf_t *RGB_Bound (GLenum target, const char *what)
 		name = rgb_array_buffer;
 	else if (target == GL_SHADER_STORAGE_BUFFER)
 		name = rgb_storage_buffer;
+	else if (target == GL_DRAW_INDIRECT_BUFFER)
+		name = rgb_indirect_buffer;
 	else if (target == GL_ELEMENT_ARRAY_BUFFER)
 	{
 		v = RGB_Vao (rgb_vao);
@@ -448,10 +460,32 @@ static rgbuf_t *RGB_Bound (GLenum target, const char *what)
 	return b;
 }
 
-/* b's SDL_GPUBuffer, made `size` bytes now; the old one retired.  Every
- * buffer can be drawn from as vertices, indices and read-only storage: GL
- * does not say which a name will be until it is bound (#340 P2e). */
-static qboolean RGB_Create (rgbuf_t *b, Uint32 size)
+/* b's SDL_GPUBuffer, made `size` bytes now through `target`; the old one
+ * retired.  Every buffer can be read as indices and read-only storage, read
+ * and written by a compute pass, and read as indirect draw commands, and
+ * every one but an element buffer drawn from as vertices: GL does not say
+ * which a name will be until it is bound (#340 P2e, P5a-2; whether D3D12 and
+ * Metal mind the union is P7's question).
+ *
+ * Not an element buffer: SDL's Vulkan backend returns a buffer to the first
+ * usage it has after each copy into it, vertex before index, and makes the
+ * copy visible to that usage alone.  With both, the first indexed draw after
+ * an upload read indices the barrier never covered, which sync validation
+ * reports as a read-after-write hazard (#340 P5a-2). */
+static SDL_GPUBufferUsageFlags RGB_Usage (GLenum target)
+{
+	SDL_GPUBufferUsageFlags	usage = SDL_GPU_BUFFERUSAGE_VERTEX | SDL_GPU_BUFFERUSAGE_INDEX |
+					SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ |
+					SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ |
+					SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE |
+					SDL_GPU_BUFFERUSAGE_INDIRECT;
+
+	if (target == GL_ELEMENT_ARRAY_BUFFER)
+		usage &= ~SDL_GPU_BUFFERUSAGE_VERTEX;
+	return usage;
+}
+
+static qboolean RGB_Create (rgbuf_t *b, Uint32 size, GLenum target)
 {
 	SDL_GPUBufferCreateInfo	ci;
 
@@ -461,8 +495,7 @@ static qboolean RGB_Create (rgbuf_t *b, Uint32 size)
 	if (!size)
 		return true;
 	SDL_zero (ci);
-	ci.usage = SDL_GPU_BUFFERUSAGE_VERTEX | SDL_GPU_BUFFERUSAGE_INDEX |
-		   SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
+	ci.usage = RGB_Usage (target);
 	ci.size = size;
 	b->buf = SDL_CreateGPUBuffer (rg_dev, &ci);
 	if (!b->buf)
@@ -472,6 +505,7 @@ static qboolean RGB_Create (rgbuf_t *b, Uint32 size)
 		return false;
 	}
 	b->size = size;
+	b->usage = ci.usage;
 	rgb_created++;
 	return true;
 }
@@ -493,7 +527,8 @@ void RG_BufferData (GLenum target, GLsizeiptr size, const void *data, GLenum usa
 	 * would read are both replaced. */
 	RGB_FlushIfRead (b);
 	RGB_DropUploads (b);
-	if ((!b->buf || b->size != (Uint32) size) && !RGB_Create (b, (Uint32) size))
+	if ((!b->buf || b->size != (Uint32) size || b->usage != RGB_Usage (target)) &&
+	    !RGB_Create (b, (Uint32) size, target))
 		return;
 	if (data && size > 0)
 		RGB_Queue (b, 0, (Uint32) size, data, true);
@@ -555,6 +590,30 @@ int RG_MaxStorageBindings (void)
 	return RGB_SSBO_POINTS;
 }
 
+/* glGetBufferSubData (#340 P5a-2): synchronous, as GL's is. */
+qboolean RG_ReadBuffer (GLenum target, GLintptr offset, GLsizeiptr size, void *data)
+{
+	rgbuf_t			*b = RGB_Bound (target, "glGetBufferSubData on a target other than "
+						"GL_ARRAY_BUFFER / ELEMENT_ARRAY / SHADER_STORAGE / "
+						"DRAW_INDIRECT (nothing read)");
+	SDL_GPUBufferRegion	r;
+
+	if (!b)
+		return false;
+	if (!b->buf || offset < 0 || size < 0 || (Uint64) offset + (Uint64) size > b->size)
+	{
+		/* GL_INVALID_VALUE in GL: nothing is read. */
+		RG_NoteUnhandled ("glGetBufferSubData outside the buffer's data store (nothing read)");
+		return false;
+	}
+	SDL_zero (r);
+	r.buffer = b->buf;
+	r.offset = (Uint32) offset;
+	r.size = (Uint32) size;
+	/* the queued uploads land first: RG_Frame_Readback ends the segment */
+	return RG_Frame_Readback (NULL, &r, data, (Uint32) size);
+}
+
 /* GL_Upload's -gpu arm.  GL streams into one ring buffer per frame and
  * binds each upload as a range of it; SDL_GPU binds a storage buffer whole,
  * with no offset, so each upload in a frame gets a buffer of its own and is
@@ -599,7 +658,9 @@ void RG_Upload (GLenum target, const void *data, size_t numbytes, GLuint *outbuf
 		return;
 	for (cap = 256; cap < (Uint32) numbytes; cap <<= 1)
 		;
-	if ((!b->buf || b->size < (Uint32) numbytes || b->size / 4 > cap) && !RGB_Create (b, cap))
+	if ((!b->buf || b->size < (Uint32) numbytes || b->size / 4 > cap ||
+	     b->usage != RGB_Usage (GL_SHADER_STORAGE_BUFFER)) &&
+	    !RGB_Create (b, cap, GL_SHADER_STORAGE_BUFFER))
 		return;
 	/* Taken before queueing: a queue past 64 MB flushes, and outside a frame
 	 * that ends the frame and rewinds the stream. */
