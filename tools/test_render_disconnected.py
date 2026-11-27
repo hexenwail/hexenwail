@@ -48,7 +48,7 @@ else:
         errors.append("the connection guard must come before R_PushDlights and R_RenderView")
 
 screen = strip((ROOT / "engine/h2shared/gl_screen.c").read_text())
-if not re.search(r"else if \(scr_drawloading\)\s*\{\s*if \(!cl\.worldmodel \|\| cls\.signon != SIGNONS\)\s*Draw_MenuBackdrop \(\);",
+if not re.search(r"else if \(scr_drawloading\)\s*\{\s*if \(!cl\.worldmodel \|\| cls\.signon != SIGNONS(?: \|\| scr_loadinglive)?\)\s*Draw_MenuBackdrop \(\);",
                  screen):
     errors.append("gl_screen.c: the plaque no longer covers a not-signed-on frame with Draw_MenuBackdrop; "
                   "skipping the 3D view there would now show garbage")

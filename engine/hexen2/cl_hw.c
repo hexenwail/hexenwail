@@ -122,6 +122,7 @@ static char hwcl_server_name[HW_ADDRESS_MAX + 1];
 static netchan_t hwcl_netchan;
 static double hwcl_connect_time;
 static double hwcl_connect_started;
+static int hwcl_connect_tries;	/* connect packets sent; the loading plaque shows retries */
 static double hwcl_last_received;
 #define HWCL_CONNECT_TIMEOUT 15.0
 static qboolean hwcl_received_packet;
@@ -421,6 +422,7 @@ static qboolean HWCL_LoadModels (void)
 		"models/assassin.mdl", "models/succubus.mdl"
 	};
 	qmodel_t *model;
+	char mapname[MAX_QPATH];
 	int i;
 
 	memset (cl.model_precache, 0, sizeof(cl.model_precache));
@@ -428,6 +430,15 @@ static qboolean HWCL_LoadModels (void)
 	{
 		if (!hwcl_model_names[i][0])
 			continue;
+		if (i == 1)
+		{
+			COM_FileBase (hwcl_model_names[1], mapname, sizeof(mapname));
+			SCR_SetLoadingStatus ("Loading map %s", mapname);
+		}
+		else
+			SCR_SetLoadingStatus ("Precaching models %d/%d", i,
+					hwcl_model_count - 1);
+		SCR_LoadingTick ();
 		model = Mod_ForName (hwcl_model_names[i], false);
 		/* Index 1 is the world: the caller reports that one and disconnects,
 		 * because by here a download has already been attempted for it.
@@ -455,6 +466,8 @@ static qboolean HWCL_LoadModels (void)
 
 	cl.worldmodel = cl_entities[0].model = cl.model_precache[1];
 	COM_FileBase (hwcl_model_names[1], cl.mapname, sizeof(cl.mapname));
+	SCR_SetLoadingStatus ("Building world");
+	SCR_LoadingTick ();
 	R_NewMap ();
 	HWCL_LoadStrings ();
 	return true;
@@ -469,8 +482,12 @@ static void HWCL_LoadSounds (void)
 	S_BeginPrecaching ();
 	for (i = 1; i < hwcl_sound_count; i++)
 	{
-		if (hwcl_sound_names[i][0])
-			cl.sound_precache[i] = S_PrecacheSound (hwcl_sound_names[i]);
+		if (!hwcl_sound_names[i][0])
+			continue;
+		SCR_SetLoadingStatus ("Precaching sounds %d/%d", i,
+				hwcl_sound_count - 1);
+		SCR_LoadingTick ();
+		cl.sound_precache[i] = S_PrecacheSound (hwcl_sound_names[i]);
 	}
 	S_EndPrecaching ();
 	CL_PrecacheTEntSounds ();
@@ -652,6 +669,7 @@ static void HWCL_ParseServerData (void)
 	Con_Printf ("HexenWorld protocol %d, game %s, level %s (player %d%s).\n",
 			hwcl_protocol, gamedir, levelname, playernum & 127,
 			(playernum & 128) ? ", spectator" : "");
+	SCR_SetLoadingStatus ("Receiving sound list");
 	HWCL_StringCmd (va ("soundlist %d 0", hwcl_servercount));
 }
 
@@ -838,6 +856,7 @@ static void HWCL_Reconnect (void)
 	hwcl_state = hwcl_connecting;
 	cls.state = ca_connected;
 	hwcl_connect_started = realtime;
+	hwcl_connect_tries = 0;
 	HWCL_SendConnectPacket ();
 }
 
@@ -2064,7 +2083,11 @@ static void HWCL_ParseServerMessage (void)
 				if (!q_strncasecmp (text, "cmd prespawn ", 13) ||
 					!q_strncasecmp (text, "cmd spawn ", 10) ||
 					!q_strncasecmp (text, "cmd begin", 9))
+				{
+					if (!q_strncasecmp (text, "cmd spawn ", 10))
+						SCR_SetLoadingStatus ("Spawning");
 					HWCL_StringCmd (text + 4);
+				}
 				else if (!q_strcasecmp (text, "skins\n"))
 				{
 					/* This is the legacy skin-download phase.  It uses the same
@@ -2168,6 +2191,12 @@ static void HWCL_SendConnectPacket (void)
 	hwcl_connect_time = realtime;
 	Con_Printf ("Connecting to HexenWorld server %s...\n",
 			HWNET_AdrToString (&hwcl_server));
+	if (hwcl_connect_tries++)
+		SCR_SetLoadingStatus ("Connecting to %s... (retry %d)",
+				HWNET_AdrToString (&hwcl_server), hwcl_connect_tries - 1);
+	else
+		SCR_SetLoadingStatus ("Connecting to %s...",
+				HWNET_AdrToString (&hwcl_server));
 }
 
 qboolean HWCL_Connect (const char *host)
@@ -2194,6 +2223,7 @@ qboolean HWCL_Connect (const char *host)
 	hwcl_state = hwcl_connecting;
 	cls.demonum = -1;
 	hwcl_connect_started = realtime;
+	hwcl_connect_tries = 0;
 	HWCL_SendConnectPacket ();
 	return true;
 }
@@ -2473,6 +2503,7 @@ static void HWCL_ConnectionlessPacket (void)
 		hwcl_state = hwcl_connected;
 		hwcl_last_received = realtime;
 		Con_Printf ("HexenWorld connection accepted.\n");
+		SCR_SetLoadingStatus ("Waiting for server info");
 		/* Recorded only once a server has answered, so a mistyped or dead
 		 * address never reaches the menu's list. */
 		M_HW_RememberServer (hwcl_server_name);
@@ -2503,9 +2534,8 @@ void HWCL_Frame (void)
 		Host_Error ("HexenWorld server connection timed out");
 	if (hwcl_state == hwcl_connecting && realtime - hwcl_connect_time > 5.0)
 	{
-		/* No answer yet: show the console's retry lines rather than a
-		 * frozen plaque while the server stays silent. */
-		SCR_EndLoadingPlaque ();
+		/* No answer yet: resend.  The plaque stays up and its status line
+		 * counts the retry (GitHub #571). */
 		HWCL_SendConnectPacket ();
 	}
 

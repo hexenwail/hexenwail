@@ -80,6 +80,10 @@ static void HWCL_PrintDownloadProgress (int percent, const char *status)
 	{
 		CON_Progressf ("[%s] %3d%% %ld B", bar,
 				hwcl_download_percent, hwcl_download_bytes);
+		/* Numbers first: a long name is what gets cut, not the progress. */
+		SCR_SetLoadingStatus ("Downloading %d%% (%ld KB) %s",
+				hwcl_download_percent, hwcl_download_bytes / 1024,
+				hwcl_download_name);
 	}
 }
 
@@ -215,9 +219,9 @@ static qboolean HWCL_CheckOrDownloadFile (const char *filename)
 	hwcl_download_bytes = 0;
 	HWCL_ResetDownloadProgress ();
 	Con_Printf ("Downloading %s...\n", hwcl_download_name);
-	/* A plaque held over a transfer of unknown length only runs into the
-	 * 25 second "load timeout"; show the console progress instead. */
-	SCR_EndLoadingPlaque ();
+	/* The plaque stays up: its status line shows the transfer, and every
+	 * change to that line restarts the "load timeout" (GitHub #571). */
+	SCR_SetLoadingStatus ("Downloading %s", hwcl_download_name);
 	HWCL_StringCmd (va ("download %s", hwcl_download_name));
 	return false;
 }
@@ -241,6 +245,7 @@ static void HWCL_SoundNextDownload (void)
 
 	HWCL_CancelDownload ();
 	HWCL_LoadSounds ();
+	SCR_SetLoadingStatus ("Receiving model list");
 	HWCL_StringCmd (va ("modellist %d 0", hwcl_servercount));
 }
 
@@ -277,6 +282,7 @@ static void HWCL_ModelNextDownload (void)
 		return;
 	}
 	Con_Printf ("HexenWorld precache lists received; requesting signon.\n");
+	SCR_SetLoadingStatus ("Receiving world state");
 	HWCL_StringCmd (va ("prespawn %d 0", hwcl_servercount));
 }
 
@@ -289,6 +295,7 @@ static void HWCL_SkinNextDownload (void)
 
 	if (hwcl_download_number == 0)
 		Con_Printf ("Checking HexenWorld player skins...\n");
+	SCR_SetLoadingStatus ("Checking player skins");
 	hwcl_download_type = hwcl_dl_skin;
 	for ( ; hwcl_download_number < HWCL_MAX_CLIENTS; hwcl_download_number++)
 	{

@@ -163,7 +163,7 @@ static	cvar_t	alias_scr_clock = {"scr_clock", "0", CVAR_NONE};
 
 #if !defined(H2W)
 static qboolean	scr_drawloading;
-static float	scr_disabled_time;
+static double	scr_disabled_time;	/* Sys_DoubleTime of the last progress */
 int		total_loading_size, current_loading_size, loading_stage;
 #endif	/* H2W */
 qboolean	scr_disabled_for_loading;
@@ -1422,6 +1422,8 @@ static void SCR_DrawPause (void)
 }
 
 #if !defined(H2W)
+#include "scr_loading.inc"
+
 /*
 ==============
 SCR_DrawLoading
@@ -1439,6 +1441,7 @@ void SCR_DrawLoading (void)
 	pic = Draw_CacheLoadingPic ();
 	offset = (vid.width - pic->width) / 2;
 	Draw_TransPic (offset, 0, pic);
+	SCR_DrawLoadingStatus (pic->height + 8);
 }
 #else
 void SCR_DrawLoading (void)
@@ -1452,6 +1455,7 @@ void SCR_DrawLoading (void)
 	pic = Draw_CachePic ("gfx/menu/loading.lmp");
 	offset = (vid.width - pic->width) / 2;
 	Draw_TransPic (offset, 0, pic);
+	SCR_DrawLoadingStatus (pic->height + 8);
 
 	if (loading_stage == 0)
 		return;
@@ -1501,6 +1505,7 @@ void SCR_BeginLoadingPlaque (void)
 	scr_centertime_off = 0;
 	scr_con_current = 0;
 
+	SCR_LoadingBegin ();
 	scr_drawloading = true;
 	scr_fullupdate = 0;
 	Sbar_Changed();
@@ -1508,7 +1513,7 @@ void SCR_BeginLoadingPlaque (void)
 	scr_drawloading = false;
 
 	scr_disabled_for_loading = true;
-	scr_disabled_time = realtime;
+	scr_disabled_time = Sys_DoubleTime ();
 	scr_fullupdate = 0;
 }
 
@@ -1522,6 +1527,7 @@ void SCR_EndLoadingPlaque (void)
 {
 	scr_disabled_for_loading = false;
 	scr_fullupdate = 0;
+	SCR_LoadingEnd ();
 	Con_ClearNotify ();
 }
 #endif	/* H2W */
@@ -2308,6 +2314,11 @@ needs almost the entire 256k of stack space!
 */
 void SCR_UpdateScreen (void)
 {
+#if !defined(H2W)
+	qboolean	live = false;
+	qboolean	was_drawloading = scr_drawloading;
+#endif
+
 	if (block_drawing)
 		return;
 
@@ -2321,7 +2332,7 @@ void SCR_UpdateScreen (void)
 #else
 	if (scr_disabled_for_loading)
 	{
-		if (realtime - scr_disabled_time > 25) {
+		if (!scr_loadingintick && Sys_DoubleTime () - scr_disabled_time > 25) {
 		/* this can happen with clients connected to servers
 		 * older than uHexen2-1.5.6 who don't issue an error
 		 * upon changelevel failures. Or, it could happen if
@@ -2330,8 +2341,11 @@ void SCR_UpdateScreen (void)
 			scr_disabled_for_loading = false;
 			total_loading_size = 0;
 			loading_stage = 0;
+			SCR_LoadingEnd ();
 			Con_Printf ("load timeout.\n");
 		}
+		else if (SCR_LoadingFrameDue ())
+			live = true;
 		else {
 			return;
 		}
@@ -2343,6 +2357,14 @@ void SCR_UpdateScreen (void)
 
 	if (!scr_initialized || !con_initialized)
 		return;		// not initialized yet
+
+#if !defined(H2W)
+	/* The plaque is up: draw it again, with its status line, and nothing
+	 * from the world -- a live frame can land mid-precache. */
+	scr_loadinglive = live;
+	if (live)
+		scr_drawloading = true;
+#endif
 
 	GL_BeginRendering (&glx, &gly, &glwidth, &glheight);
 	GL_PostProcess_BeginFrame ();
@@ -2363,6 +2385,9 @@ void SCR_UpdateScreen (void)
 //
 	SCR_SetUpToDrawConsole ();
 
+#if !defined(H2W)
+	if (!scr_loadinglive)
+#endif
 #if FULLSCREEN_INTERMISSIONS
 	// no need to draw view in fullscreen intermission screens
 	if (!cl.intermission)
@@ -2395,7 +2420,7 @@ void SCR_UpdateScreen (void)
 		SCR_DrawNotifyString ();
 		scr_copyeverything = true;
 	}
-	else if (cl.intermission)
+	else if (cl.intermission && !scr_loadinglive)
 	{
 #if !defined(H2W)
 		SB_IntermissionOverlay();
@@ -2418,7 +2443,7 @@ void SCR_UpdateScreen (void)
 		 * plaque instead of black, since the back buffer is undefined
 		 * after the previous SwapBuffers. Mid-game level transitions
 		 * keep the vanilla "darken previous frame" feel. */
-		if (!cl.worldmodel || cls.signon != SIGNONS)
+		if (!cl.worldmodel || cls.signon != SIGNONS || scr_loadinglive)
 			Draw_MenuBackdrop ();
 		else
 			Draw_FadeScreen ();
@@ -2490,5 +2515,12 @@ void SCR_UpdateScreen (void)
 #endif
 
 	GL_EndRendering ();
+
+#if !defined(H2W)
+	if (scr_loadinglive)
+		SCR_LoadingFrameDone ();
+	scr_loadinglive = false;
+	scr_drawloading = was_drawloading;
+#endif
 }
 

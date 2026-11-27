@@ -62,7 +62,10 @@ static char	rec_console[16384];
 static char	rec_stringcmd[16][128];
 static int	rec_stringcmd_count;
 static int	rec_disconnects;
-static int	rec_plaque_ends;
+/* The loading plaque's line, last set.  64 bytes, as scr_loadstatus in
+ * engine/h2shared/scr_loading.inc: what does not fit is cut there too. */
+static char	rec_status[64];
+static int	rec_status_sets;
 static int	rec_loadmodels_calls;
 static int	rec_loadsounds_calls;
 static int	rec_signon_finishes;
@@ -79,7 +82,8 @@ static void rec_reset (void)
 	rec_console[0] = 0;
 	rec_stringcmd_count = 0;
 	rec_disconnects = 0;
-	rec_plaque_ends = 0;
+	rec_status[0] = 0;
+	rec_status_sets = 0;
 	rec_loadmodels_calls = 0;
 	rec_loadsounds_calls = 0;
 	rec_signon_finishes = 0;
@@ -234,7 +238,18 @@ static qboolean CON_EndProgress (const char *fmt, ...)
 
 #define Con_DPrintf Con_Printf
 
-static void SCR_EndLoadingPlaque (void) { rec_plaque_ends++; }
+/* The walk keeps the loading plaque up and reports on its status line
+ * (GitHub #571), so there is deliberately no SCR_EndLoadingPlaque stub: a
+ * walk that drops the plaque again does not build. */
+static void SCR_SetLoadingStatus (const char *fmt, ...)
+{
+	va_list	ap;
+
+	va_start (ap, fmt);
+	vsnprintf (rec_status, sizeof(rec_status), fmt, ap);
+	va_end (ap);
+	rec_status_sets++;
+}
 
 static void HWCL_StringCmd (const char *cmd)
 {
@@ -737,6 +752,8 @@ static void test_progress_display (void)
 	feed_block (sizeof(payload), 25, payload, sizeof(payload));
 	CHECK (console_said ("[==        ]  25% 32 B\r"),
 		"unchanged percent did not update the byte count: %s", rec_console);
+	CHECK (!strcmp (rec_status, "Downloading 25% (0 KB) maps/progress.bsp"),
+		"a block did not update the plaque's status: '%s'", rec_status);
 	CHECK (count_char (rec_console, '\n') == 0,
 		"intermediate progress added %d console-history lines",
 		count_char (rec_console, '\n'));
@@ -753,6 +770,16 @@ static void test_progress_display (void)
 		"completion did not finish the inline line: %s", rec_console);
 	CHECK (!rec_progress_active, "completion left progress active");
 	unlink (tmppath ("maps/progress.bsp"));
+
+	/* A long name is what the 64-byte status line cuts, never the progress:
+	 * a cut progress would freeze the line and stop restarting the load
+	 * timeout. */
+	rec_reset ();
+	begin_download ("maps/a_rather_long_custom_map_name_from_some_mod_pack.bsp");
+	feed_block (sizeof(payload), 40, payload, sizeof(payload));
+	CHECK (!strncmp (rec_status, "Downloading 40% (0 KB) maps/", 28),
+		"a long name pushed the progress off the plaque: '%s'", rec_status);
+	HWCL_CancelDownload ();
 
 	/* Cancellation and failures replace the active line with a terminated
 	 * status, rather than leaving a carriage-return line pending. */
@@ -960,6 +987,8 @@ static void test_missing_world (void)
 	HWCL_ModelNextDownload ();
 	CHECK (rec_disconnects == 0, "a loadable world disconnected");
 	CHECK (sent_cmd ("prespawn 7 0"), "a loadable world did not ask to spawn");
+	CHECK (!strcmp (rec_status, "Receiving world state"),
+		"prespawn did not name its stage: '%s'", rec_status);
 }
 
 /* ================================================================== */
@@ -980,7 +1009,8 @@ static void test_walk_requests (void)
 	HWCL_ModelNextDownload ();
 	CHECK (sent_cmd ("download maps/world.bsp"),
 		"the walk did not request the first missing model");
-	CHECK (rec_plaque_ends >= 1, "the walk did not drop the loading plaque");
+	CHECK (!strcmp (rec_status, "Downloading maps/world.bsp"),
+		"the walk did not put the download on the plaque: '%s'", rec_status);
 
 	/* Inline brush models have no file to fetch: asking hwsv for "*1" gets a
 	 * refusal at best, and the walk must step over them rather than stall on
@@ -1068,6 +1098,8 @@ static void test_skin_walk (void)
 		"the skin walk requested an unsafe userinfo path");
 	CHECK (rec_signon_finishes == 1,
 		"refused skin did not let the signon phase continue");
+	CHECK (!strcmp (rec_status, "Checking player skins"),
+		"the skin walk did not name its stage: '%s'", rec_status);
 }
 
 /* ================================================================== */

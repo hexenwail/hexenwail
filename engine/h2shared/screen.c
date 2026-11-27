@@ -146,7 +146,7 @@ cvar_t		scr_menubgalpha = {"scr_menubgalpha", "1", CVAR_ARCHIVE};
 
 #if !defined(H2W)
 static qboolean	scr_drawloading;
-static float	scr_disabled_time;
+static double	scr_disabled_time;	/* Sys_DoubleTime of the last progress */
 int		total_loading_size, current_loading_size, loading_stage;
 #endif	/* H2W */
 qboolean	scr_disabled_for_loading;
@@ -877,6 +877,8 @@ static void SCR_DrawPause (void)
 }
 
 #if !defined(H2W)
+#include "scr_loading.inc"
+
 /*
 ==============
 SCR_DrawLoading
@@ -894,6 +896,10 @@ void SCR_DrawLoading (void)
 	pic = Draw_CacheLoadingPic ();
 	offset = (vid.width - pic->width) / 2;
 	Draw_TransPic (offset, 0, pic);
+	/* The 8bpp framebuffer keeps the last frame: wipe the old line. */
+	if (scr_loadinglive)
+		Draw_Fill (0, pic->height + 5, vid.width, 26, 0);
+	SCR_DrawLoadingStatus (pic->height + 8);
 }
 #else
 void SCR_DrawLoading (void)
@@ -907,6 +913,9 @@ void SCR_DrawLoading (void)
 	pic = Draw_CachePic ("gfx/menu/loading.lmp");
 	offset = (vid.width - pic->width) / 2;
 	Draw_TransPic (offset, 0, pic);
+	if (scr_loadinglive)
+		Draw_Fill (0, pic->height + 5, vid.width, 26, 0);
+	SCR_DrawLoadingStatus (pic->height + 8);
 
 	if (loading_stage == 0)
 		return;
@@ -953,6 +962,7 @@ void SCR_BeginLoadingPlaque (void)
 	scr_centertime_off = 0;
 	scr_con_current = 0;
 
+	SCR_LoadingBegin ();
 	scr_drawloading = true;
 	scr_fullupdate = 0;
 	Sbar_Changed();
@@ -960,7 +970,7 @@ void SCR_BeginLoadingPlaque (void)
 	scr_drawloading = false;
 
 	scr_disabled_for_loading = true;
-	scr_disabled_time = realtime;
+	scr_disabled_time = Sys_DoubleTime ();
 }
 
 /*
@@ -974,7 +984,34 @@ void SCR_EndLoadingPlaque (void)
 	scr_disabled_for_loading = false;
 	scr_fullupdate = 0;
 	scr_topupdate = 0;
+	SCR_LoadingEnd ();
 	Con_ClearNotify ();
+}
+
+/* The plaque is up: redraw it and its status line over the frame the 8bpp
+ * buffer still holds, with nothing from the world. */
+static void SCR_DrawLoadingLive (void)
+{
+	vrect_t		vrect;
+
+	if (!scr_initialized || !con_initialized || cls.state == ca_dedicated)
+		return;
+
+	scr_loadinglive = true;
+	scr_drawloading = true;
+	D_EnableBackBufferAccess ();
+	SCR_DrawLoading ();
+	D_DisableBackBufferAccess ();
+	scr_drawloading = false;
+	scr_loadinglive = false;
+
+	vrect.x = 0;
+	vrect.y = 0;
+	vrect.width = vid.width;
+	vrect.height = vid.height;
+	vrect.pnext = NULL;
+	VID_Update (&vrect);
+	SCR_LoadingFrameDone ();
 }
 #endif	/* H2W */
 
@@ -1723,7 +1760,7 @@ void SCR_UpdateScreen (void)
 #else
 	if (scr_disabled_for_loading)
 	{
-		if (realtime - scr_disabled_time > 25) {
+		if (!scr_loadingintick && Sys_DoubleTime () - scr_disabled_time > 25) {
 		/* this can happen with clients connected to servers
 		 * older than uHexen2-1.5.6 who don't issue an error
 		 * upon changelevel failures. Or, it could happen if
@@ -1732,9 +1769,12 @@ void SCR_UpdateScreen (void)
 			scr_disabled_for_loading = false;
 			total_loading_size = 0;
 			loading_stage = 0;
+			SCR_LoadingEnd ();
 			Con_Printf ("load timeout.\n");
 		}
 		else {
+			if (SCR_LoadingFrameDue ())
+				SCR_DrawLoadingLive ();
 			return;
 		}
 	}

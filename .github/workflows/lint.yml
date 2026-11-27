@@ -430,6 +430,11 @@ jobs:
       - name: Step files load levels without a toggle in flight
         run: python3 tools/test_steps_level_load.py
 
+      # The loading plaque redraws, throttled, with each join stage on a
+      # status line, Hexen II and HexenWorld, both renderers (#571).
+      - name: Loading plaque stays live through a join
+        run: python3 tools/test_loading_status.py
+
       # Dedicated servers default to the client's 512 MB heap, and running
       # out names -heapsize (in KB) (GitHub #79).
       - name: Dedicated server heap

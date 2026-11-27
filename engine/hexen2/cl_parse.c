@@ -559,6 +559,8 @@ static void CL_ParseServerInfo (void)
 		Con_Printf("ERROR: World model name is empty! Cannot load map.\n");
 		return;
 	}
+	SCR_SetLoadingStatus ("Loading map %s", cl.mapname);
+	SCR_LoadingTick ();
 	cl.model_precache[1] = Mod_ForName (model_precache[1], false);
 	for (i = 2; i < nummodels; i++)
 	{
@@ -569,6 +571,8 @@ static void CL_ParseServerInfo (void)
 			continue;
 		}
 
+		SCR_SetLoadingStatus ("Precaching models %d/%d", i, nummodels - 1);
+		SCR_LoadingTick ();
 		if (precache.integer)
 		{
 			cl.model_precache[i] = Mod_ForName (model_precache[i], false);
@@ -673,6 +677,8 @@ static void CL_ParseServerInfo (void)
 	S_BeginPrecaching ();
 	for (i = 1; i < numsounds; i++)
 	{
+		SCR_SetLoadingStatus ("Precaching sounds %d/%d", i, numsounds - 1);
+		SCR_LoadingTick ();
 		cl.sound_precache[i] = S_PrecacheSound (sound_precache[i]);
 		if (precache.integer)
 		{
@@ -695,6 +701,8 @@ static void CL_ParseServerInfo (void)
 // local state
 	cl_entities[0].model = cl.worldmodel = cl.model_precache[1];
 
+	SCR_SetLoadingStatus ("Building world");
+	SCR_LoadingTick ();
 	R_NewMap ();
 
 	if (!sv.active)
