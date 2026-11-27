@@ -127,7 +127,22 @@ CANON.update({
     # the softemu palette LUT's compute builder (PP_BuildPaletteLUT_GPU, #340
     # P5a-2): the 256x1 palette, bound at 0 as TEXBIND(0) says
     "u_palette": "0",
+    # the SSAO evaluate stage (SS_BindSamplers, -gpu alone, #340 P5e): its
+    # TEXBIND2(8..10) units, the units R_SSAO_Apply binds them on.  The
+    # prepare's u_world_depth is the composite's unit already; the mip's
+    # u_scene_depth is not, and the filter's names are too generic to hold
+    # every program to, see CANON_AT
+    "world_depth": "SSAO_TEX_UNIT", "hilbert_lut": "SSAO_TEX_UNIT + 1",
+    "depth_mismatch": "SSAO_TEX_UNIT + 2",
 })
+# (set-up function, program, sampler) -> its unit, where one sampler name is
+# bound at different units by different programs: ssao_mip reads the scene's
+# depth at TEXBIND2(8), the composite at SSAO_TEX_UNIT + 1 (#340 P5e).
+CANON_AT = {
+    ("SS_BindSamplers", "ss_mip_prog", "u_scene_depth"): "SSAO_TEX_UNIT",
+    ("SS_BindSamplers", "ss_filter_prog", "source"): "SSAO_TEX_UNIT",
+    ("SS_BindSamplers", "ss_filter_prog", "edges"): "SSAO_TEX_UNIT + 1",
+}
 # (program, sampler) left without a unit, and why that is right.  Empty
 # since #532: an unset sampler reads unit 0 on GL and is counted under -gpu
 # ("sampler with no GL unit mapping") on every draw, so give it its unit
@@ -557,7 +572,7 @@ def check_call_sites(setups, allfns, defs):
                     fail('%s: R_ProgramSamplerUnit (..., %s, "%s", ...) but %s was looked up for "%s"'
                          % (fn, loc, name, loc, prior[-1].group(2)))
             # its unit is the constant the sampler is bound at
-            want = CANON.get(name)
+            want = CANON_AT.get((fn, prog.strip(), name), CANON.get(name))
             if want is None:
                 fail('%s: sampler "%s" has no unit in CANON -- add the constant it is bound at' % (fn, name))
             elif norm(unit) != want:

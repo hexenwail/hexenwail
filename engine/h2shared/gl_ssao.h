@@ -13,5 +13,7 @@ qboolean R_SSAO_WantsSceneFBO (void);
  * path is on and the scene FBO is up. */
 void	R_SSAO_CaptureWorld (void);
 void	R_SSAO_Apply (void);
+/* renderer_status's line: whether r_ssao can run here, and what it ran. */
+void	R_SSAO_Status (void);
 
 #endif

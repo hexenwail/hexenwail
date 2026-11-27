@@ -107,9 +107,10 @@ if not m:
 if '#include "gl_ssao.h"' not in pp:
     errors.append("gl_postprocess.c must include gl_ssao.h for R_SSAO_WantsSceneFBO")
 want = fn_body(c, r"qboolean R_SSAO_WantsSceneFBO \(void\)")
-if not re.search(r"#ifdef USE_SDL_GPU\s*if \(R_GPU \(\)\)[^\n]*\n\s*return false;\s*#endif", want):
-    errors.append("R_SSAO_WantsSceneFBO must answer false under -gpu, as OIT_Active does")
-ret = re.search(r"return (r_ssao.*?);", want, re.S)
+# -gpu runs SSAO since #340 P5e: no blanket answer there, only the probes
+if re.search(r"if \(R_GPU \(\)\)\s*(?:/\*.*?\*/\s*)?return false;", want, re.S):
+    errors.append("R_SSAO_WantsSceneFBO must not answer false for all of -gpu (#340 P5e runs SSAO there)")
+ret = re.search(r"if \(!\((r_ssao.*?)\)\)\s*return false;", want, re.S)
 for term in ("r_ssao.integer > 0", "!ss_failed", "gl_renderer_caps.compute_shaders", "glBindImageTexture_fp",
              "glBlitFramebuffer_fp", "glTexStorage2D_fp"):
     if not ret or term not in ret.group(1):

@@ -480,6 +480,25 @@ Checked, from the sources (stock python3, lint.yml):
       pyramid read back (R_ReadTexImage, each level held to the reduce of
       the one below); asked with Hi-Z on, it runs right after the next mark
       dispatch, before the frame's end rebuilds the pyramid it read.
+  SSAO under -gpu (#340 P5e, check_ssao), which tools/sweep-ssao-gpu.steps
+  and tools/ssao-diff.sh check:
+    * R_SSAO_WantsSceneFBO has no -gpu gate; it asks SS_DeviceWhy, which
+      probes the device once (under -gpu a scene depth the device cannot
+      sample ahead of the storage probes: COMPUTE_GATES) and keeps the
+      answer; a failure is printed once, R_SSAO_CaptureWorld counts the
+      scenes it held off, and renderer_status asks the device whatever
+      r_ssao is (R_SSAO_Status);
+    * SsaoParams is a registered mirror (SS_BuildPrograms registers
+      ss_params, a file-scope ssao_params_t, in place of ss_ubo), and
+      SS_Upload flushes it, ahead of every GL call, each time: the prepare,
+      both filters and the composite each get their own;
+    * the compute stages' samplers get, under -gpu alone, the units their
+      shaders' TEXBIND2 give GL (SS_BindSamplers), so GL's calls are what
+      they were; Hi-Z's (R_HiZ_EnsureResources) likewise;
+    * the mip pass binds mip 0 and the tile tags read-write (SIMULTANEOUS
+      storage under -gpu) and clears the tags before its dispatch;
+    * under -gpu the Hilbert table is R32UI: SDL_GPU refuses SAMPLER on an
+      8- or 16-bit integer format.
 
 Usage: test_rg_sources.py [--root DIR]
 """
@@ -3595,11 +3614,11 @@ COMPUTE_FORMATS = (
      "R_StorageFormatOk(GL_RGBA32UI,GL_TEXTURE_3D,GL_WRITE_ONLY)", r"\bR_Program_Create\s*\("),
     ("engine/h2shared/gl_worldcull.c", "R_HiZ_EnsureResources",
      "R_StorageFormatOk(GL_R32F,GL_TEXTURE_2D,GL_WRITE_ONLY)", r"\bR_Program_Create\s*\("),
-    ("engine/h2shared/gl_ssao.c", "R_SSAO_WantsSceneFBO",
+    ("engine/h2shared/gl_ssao.c", "SS_DeviceWhy",
      "R_StorageFormatOk(GL_RG16F,GL_TEXTURE_2D,GL_READ_WRITE)", None),
-    ("engine/h2shared/gl_ssao.c", "R_SSAO_WantsSceneFBO",
+    ("engine/h2shared/gl_ssao.c", "SS_DeviceWhy",
      "R_StorageFormatOk(GL_R8,GL_TEXTURE_2D,GL_WRITE_ONLY)", None),
-    ("engine/h2shared/gl_ssao.c", "R_SSAO_WantsSceneFBO",
+    ("engine/h2shared/gl_ssao.c", "SS_DeviceWhy",
      "R_StorageFormatOk(GL_R32UI,GL_TEXTURE_2D,GL_READ_WRITE)", None),
 )
 # The buffers each compute file makes (check_compute holds each to
@@ -3621,10 +3640,9 @@ COMPUTE_BINDS = (
     ("engine/h2shared/gl_worldcull.c", "R_DrawWorldCulled",
      "GL_BindBuffer(GL_DRAW_INDIRECT_BUFFER,cull_indirect_buf);", "for(i=0;i<cull_num_buckets;i++)"),
 )
-# The gates that keep each pass off under -gpu while caps.compute_shaders is
-# false there anyway: (file, function, regex, what it must precede, why).
-# Each sub-phase of P5 lifts its own.
-_ANSWER_GATE = r"\s*#\s*ifdef\s+USE_SDL_GPU\s*\n\s*if\s*\(\s*R_GPU\s*\(\s*\)\s*\)\s*return\s+false\s*;\s*#\s*endif"
+# The gates each pass keeps under -gpu: (file, function, regex, what it must
+# precede, why).  Each sub-phase of P5 lifted its blanket gate, and what is
+# left holds the pass off on a device that cannot run it.
 COMPUTE_GATES = (
     ("engine/h2shared/gl_postprocess.c", "PP_BuildPaletteLUT_GPU",
      r"if\s*\(\s*!\s*gl_renderer_caps\.compute_shaders\s*\|\|[^)]*\)\s*return\s+false\s*;",
@@ -3635,8 +3653,11 @@ COMPUTE_GATES = (
      r"\s*return\s+false\s*;\s*#\s*endif", r"\breturn\s*\(",
      "Hi-Z off under -gpu only where the scene depth cannot be sampled (P5d): a placeholder seeds a "
      "pyramid that culls nothing"),
-    ("engine/h2shared/gl_ssao.c", "R_SSAO_WantsSceneFBO", _ANSWER_GATE, r"\breturn\s+r_ssao\b",
-     "SSAO (P5e lifts it)"),
+    ("engine/h2shared/gl_ssao.c", "SS_DeviceWhy",
+     r"\s*#\s*ifdef\s+USE_SDL_GPU\s*\n\s*if\s*\(\s*R_GPU\s*\(\s*\)\s*&&\s*!\s*RG_DepthSampled\s*\(\s*\)\s*\)"
+     r"\s*ss_unsupported\s*=", r"\bR_StorageFormatOk\s*\(",
+     "SSAO off under -gpu only on a device that cannot sample the scene depth or lacks a storage format "
+     "(P5e): the snapshots would read as placeholders"),
 )
 
 
@@ -4624,6 +4645,156 @@ def check_hiz(root):
              "state for it is the graphics stages', and the copy out after the pass races (#340 P5d)" % rr)
 
 
+# Each SSAO compute program's variable in gl_ssao.c, and its shader.
+SSAO_STAGES = (("ss_prep_prog", "ssao_prepare_comp.glsl"), ("ss_mip_prog", "ssao_mip_comp.glsl"),
+               ("ss_eval_prog[q]", "ssao_evaluate_comp.glsl"), ("ss_filter_prog", "ssao_filter_comp.glsl"))
+
+
+def check_ssao(root):
+    """#340 P5e: SSAO under -gpu."""
+    rel = "engine/h2shared/gl_ssao.c"
+    if not (root / rel).is_file():
+        fail("%s: missing -- the #340 P5e pins have nothing to read" % rel)
+        return
+    code = strip_c_comments((root / rel).read_text(errors="replace"))
+    if not re.search(r"^static\s+ssao_params_t\s+ss_params\s*;", code, re.M):
+        fail("%s: ss_params must be a file-scope ssao_params_t: the registered mirror outlives the call "
+             "(#340 P5e)" % rel)
+    inc = root / "engine/shaders/ssao.inc"
+    if not inc.is_file() or not re.search(r"\bSSAO_PARAMS_BIND\s+uniform\s+SsaoParams\s*\{",
+                                          strip_c_comments(inc.read_text(errors="replace"))):
+        fail("engine/shaders/ssao.inc: the block must be `SSAO_PARAMS_BIND uniform SsaoParams` -- the name the "
+             "mirror is registered by (#340 P5e)")
+    b = body_named(root, rel, "SS_BuildPrograms")
+    if b is not None and ('#ifdefUSE_SDL_GPUif(R_GPU())RG_UniformBlockRegister("SsaoParams",&ss_params,'
+                          'sizeof(ss_params));else#endif{R_GenBuffers(1,&ss_ubo);') not in squash(b):
+        fail("%s: SS_BuildPrograms must register ss_params as SsaoParams under -gpu, in place of ss_ubo "
+             "(#340 P5e)" % rel)
+    b = body_named(root, rel, "SS_Upload")
+    if b is not None and not squash(b).startswith('{#ifdefUSE_SDL_GPUif(R_GPU()){RG_UniformBlockFlushed('
+                                                  '"SsaoParams");return;}#endif'):
+        fail("%s: SS_Upload must open with `if (R_GPU ()) { RG_UniformBlockFlushed (\"SsaoParams\"); return; }`"
+             ": each upload is its own flush, or a dispatch pushes another's settings (#340 P5e)" % rel)
+    b = body_named(root, rel, "R_SSAO_CaptureWorld")
+    if b is not None:
+        sb = squash(b)
+        u, d = sb.find("SS_Upload();"), sb.find("R_DispatchCompute(")
+        if u < 0 or d < u:
+            fail("%s: R_SSAO_CaptureWorld must upload its params before the prepare dispatch (#340 P5e)" % rel)
+        if "if(!SS_Active()){if(r_ssao.integer>0&&ss_unsupported)ss_unsupported_scenes++;return;}" not in sb:
+            fail("%s: R_SSAO_CaptureWorld must count the scenes the device held SSAO off for "
+                 "(decision 12, #340 P5e)" % rel)
+    b = body_named(root, rel, "R_SSAO_Apply")
+    if b is not None:
+        sb = squash(b)
+        at = 0
+        for step, why in (
+                ("R_TexSubImage2D(GL_TEXTURE_2D,ss_mismatch,0,0,0,ss_mismatch_w,ss_mismatch_h,"
+                 "GL_RED_INTEGER,GL_UNSIGNED_INT,zeros);", "the tile tags cleared"),
+                ("R_BindImageTexture(level,ss_pyramid,q_min(level,ss_levels-1),GL_FALSE,0,"
+                 "level==0?GL_READ_WRITE:GL_WRITE_ONLY,GL_RG16F);",
+                 "mip 0 bound read-write: the mip pass reads the prepared world depth back"),
+                ("R_BindImageTexture(5,ss_mismatch,0,GL_FALSE,0,GL_READ_WRITE,GL_R32UI);",
+                 "the tile tags bound read-write: imageAtomicOr"),
+                ("R_UseProgram(ss_mip_prog);R_DispatchCompute(", "then the mip dispatch"),
+                ("ss_params.settings[2]=0.0f;SS_Upload();", "the first filter's params uploaded"),
+                ("R_DispatchCompute((ss_aow+15)/16,(ss_aoh+7)/8,1);", "the first filter"),
+                ("ss_params.settings[2]=1.0f;SS_Upload();", "the second filter's"),
+                ("R_DispatchCompute((ss_aow+15)/16,(ss_aoh+7)/8,1);", "the second filter"),
+                ("SS_Upload();", "the composite's"),
+                ("R_DrawArrays(GL_TRIANGLES,0,3);", "the composite")):
+            i = sb.find(step, at)
+            if i < 0:
+                fail("%s: R_SSAO_Apply must make `%s` after the steps before it -- %s (#340 P5e)"
+                     % (rel, step, why))
+                break
+            at = i + len(step)
+    b = body_named(root, rel, "R_SSAO_WantsSceneFBO")
+    if b is not None:
+        sb = squash(b)
+        if re.search(r"if\(R_GPU\(\)\)returnfalse;", sb):
+            fail("%s: R_SSAO_WantsSceneFBO must not answer no for all of -gpu (#340 P5e)" % rel)
+        if not sb.endswith("why=SS_DeviceWhy();if(why&&!ss_said){ss_said=true;Con_Printf(\"r_ssao:thisdevicehas%s,"
+                           "SSAOisoff\\n\",why);}returnwhy==NULL;"):
+            fail("%s: R_SSAO_WantsSceneFBO must take the device's answer (SS_DeviceWhy), print a failure once and "
+                 "answer by it (decision 12, #340 P5e)" % rel)
+    b = body_named(root, rel, "SS_DeviceWhy")
+    if b is not None and not squash(b).startswith("{if(ss_probed)returnss_unsupported;ss_probed=true;ss_unsupported=NULL;"):
+        fail("%s: SS_DeviceWhy must ask the device once and keep the answer in ss_unsupported, which renderer_status "
+             "reads whatever r_ssao is (decision 12, #340 P5e)" % rel)
+    b = body_named(root, rel, "R_SSAO_Status")
+    if b is not None and "elseif(SS_DeviceWhy())state=SS_DeviceWhy();" not in squash(b):
+        fail("%s: R_SSAO_Status must ask the device (SS_DeviceWhy), not a reason cached only when r_ssao was on "
+             "(decision 12, #340 P5e)" % rel)
+    b = body_named(root, rel, "R_SSAO_Shutdown")
+    if b is not None and "ss_probed=ss_said=false;" not in squash(b):
+        fail("%s: R_SSAO_Shutdown must forget the device's answer: a vid_restart may bring another (#340 P5e)" % rel)
+    b = body_named(root, "engine/h2shared/gl_vidsdl.c", "GL_RendererStatus_f")
+    if b is not None and not re.search(r"\bR_SSAO_Status\s*\(\s*\)\s*;", b):
+        fail("gl_vidsdl.c: renderer_status must print R_SSAO_Status -- the fallback is counted there "
+             "(decision 12, #340 P5e)")
+    b = body_named(root, rel, "SS_EnsureTargets")
+    if b is not None:
+        sb = squash(b)
+        want = ("#ifdefUSE_SDL_GPUif(R_GPU()){R_BindImageTexture(0,ss_pyramid,0,GL_FALSE,0,GL_READ_WRITE,GL_RG16F);"
+                "R_BindImageTexture(1,ss_mismatch,0,GL_FALSE,0,GL_READ_WRITE,GL_R32UI);"
+                "R_BindImageTexture(0,0,0,GL_FALSE,0,GL_READ_ONLY,GL_R8);"
+                "R_BindImageTexture(1,0,0,GL_FALSE,0,GL_READ_ONLY,GL_R8);}#endif")
+        i, d = sb.find(want), sb.find("ss_mismatch=SS_Tex2D(")
+        if i < 0 or d < 0 or i < d:
+            fail("%s: SS_EnsureTargets must bind the pyramid and the tile tags read-write under -gpu once they "
+                 "are made, and unbind them: SDL_GPU fixes usage at creation, and the prepare's write-only bind "
+                 "would make the pyramid without SIMULTANEOUS storage, re-made (mip 0 lost) at the mip pass (#340 P5e)"
+                 % rel)
+    b = body_named(root, rel, "SS_UploadHilbert")
+    if b is not None:
+        sb = squash(b)
+        if ("#ifdefUSE_SDL_GPUif(R_GPU()){staticGLuintwide[64*64];for(x=0;x<64*64;x++)wide[x]=data[x];"
+                "ss_hilbert=SS_Tex2D(1,GL_R32UI,64,64,GL_NEAREST);R_TexSubImage2D(GL_TEXTURE_2D,ss_hilbert,0,0,0,"
+                "64,64,GL_RED_INTEGER,GL_UNSIGNED_INT,wide);return;}#endif"
+                "ss_hilbert=SS_Tex2D(1,GL_R16UI,64,64,GL_NEAREST);") not in sb:
+            fail("%s: SS_UploadHilbert must make the table R32UI under -gpu, and R16UI on GL: SDL_GPU refuses "
+                 "SAMPLER on an 8- or 16-bit integer format (#340 P5e)" % rel)
+    # the compute stages' units: each sampler's TEXBIND2 unit, -gpu alone
+    m = re.search(r"#\s*define\s+SSAO_TEX_UNIT\s+(\d+)", code)
+    base = int(m.group(1)) if m else None
+    b = body_named(root, rel, "SS_BindSamplers")
+    if b is not None and base is not None:
+        arm = re.search(r"#\s*ifdef\s+USE_SDL_GPU\s*if\s*\(\s*R_GPU\s*\(\s*\)\s*\)\s*(\{.*?\n\t\})\s*#\s*endif", b, re.S)
+        if not arm:
+            fail("%s: SS_BindSamplers must name the compute stages' units in an `#ifdef USE_SDL_GPU / if (R_GPU "
+                 "())` arm -- GL's TEXBIND2 says them already, and GL's calls stay what they were (#340 P5e)"
+                 % rel)
+        else:
+            sa = squash(arm.group(1))
+            outside = squash(b.replace(arm.group(0), ""))
+            for prog, sh in SSAO_STAGES:
+                src = strip_c_comments((root / "engine/shaders" / sh).read_text(errors="replace"))
+                for unit, name in re.findall(r"TEXBIND2\s*\(\s*(\d+)\s*,\s*\d+\s*\)\s*uniform\s+\w+\s+(\w+)\s*;", src):
+                    k = int(unit) - base
+                    u = "SSAO_TEX_UNIT" + ("+%d" % k if k else "")
+                    want = 'loc=R_ProgramSamplerLoc(%s,"%s");R_ProgramSamplerUnit(%s,loc,"%s",%s);' % (
+                        prog, name, prog, name, u)
+                    if want not in sa:
+                        fail("%s: SS_BindSamplers' -gpu arm must make `%s` -- %s's TEXBIND2 unit %s; a sampler "
+                             "with no unit reads a placeholder under -gpu (#340 P5e)" % (rel, want, sh, unit))
+                    if "R_ProgramSamplerUnit(%s," % prog in outside:
+                        fail("%s: SS_BindSamplers names %s's units outside the -gpu arm -- GL's calls change "
+                             "(#340 P5e)" % (rel, prog))
+    wc = "engine/h2shared/gl_worldcull.c"
+    b = body_named(root, wc, "R_HiZ_EnsureResources")
+    if b is not None:
+        sb = squash(b)
+        want = ('#ifdefUSE_SDL_GPUif(R_GPU()){GLintloc;R_UseProgram(hiz_copy_prog);'
+                'loc=R_ProgramSamplerLoc(hiz_copy_prog,"u_scene_depth");'
+                'R_ProgramSamplerUnit(hiz_copy_prog,loc,"u_scene_depth",0);R_UseProgram(hiz_reduce_prog);'
+                'loc=R_ProgramSamplerLoc(hiz_reduce_prog,"u_src");R_ProgramSamplerUnit(hiz_reduce_prog,loc,"u_src",0);'
+                'R_UseProgram(0);}#endif')
+        if want not in sb:
+            fail("%s: R_HiZ_EnsureResources must name the Hi-Z samplers' units under -gpu alone -- TEXBIND(0) "
+                 "says them to GL, whose calls stay what they were before P5d (#340 P5e)" % wc)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     ap.add_argument("--root", type=Path, default=ROOT)
@@ -4656,6 +4827,7 @@ def main(argv=None):
     check_light_cluster(root)
     check_world_cull(root)
     check_hiz(root)
+    check_ssao(root)
     nfiles = 0
     rg_files = []
     for p in sorted(eng.rglob("*")):
