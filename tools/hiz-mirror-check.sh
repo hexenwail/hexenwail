@@ -52,7 +52,16 @@
 # KEEP=1 keeps the work directory (logs) and prints its path.
 #
 # Engine: ENGINE (default ./result/bin/hexenwail), desktop GL.  Commands go
-# through an exec'd cfg, as tools/hiz-toggle-check.sh does.
+# through an exec'd cfg, as tools/hiz-toggle-check.sh does.  ENGINE_ARGS go
+# on the command line ahead of the map, and TIMEOUT (default 180) bounds each
+# run.  The SDL_GPU backend (#340 P5d):
+#
+#   ENGINE_ARGS="-gpu +gpu_allow_software 1" ./tools/hiz-mirror-check.sh
+#
+# with VK_ICD_FILENAMES naming the device to run on.  -gpu runs reversed-Z
+# only (gl_vidsdl.c GL_Init_NullGL: SDL_GPU's clip space has no [-1, 1] to
+# fall back to), so it takes that convention alone, without the vid_restart,
+# and its null-GL boot line is what says so.
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -61,7 +70,10 @@ set -euo pipefail
 BASEDIR=${1:-$HOME/hexen2}
 ENGINE=${ENGINE:-./result/bin/hexenwail}
 SLACK=${SLACK:-5}
+ENGINE_ARGS=${ENGINE_ARGS:-}
+TIMEOUT=${TIMEOUT:-180}
 HERE=$(cd "$(dirname "$0")" && pwd)
+case " $ENGINE_ARGS " in *" -gpu "*) GPU=1; ZMODES=1 ;; *) GPU=; ZMODES="1 0" ;; esac
 
 [ -x "$ENGINE" ] || { echo "no engine at $ENGINE (nix build .#default)" >&2; exit 2; }
 BASEDIR=$(readlink -f "$BASEDIR")
@@ -91,7 +103,8 @@ run() {
 	local ud="$work/u-$1-z$3"
 	mkdir -p "$ud/mirror"
 	{
-		w 400; echo "echo ZMODE-BEGIN"; echo "gl_reversed_z $3"; echo vid_restart; w 200
+		w 400; echo "echo ZMODE-BEGIN"
+		[ -n "$GPU" ] || { echo "gl_reversed_z $3"; echo vid_restart; w 200; }
 		echo god; echo notarget; echo noclip
 		echo "r_drawviewmodel 0"; echo "gl_cull 1"
 		echo "setpos $2"; echo "r_mirroralpha 1"; w 60; st a1
@@ -100,8 +113,8 @@ run() {
 		echo quit
 	} >"$ud/mirror/probe.cfg"
 	env -u LD_LIBRARY_PATH SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-offscreen}" SDL_AUDIODRIVER=dummy \
-		timeout -k 5 180 "$ENGINE" -condebug -basedir "$work/base" -userdir "$ud" \
-		-width 800 -height 600 -window -fsaa 0 -game mirror +gl_hiz_cull 1 \
+		timeout -k 5 "$TIMEOUT" "$ENGINE" -condebug -basedir "$work/base" -userdir "$ud" \
+		-width 800 -height 600 -window -fsaa 0 -game mirror $ENGINE_ARGS +gl_hiz_cull 1 \
 		+map "$1" +exec probe.cfg >"$ud/stdout" 2>&1 || true
 	local log
 	log=$(find "$ud" -name qconsole.log -print -quit)
@@ -109,12 +122,13 @@ run() {
 	awk '/^PHASE-/ {p = substr($1, 7)}
 	     /^hiz_stats:/ {for (i = 2; i <= NF; i++) if ($i ~ /^hiz=/) h[p] = h[p] " " substr($i, 5)}
 	     /^ZMODE-BEGIN/ {z = 1} z && /^Reversed-Z depth buffer enabled/ {rz = 1}
+	     /^GL: null GL \(SDL_GPU mode\)/ {rz = 1}
 	     END {print "zmode", (rz ? "reversed" : "forward"); for (k in h) {n = split(h[k], a, " "); u = a[1]; for (i = 2; i <= n; i++) if (a[i] != u) u = "varies"; print k, u}}' \
 		"$log" | sort
 }
 
 fail=0
-for z in 1 0; do
+for z in $ZMODES; do
 for cam in "demo1|-312 -2128 284 0 0 0" "demo1f|-860 -1990 30 10 40 0"; do
 	map=${cam%%|*}; pos=${cam##*|}
 	declare -A h=()

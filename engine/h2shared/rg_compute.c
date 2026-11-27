@@ -40,6 +40,15 @@
  * a placeholder needs none of that: the placeholders were written at boot
  * (P5c, the world cull's Hi-Z pyramid while Hi-Z is off).
  *
+ * Sampled and written.  A stage that samples a texture and writes one of its
+ * levels as a storage image (the Hi-Z reduce: mip N-1 in, mip N out, #340
+ * P5d) has the written level in the storage layout while the sampler's view,
+ * which takes in every level, is declared read-only: Vulkan faults the
+ * dispatch (VUID-vkCmdDispatch-imageLayout-00344), whatever level the shader
+ * actually reads.  So that image is written through a scratch texture of the
+ * level's size (RG_Res_StorageScratch), copied into the level in a copy pass
+ * right after.  GL binds the level itself, and is unchanged.
+ *
  * Dropped.  A dispatch that cannot be made is counted, and the frame goes on;
  * RG_ComputeDropped lets a caller that draws from the pass's output see it
  * went missing (the world cull, P5c), and renderer_status shows the frame's.
@@ -59,24 +68,59 @@
 #include "quakedef.h"
 #include "rg_internal.h"
 
-static unsigned long	rgc_dispatches, rgc_dropped, rgc_barriers, rgc_cycled;
+static unsigned long	rgc_dispatches, rgc_dropped, rgc_barriers, rgc_cycled, rgc_scratched;
+
+/* A storage image the dispatch writes through a scratch texture: where the
+ * scratch is copied back to once the pass ends (RG_Res_StorageScratch). */
+typedef struct {
+	SDL_GPUTextureLocation	scratch, home;
+	Uint32			size[3];
+	qboolean		preload;
+} rgcscratch_t;
+
+/* Whether storage image `im` holds a texture one of the stage's samplers
+ * reads: the reduce of a mip chain, sampling the levels it reads from and
+ * writing the next one (the Hi-Z pyramid, #340 P5d). */
+static qboolean RGC_ImageSampled (const rgstage_t *st, const rgimage_t *im)
+{
+	int	i;
+
+	for (i = 0; i < st->num_samplers; i++)
+	{
+		if (RG_Res_ImageSampled (im->binding, st->samplers[i].unit, (rg_textype_t) st->samplers[i].type))
+			return true;
+	}
+	return false;
+}
 
 /* The bindings of one dispatch; false when one cannot be made (counted by
  * whoever refused), and the dispatch is dropped. */
 static qboolean RGC_Bind (const rgstage_t *st, const Uint32 cover[3],
 			  SDL_GPUStorageTextureReadWriteBinding *img,
 			  SDL_GPUStorageBufferReadWriteBinding *rw,
-			  SDL_GPUTextureSamplerBinding *smp, SDL_GPUBuffer **ro)
+			  SDL_GPUTextureSamplerBinding *smp, SDL_GPUBuffer **ro,
+			  rgcscratch_t *sc, int *nsc)
 {
 	int	i;
 	void	*read;
 
+	*nsc = 0;
+	RG_Res_ScratchBegin ();
 	for (i = 0; i < st->num_images; i++)
 	{
 		const rgimage_t	*im = &st->images[i];
+		SDL_GPUStorageTextureReadWriteBinding *b = &img[im->binding];
 
-		if (!RG_Res_StorageImage (im->binding, (rg_textype_t) im->type, cover, &img[im->binding]))
+		if (!RG_Res_StorageImage (im->binding, (rg_textype_t) im->type, cover, b))
 			return false;
+		if (!RGC_ImageSampled (st, im))
+			continue;
+		if (!RG_Res_StorageScratch (im->binding, cover, b, &sc[*nsc].home, sc[*nsc].size,
+					    &sc[*nsc].preload))
+			return false;
+		SDL_zero (sc[*nsc].scratch);
+		sc[*nsc].scratch.texture = b->texture;
+		(*nsc)++;
 	}
 	/* RG_Res_StorageImageWritten once the dispatch is recorded */
 	for (i = 0; i < st->num_rwssbos; i++)
@@ -125,11 +169,13 @@ void RG_DispatchCompute (GLuint groups_x, GLuint groups_y, GLuint groups_z)
 	SDL_GPUStorageBufferReadWriteBinding	rw[RG_MAX_STAGE_SSBOS];
 	SDL_GPUTextureSamplerBinding		smp[RG_MAX_STAGE_SAMPLERS];
 	SDL_GPUBuffer				*ro[RG_MAX_STAGE_SSBOS];
+	rgcscratch_t				sc[RG_MAX_STAGE_IMAGES];
 	SDL_GPUCommandBuffer			*cmd;
 	SDL_GPUComputePass			*pass;
+	SDL_GPUCopyPass				*copy;
 	Uint32					cover[3];
 	qboolean				target = false, samples = false;
-	int					i;
+	int					i, nsc;
 
 	if (!prog || !prog->compute || !prog->cs)
 	{
@@ -156,18 +202,39 @@ void RG_DispatchCompute (GLuint groups_x, GLuint groups_y, GLuint groups_z)
 	 * buffer; a placeholder was written at boot (#340 P5c: the world cull
 	 * declares the Hi-Z pyramid, and samples it only with Hi-Z on). */
 	for (i = 0; i < st->num_samplers; i++)
+	{
 		samples |= RG_Res_UnitHolds (st->samplers[i].unit, (rg_textype_t) st->samplers[i].type);
+		/* the scene's depth, read where its framebuffer is still bound
+		 * (the Hi-Z copy at the post chain's end): a clear pending on
+		 * it lands first (#340 P5d) */
+		target |= RG_Res_UnitIsTarget (st->samplers[i].unit, (rg_textype_t) st->samplers[i].type);
+	}
 	cmd = RG_Frame_ComputeBegin (target, samples);
 	if (!cmd)
 	{
 		rgc_dropped++;
 		return;
 	}
-	if (!RGC_Bind (st, cover, img, rw, smp, ro))
+	if (!RGC_Bind (st, cover, img, rw, smp, ro, sc, &nsc))
 	{
 		rgc_dropped++;
 		RG_Frame_ComputeEnd (false);
 		return;
+	}
+	for (i = 0; i < nsc; i++)
+	{
+		if (!sc[i].preload)
+			continue;
+		copy = SDL_BeginGPUCopyPass (cmd);
+		if (!copy)
+		{
+			rgc_dropped++;
+			RG_Frame_ComputeEnd (false);
+			return;
+		}
+		SDL_CopyGPUTextureToTexture (copy, &sc[i].home, &sc[i].scratch, sc[i].size[0], sc[i].size[1],
+					     sc[i].size[2], false);
+		SDL_EndGPUCopyPass (copy);
 	}
 
 	pass = SDL_BeginGPUComputePass (cmd, img, (Uint32) st->num_images, rw, (Uint32) st->num_rwssbos);
@@ -201,6 +268,22 @@ void RG_DispatchCompute (GLuint groups_x, GLuint groups_y, GLuint groups_z)
 	}
 	SDL_DispatchGPUCompute (pass, groups_x, groups_y, groups_z);
 	SDL_EndGPUComputePass (pass);
+	if (nsc)
+	{
+		/* The level lands where GL would have stored it.  A copy pass
+		 * that cannot begin leaves it as it was: counted, as a drop. */
+		copy = SDL_BeginGPUCopyPass (cmd);
+		if (!copy)
+			rgc_dropped++;
+		for (i = 0; copy && i < nsc; i++)
+			SDL_CopyGPUTextureToTexture (copy, &sc[i].scratch, &sc[i].home, sc[i].size[0],
+						     sc[i].size[1], sc[i].size[2], false);
+		if (copy)
+		{
+			SDL_EndGPUCopyPass (copy);
+			rgc_scratched += nsc;
+		}
+	}
 	for (i = 0; i < st->num_images; i++)
 	{
 		rgc_cycled += img[i].cycle;
@@ -224,7 +307,7 @@ void RG_MemoryBarrier (GLbitfield barriers)
 
 void RG_Compute_Status (void)
 {
-	Con_Printf ("[RENDERER] SDL_GPU compute since boot: %lu dispatches (%lu images cycled), "
-		    "%lu dropped, %lu barriers met by pass boundaries\n",
-		    rgc_dispatches, rgc_cycled, rgc_dropped, rgc_barriers);
+	Con_Printf ("[RENDERER] SDL_GPU compute since boot: %lu dispatches (%lu images cycled, %lu "
+		    "written through a scratch), %lu dropped, %lu barriers met by pass boundaries\n",
+		    rgc_dispatches, rgc_cycled, rgc_scratched, rgc_dropped, rgc_barriers);
 }

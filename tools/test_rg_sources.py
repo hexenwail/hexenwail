@@ -452,6 +452,34 @@ Checked, from the sources (stock python3, lint.yml):
     * a dispatch waits for the queue only when a sampler would read an
       engine texture rather than a placeholder (RG_Res_UnitHolds, exactly
       RG_Res_ForDraw's first test).
+  the Hi-Z pyramid under -gpu (#340 P5d, check_hiz), which
+  tools/sweep-hiz-gpu.steps and tools/hiz-diff.sh check:
+    * R_HiZ_Available's -gpu arm answers no only on a device whose scene
+      depth cannot be sampled (RG_DepthSampled), and R_HiZ_EnsureResources
+      asks R_StorageFormatOk (GL_R32F) before it makes the programs
+      (COMPUTE_GATES, COMPUTE_FORMATS);
+    * HizParams is a registered mirror (WC_BindHizParamsBlock registers
+      hiz_params, a file-scope hiz_params_t, ahead of every GL call);
+      R_BuildHiZForNextFrame fills it and flushes (-gpu) or uploads (GL) it
+      before the copy's dispatch, and each level's CullParams the same way
+      in the cull's own mirror; the dropped-dispatch count is read before
+      the first dispatch, and a pyramid with a dropped level is not valid;
+    * both programs name their sampler's unit, 0, through
+      R_ProgramSamplerUnit; the standalone depth copy is made in the
+      scene's own depth format under -gpu (GL_DEPTH24_STENCIL8 on its
+      depth-stencil attachment), and a copy the backend declines leaves no
+      pyramid;
+    * a frame whose cull dispatch was dropped forgets the kept view
+      (R_HiZ_ForgetView) as it skips its indirect draws;
+    * the backend: a storage image whose texture one of the stage's
+      samplers reads (RGC_ImageSampled) is written through a scratch
+      texture (RG_Res_StorageScratch: storage usage alone, never cycled,
+      the level's texels copied in first unless a write-only dispatch
+      covers the level), copied into the level after the pass;
+    * worldcull_verify runs cull_mark's Hi-Z test on the CPU, against the
+      pyramid read back (R_ReadTexImage, each level held to the reduce of
+      the one below); asked with Hi-Z on, it runs right after the next mark
+      dispatch, before the frame's end rebuilds the pyramid it read.
 
 Usage: test_rg_sources.py [--root DIR]
 """
@@ -3176,7 +3204,9 @@ def check_render_targets(root):
         fail("%s: RG_Res_RenderTarget must queue an unwritten target's one clear (#340 P4a-2)" % rr)
     b = body_named(root, rr, "RG_Res_ForDraw")
     if b is not None:
-        fb = re.search(r"\belse\s+if\s*\(\s*RG_Frame_TargetHolds\s*\(\s*t->tex\s*\)\s*\)", b)
+        # a dispatch's bindings excepted: no render pass is open then (#340 P5d)
+        fb = re.search(r"\belse\s+if\s*\(\s*RG_Frame_TargetHolds\s*\(\s*t->tex\s*\)\s*&&\s*"
+                       r"!\s*RG_Frame_ComputeBinding\s*\(\s*\)\s*\)", b)
         bind = re.search(r"\bout->texture\s*=\s*t->tex\s*;", b)
         if not (fb and bind and fb.start() < bind.start()):
             fail("%s: RG_Res_ForDraw must bind a placeholder, not a texture the draw renders into "
@@ -3563,6 +3593,8 @@ COMPUTE_FORMATS = (
      "R_StorageFormatOk(GL_RGBA8,GL_TEXTURE_3D,GL_WRITE_ONLY)", r"\bR_Program_Create\s*\("),
     ("engine/h2shared/gl_lightcluster.c", "R_LightCluster_Build",
      "R_StorageFormatOk(GL_RGBA32UI,GL_TEXTURE_3D,GL_WRITE_ONLY)", r"\bR_Program_Create\s*\("),
+    ("engine/h2shared/gl_worldcull.c", "R_HiZ_EnsureResources",
+     "R_StorageFormatOk(GL_R32F,GL_TEXTURE_2D,GL_WRITE_ONLY)", r"\bR_Program_Create\s*\("),
     ("engine/h2shared/gl_ssao.c", "R_SSAO_WantsSceneFBO",
      "R_StorageFormatOk(GL_RG16F,GL_TEXTURE_2D,GL_READ_WRITE)", None),
     ("engine/h2shared/gl_ssao.c", "R_SSAO_WantsSceneFBO",
@@ -3598,8 +3630,11 @@ COMPUTE_GATES = (
      r"if\s*\(\s*!\s*gl_renderer_caps\.compute_shaders\s*\|\|[^)]*\)\s*return\s+false\s*;",
      r"\bR_Program_Create\s*\(|\bR_DispatchCompute\s*\(",
      "the palette LUT: a GL without compute (and -gpu before P5a-2) takes the CPU builder"),
-    ("engine/h2shared/gl_worldcull.c", "R_HiZ_Available", _ANSWER_GATE, r"\breturn\s*\(",
-     "Hi-Z (P5d lifts it)"),
+    ("engine/h2shared/gl_worldcull.c", "R_HiZ_Available",
+     r"\s*#\s*ifdef\s+USE_SDL_GPU\s*\n\s*if\s*\(\s*R_GPU\s*\(\s*\)\s*&&\s*!\s*RG_DepthSampled\s*\(\s*\)\s*\)"
+     r"\s*return\s+false\s*;\s*#\s*endif", r"\breturn\s*\(",
+     "Hi-Z off under -gpu only where the scene depth cannot be sampled (P5d): a placeholder seeds a "
+     "pyramid that culls nothing"),
     ("engine/h2shared/gl_ssao.c", "R_SSAO_WantsSceneFBO", _ANSWER_GATE, r"\breturn\s+r_ssao\b",
      "SSAO (P5e lifts it)"),
 )
@@ -3804,7 +3839,9 @@ def check_compute(root):
 COMPUTE_DISPATCH_ORDER = (
     "samples|=RG_Res_UnitHolds(st->samplers[i].unit,(rg_textype_t)st->samplers[i].type);",
     "cmd=RG_Frame_ComputeBegin(target,samples);",
-    "if(!RGC_Bind(st,cover,img,rw,smp,ro))",
+    "if(!RGC_Bind(st,cover,img,rw,smp,ro,sc,&nsc))",
+    "for(i=0;i<nsc;i++){if(!sc[i].preload)continue;copy=SDL_BeginGPUCopyPass(cmd);",
+    "SDL_CopyGPUTextureToTexture(copy,&sc[i].home,&sc[i].scratch,sc[i].size[0],sc[i].size[1],sc[i].size[2],false);",
     "pass=SDL_BeginGPUComputePass(cmd,img,(Uint32)st->num_images,rw,(Uint32)st->num_rwssbos);",
     "SDL_BindGPUComputePipeline(pass,prog->cs);",
     "SDL_BindGPUComputeSamplers(pass,0,smp,(Uint32)st->num_samplers);",
@@ -3812,11 +3849,19 @@ COMPUTE_DISPATCH_ORDER = (
     "SDL_PushGPUComputeUniformData(cmd,u->binding,data,(Uint32)size);",
     "SDL_DispatchGPUCompute(pass,groups_x,groups_y,groups_z);",
     "SDL_EndGPUComputePass(pass);",
+    "if(nsc){copy=SDL_BeginGPUCopyPass(cmd);if(!copy)rgc_dropped++;for(i=0;copy&&i<nsc;i++)",
+    "SDL_CopyGPUTextureToTexture(copy,&sc[i].scratch,&sc[i].home,sc[i].size[0],sc[i].size[1],sc[i].size[2],false);",
     "RG_Frame_ComputeEnd(true);",
 )
 COMPUTE_BIND_PINS = (
-    ("RG_Res_StorageImage(im->binding,(rg_textype_t)im->type,cover,&img[im->binding])",
+    ("SDL_GPUStorageTextureReadWriteBinding*b=&img[im->binding];"
+     "if(!RG_Res_StorageImage(im->binding,(rg_textype_t)im->type,cover,b))returnfalse;",
      "storage image N is what image unit N holds: IMGBIND gives GL and Vulkan one number"),
+    ("if(!RGC_ImageSampled(st,im))continue;if(!RG_Res_StorageScratch(im->binding,cover,b,&sc[*nsc].home,"
+     "sc[*nsc].size,&sc[*nsc].preload))returnfalse;",
+     "an image a sampler of the stage also reads is written through a scratch: its level in the storage "
+     "layout under the sampler's read-only view of every level is VUID-vkCmdDispatch-imageLayout-00344 "
+     "(#340 P5d)"),
     ("rw[sb->slot].buffer=buf;rw[sb->slot].cycle=false;",
      "a read-write buffer never cycles: the cull's indirect buffer keeps the first index written at "
      "creation, its dedup buffer the frame count"),
@@ -4329,10 +4374,11 @@ def check_world_cull(root):
     b = body_named(root, rel, "R_DrawWorldCulled")
     if b is not None:
         sb = squash(b)
-        g, f = sb.find("if(!WC_CullRan())return;"), sb.find("R_BindVertexArray(world_vao);")
+        g, f = sb.find("if(!WC_CullRan()){R_HiZ_ForgetView();return;}"), sb.find("R_BindVertexArray(world_vao);")
         if g < 0 or f < 0 or g > f:
-            fail("%s: R_DrawWorldCulled must ask WC_CullRan () before its first bind -- a dropped dispatch "
-                 "leaves the indirect buffer as an older frame left it (#340 P5c)" % rel)
+            fail("%s: R_DrawWorldCulled must ask WC_CullRan () before its first bind, and forget the kept "
+                 "view when it says no -- a dropped dispatch leaves the indirect buffer as an older frame "
+                 "left it, and keeps no MVP for the pyramid this frame builds (#340 P5c, P5d)" % rel)
     b = body_named(root, rel, "WC_CullRan")
     if b is not None and "if(R_GPU()&&!wc_cull_ran)" not in squash(b):
         fail("%s: WC_CullRan must answer no under -gpu when the frame's cull dispatches did not both run "
@@ -4414,6 +4460,170 @@ def check_world_cull(root):
         fail("%s: RG_ReadBufferAsync must hand the region to RG_Frame_ReadbackRequest (#340 P5c)" % rb)
 
 
+# R_BuildHiZForNextFrame, whitespace dropped (#340 P5d): in this order.
+HIZ_BUILD_ORDER = (
+    "hiz_pyramid_valid=false;",
+    "dropped=RG_ComputeDropped();",
+    "R_UseProgram(hiz_copy_prog);R_BindTextureSlot(0,scene_depth_tex);",
+    "hiz_params.size[0]=scene_w;hiz_params.size[1]=scene_h;hiz_params.size[2]=0;hiz_params.size[3]=0;",
+    'if(R_GPU())RG_UniformBlockFlushed("HizParams");else',
+    "GL_Upload(GL_UNIFORM_BUFFER,&hiz_params,sizeof(hiz_params),&ubo,&ofs);",
+    "R_DispatchCompute((scene_w+7)/8,(scene_h+7)/8,1);",
+    "R_UseProgram(hiz_reduce_prog);R_BindTextureSlot(0,hiz_pyramid_tex);",
+    "memset(&cull_params,0,sizeof(cull_params));",
+    "cull_params.reduce2[1]=gl_clipcontrol_able?1:0;",
+    'if(R_GPU())RG_UniformBlockFlushed("CullParams");else',
+    "GL_Upload(GL_UNIFORM_BUFFER,&cull_params,sizeof(cull_params),&ubo,&ofs);",
+    "R_DispatchCompute((dst_w+7)/8,(dst_h+7)/8,1);",
+    "if(R_GPU()&&RG_ComputeDropped()!=dropped)return;",
+    "hiz_pyramid_valid=true;",
+)
+
+
+def check_hiz(root):
+    """#340 P5d: the Hi-Z pyramid under -gpu."""
+    rel = "engine/h2shared/gl_worldcull.c"
+    if not (root / rel).is_file():
+        fail("%s: missing -- the #340 P5d pins have nothing to read" % rel)
+        return
+    code = strip_c_comments((root / rel).read_text(errors="replace"))
+    if not re.search(r"^static\s+hiz_params_t\s+hiz_params\s*;", code, re.M):
+        fail("%s: hiz_params must be a file-scope hiz_params_t: the registered mirror outlives the call "
+             "(#340 P5d)" % rel)
+    b = body_named(root, rel, "WC_BindHizParamsBlock")
+    if b is not None:
+        m = re.search(r"#\s*ifdef\s+USE_SDL_GPU\b(.*?)#\s*endif", b, re.S)
+        g = re.search(r"\bgl\w+_fp\b", b)
+        if not m or squash(m.group(1)) != ('if(R_GPU()){RG_UniformBlockRegister("HizParams",&hiz_params,'
+                                           'sizeof(hiz_params));return;}') or not g or g.start() < m.start():
+            fail("%s: WC_BindHizParamsBlock's SDL_GPU arm must be exactly `if (R_GPU ()) { "
+                 "RG_UniformBlockRegister (\"HizParams\", &hiz_params, sizeof(hiz_params)); return; }`, "
+                 "ahead of every GL call (#340 P5d)" % rel)
+    red = root / "engine/shaders/hiz_reduce_comp.glsl"
+    rs = squash(strip_c_comments(red.read_text(errors="replace"))) if red.is_file() else ""
+    if "if(u_creduce2.y!=0)r=min(min(va,vb),min(vc,vd));elser=max(max(va,vb),max(vc,vd));" not in rs:
+        fail("engine/shaders/hiz_reduce_comp.glsl: the reduce must keep the farthest depth -- min under "
+             "reversed-Z (u_creduce2.y), max forward -- or the pyramid occludes what is in front of it "
+             "(#340 P5d)")
+    shader = root / "engine/shaders/hiz_copy_comp.glsl"
+    if not shader.is_file() or not re.search(r"\bUBO\s*\(\s*0\s*\)\s*uniform\s+HizParams\s*\{",
+                                             strip_c_comments(shader.read_text(errors="replace"))):
+        fail("engine/shaders/hiz_copy_comp.glsl: the copy's block must be `UBO(0) uniform HizParams` -- the "
+             "name the mirror is registered by (#340 P5d)")
+    b = body_named(root, rel, "R_BuildHiZForNextFrame")
+    if b is not None:
+        sb = squash(b)
+        at = 0
+        for step in HIZ_BUILD_ORDER:
+            i = sb.find(step, at)
+            if i < 0:
+                fail("%s: R_BuildHiZForNextFrame must make `%s` after the steps before it -- the pyramid "
+                     "invalid until the end, each dispatch's block filled and flushed or uploaded before it, "
+                     "a dropped level noticed (#340 P5d)" % (rel, step))
+                break
+            at = i + len(step)
+        for blk in ("HizParams", "CullParams"):
+            if sb.count('RG_UniformBlockFlushed("%s")' % blk) != 1:
+                fail("%s: R_BuildHiZForNextFrame must flush %s in one place (#340 P5d)" % (rel, blk))
+    b = body_named(root, rel, "R_HiZ_EnsureResources")
+    if b is not None:
+        sb = squash(b)
+        for prog, name in (("hiz_copy_prog", "u_scene_depth"), ("hiz_reduce_prog", "u_src")):
+            if ('R_UseProgram(%s);loc=R_ProgramSamplerLoc(%s,"%s");R_ProgramSamplerUnit(%s,loc,"%s",0);'
+                    % (prog, prog, name, prog, name)) not in sb:
+                fail("%s: R_HiZ_EnsureResources must name %s's unit, 0, through R_ProgramSamplerUnit -- the "
+                     "Vulkan SPIR-V keeps only its slot, and an unmapped sampler reads a placeholder "
+                     "(#340 P5d)" % (rel, name))
+    b = body_named(root, rel, "R_HiZ_ResolveStandaloneDepth")
+    if b is not None:
+        sb = squash(b)
+        for pin, why in (
+                ("GLenumfmt=GL_DEPTH_COMPONENT24,attach=GL_DEPTH_ATTACHMENT;", "GL keeps its depth-only copy"),
+                ("#ifdefUSE_SDL_GPUif(R_GPU()){fmt=GL_DEPTH24_STENCIL8;attach=GL_DEPTH_STENCIL_ATTACHMENT;}#endif",
+                 "-gpu copies depth only between textures of the scene's own format"),
+                ("ok=R_BlitFramebuffer(0,0,scene_w,scene_h,0,0,scene_w,scene_h,GL_DEPTH_BUFFER_BIT,GL_NEAREST);",
+                 "the copy's answer is kept"),
+                ("returnok?hiz_resolve_depth_tex:0;", "a declined copy leaves no pyramid, not an older "
+                 "frame's depth")):
+            if pin not in sb:
+                fail("%s: R_HiZ_ResolveStandaloneDepth must make `%s` -- %s (#340 P5d)" % (rel, pin, why))
+    b = body_named(root, rel, "WC_ReadPyramid")
+    if b is not None:
+        sb = squash(b)
+        if "R_ReadTexImage(GL_TEXTURE_2D,hiz_pyramid_tex,mip,GL_RED,GL_FLOAT,p->lv[mip])" not in sb or \
+                "*off+=WC_PyramidOff(p,mip);" not in sb:
+            fail("%s: WC_ReadPyramid must read each level back through R_ReadTexImage and hold it to the "
+                 "reduce of the one below (#340 P5d)" % rel)
+    else:
+        fail("%s: no WC_ReadPyramid -- worldcull_verify cannot follow Hi-Z (#340 P5d)" % rel)
+    b = body_named(root, rel, "R_DispatchWorldCull")
+    if b is not None:
+        sb = squash(b)
+        m, v = sb.find("R_DispatchCompute((cull_num_marksurfs+63)/64,1,1);"), \
+            sb.find("if(wc_verify_pending){wc_verify_pending=false;WC_Verify();}")
+        if m < 0 or v < m:
+            fail("%s: R_DispatchWorldCull must run a pending worldcull_verify after the mark dispatch -- the "
+                 "pyramid it read is rebuilt at the frame's end (#340 P5d)" % rel)
+    b = body_named(root, rel, "R_WorldCull_Verify_f")
+    if b is not None and "if(cull_initialized&&gl_hiz_cull.integer&&wc_last_hiz)wc_verify_pending=true;" \
+            "elseWC_Verify();" not in squash(b):
+        fail("%s: worldcull_verify with Hi-Z on must wait for the next mark dispatch (#340 P5d)" % rel)
+    b = body_named(root, rel, "WC_CpuAccepts")
+    if b is not None:
+        sb = squash(b)
+        h, f, d = sb.find("if(p){inth=WC_CpuHiZ(s,p);"), sb.find("<-512.0f"), sb.find("if(seen[ms->surf_idx])")
+        if h < 0 or f < 0 or d < 0 or not f < h < d:
+            fail("%s: WC_CpuAccepts must run the Hi-Z test between the frustum's and the dedup, as "
+                 "cull_mark_comp does (#340 P5d)" % rel)
+
+    rc = "engine/h2shared/rg_compute.c"
+    b = body_named(root, rc, "RGC_ImageSampled")
+    if b is None or "if(RG_Res_ImageSampled(im->binding,st->samplers[i].unit,(rg_textype_t)st->samplers[i].type))" \
+            not in squash(b):
+        fail("%s: RGC_ImageSampled must ask every sampler of the stage whether it reads the image's texture "
+             "(RG_Res_ImageSampled, #340 P5d)" % rc)
+    b = body_named(root, rc, "RG_DispatchCompute")
+    if b is not None and "target|=RG_Res_UnitIsTarget(st->samplers[i].unit,(rg_textype_t)st->samplers[i].type);" \
+            not in squash(b):
+        fail("%s: RG_DispatchCompute must end the segment when a sampler reads the target's texture, so a "
+             "clear pending on it lands before the dispatch reads it (#340 P5d)" % rc)
+    rf = "engine/h2shared/rg_frame.c"
+    b, e = body_named(root, rf, "RG_Frame_ComputeBegin"), body_named(root, rf, "RG_Frame_ComputeEnd")
+    if b is None or e is None or not squash(b).endswith("rgf_compute_bind=true;returnrgf_cmd;") or \
+            not squash(e).startswith("{rgf_compute_bind=false;"):
+        fail("%s: RG_Frame_ComputeBinding must be true from RG_Frame_ComputeBegin's success to "
+             "RG_Frame_ComputeEnd alone -- a draw sampling its own target must still get the placeholder "
+             "(#340 P5d)" % rf)
+    rr = "engine/h2shared/rg_resource.c"
+    b = body_named(root, rr, "RG_Res_ImageSampled")
+    if b is not None and "returnname&&sunit<RT_MAX_TEXTURE_UNITS&&(int)type<RG_TT_COUNT&&" \
+            "rgt_units[sunit][type]==name;" not in squash(b):
+        fail("%s: RG_Res_ImageSampled must compare the image unit's texture with the sampler unit's, for "
+             "the sampler's dimensionality (#340 P5d)" % rr)
+    b = body_named(root, rr, "RG_Res_StorageScratch")
+    if b is not None:
+        sb = squash(b)
+        for pin, why in (
+                ("sc=RGT_Scratch(is3d?SDL_GPU_TEXTURETYPE_3D:SDL_GPU_TEXTURETYPE_2D,t->fmt,"
+                 "RGT_StorageUsage(u->access),size[0],size[1],size[2]);",
+                 "a scratch of the level's size and format, with the storage usage the bind asked for"),
+                ("*preload=!(u->access==GL_WRITE_ONLY&&cover[0]>=size[0]&&cover[1]>=size[1]&&"
+                 "cover[2]>=size[2]);", "GL keeps what a dispatch does not store"),
+                ("b->texture=sc;b->mip_level=0;b->layer=0;b->cycle=false;", "the pass writes the scratch"),
+                ("home->texture=t->tex;home->mip_level=b->mip_level;home->layer=b->layer;",
+                 "the level the scratch is copied back to is the one GL bound")):
+            if pin not in sb:
+                fail("%s: RG_Res_StorageScratch must make `%s` -- %s (#340 P5d)" % (rr, pin, why))
+    else:
+        fail("%s: no RG_Res_StorageScratch (#340 P5d)" % rr)
+    b = body_named(root, rr, "RGT_Scratch")
+    su = body_named(root, rr, "RGT_StorageUsage")
+    if b is not None and ("ci.usage=usage;ci.width=w;" not in squash(b) or "SAMPLER" in squash(b) or su is None or
+                          "SAMPLER" in squash(su) or "GRAPHICS" in squash(su)):
+        fail("%s: RGT_Scratch must make the scratch with storage usage alone -- with SAMPLER SDL's resting "
+             "state for it is the graphics stages', and the copy out after the pass races (#340 P5d)" % rr)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     ap.add_argument("--root", type=Path, default=ROOT)
@@ -4445,6 +4655,7 @@ def main(argv=None):
     check_compute_backend(root)
     check_light_cluster(root)
     check_world_cull(root)
+    check_hiz(root)
     nfiles = 0
     rg_files = []
     for p in sorted(eng.rglob("*")):

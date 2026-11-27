@@ -1,0 +1,229 @@
+# sweep-hiz-gpu.steps -- the Hi-Z pyramid through the SDL_GPU backend (-gpu)
+# against GL (#340 P5d): gl_worldcull.c's hiz_copy (the scene depth into mip
+# 0), one hiz_reduce pass per level after it, and cull_mark's occlusion test
+# against the pyramid the frame before built.
+#
+# One basedir, one command line, both sides: tools/mk-mirror-testgame.py's
+# game over a FULL install (village1 is the cheapest map that occludes
+# anything; demo1 and demo2 cull nothing):
+#
+#   ./tools/mk-mirror-testgame.py $B          # $B holds the retail data1
+#   A="-fsaa 0 +gamma 1 -game mirror +map village1"
+#   STEPS=tools/sweep-hiz-gpu.steps ENGINE=$E ./tools/headless-drive.sh script /tmp/h-gl  $B $A
+#   VK_ICD_FILENAMES=<lvp_icd json> STEPS=tools/sweep-hiz-gpu.steps ENGINE=$E \
+#       ./tools/headless-drive.sh script /tmp/h-gpu $B -gpu +gpu_allow_software 1 +gpu_debug 1 $A
+#   ./tools/hiz-diff.sh /tmp/h-gl /tmp/h-gpu
+#
+# The frames, each with gl_hiz_stats 1 for a few seconds between STATS-nn
+# markers and worldcull_verify after it (with Hi-Z on it answers at the next
+# mark dispatch, so the END marker waits two frames):
+#   01-04  sweep-worldcull.steps' four village1 viewpoints -- yaw 90, yaw 90
+#          at gl_hiz_cull 0, yaw 180, yaw 270 -- post chain off: the pyramid
+#          is seeded from the standalone copy of framebuffer 0's depth
+#          (R_HiZ_ResolveStandaloneDepth)
+#   05-08  the same at gamma 1.2: the post chain is up, and the pyramid is
+#          seeded from its scene depth texture (GL_PostProcess_End3D)
+#   09     yaw 90 at r_scale 0.5: a 400x300 scene, a 9-level pyramid
+#   11     the post chain raised and dropped at runtime (#539): yaw 90 with
+#          it off (STATS-11A), up at yaw 180 (11B), down at yaw 180 (11C),
+#          back to yaw 90 (11)
+#   12     a camera jump, Hi-Z off: worldcull_verify the frame after
+#          `setpos` moves the view to another leaf, so a cull that reads
+#          the PVS a frame late cannot hide behind a static camera
+#   10     the mirror test game's floor camera (demo1f, hiz-mirror-check.sh's)
+#          at r_mirroralpha 1 (STATS-10A) and 0.5 (10): the view's depth in
+#          half the window-Z range (#533); last, since it is a map change
+#
+# THE GATE IS THE NUMBERS.  Occlusion culling that works is invisible, and so
+# is one that culls nothing (see sweep-worldcull.steps), so the frames are
+# corroboration:
+#   * every STATS section's hiz_stats lines one line, the same on both
+#     sides; 01 and 03 the pinned village1 baseline exactly (hiz=118 and 147),
+#     02 and 04 hiz=0;
+#   * worldcull_verify in every STATS section on both sides: 0 buckets off,
+#     and with Hi-Z on 0 pyramid texels off the reduce of the level below and
+#     as many marksurfaces culled by the CPU's Hi-Z test as hiz_stats counts;
+#   * the relations of hiz-mirror-check.sh (10 against 10A) and
+#     hiz-toggle-check.sh (11 equal to 01, 11C to 11B);
+#   * -gpu: 0 routed calls the backend did not handle, 0 dispatches
+#     dropped, no "Validation Error" with sync validation on;
+#   * the frames: PSNR GL against -gpu, and each -gpu frame against master
+#     -gpu's (where Hi-Z is held off) AE 0, every frame.
+#
+# SETTINGS, on BOTH sides: sweep-cull-gpu.steps', with gl_hiz_cull 1 and the
+# default view size, whose status bar sweep-worldcull.steps' counts were
+# taken with.  Each shot is taken paused.  Commands share a console line
+# where they can: each line typed costs the driver about four seconds.
+
+sleep 30
+cmd god; notarget; noclip; viewsize 100; crosshair 0; showpause 0; r_skyspeed_back 0; r_skyspeed_front 0
+cmd r_skybox_speed 0; r_flatlightstyles 1; r_dynamic 0; r_gpulightstyles 0; r_ssao 0; r_bloom 0
+cmd r_dlight_occlusion 0; r_alias_gpu 0; r_particles 0; r_drawparticles 0; gl_texture_anisotropy 1; r_oit 0
+cmd r_waterwarp 0; r_softparticles 0; r_softemu 0; r_scale 1; gl_waterwarp_speed 0; r_caustics 0; gl_glows 0
+cmd gl_missile_glows 0; gl_other_glows 0; r_drawviewmodel 0; r_drawentities 0; fog 0; gl_cull 1
+cmd gl_hiz_stats 0; r_mirroralpha 1; r_gpucull 1; gl_hiz_cull 1
+sleep 2
+
+# --- post chain off: the standalone depth copy ---
+cmd gpu_unrouted reset; setpos 200 -784 30 0 90 0
+sleep 2
+cmd pause
+shot 01-yaw090
+cmd pause
+cmd echo STATS-01-BEGIN; gl_hiz_stats 1
+sleep 4
+cmd gl_hiz_stats 0
+sleep 1
+cmd worldcull_verify; wait; wait; echo STATS-01-END
+cmd gl_hiz_cull 0
+sleep 2
+cmd pause
+shot 02-yaw090-hiz-off
+cmd pause
+cmd echo STATS-02-BEGIN; gl_hiz_stats 1
+sleep 4
+cmd gl_hiz_stats 0
+sleep 1
+cmd worldcull_verify; wait; wait; echo STATS-02-END
+cmd gl_hiz_cull 1; setpos 200 -784 30 0 180 0
+sleep 2
+cmd pause
+shot 03-yaw180
+cmd pause
+cmd echo STATS-03-BEGIN; gl_hiz_stats 1
+sleep 4
+cmd gl_hiz_stats 0
+sleep 1
+cmd worldcull_verify; wait; wait; echo STATS-03-END
+cmd setpos 200 -784 30 0 270 0
+sleep 2
+cmd pause
+shot 04-yaw270
+cmd pause
+cmd echo STATS-04-BEGIN; gl_hiz_stats 1
+sleep 4
+cmd gl_hiz_stats 0
+sleep 1
+cmd worldcull_verify; wait; wait; echo STATS-04-END
+cmd echo REPORT-OFF-BEGIN; gpu_unrouted; renderer_status; echo REPORT-OFF-END
+
+# --- post chain up: its scene depth texture ---
+cmd gamma 1.2; setpos 200 -784 30 0 90 0
+sleep 3
+cmd pause
+shot 05-yaw090-pp
+cmd pause
+cmd echo STATS-05-BEGIN; gl_hiz_stats 1
+sleep 4
+cmd gl_hiz_stats 0
+sleep 1
+cmd worldcull_verify; wait; wait; echo STATS-05-END
+cmd gl_hiz_cull 0
+sleep 2
+cmd pause
+shot 06-yaw090-pp-hiz-off
+cmd pause
+cmd echo STATS-06-BEGIN; gl_hiz_stats 1
+sleep 4
+cmd gl_hiz_stats 0
+sleep 1
+cmd worldcull_verify; wait; wait; echo STATS-06-END
+cmd gl_hiz_cull 1; setpos 200 -784 30 0 180 0
+sleep 2
+cmd pause
+shot 07-yaw180-pp
+cmd pause
+cmd echo STATS-07-BEGIN; gl_hiz_stats 1
+sleep 4
+cmd gl_hiz_stats 0
+sleep 1
+cmd worldcull_verify; wait; wait; echo STATS-07-END
+cmd setpos 200 -784 30 0 270 0
+sleep 2
+cmd pause
+shot 08-yaw270-pp
+cmd pause
+cmd echo STATS-08-BEGIN; gl_hiz_stats 1
+sleep 4
+cmd gl_hiz_stats 0
+sleep 1
+cmd worldcull_verify; wait; wait; echo STATS-08-END
+cmd echo REPORT-PP-BEGIN; gpu_unrouted; renderer_status; echo REPORT-PP-END
+
+# --- a scaled scene ---
+cmd r_scale 0.5; setpos 200 -784 30 0 90 0
+sleep 3
+cmd pause
+shot 09-yaw090-scale
+cmd pause
+cmd echo STATS-09-BEGIN; gl_hiz_stats 1
+sleep 4
+cmd gl_hiz_stats 0
+sleep 1
+cmd worldcull_verify; wait; wait; echo STATS-09-END
+cmd r_scale 1; gamma 1
+
+# --- the post chain toggled at runtime (#539) ---
+sleep 3
+cmd echo STATS-11A-BEGIN; gl_hiz_stats 1
+sleep 3
+cmd gl_hiz_stats 0
+sleep 1
+cmd echo STATS-11A-END
+cmd gamma 1.2; setpos 200 -784 30 0 180 0
+sleep 3
+cmd echo STATS-11B-BEGIN; gl_hiz_stats 1
+sleep 3
+cmd gl_hiz_stats 0
+sleep 1
+cmd echo STATS-11B-END
+cmd gamma 1
+sleep 3
+cmd echo STATS-11C-BEGIN; gl_hiz_stats 1
+sleep 3
+cmd gl_hiz_stats 0
+sleep 1
+cmd echo STATS-11C-END
+cmd setpos 200 -784 30 0 90 0
+sleep 3
+cmd pause
+shot 11-toggle-yaw090
+cmd pause
+cmd echo STATS-11-BEGIN; gl_hiz_stats 1
+sleep 4
+cmd gl_hiz_stats 0
+sleep 1
+cmd worldcull_verify; wait; wait; echo STATS-11-END
+
+# --- a camera jump, Hi-Z off: the verify one frame after it ---
+cmd gl_hiz_cull 0
+sleep 2
+cmd echo JUMP-BEGIN; setpos -520 -1200 60 0 0 0; wait; worldcull_verify
+sleep 2
+cmd setpos 200 -784 30 0 90 0; wait; worldcull_verify; echo JUMP-END
+cmd gl_hiz_cull 1; echo REPORT-VILLAGE-BEGIN; gpu_unrouted; renderer_status; echo REPORT-VILLAGE-END
+
+# --- the mirror's depth range (#533): demo1f's floor camera ---
+cmd gpu_unrouted reset
+console
+enter map demo1f
+sleep 25
+cmd god; notarget; noclip; fog 0; gl_hiz_cull 1; r_mirroralpha 1; setpos -860 -1990 30 10 40 0
+sleep 3
+cmd echo STATS-10A-BEGIN; gl_hiz_stats 1
+sleep 4
+cmd gl_hiz_stats 0
+sleep 1
+cmd worldcull_verify; wait; wait; echo STATS-10A-END
+cmd r_mirroralpha 0.5
+sleep 3
+cmd pause
+shot 10-mirror-floor
+cmd pause
+cmd echo STATS-10-BEGIN; gl_hiz_stats 1
+sleep 4
+cmd gl_hiz_stats 0
+sleep 1
+cmd worldcull_verify; wait; wait; echo STATS-10-END
+cmd echo REPORT-MIRROR-BEGIN; gpu_unrouted; renderer_status; echo REPORT-MIRROR-END
+sleep 1

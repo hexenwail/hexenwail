@@ -152,15 +152,18 @@ if not draw:
     errors.append("no R_DrawWorldCulled body found")
 elif "R_SetWorldFrag (" not in draw.group(1):
     errors.append("R_DrawWorldCulled no longer writes the world fragment set")
-# One sampler-unit lookup is not a loose uniform: u_hiz_pyramid's unit, named
-# through the seam for -gpu, whose SPIR-V keeps only its slot (#340 P5c).
+# Three sampler-unit lookups are not loose uniforms: u_hiz_pyramid's unit and
+# the Hi-Z passes' (#340 P5d), named through the seam for -gpu, whose SPIR-V
+# keeps only their slots (#340 P5c).
 # Every other R_ProgramSamplerLoc, and any raw glGetUniformLocation, is one.
 nocomment = re.sub(r"//[^\n]*", " ", re.sub(r"/\*.*?\*/", " ", src, flags=re.S))
 samplers = re.findall(r'R_ProgramSamplerLoc\s*\(\s*(\w+)\s*,\s*"(\w+)"\s*\)', nocomment)
 if "glGetUniformLocation_fp" in code or len(re.findall(r"\bR_ProgramSamplerLoc\s*\(", code)) != len(samplers) \
-        or samplers not in ([], [("cull_mark_prog", "u_hiz_pyramid")]):
+        or samplers not in ([], [("cull_mark_prog", "u_hiz_pyramid"), ("hiz_copy_prog", "u_scene_depth"),
+                                 ("hiz_reduce_prog", "u_src")]):
     errors.append("glGetUniformLocation_fp, or an R_ProgramSamplerLoc but cull_mark_prog's u_hiz_pyramid, "
-                  "used in gl_worldcull.c: %s" % samplers)
+                  "hiz_copy_prog's u_scene_depth and hiz_reduce_prog's u_src (#340 P5d), used in "
+                  "gl_worldcull.c: %s" % samplers)
 # The block bindings are plumbing, not uploads; both calls must still
 # exist (the bare name also appears in the two null guards -- count calls).
 if len(re.findall(r"glUniformBlockBinding_fp\s*\(", code)) != 2:

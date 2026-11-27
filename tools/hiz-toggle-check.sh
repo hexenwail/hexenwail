@@ -30,7 +30,15 @@
 #
 # Engine: ENGINE (default ./result/bin/hexenwail), desktop GL.  The commands
 # go through an exec'd cfg because a "+setpos 200 -784 ..." on the command
-# line ends at "-784".
+# line ends at "-784".  ENGINE_ARGS go on the command line ahead of the map,
+# and TIMEOUT (default 180) bounds each run.  The SDL_GPU backend (#340 P5d):
+#
+#   ENGINE_ARGS="-gpu +gpu_allow_software 1" ./tools/hiz-toggle-check.sh
+#
+# with VK_ICD_FILENAMES naming the device to run on.  -gpu has no MSAA (the
+# scene is single-sampled whatever vid_fsaa says), so it takes the fsaa 0
+# runs alone: an fsaa 4 run would hold it to an MSAA relation it has no
+# MSAA for.
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -38,6 +46,9 @@ set -euo pipefail
 
 BASEDIR=${1:-$HOME/hexen2}
 ENGINE=${ENGINE:-./result/bin/hexenwail}
+ENGINE_ARGS=${ENGINE_ARGS:-}
+TIMEOUT=${TIMEOUT:-180}
+case " $ENGINE_ARGS " in *" -gpu "*) FSAAS=0 ;; *) FSAAS="4 0" ;; esac
 
 [ -x "$ENGINE" ] || { echo "no engine at $ENGINE (nix build .#default)" >&2; exit 2; }
 BASEDIR=$(readlink -f "$BASEDIR")
@@ -63,8 +74,8 @@ run() {
 		echo quit
 	} >"$ud/data1/probe.cfg"
 	env -u LD_LIBRARY_PATH SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-offscreen}" SDL_AUDIODRIVER=dummy \
-		timeout -k 5 180 "$ENGINE" -condebug -basedir "$BASEDIR" -userdir "$ud" \
-		-width 800 -height 600 -window -fsaa "$2" +gl_hiz_cull 1 \
+		timeout -k 5 "$TIMEOUT" "$ENGINE" -condebug -basedir "$BASEDIR" -userdir "$ud" \
+		-width 800 -height 600 -window -fsaa "$2" $ENGINE_ARGS +gl_hiz_cull 1 \
 		+map village1 +exec probe.cfg >"$ud/stdout" 2>&1 || true
 	local log
 	log=$(find "$ud" -name qconsole.log -print -quit)
@@ -79,7 +90,7 @@ run() {
 fail=0
 for toggle in "r_ssao 1|r_ssao 0" "gamma 0.9|gamma 1"; do
 	on=${toggle%%|*}; off=${toggle##*|}
-	for fsaa in 4 0; do
+	for fsaa in $FSAAS; do
 		name="${on%% *}-fsaa$fsaa"
 		declare -A h=()
 		while read -r p v; do h[$p]=$v; done < <(run "$name" "$fsaa" "$on" "$off")

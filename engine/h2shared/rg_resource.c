@@ -122,6 +122,22 @@ typedef struct {
 static rgimageunit_t	rgt_images[RG_MAX_STAGE_IMAGES];
 static unsigned long	rgt_storage_recreated, rgt_readbacks;
 
+/* What a dispatch writes in place of a level it also samples
+ * (RG_Res_StorageScratch, #340 P5d): one per shape, kept, as few as the
+ * pyramids that need them have levels. */
+#define RGT_MAX_SCRATCH	24
+typedef struct {
+	SDL_GPUTexture		*tex;
+	SDL_GPUTextureType	type;
+	SDL_GPUTextureFormat	fmt;
+	SDL_GPUTextureUsageFlags usage;
+	Uint32			w, h, d;
+	unsigned long		gen;		/* the dispatch it was last handed to */
+} rgscratch_t;
+static rgscratch_t	rgt_scratch[RGT_MAX_SCRATCH];
+static int		rgt_numscratch, rgt_nextscratch;
+static unsigned long	rgt_scratch_made, rgt_scratch_gen;
+
 /* Released only after the frame's command buffer is submitted: a recorded
  * draw can still name one when the delete or re-creation happens. */
 static SDL_GPUTexture	**rgt_retired;
@@ -1135,8 +1151,9 @@ qboolean RG_Res_ForDraw (GLuint unit, rg_textype_t type, rg_sampclass_t sclass, 
 			RGT_Realize (t);
 			if (t->tex && !(t->tex_usage & SDL_GPU_TEXTUREUSAGE_SAMPLER))
 				RG_NoteUnhandled ("texture made without SAMPLER usage sampled (placeholder bound)");
-			else if (RG_Frame_TargetHolds (t->tex))
-				/* GL leaves that undefined; Vulkan faults it. */
+			else if (RG_Frame_TargetHolds (t->tex) && !RG_Frame_ComputeBinding ())
+				/* GL leaves that undefined; Vulkan faults it.  A
+				 * dispatch is no draw: it runs between passes. */
 				RG_NoteUnhandled ("texture sampled by a draw into it (placeholder bound)");
 			else if (t->tex)
 			{
@@ -1273,6 +1290,14 @@ qboolean RG_Res_UnitHolds (GLuint unit, rg_textype_t type)
 	return t && t->defined && t->type == type;
 }
 
+qboolean RG_Res_UnitIsTarget (GLuint unit, rg_textype_t type)
+{
+	rgtex_t	*t = (unit < RT_MAX_TEXTURE_UNITS && (int) type < RG_TT_COUNT)
+		     ? RGT_Get (rgt_units[unit][type]) : NULL;
+
+	return t && t->tex && RG_Frame_TargetHolds (t->tex);
+}
+
 qboolean RG_Res_StorageImage (int unit, rg_textype_t type, const Uint32 cover[3],
 			      SDL_GPUStorageTextureReadWriteBinding *out)
 {
@@ -1349,6 +1374,123 @@ void RG_Res_StorageImageWritten (int unit)
 
 	if (t)
 		t->unwritten = false;
+}
+
+qboolean RG_Res_ImageSampled (int unit, GLuint sunit, rg_textype_t type)
+{
+	GLuint	name = (unit >= 0 && unit < RG_MAX_STAGE_IMAGES) ? rgt_images[unit].tex : 0;
+
+	return name && sunit < RT_MAX_TEXTURE_UNITS && (int) type < RG_TT_COUNT &&
+	       rgt_units[sunit][type] == name;
+}
+
+static SDL_GPUTexture *RGT_Scratch (SDL_GPUTextureType type, SDL_GPUTextureFormat fmt,
+				    SDL_GPUTextureUsageFlags usage, Uint32 w, Uint32 h, Uint32 d)
+{
+	SDL_GPUTextureCreateInfo	ci;
+	rgscratch_t			*sc;
+	int				i;
+
+	for (i = 0; i < rgt_numscratch; i++)
+	{
+		sc = &rgt_scratch[i];
+		if (sc->tex && sc->type == type && sc->fmt == fmt && sc->usage == usage &&
+		    sc->w == w && sc->h == h && sc->d == d)
+		{
+			sc->gen = rgt_scratch_gen;
+			return sc->tex;
+		}
+	}
+	if (rgt_numscratch < RGT_MAX_SCRATCH)
+		sc = &rgt_scratch[rgt_numscratch++];
+	else
+	{
+		/* Full: the oldest goes, but never one this dispatch holds --
+		 * it is bound to nothing yet, so SDL would not keep it alive.
+		 * One already recorded SDL keeps until that work retires. */
+		for (i = 0; i < RGT_MAX_SCRATCH; i++)
+		{
+			sc = &rgt_scratch[(rgt_nextscratch + i) % RGT_MAX_SCRATCH];
+			if (sc->gen != rgt_scratch_gen)
+				break;
+		}
+		if (i == RGT_MAX_SCRATCH)
+			return NULL;
+		rgt_nextscratch = (rgt_nextscratch + i + 1) % RGT_MAX_SCRATCH;
+		if (sc->tex)
+			SDL_ReleaseGPUTexture (rg_dev, sc->tex);
+	}
+	SDL_zero (ci);
+	ci.type = type;
+	ci.format = fmt;
+	/* Storage alone: SDL's resting state for it is then the compute
+	 * stage's, so the copy out of it after the pass, and the next pass's
+	 * write after that copy, are each ordered by the barrier SDL puts
+	 * between them. */
+	ci.usage = usage;
+	ci.width = w;
+	ci.height = h;
+	ci.layer_count_or_depth = d;
+	ci.num_levels = 1;
+	ci.sample_count = SDL_GPU_SAMPLECOUNT_1;
+	memset (sc, 0, sizeof(*sc));
+	sc->tex = SDL_CreateGPUTexture (rg_dev, &ci);
+	if (!sc->tex)
+	{
+		/* the slot stays, empty: nothing matches it, and it goes first */
+		Con_DPrintf ("SDL_GPU: no %ux%ux%u scratch texture (%s)\n", w, h, d, SDL_GetError ());
+		return NULL;
+	}
+	sc->gen = rgt_scratch_gen;
+	sc->type = type;
+	sc->fmt = fmt;
+	sc->usage = usage;
+	sc->w = w;
+	sc->h = h;
+	sc->d = d;
+	rgt_scratch_made++;
+	return sc->tex;
+}
+
+void RG_Res_ScratchBegin (void)
+{
+	rgt_scratch_gen++;
+}
+
+qboolean RG_Res_StorageScratch (int unit, const Uint32 cover[3], SDL_GPUStorageTextureReadWriteBinding *b,
+				SDL_GPUTextureLocation *home, Uint32 size[3], qboolean *preload)
+{
+	const rgimageunit_t	*u = (unit >= 0 && unit < RG_MAX_STAGE_IMAGES) ? &rgt_images[unit] : NULL;
+	rgtex_t			*t = u ? RGT_Get (u->tex) : NULL;
+	SDL_GPUTexture		*sc;
+	qboolean		is3d;
+
+	if (!t || !t->tex || b->texture != t->tex)
+		return false;
+	is3d = (t->type == RG_TT_3D);
+	size[0] = (Uint32) q_max (1, t->w >> u->level);
+	size[1] = (Uint32) q_max (1, t->h >> u->level);
+	size[2] = is3d ? (Uint32) q_max (1, t->d >> u->level) : 1;
+	sc = RGT_Scratch (is3d ? SDL_GPU_TEXTURETYPE_3D : SDL_GPU_TEXTURETYPE_2D, t->fmt,
+			  RGT_StorageUsage (u->access), size[0], size[1], size[2]);
+	if (!sc)
+	{
+		RG_NoteUnhandled ("no scratch texture for a level a dispatch samples and writes (dropped)");
+		return false;
+	}
+	SDL_zero (*home);
+	home->texture = t->tex;
+	home->mip_level = b->mip_level;
+	home->layer = b->layer;
+	/* GL keeps what a dispatch does not store: a read-write image, or a
+	 * dispatch short of the level, starts from the level's texels. */
+	*preload = !(u->access == GL_WRITE_ONLY &&
+		     cover[0] >= size[0] && cover[1] >= size[1] && cover[2] >= size[2]);
+	b->texture = sc;
+	b->mip_level = 0;
+	b->layer = 0;
+	b->cycle = false;
+	return true;
 }
 
 qboolean RG_ReadTexture (GLenum target, GLuint texture, GLint level, GLenum format,
@@ -1710,6 +1852,13 @@ void RG_Res_Shutdown (void)
 	if (rgt_ph_shadow)
 		SDL_ReleaseGPUTexture (rg_dev, rgt_ph_shadow);
 	rgt_ph_shadow = NULL;
+	for (i = 0; i < rgt_numscratch; i++)
+	{
+		if (rgt_scratch[i].tex)
+			SDL_ReleaseGPUTexture (rg_dev, rgt_scratch[i].tex);
+	}
+	memset (rgt_scratch, 0, sizeof(rgt_scratch));
+	rgt_numscratch = rgt_nextscratch = 0;
 	for (i = 0; i < rgs_count; i++)
 	{
 		if (rgs_cache[i].sampler)
@@ -1736,8 +1885,8 @@ void RG_Res_Status (void)
 	}
 	Con_Printf ("[RENDERER] SDL_GPU textures: %d names, %d created (%lu creates, %lu re-creates, "
 		    "%lu for storage usage), %d samplers (%lu cache flushes), %lu uploads / %lu KB, "
-		    "%u bytes queued, %lu render targets cleared, %lu read back\n",
+		    "%u bytes queued, %lu render targets cleared, %lu read back, %d scratch (%lu made)\n",
 		    alive, made, rgt_created, rgt_recreated, rgt_storage_recreated, rgs_count, rgs_flushes,
 		    rgt_uploads, rgt_upload_bytes / 1024, (unsigned int)rgt_pending_bytes, rgt_cleared,
-		    rgt_readbacks);
+		    rgt_readbacks, rgt_numscratch, rgt_scratch_made);
 }

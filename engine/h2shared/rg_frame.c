@@ -1869,6 +1869,15 @@ static qboolean RGF_CopyOnly (void)
 	return ok;
 }
 
+/* Between RG_Frame_ComputeBegin and _End: a dispatch's bindings are being
+ * made, with no render pass open (#340 P5d). */
+static qboolean		rgf_compute_bind;
+
+qboolean RG_Frame_ComputeBinding (void)
+{
+	return rgf_compute_bind;
+}
+
 SDL_GPUCommandBuffer *RG_Frame_ComputeBegin (qboolean touches_target, qboolean samples)
 {
 	if (rgf_numdraws || (rgf_clear_mask && touches_target))
@@ -1885,11 +1894,13 @@ SDL_GPUCommandBuffer *RG_Frame_ComputeBegin (qboolean touches_target, qboolean s
 		return NULL;
 	if (!RGF_EnsureCmd ())
 		return NULL;
+	rgf_compute_bind = true;
 	return rgf_cmd;
 }
 
 void RG_Frame_ComputeEnd (qboolean dispatched)
 {
+	rgf_compute_bind = false;
 	if (dispatched)
 	{
 		rgf_frame_cpasses++;

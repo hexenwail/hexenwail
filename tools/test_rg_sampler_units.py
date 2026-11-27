@@ -733,6 +733,7 @@ static unsigned int RG_Frame_Segment (void) { return 7; }
 /* the texture the draw renders into (#340 P4a-2): the real one, when set */
 static int		fb_hold;
 static int RG_Frame_TargetHolds (const SDL_GPUTexture *t) { return fb_hold && t == (SDL_GPUTexture *) &fake[40]; }
+static int RG_Frame_ComputeBinding (void) { return 0; }
 @RES@
 
 static Uint32 *load (const char *path, size_t *n)
