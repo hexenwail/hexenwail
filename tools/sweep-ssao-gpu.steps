@@ -1,0 +1,127 @@
+# sweep-ssao-gpu.steps -- r_ssao through the SDL_GPU backend (-gpu) against
+# GL (#340 P5e), on demo1's graveyard by the start.
+#
+# Since P5e -gpu runs SSAO: the world's depth snapshot and the prepare
+# dispatch after R_DrawWorld, the scene's snapshot and the mip, evaluate and
+# two filter dispatches after the opaque entities, each a compute pass of
+# rg_compute.c's (SsaoParams a registered mirror, flushed at each upload),
+# then the composite, a fragment draw into the scene FBO reading units 8-11.
+# Before it R_SSAO_WantsSceneFBO answered no under -gpu, and r_ssao drew
+# nothing there.
+#
+# Run the SAME binary both ways, with identical settings:
+#
+#   A="-fsaa 0 +gamma 1 +map demo1"
+#   STEPS=tools/sweep-ssao-gpu.steps ENGINE=$E ./tools/headless-drive.sh script /tmp/ss-gl ~/hexen2 $A
+#   VK_ICD_FILENAMES=<lvp_icd json> VK_LAYER_PATH=<vulkan-validation-layers>/share/vulkan/explicit_layer.d \
+#       VK_KHRONOS_VALIDATION_VALIDATE_SYNC=true VK_KHRONOS_VALIDATION_ENABLE_MESSAGE_LIMIT=false \
+#       STEPS=tools/sweep-ssao-gpu.steps ENGINE=$E \
+#       ./tools/headless-drive.sh script /tmp/ss-gpu ~/hexen2 -gpu +gpu_allow_software 1 +gpu_debug 1 $A
+#   ./tools/ssao-diff.sh /tmp/ss-gl /tmp/ss-gpu
+#
+# -fsaa 0 on both: GL's scene FBO is multisampled at vid_fsaa, and SSAO's
+# depth blit then resolves one sample; -gpu has no MSAA.
+#
+# THE FRAMES.  The camera is sweep-alias-gpu.steps' 01: four tombstones, the
+# angel statue and a tree standing on the world's floor, the receivers SSAO
+# shades (r_drawentities 1; the view model off).  Every frame is paused.
+#   01   r_ssao 0
+#   02   r_ssao 1 (half resolution)
+#   03   r_ssao 2
+#   04   r_ssao 3
+#   05   r_ssao 2, r_ssao_debug 1: the occlusion multiplier alone, white
+#        where nothing is occluded
+#   06   r_ssao 2, r_ssao_debug 2: the receiver mask, white on an entity's
+#        own pixels
+#   07   r_ssao 2, r_scale 0.5
+#   08   r_ssao 2 under fog (the composite fades by it)
+#   09   r_ssao 2 on a camera with no entity in view
+#   01n  09's camera at r_ssao 0: with nothing to add, SSAO changes nothing
+#        but the R8 AO's rounding, and 09 is 01n to within one level
+# 01n stands in for the plan's "09 equals 01": 01 has the entities 02-04 are
+# held to differ by, so it cannot also be the frame SSAO leaves alone.
+#
+# THE REPORTS, -gpu: REPORT-OFF (r_ssao 0) and REPORT-ON (r_ssao 2) at 01's
+# camera, so the compute passes and fence waits of one frame with SSAO on
+# are the other's plus SSAO's.  REPORT-ON's unrouted calls are counted from
+# REPORT-OFF, across SSAO coming up at r_ssao 1 and its targets made again
+# at full resolution for r_ssao 2.  REPORT-MAP after a map change with
+# r_ssao 2 (the targets and programs survive it).  ssao-diff.sh reads them.
+#
+# Settings as sweep-alias-gpu.steps: what either side does not draw alike is
+# off (post-process but SSAO's chain, compute lighting, particles, fog but
+# in 08, anisotropy), and setpos cameras with the game paused make each frame
+# repeatable; con_notifytime 0 keeps each `cmd`'s echo off the frames.
+# ssao-diff.sh cuts off the bottom 40 rows, the status bar.
+
+sleep 20
+cmd god; notarget; viewsize 120; crosshair 0; showpause 0; con_notifytime 0; r_skyspeed_back 0; r_skyspeed_front 0
+cmd r_flatlightstyles 1; r_dynamic 0; r_gpulightstyles 0; r_ssao 0; r_ssao_debug 0; r_bloom 0
+cmd r_dlight_occlusion 0; r_alias_gpu 1; r_particles 0; r_drawparticles 0; fog 0; gl_texture_anisotropy 1
+cmd r_oit 0; gl_waterwarp_speed 0; r_caustics 0; r_drawviewmodel 0; r_drawentities 1; r_scale 1
+sleep 2
+
+cmd setpos -960 -1960 40 10 225 0
+sleep 2
+cmd pause
+shot 01-ssao0
+cmd gpu_unrouted reset
+sleep 1
+cmd echo REPORT-OFF-BEGIN; gpu_unrouted; renderer_status; echo REPORT-OFF-END
+cmd pause
+cmd r_ssao 1
+sleep 2
+cmd pause
+shot 02-ssao1
+cmd pause
+cmd r_ssao 2
+sleep 2
+cmd pause
+shot 03-ssao2
+cmd echo REPORT-ON-BEGIN; gpu_unrouted; renderer_status; echo REPORT-ON-END
+cmd pause
+cmd r_ssao 3
+sleep 2
+cmd pause
+shot 04-ssao3
+cmd pause
+cmd r_ssao 2; r_ssao_debug 1
+sleep 2
+cmd pause
+shot 05-debug1
+cmd pause
+cmd r_ssao_debug 2
+sleep 2
+cmd pause
+shot 06-debug2
+cmd pause
+cmd r_ssao_debug 0; r_scale 0.5
+sleep 2
+cmd pause
+shot 07-scale050
+cmd pause
+cmd r_scale 1; fog 0.15 0.6 0.3 0.1
+sleep 2
+cmd pause
+shot 08-fog
+cmd pause
+cmd fog 0; setpos -1250 -1700 80 30 135 0
+sleep 2
+cmd pause
+shot 09-noent
+cmd pause
+cmd r_ssao 0
+sleep 2
+cmd pause
+shot 01n-noent-ssao0
+cmd pause
+
+# --- a map change with SSAO on: the targets and programs survive it ---
+cmd r_ssao 2; gpu_unrouted reset
+console
+enter map demo1
+sleep 20
+cmd god; notarget; setpos -960 -1960 40 10 225 0
+sleep 3
+cmd echo REPORT-MAP-BEGIN; gpu_unrouted; renderer_status; echo REPORT-MAP-END
+sleep 1

@@ -42,7 +42,7 @@
 #include "gl_fbo.h"	/* the depth snapshots, through the seam (#340 P5a-1) */
 #include "gl_compute.h"	/* dispatch, barriers, program deletes (#340 P5a-1) */
 #ifdef USE_SDL_GPU
-#include "rg_device.h"	/* R_GPU (): -gpu does not raise the chain for SSAO */
+#include "rg_device.h"	/* R_GPU (), the SsaoParams mirror, RG_DepthSampled (#340 P5e) */
 #endif
 
 #ifndef CLAMP
@@ -95,7 +95,18 @@ static int	ss_w, ss_h, ss_scale, ss_aow, ss_aoh, ss_levels;
 static int	ss_mismatch_w, ss_mismatch_h;
 static qboolean	ss_failed;		/* a program or target could not be built; until restart */
 static qboolean	ss_world_valid;		/* CaptureWorld ran this frame */
+/* What ss_ubo holds; under -gpu the registered SsaoParams mirror, flushed at
+ * each SS_Upload: each dispatch pushes the copy flushed before it, and the
+ * composite's draw snapshots its own as it is recorded (#340 P5e). */
 static ssao_params_t	ss_params;
+/* Why this device cannot run r_ssao, or NULL (decision 12, #340 P5e): asked
+ * once per device (SS_DeviceWhy), printed once when r_ssao asks for SSAO
+ * there, and renderer_status says it whatever r_ssao is, with the scenes it
+ * held SSAO off for.  Only the -gpu probes can set it; on GL they are always
+ * true. */
+static const char	*ss_unsupported;
+static qboolean		ss_probed, ss_said;
+static unsigned long	ss_unsupported_scenes, ss_scenes;
 
 static void SS_DeleteTargets (void)
 {
@@ -132,6 +143,7 @@ void R_SSAO_Shutdown (void)
 	if (ss_vao) { R_DeleteVertexArrays (1, &ss_vao); ss_vao = 0; }
 	ss_failed = false;
 	ss_world_valid = false;
+	ss_probed = ss_said = false;	/* a vid_restart may bring another device */
 }
 
 static void SS_BindBlock (GLuint prog)
@@ -139,7 +151,8 @@ static void SS_BindBlock (GLuint prog)
 	GLuint	blk;
 
 #ifdef USE_SDL_GPU
-	/* The SPIR-V fixes the block's slot; the mirror is P5e's (#340). */
+	/* The SPIR-V fixes the block's slot; SS_BuildPrograms registers the
+	 * mirror (#340 P5e). */
 	if (R_GPU ())
 		return;
 #endif
@@ -169,6 +182,34 @@ static void SS_BindSamplers (void)
 	loc = R_ProgramSamplerLoc (ss_comp_prog, "prepared_depth");
 	R_ProgramSamplerUnit (ss_comp_prog, loc, "prepared_depth", SSAO_TEX_UNIT + 3);
 	R_UseProgram (0);
+#ifdef USE_SDL_GPU
+	/* The compute stages' units, which their TEXBIND2 already says to GL;
+	 * the Vulkan SPIR-V keeps only the slot, and a sampler with no unit
+	 * reads a placeholder (#340 P5e).  -gpu alone, so GL's calls are what
+	 * they were. */
+	if (R_GPU ())
+	{
+		int	q;
+
+		loc = R_ProgramSamplerLoc (ss_prep_prog, "u_world_depth");
+		R_ProgramSamplerUnit (ss_prep_prog, loc, "u_world_depth", SSAO_TEX_UNIT);
+		loc = R_ProgramSamplerLoc (ss_mip_prog, "u_scene_depth");
+		R_ProgramSamplerUnit (ss_mip_prog, loc, "u_scene_depth", SSAO_TEX_UNIT);
+		for (q = 0; q < 3; q++)
+		{
+			loc = R_ProgramSamplerLoc (ss_eval_prog[q], "world_depth");
+			R_ProgramSamplerUnit (ss_eval_prog[q], loc, "world_depth", SSAO_TEX_UNIT);
+			loc = R_ProgramSamplerLoc (ss_eval_prog[q], "hilbert_lut");
+			R_ProgramSamplerUnit (ss_eval_prog[q], loc, "hilbert_lut", SSAO_TEX_UNIT + 1);
+			loc = R_ProgramSamplerLoc (ss_eval_prog[q], "depth_mismatch");
+			R_ProgramSamplerUnit (ss_eval_prog[q], loc, "depth_mismatch", SSAO_TEX_UNIT + 2);
+		}
+		loc = R_ProgramSamplerLoc (ss_filter_prog, "source");
+		R_ProgramSamplerUnit (ss_filter_prog, loc, "source", SSAO_TEX_UNIT);
+		loc = R_ProgramSamplerLoc (ss_filter_prog, "edges");
+		R_ProgramSamplerUnit (ss_filter_prog, loc, "edges", SSAO_TEX_UNIT + 1);
+	}
+#endif
 }
 
 static qboolean SS_BuildPrograms (void)
@@ -204,10 +245,17 @@ static qboolean SS_BuildPrograms (void)
 	SS_BindBlock (ss_comp_prog);
 	SS_BindSamplers ();
 
-	R_GenBuffers (1, &ss_ubo);
-	GL_BindBuffer (GL_UNIFORM_BUFFER, ss_ubo);
-	R_BufferData (GL_UNIFORM_BUFFER, sizeof(ssao_params_t), NULL, GL_DYNAMIC_DRAW);
-	GL_BindBuffer (GL_UNIFORM_BUFFER, 0);
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+		RG_UniformBlockRegister ("SsaoParams", &ss_params, sizeof(ss_params));
+	else
+#endif
+	{
+		R_GenBuffers (1, &ss_ubo);
+		GL_BindBuffer (GL_UNIFORM_BUFFER, ss_ubo);
+		R_BufferData (GL_UNIFORM_BUFFER, sizeof(ssao_params_t), NULL, GL_DYNAMIC_DRAW);
+		GL_BindBuffer (GL_UNIFORM_BUFFER, 0);
+	}
 	R_GenVertexArrays (1, &ss_vao);
 	return true;
 }
@@ -272,6 +320,22 @@ static void SS_UploadHilbert (void)
 			}
 			data[y * 64 + x] = (unsigned short)index;
 		}
+#ifdef USE_SDL_GPU
+	/* SDL_GPU refuses SAMPLER usage on an 8- or 16-bit integer format
+	 * (SDL_gpu.c: "usage cannot contain SAMPLER for textures with an
+	 * integer format"), and R32UI is not one; the shader's usampler2D reads
+	 * either the same (#340 P5e). */
+	if (R_GPU ())
+	{
+		static GLuint	wide[64 * 64];
+
+		for (x = 0; x < 64 * 64; x++)
+			wide[x] = data[x];
+		ss_hilbert = SS_Tex2D (1, GL_R32UI, 64, 64, GL_NEAREST);
+		R_TexSubImage2D (GL_TEXTURE_2D, ss_hilbert, 0, 0, 0, 64, 64, GL_RED_INTEGER, GL_UNSIGNED_INT, wide);
+		return;
+	}
+#endif
 	ss_hilbert = SS_Tex2D (1, GL_R16UI, 64, 64, GL_NEAREST);
 	R_TexSubImage2D (GL_TEXTURE_2D, ss_hilbert, 0, 0, 0, 64, 64, GL_RED_INTEGER, GL_UNSIGNED_SHORT, data);
 }
@@ -312,6 +376,19 @@ static qboolean SS_EnsureTargets (int w, int h, int scale)
 	ss_filtered = SS_Tex2D (1, GL_R8, ss_aow, ss_aoh, GL_NEAREST);
 	ss_edges = SS_Tex2D (1, GL_R8, ss_aow, ss_aoh, GL_NEAREST);
 	ss_mismatch = SS_Tex2D (1, GL_R32UI, ss_mismatch_w, ss_mismatch_h, GL_NEAREST);
+#ifdef USE_SDL_GPU
+	/* SDL_GPU fixes a texture's usage when it is made, and the prepare
+	 * binds mip 0 write-only before the mip pass binds it read-write: say
+	 * the read-write use first, or the pyramid is made without it and made
+	 * again at the mip pass, the prepared depth lost (#340 P5e). */
+	if (R_GPU ())
+	{
+		R_BindImageTexture (0, ss_pyramid, 0, GL_FALSE, 0, GL_READ_WRITE, GL_RG16F);
+		R_BindImageTexture (1, ss_mismatch, 0, GL_FALSE, 0, GL_READ_WRITE, GL_R32UI);
+		R_BindImageTexture (0, 0, 0, GL_FALSE, 0, GL_READ_ONLY, GL_R8);
+		R_BindImageTexture (1, 0, 0, GL_FALSE, 0, GL_READ_ONLY, GL_R8);
+	}
+#endif
 	SS_UploadHilbert ();
 	R_BindTextureForEdit (GL_TEXTURE_2D, 0);
 	return true;
@@ -332,6 +409,13 @@ static void SS_Blit (GLuint dst_fbo)
 
 static void SS_Upload (void)
 {
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_UniformBlockFlushed ("SsaoParams");
+		return;
+	}
+#endif
 	GL_BindBuffer (GL_UNIFORM_BUFFER, ss_ubo);
 	R_BufferSubData (GL_UNIFORM_BUFFER, 0, sizeof(ss_params), &ss_params);
 	GL_BindBuffer (GL_UNIFORM_BUFFER, 0);
@@ -366,18 +450,65 @@ static void SS_UnbindTex (int count)
  * on this answer (#539): asked before the frame's FBO exists, so it cannot
  * ask for it, and a driver that could never run SSAO is not handed a post
  * chain it would only pay for. */
+/* True on GL.  Under -gpu: mip 0 is read and written in one dispatch and
+ * the tile tags take imageAtomicOr, which want SIMULTANEOUS_READ_WRITE
+ * storage; the AO targets want R8 storage; and the snapshots are sampled,
+ * which a depth format the device only renders to is not.  SDL_GPU has no
+ * query for image atomics: R32UI's are assumed, as Vulkan requires them of
+ * any device with R32UI storage (to be checked on P7's D3D12 and Metal).
+ * The answers are the device's, so they are asked once. */
+static const char *SS_DeviceWhy (void)
+{
+	if (ss_probed)
+		return ss_unsupported;
+	ss_probed = true;
+	ss_unsupported = NULL;
+#ifdef USE_SDL_GPU
+	if (R_GPU () && !RG_DepthSampled ())
+		ss_unsupported = "a scene depth it cannot sample";
+	else
+#endif
+	if (!R_StorageFormatOk (GL_RG16F, GL_TEXTURE_2D, GL_READ_WRITE))
+		ss_unsupported = "no read-write RG16F storage image";
+	else if (!R_StorageFormatOk (GL_R8, GL_TEXTURE_2D, GL_WRITE_ONLY))
+		ss_unsupported = "no R8 storage image";
+	else if (!R_StorageFormatOk (GL_R32UI, GL_TEXTURE_2D, GL_READ_WRITE))
+		ss_unsupported = "no read-write R32UI storage image";
+	return ss_unsupported;
+}
+
 qboolean R_SSAO_WantsSceneFBO (void)
 {
-#ifdef USE_SDL_GPU
-	if (R_GPU ())	/* raw GL compute: nothing here is routed through -gpu */
+	const char	*why;
+
+	if (!(r_ssao.integer > 0 && !ss_failed &&
+	      gl_renderer_caps.compute_shaders && glBindImageTexture_fp &&
+	      glBlitFramebuffer_fp && glTexStorage2D_fp))
 		return false;
-#endif
-	return r_ssao.integer > 0 && !ss_failed &&
-	       gl_renderer_caps.compute_shaders && glBindImageTexture_fp &&
-	       glBlitFramebuffer_fp && glTexStorage2D_fp &&
-	       R_StorageFormatOk (GL_RG16F, GL_TEXTURE_2D, GL_READ_WRITE) &&
-	       R_StorageFormatOk (GL_R8, GL_TEXTURE_2D, GL_WRITE_ONLY) &&
-	       R_StorageFormatOk (GL_R32UI, GL_TEXTURE_2D, GL_READ_WRITE);
+	why = SS_DeviceWhy ();
+	if (why && !ss_said)
+	{
+		ss_said = true;
+		Con_Printf ("r_ssao: this device has %s, SSAO is off\n", why);
+	}
+	return why == NULL;
+}
+
+void R_SSAO_Status (void)
+{
+	const char	*state;
+
+	if (!(gl_renderer_caps.compute_shaders && glBindImageTexture_fp &&
+	      glBlitFramebuffer_fp && glTexStorage2D_fp))
+		state = "no compute or image load/store here";
+	else if (SS_DeviceWhy ())
+		state = SS_DeviceWhy ();
+	else if (ss_failed)
+		state = "failed until vid_restart";
+	else
+		state = "available";
+	Con_Printf ("[RENDERER] SSAO: r_ssao %d, %s; since boot %lu scenes with it, %lu held off by the "
+		    "device\n", r_ssao.integer, state, ss_scenes, ss_unsupported_scenes);
 }
 
 static qboolean SS_Active (void)
@@ -420,7 +551,11 @@ void R_SSAO_CaptureWorld (void)
 
 	ss_world_valid = false;
 	if (!SS_Active ())
+	{
+		if (r_ssao.integer > 0 && ss_unsupported)
+			ss_unsupported_scenes++;
 		return;
+	}
 	if (!GL_PostProcess_GetSceneSize (&w, &h) || w <= 0 || h <= 0)
 		return;
 	if (!SS_DepthLinearisation (&za, &zb, &clear_depth))
@@ -477,6 +612,7 @@ void R_SSAO_CaptureWorld (void)
 	SS_UnbindTex (1);
 	R_UseProgram (0);
 	ss_world_valid = true;
+	ss_scenes++;
 }
 
 void R_SSAO_Apply (void)
@@ -580,5 +716,9 @@ void R_SSAO_Shutdown (void) {}
 qboolean R_SSAO_WantsSceneFBO (void) { return false; }
 void R_SSAO_CaptureWorld (void) {}
 void R_SSAO_Apply (void) {}
+void R_SSAO_Status (void)
+{
+	Con_Printf ("[RENDERER] SSAO: r_ssao %d, no compute on the ES tier\n", r_ssao.integer);
+}
 
 #endif

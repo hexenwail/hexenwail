@@ -728,7 +728,10 @@ static qboolean R_HiZ_EnsureResources (int scene_w, int scene_h)
 		return false;
 	}
 	/* Both read unit 0, which TEXBIND(0) already says to GL; the Vulkan
-	 * SPIR-V keeps only the slot, so -gpu is told (#340 P5d). */
+	 * SPIR-V keeps only the slot, so -gpu is told (#340 P5d), and -gpu
+	 * alone, so GL's calls are what they were before (P5e). */
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
 	{
 		GLint	loc;
 
@@ -740,6 +743,7 @@ static qboolean R_HiZ_EnsureResources (int scene_w, int scene_h)
 		R_ProgramSamplerUnit (hiz_reduce_prog, loc, "u_src", 0);
 		R_UseProgram (0);
 	}
+#endif
 
 	Con_DPrintf("Hi-Z: %dx%d pyramid, %d mips\n",
 		    hiz_width, hiz_height, hiz_mip_count);

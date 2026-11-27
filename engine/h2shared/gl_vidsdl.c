@@ -723,6 +723,7 @@ static void GL_RendererStatus_f (void)
 		   gl_renderer_caps.sample_shading ? "yes" : "no");
 	GL_ReportShaderStatus();
 	GL_ReportLightmapStatus();
+	R_SSAO_Status ();
 	Con_Printf("[RENDERER] texture-create calls naming a texture other than the one bound: %d\n",
 		   R_TexCreate_Mismatches ());
 }
@@ -2076,11 +2077,9 @@ static void GL_Init_NullGL (void)
 	/* Compute (#340 P5a-2): rg_compute.c runs each dispatch as a compute
 	 * pass, so the palette LUT is built on the GPU, as on GL, and so is
 	 * the light cluster's froxel grid (P5b) and the world cull, whose
-	 * indirect draws are SDL_DrawGPUIndexedPrimitivesIndirect (P5c).  The
-	 * passes not routed yet keep a gate each, which their sub-phase
-	 * lifts: Hi-Z (R_HiZ_Available, P5d) and SSAO (R_SSAO_WantsSceneFBO,
-	 * P5e); the GPU particles stay off on every tier.  Before
-	 * GL_PostProcess_Init, which builds the LUT. */
+	 * indirect draws are SDL_DrawGPUIndexedPrimitivesIndirect (P5c), its
+	 * Hi-Z pyramid (P5d) and SSAO (P5e).  The GPU particles stay off on
+	 * every tier.  Before GL_PostProcess_Init, which builds the LUT. */
 	gl_renderer_caps.compute_shaders = true;
 	gl_renderer_caps.indirect_draw = true;
 	/* RG_TexParameter carries GL_TEXTURE_LOD_BIAS into the sampler's
