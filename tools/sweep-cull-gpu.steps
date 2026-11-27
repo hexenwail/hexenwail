@@ -1,0 +1,228 @@
+# sweep-cull-gpu.steps -- the GPU world cull through the SDL_GPU backend
+# (-gpu) against GL (#340 P5c): gl_worldcull.c's two compute passes
+# (cull_clear_comp, cull_mark_comp), one indirect draw per texture bucket
+# from the index buffer the second pass compacts into, and gl_hiz_stats'
+# counters read back.  Hi-Z stays off on both sides (gl_hiz_cull 0: P5d).
+#
+# One basedir, one command line, both sides: tools/mk-mirror-testgame.py's
+# game (demo1 with a wall panel renamed to the mirror texture) over a FULL
+# install, since frames 10-13 are village1's:
+#
+#   ./tools/mk-mirror-testgame.py $B          # $B holds the retail data1
+#   A="-fsaa 0 +gamma 1 -game mirror +map demo1"
+#   STEPS=tools/sweep-cull-gpu.steps ENGINE=$E ./tools/headless-drive.sh script /tmp/c-gl  $B $A
+#   VK_ICD_FILENAMES=<lvp_icd json> STEPS=tools/sweep-cull-gpu.steps ENGINE=$E \
+#       ./tools/headless-drive.sh script /tmp/c-gpu $B -gpu +gpu_allow_software 1 +gpu_debug 1 $A
+#   ./tools/cull-diff.sh /tmp/c-gl /tmp/c-gpu
+#
+# The frames:
+#   01-06  sweep-world-gpu.steps' six demo1 cameras, r_gpucull 1
+#   07     01's camera at r_gpucull 0: the chain pass alone
+#   08     the mirror (sweep-mirror-gpu.steps' 01-wall) at r_mirroralpha 0.5:
+#          the view keeps the cull, the reflected pass does not
+#          (gpu_cull_active is `!mirror')
+#   09     the same at gl_cull 0, where the cull must be off on a mirror map
+#          (its back faces would cover the reflection, #517)
+#   10-13  sweep-worldcull.steps' four village1 viewpoints, each with
+#          gl_hiz_stats 1 for a few seconds, between STATS-nn markers
+#
+# THE GATE IS STRUCTURAL FIRST.  The chain pass draws every surface the cull
+# draws, after it (DrawTextureChains, gl_rsurf.c), so a cull that draws
+# nothing is nearly invisible in a frame; what cannot hide is the counts:
+#   * every hiz_stats line of each STATS section equal to GL's, and at yaw 90
+#     `total=5572 pvs=4953 flags=46 frust=2 hiz=0 accepted=503 dedup=68`;
+#   * worldcull_verify in REPORT-CULL, -MIRROR and every STATS section: the
+#     last frame's indirect commands and compacted indices read back and held
+#     to cull_mark_comp's tests run on the CPU -- each bucket's count, first
+#     index and indices (as a multiset) -- 0 buckets off, and the same line on
+#     both sides;
+#   * renderer_status' indirect draws, in each REPORT section with the cull
+#     on, equal to the map's "N with a texture" from the boot line, and 0 in
+#     REPORT-NOCULL (09); 0 dispatches dropped;
+#   * gpu_unrouted 0 routed calls in every REPORT, the last after two map
+#     changes (R_FreeWorldCull's buffer and program deletes);
+#   * no "Validation Error" with sync validation on (the cull's index and
+#     indirect buffers are read by a draw after a compute pass writes them).
+# Then the frames: PSNR GL against -gpu, and 01 against 07 on -gpu within
+# GL's own 01-against-07 difference.  The compaction's atomicAdd order differs
+# run to run on both backends, so a coplanar tie can move a few pixels: the
+# gate is counts plus PSNR, not AE 0 (#340 open question 7).
+#
+# SETTINGS, on BOTH sides: what sweep-world-gpu.steps and sweep-mirror-gpu.steps
+# turn off, entities and the view model off too (nothing here is about them,
+# and the pickups spin), and the compute cvars fixed: gl_hiz_cull 0 (Hi-Z is
+# P5d), r_ssao 0 (P5e), r_dynamic 0 and r_dlight_occlusion 0.  Each shot is
+# taken paused.
+
+sleep 20
+cmd god
+cmd notarget
+cmd noclip
+cmd viewsize 120
+cmd crosshair 0
+cmd showpause 0
+cmd r_skyspeed_back 0
+cmd r_skyspeed_front 0
+cmd r_skybox_speed 0
+cmd r_flatlightstyles 1
+cmd r_dynamic 0
+cmd r_gpulightstyles 0
+cmd r_ssao 0
+cmd r_bloom 0
+cmd r_dlight_occlusion 0
+cmd r_alias_gpu 0
+cmd r_particles 0
+cmd r_drawparticles 0
+cmd gl_texture_anisotropy 1
+cmd r_oit 0
+cmd r_waterwarp 0
+cmd r_softparticles 0
+cmd r_softemu 0
+cmd r_scale 1
+cmd gl_waterwarp_speed 0
+cmd r_caustics 0
+cmd gl_glows 0
+cmd gl_missile_glows 0
+cmd gl_other_glows 0
+cmd r_drawviewmodel 0
+cmd r_drawentities 0
+cmd fog 0
+cmd gl_cull 1
+cmd gl_hiz_cull 0
+cmd gl_hiz_stats 0
+cmd r_mirroralpha 1
+cmd r_gpucull 1
+sleep 2
+
+# --- demo1, the cull on ---
+cmd gpu_unrouted reset
+cmd setpos -918 -2034 0 -20 45 0
+sleep 2
+cmd pause
+shot 01-statue-sky
+cmd pause
+cmd setpos -918 -2034 0 0 135 0
+sleep 2
+cmd pause
+shot 02-arch
+cmd pause
+cmd setpos -918 -2034 0 0 225 0
+sleep 2
+cmd pause
+shot 03-tree
+cmd pause
+cmd setpos -918 -2034 0 0 315 0
+sleep 2
+cmd pause
+shot 04-cross
+cmd pause
+cmd setpos -700 -1700 0 -10 90 0
+sleep 2
+cmd pause
+shot 05-wall
+cmd pause
+cmd setpos -1100 -1800 100 -30 0 0
+sleep 2
+cmd pause
+shot 06-courtyard
+sleep 1
+cmd echo REPORT-CULL-BEGIN
+cmd worldcull_verify
+cmd gpu_unrouted
+cmd renderer_status
+cmd echo REPORT-CULL-END
+cmd pause
+
+# --- 01's camera, the cull off ---
+cmd r_gpucull 0
+cmd setpos -918 -2034 0 -20 45 0
+sleep 2
+cmd pause
+shot 07-statue-sky-nocull
+cmd pause
+cmd r_gpucull 1
+
+# --- the mirror: the wall panel (rtex013, x = -216, facing -x) ---
+cmd r_mirroralpha 0.5
+cmd setpos -312 -2128 284 0 0 0
+sleep 2
+cmd pause
+shot 08-mirror
+sleep 1
+cmd echo REPORT-MIRROR-BEGIN
+cmd worldcull_verify
+cmd gpu_unrouted
+cmd renderer_status
+cmd echo REPORT-MIRROR-END
+cmd gl_cull 0
+sleep 2
+shot 09-mirror-gl-cull-0
+sleep 1
+cmd echo REPORT-NOCULL-BEGIN
+cmd gpu_unrouted
+cmd renderer_status
+cmd echo REPORT-NOCULL-END
+cmd gl_cull 1
+cmd pause
+cmd r_mirroralpha 1
+
+# --- village1: sweep-worldcull.steps' viewpoints, with the counters ---
+# reset ahead of the load: REPORT-VILLAGE then covers the map change, where
+# R_FreeWorldCull deletes the old map's programs and buffers
+cmd gpu_unrouted reset
+console
+enter map village1
+sleep 30
+cmd god
+cmd notarget
+cmd noclip
+cmd fog 0
+cmd gl_hiz_cull 0
+# sweep-worldcull.steps' view: its counts were taken at the default view
+# size, whose status bar shortens the frustum (viewsize 120 reads frust=40)
+cmd viewsize 100
+cmd setpos 200 -784 30 0 90 0
+sleep 2
+shot 10-yaw090
+cmd echo STATS-10-BEGIN
+cmd gl_hiz_stats 1
+sleep 4
+cmd gl_hiz_stats 0
+sleep 1
+cmd worldcull_verify
+cmd echo STATS-10-END
+cmd setpos 200 -784 30 0 180 0
+sleep 2
+shot 11-yaw180
+cmd echo STATS-11-BEGIN
+cmd gl_hiz_stats 1
+sleep 4
+cmd gl_hiz_stats 0
+sleep 1
+cmd worldcull_verify
+cmd echo STATS-11-END
+cmd setpos 200 -784 30 0 270 0
+sleep 2
+shot 12-yaw270
+cmd echo STATS-12-BEGIN
+cmd gl_hiz_stats 1
+sleep 4
+cmd gl_hiz_stats 0
+sleep 1
+cmd worldcull_verify
+cmd echo STATS-12-END
+cmd setpos 200 -784 30 0 0 0
+sleep 2
+shot 13-yaw000
+cmd echo STATS-13-BEGIN
+cmd gl_hiz_stats 1
+sleep 4
+cmd gl_hiz_stats 0
+sleep 1
+cmd worldcull_verify
+cmd echo STATS-13-END
+cmd echo REPORT-VILLAGE-BEGIN
+cmd gpu_unrouted
+cmd renderer_status
+cmd echo REPORT-VILLAGE-END
+sleep 1

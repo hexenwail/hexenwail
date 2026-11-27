@@ -6,7 +6,8 @@ uploads or location queries at all: none for the three compute programs,
 and none for R_DrawWorldCulled's world program, whose matrices moved onto
 VertParams in #450 W1 and whose fragment set onto FragParams / WorldFrag in
 W2 (tools/test_world_vert_block.py pins that path's block writes).
-glGetUniformLocation_fp is gone entirely, and the C mirror must agree with
+glGetUniformLocation_fp is gone entirely (R_ProgramSamplerLoc names one
+sampler's unit, u_hiz_pyramid's, for -gpu: #340 P5c), and the C mirror must agree with
 the GLSL block member for member -- the std140 array-stride error this
 catches compiles clean and renders wrong, so it is checked here, not on
 screen.
@@ -151,8 +152,15 @@ if not draw:
     errors.append("no R_DrawWorldCulled body found")
 elif "R_SetWorldFrag (" not in draw.group(1):
     errors.append("R_DrawWorldCulled no longer writes the world fragment set")
-if "glGetUniformLocation_fp" in code or "R_ProgramSamplerLoc" in code:
-    errors.append("glGetUniformLocation_fp (or its R_ProgramSamplerLoc seam) still used in gl_worldcull.c")
+# One sampler-unit lookup is not a loose uniform: u_hiz_pyramid's unit, named
+# through the seam for -gpu, whose SPIR-V keeps only its slot (#340 P5c).
+# Every other R_ProgramSamplerLoc, and any raw glGetUniformLocation, is one.
+nocomment = re.sub(r"//[^\n]*", " ", re.sub(r"/\*.*?\*/", " ", src, flags=re.S))
+samplers = re.findall(r'R_ProgramSamplerLoc\s*\(\s*(\w+)\s*,\s*"(\w+)"\s*\)', nocomment)
+if "glGetUniformLocation_fp" in code or len(re.findall(r"\bR_ProgramSamplerLoc\s*\(", code)) != len(samplers) \
+        or samplers not in ([], [("cull_mark_prog", "u_hiz_pyramid")]):
+    errors.append("glGetUniformLocation_fp, or an R_ProgramSamplerLoc but cull_mark_prog's u_hiz_pyramid, "
+                  "used in gl_worldcull.c: %s" % samplers)
 # The block bindings are plumbing, not uploads; both calls must still
 # exist (the bare name also appears in the two null guards -- count calls).
 if len(re.findall(r"glUniformBlockBinding_fp\s*\(", code)) != 2:

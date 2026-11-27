@@ -358,6 +358,7 @@ void R_Init (void)
 		Cvar_RegisterVariable (&gl_hiz_cull);
 		Cvar_RegisterVariable (&gl_hiz_stats);
 	}
+	R_WorldCull_Init ();
 #endif
 	Cvar_RegisterVariable (&gl_cull);
 	Cvar_RegisterVariable (&gl_smoothmodels);

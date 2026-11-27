@@ -53,6 +53,16 @@ the RG_* entry points the gl_buffer.c seams call and checks, case by case:
     wants other usage makes the buffer again; GL_DRAW_INDIRECT_BUFFER is
     shadowed, a fill through it lands, a delete leaves it; glGetBufferSubData
     reads back what was queued, and refuses a range past the buffer.
+  * the indirect draw (#340 P5c): a buffer made through
+    GL_DRAW_INDIRECT_BUFFER has neither VERTEX nor INDEX usage (SDL returns a
+    buffer to its first usage after a compute pass writes it, and a draw's
+    indirect read adds no barrier); RG_Buf_Indirect hands over the bound
+    indirect buffer for a command inside it and 4-byte aligned, refuses one
+    past the end, unaligned or with nothing bound (counted), notes one made
+    through another target, and its read stamp ends the segment before an
+    upload into it; an indexed draw reports its element buffer's usage;
+    RG_ReadBufferAsync hands rg_frame.c the region asked for and refuses one
+    past the buffer.
 
 Stock python3 and a C compiler (cc / gcc / clang); lint.yml.
 """
@@ -158,6 +168,8 @@ void RG_BindBufferRange (GLenum target, GLuint index, GLuint buffer, GLintptr of
 void RG_Upload (GLenum target, const void *data, size_t numbytes, GLuint *outbuf,
 		GLintptr *outofs);
 qboolean RG_ReadBuffer (GLenum target, GLintptr offset, GLsizeiptr size, void *data);
+unsigned int RG_Frame_ReadbackRequest (const SDL_GPUBufferRegion *buf);
+unsigned int RG_ReadBufferAsync (GLenum target, GLintptr offset, GLsizeiptr size);
 /* the real header's layout and draw-input types, copied verbatim */
 %(types)s
 '''
@@ -226,6 +238,10 @@ qboolean RG_Frame_Readback (const SDL_GPUTextureRegion *tex, const SDL_GPUBuffer
 	return true;
 }
 static void EndFrame (void) { RG_Frame_Flush (); RG_Buf_EndFrame (); }
+/* rg_frame.c's asynchronous readback: what it was asked for */
+static SDL_GPUBufferRegion asked;
+static unsigned int tickets;
+unsigned int RG_Frame_ReadbackRequest (const SDL_GPUBufferRegion *buf) { asked = *buf; return ++tickets; }
 
 #define CHECK(c, what) do { if (!(c)) { printf ("FAIL %s:%d: %s\n", __func__, __LINE__, what); failures++; } } while (0)
 
@@ -626,8 +642,11 @@ static void compute_usage (void)
 	       "an array buffer: vertex, index, storage, compute read and write, indirect");
 	CHECK ((ele->usage & compute) == compute && !(ele->usage & SDL_GPU_BUFFERUSAGE_VERTEX),
 	       "an element buffer: everything but vertex, so SDL returns it to INDEX after a copy");
-	CHECK ((ind->usage & compute) == compute && (sto->usage & compute) == compute,
-	       "indirect and storage buffers: compute read and write, indirect");
+	CHECK ((sto->usage & compute) == compute, "a storage buffer: compute read and write, indirect");
+	CHECK ((ind->usage & (compute & ~SDL_GPU_BUFFERUSAGE_INDEX)) == (compute & ~SDL_GPU_BUFFERUSAGE_INDEX) &&
+	       !(ind->usage & (SDL_GPU_BUFFERUSAGE_VERTEX | SDL_GPU_BUFFERUSAGE_INDEX)),
+	       "an indirect buffer: compute read and write and indirect, neither vertex nor index, so SDL "
+	       "returns it to INDIRECT after the compute pass that counts into it (#340 P5c)");
 	CopyPass ();
 	CHECK (!memcmp (ind->data, bytes, 64), "glBufferData through GL_DRAW_INDIRECT_BUFFER filled it");
 
@@ -679,6 +698,81 @@ static void compute_usage (void)
 	EndFrame ();
 }
 
+/* #340 P5c: the indirect draw's buffer, an element buffer's usage, and the
+ * asynchronous readback's region. */
+static void indirect_draw (void)
+{
+	GLuint		vao, b[4];
+	unsigned char	bytes[64];
+	rgvinput_t	in;
+	void		*read;
+	SDL_GPUBuffer	*got, *ind, *ele;
+	int		k0, f0;
+
+	memset (bytes, 7, sizeof(bytes));
+	RG_GenVertexArrays (1, &vao);
+	RG_BindVertexArray (vao);
+	RG_GenBuffers (4, b);
+	unhandled = 0;
+	CHECK (!RG_Buf_Indirect (0, 20, &read) && unhandled == 1 && !read,
+	       "nothing bound to GL_DRAW_INDIRECT_BUFFER: no buffer, counted");
+	k0 = nmade;
+	RG_BindBuffer (GL_DRAW_INDIRECT_BUFFER, b[0]);
+	RG_BufferData (GL_DRAW_INDIRECT_BUFFER, 64, bytes, 0);
+	ind = made[k0];
+	unhandled = 0;
+	got = RG_Buf_Indirect (40, 20, &read);
+	CHECK (got == ind && read && unhandled == 0, "a command inside the bound indirect buffer");
+	CHECK (!RG_Buf_Indirect (48, 20, &read) && unhandled == 1, "a command past the end: refused, counted");
+	CHECK (!RG_Buf_Indirect (2, 20, &read) && unhandled == 2, "an unaligned command: refused, counted");
+	CHECK (!RG_Buf_Indirect (-4, 20, &read) && unhandled == 3, "a negative offset: refused, counted");
+	/* the read stamp: an upload into it after a draw read it ends the segment */
+	CopyPass ();
+	got = RG_Buf_Indirect (0, 20, &read);
+	RG_Buf_StampRead (read);
+	draws++;
+	f0 = flushes;
+	RG_BufferSubData (GL_DRAW_INDIRECT_BUFFER, 0, 4, bytes);
+	CHECK (flushes == f0 + 1, "an upload into an indirect buffer a recorded draw reads ends the segment");
+	/* one made through the storage target and drawn from: noted */
+	RG_BindBuffer (GL_SHADER_STORAGE_BUFFER, b[1]);
+	RG_BufferData (GL_SHADER_STORAGE_BUFFER, 64, bytes, 0);
+	RG_BindBuffer (GL_DRAW_INDIRECT_BUFFER, b[1]);
+	unhandled = 0;
+	CHECK (RG_Buf_Indirect (0, 20, &read) && unhandled == 1,
+	       "an indirect draw from a buffer made through another target is noted (read unsynchronised)");
+	/* an indexed draw reports its element buffer's usage */
+	k0 = nmade;
+	RG_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, b[2]);
+	RG_BufferData (GL_ELEMENT_ARRAY_BUFFER, 64, bytes, 0);
+	ele = made[k0];
+	CopyPass ();
+	CHECK (RG_Buf_ForDraw (4, &in) && in.ib == ele && in.ib_usage == ele->usage &&
+	       !(in.ib_usage & SDL_GPU_BUFFERUSAGE_VERTEX), "the draw reports the element buffer's usage");
+	RG_BindBuffer (GL_SHADER_STORAGE_BUFFER, b[3]);
+	RG_BufferData (GL_SHADER_STORAGE_BUFFER, 64, bytes, 0);
+	RG_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, b[3]);
+	CopyPass ();
+	CHECK (RG_Buf_ForDraw (4, &in) && (in.ib_usage & SDL_GPU_BUFFERUSAGE_VERTEX),
+	       "an element buffer made through the storage target reports its vertex usage");
+	/* the asynchronous read */
+	RG_BindBuffer (GL_SHADER_STORAGE_BUFFER, b[1]);
+	tickets = 0;
+	CHECK (RG_ReadBufferAsync (GL_SHADER_STORAGE_BUFFER, 8, 32) == 1 && asked.offset == 8 && asked.size == 32 &&
+	       asked.buffer == made[k0 - 1], "RG_ReadBufferAsync asks rg_frame.c for the bound buffer's region");
+	unhandled = 0;
+	CHECK (RG_ReadBufferAsync (GL_SHADER_STORAGE_BUFFER, 40, 32) == 0 && unhandled == 1 && tickets == 1,
+	       "a read past the buffer: no ticket, counted, nothing asked");
+	CHECK (RG_ReadBufferAsync (GL_SHADER_STORAGE_BUFFER, 0, 0) == 0 && tickets == 1, "an empty read asks nothing");
+	RG_BindBuffer (GL_SHADER_STORAGE_BUFFER, 0);
+	RG_BindBuffer (GL_DRAW_INDIRECT_BUFFER, 0);
+	RG_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, 0);
+	RG_BindVertexArray (0);
+	RG_DeleteBuffers (4, b);
+	RG_DeleteVertexArrays (1, &vao);
+	EndFrame ();
+}
+
 int main (void)
 {
 	RG_Buf_Init ();
@@ -690,6 +784,7 @@ int main (void)
 	storage ();
 	bufferless ();
 	compute_usage ();
+	indirect_draw ();
 	RG_Buf_Shutdown ();
 	if (failures)
 		return 1;
@@ -736,7 +831,8 @@ def main():
     print("PASS rg_buffer.c's buffer and vertex-array shadow keeps GL's binding rules, uploads, the "
           "segment hazard, table growth and name reuse (#340 P2d), the skeletal layout, storage "
           "binding points and the upload stream (#340 P2e), compute and indirect usage, element "
-          "buffers without VERTEX, the indirect binding and glGetBufferSubData (#340 P5a-2)")
+          "buffers without VERTEX, the indirect binding and glGetBufferSubData (#340 P5a-2), indirect buffers "
+          "without VERTEX or INDEX, the indirect draw's command and the asynchronous read (#340 P5c)")
 
 
 if __name__ == "__main__":

@@ -276,6 +276,11 @@ qboolean RG_Res_StorageImage (int unit, rg_textype_t type, const Uint32 cover[3]
 void	RG_Res_StorageImageWritten (int unit);
 /* Whether image unit `unit` holds the texture the open segment draws into. */
 qboolean RG_Res_ImageIsTarget (int unit);
+/* Whether a sampler of dimensionality `type` reading GL unit `unit` would
+ * be handed a texture of the engine's rather than a placeholder: what a
+ * dispatch that samples has to wait for (#340 P5c).  The placeholders are
+ * written once, at boot. */
+qboolean RG_Res_UnitHolds (GLuint unit, rg_textype_t type);
 
 /* ------------------------------------------------------------------ */
 /* rg_shader.c                                                         */
@@ -443,6 +448,7 @@ typedef struct {
 	int		nconst;
 	float		consts[RG_MAX_VATTRS][4];
 	SDL_GPUBuffer	*ib;
+	SDL_GPUBufferUsageFlags ib_usage;	/* the element buffer's, RGB_Usage's */
 	Uint32		ib_count;	/* indices the element buffer holds */
 	int		nreads;		/* rg_buffer.c's buffers the draw reads */
 	void		*reads[RG_MAX_VBUFS + 1];
@@ -471,6 +477,11 @@ void	RG_Buf_MarkRead (const rgvinput_t *in);
  * is what RG_Buf_StampRead takes once the draw is recorded (#340 P2e). */
 SDL_GPUBuffer *RG_Buf_Storage (int point, qboolean unbound_ok, void **read);
 void	RG_Buf_StampRead (void *read);
+/* The buffer bound to GL_DRAW_INDIRECT_BUFFER, for an indirect draw whose
+ * command is the `bytes` at byte `offset`; NULL, and counted, when nothing
+ * is bound or the command is not inside it (#340 P5c).  *read as
+ * RG_Buf_Storage's. */
+SDL_GPUBuffer *RG_Buf_Indirect (GLintptr offset, Uint32 bytes, void **read);
 Uint32	RG_Buf_PendingBytes (void);
 void	RG_Buf_StageUploads (Uint8 *dst, Uint32 base);
 void	RG_Buf_IssueUploads (SDL_GPUCopyPass *copy, SDL_GPUTransferBuffer *tb);
@@ -566,6 +577,12 @@ const void *RG_Frame_BlockFlushed (int block, int *size);
  * buffer with none of the end-of-frame work done (RGF_SubmitMidFrame). */
 qboolean RG_Frame_Readback (const SDL_GPUTextureRegion *tex, const SDL_GPUBufferRegion *buf,
 			    void *dst, Uint32 bytes);
+/* The same download without the wait (#340 P5c): recorded into the frame's
+ * command buffer after what is recorded lands, and read by
+ * RG_ReadbackCollect once the fence of the submit that carried it has
+ * signalled.  A ticket, or 0 (counted) outside a frame, with every slot of
+ * the ring pending, or on a device failure. */
+unsigned int RG_Frame_ReadbackRequest (const SDL_GPUBufferRegion *buf);
 
 /* ------------------------------------------------------------------ */
 /* rg_compute.c                                                        */

@@ -36,7 +36,13 @@
  *
  * Sampling.  A dispatch that samples a texture first submits what is
  * recorded and waits (RG_Frame_ComputeBegin): SDL 3.4.12 syncs a texture's
- * return to SAMPLER for the graphics stages alone.
+ * return to SAMPLER for the graphics stages alone.  A sampler its unit hands
+ * a placeholder needs none of that: the placeholders were written at boot
+ * (P5c, the world cull's Hi-Z pyramid while Hi-Z is off).
+ *
+ * Dropped.  A dispatch that cannot be made is counted, and the frame goes on;
+ * RG_ComputeDropped lets a caller that draws from the pass's output see it
+ * went missing (the world cull, P5c), and renderer_status shows the frame's.
  *
  * Copyright (C) 2026  Contributors of the uHexen2 project
  *
@@ -122,7 +128,7 @@ void RG_DispatchCompute (GLuint groups_x, GLuint groups_y, GLuint groups_z)
 	SDL_GPUCommandBuffer			*cmd;
 	SDL_GPUComputePass			*pass;
 	Uint32					cover[3];
-	qboolean				target = false;
+	qboolean				target = false, samples = false;
 	int					i;
 
 	if (!prog || !prog->compute || !prog->cs)
@@ -146,7 +152,12 @@ void RG_DispatchCompute (GLuint groups_x, GLuint groups_y, GLuint groups_z)
 
 	for (i = 0; i < st->num_images; i++)
 		target |= RG_Res_ImageIsTarget (st->images[i].binding);
-	cmd = RG_Frame_ComputeBegin (target, st->num_samplers > 0);
+	/* Only a texture of the engine's can have been written in this command
+	 * buffer; a placeholder was written at boot (#340 P5c: the world cull
+	 * declares the Hi-Z pyramid, and samples it only with Hi-Z on). */
+	for (i = 0; i < st->num_samplers; i++)
+		samples |= RG_Res_UnitHolds (st->samplers[i].unit, (rg_textype_t) st->samplers[i].type);
+	cmd = RG_Frame_ComputeBegin (target, samples);
 	if (!cmd)
 	{
 		rgc_dropped++;
@@ -197,6 +208,11 @@ void RG_DispatchCompute (GLuint groups_x, GLuint groups_y, GLuint groups_z)
 	}
 	rgc_dispatches++;
 	RG_Frame_ComputeEnd (true);
+}
+
+unsigned long RG_ComputeDropped (void)
+{
+	return rgc_dropped;
 }
 
 void RG_MemoryBarrier (GLbitfield barriers)

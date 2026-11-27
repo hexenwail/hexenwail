@@ -18,9 +18,10 @@
  * (RG_Frame_Flush), a different render target bound (RG_Frame_BindTarget,
  * #340 P4a-2), a blit or a copy between targets (RG_Frame_Break), a compute
  * dispatch (RG_Frame_ComputeBegin, P5a-2: with no draws in the segment, its
- * copy pass alone, the pending clear kept) and a readback
- * (RG_Frame_Readback, which also submits and waits, the frame going on in a
- * new command buffer).
+ * copy pass alone, the pending clear kept), a readback (RG_Frame_Readback,
+ * which also submits and waits, the frame going on in a new command buffer)
+ * and an asynchronous one (RG_Frame_ReadbackRequest, P5c: no wait; read
+ * once the fence of the submit that carried it signals).
  *
  * The render target is GL's draw framebuffer: 0 is the SCENE target, any
  * other a framebuffer rg_target.c resolves to its attachments.  The frame
@@ -49,7 +50,9 @@
  * indexed draws from a VAO (R_DrawElements): the world, brush models and the
  * sky pre-pass, from their static buffers (rg_buffer.c), so only the
  * constant-attribute record lands in the stream.  Their pipeline is keyed on
- * the VAO's interned vertex layout (rg_pipeline.c).
+ * the VAO's interned vertex layout (rg_pipeline.c).  Since P5c an indexed
+ * draw can take its count and first index from a GL_DRAW_INDIRECT_BUFFER
+ * command a compute pass wrote (R_DrawElementsIndirect, the world cull's).
  *
  * Every slot a draw's program declares is bound (#340 P2a), because SDL_GPU
  * faults a draw that leaves one empty: each sampler its texture or a typed
@@ -173,7 +176,9 @@ enum {
 	RGD_ARRAYS,		/* none */
 	RGD_STREAM,		/* 16-bit, in the stream arena at ib_ofs */
 	RGD_QUADS,		/* 16-bit, the static quad buffer */
-	RGD_BUFFER		/* the VAO's element buffer, ib_size wide (#340 P2d) */
+	RGD_BUFFER,		/* the VAO's element buffer, ib_size wide (#340 P2d) */
+	RGD_INDIRECT		/* the VAO's element buffer, the count and first index
+				 * the command at `indirect_ofs` of `indirect` holds (P5c) */
 };
 
 typedef struct {
@@ -189,6 +194,8 @@ typedef struct {
 	SDL_GPUIndexElementSize		ib_size;
 	Uint32				first_index;	/* RGD_BUFFER */
 	Uint32				first_vertex;	/* RGD_ARRAYS: RG_DrawArrays's first */
+	SDL_GPUBuffer			*indirect;	/* RGD_INDIRECT: the command's buffer */
+	Uint32				indirect_ofs;	/* and its byte offset in it */
 	Uint32				instances;
 	Uint32				count;		/* vertices, or indices */
 	int				nvs, nfs;
@@ -287,6 +294,12 @@ static unsigned long		rgf_cpasses, rgf_reads;
  * measures, counted so a pass that starts paying it shows). */
 static int			rgf_last_waits, rgf_frame_waits;
 static unsigned long		rgf_waits;
+/* Indirect draws per frame (#340 P5c: the world cull's, one per texture
+ * bucket), the compute dispatches dropped in it (RG_ComputeDropped at the
+ * frame's start), and the asynchronous readbacks asked for in it. */
+static int			rgf_last_indirect, rgf_frame_indirect;
+static unsigned long		rgf_cdropped_base, rgf_last_cdropped;
+static int			rgf_last_areads, rgf_frame_areads;
 
 /* The storage buffers the draw being recorded reads, stamped once it is
  * committed (RG_Buf_StampRead), so an upload into one ends the segment. */
@@ -294,6 +307,9 @@ static void			*rgf_pending_reads[2 * RG_MAX_STAGE_SSBOS];
 static int			rgf_npending_reads, rgf_pending_ssbo, rgf_pending_standin;
 static unsigned long		rgf_frames;
 static unsigned long		rgf_dropped;
+
+static void RGF_ReadbacksAge (void);
+static qboolean RGF_CopyOnly (void);
 
 /* A device that fails once tends to fail every frame: say it a few times. */
 static int	rgf_warnings;
@@ -498,6 +514,9 @@ void RG_BeginFrame (int width, int height)
 	rgf_frame_stream = 0;
 	rgf_frame_ssbo = rgf_frame_standin = 0;
 	rgf_frame_cpasses = rgf_frame_reads = rgf_frame_waits = 0;
+	rgf_frame_indirect = rgf_frame_areads = 0;
+	rgf_cdropped_base = RG_ComputeDropped ();
+	RGF_ReadbacksAge ();
 }
 
 /* Snapshot of block `b` in the open segment's uniform arena. */
@@ -951,6 +970,78 @@ void RG_DrawIndexed (GLenum mode, GLsizei count, GLenum type, const void *indice
 	RGF_CommitDraw (d, ps);
 }
 
+/* GL's DrawElementsIndirectCommand, SDL_GPUIndexedIndirectDrawCommand's
+ * layout: count, instances, first index, base vertex, first instance. */
+#define RG_INDIRECT_CMD_BYTES	20u
+
+void RG_DrawElementsIndirect (GLenum mode, GLenum type, const void *indirect)
+{
+	const rpipestate_t	*ps = R_PipelineState ();
+	const rgprog_t		*prog = RG_Program (ps->program);
+	rgvinput_t		in;
+	rgdraw_t		*d;
+	SDL_GPUBuffer		*cmdbuf;
+	void			*cmdread;
+	Uint32			layout, isize;
+	int			s;
+
+	if (!prog || prog->compute)
+	{
+		RG_NoteUnhandled ("indirect draw with no SDL_GPU program bound");
+		return;
+	}
+	/* The one caller, the world cull, draws triangles (R_DrawWorldCulled). */
+	if (mode != GL_TRIANGLES)
+	{
+		RG_NoteUnhandled ("indirect draw in a GL primitive mode other than GL_TRIANGLES (dropped)");
+		return;
+	}
+	switch (type)
+	{
+	case GL_UNSIGNED_SHORT:	isize = 2; break;
+	case GL_UNSIGNED_INT:	isize = 4; break;
+	default:
+		RG_NoteUnhandled ("indirect draw with GL_UNSIGNED_BYTE or an unknown index type (dropped)");
+		return;
+	}
+	if (!rgf_active)
+		RG_BeginFrame (rgf_w, rgf_h);
+	cmdbuf = RG_Buf_Indirect ((GLintptr)(uintptr_t) indirect, RG_INDIRECT_CMD_BYTES, &cmdread);
+	if (!cmdbuf || !RG_Buf_ForDraw ((int) isize, &in))
+	{
+		rgf_dropped++;
+		return;
+	}
+	/* See RGB_Usage: an element buffer with vertex usage is read as
+	 * indices with no barrier after the pass that wrote them. */
+	if (in.ib_usage & SDL_GPU_BUFFERUSAGE_VERTEX)
+		RG_NoteUnhandled ("indirect draw from an element buffer with vertex usage "
+				  "(its indices are read unsynchronised)");
+	layout = RG_LayoutIntern (&in.layout);
+
+	d = RGF_BeginDraw (prog, SDL_GPU_PRIMITIVETYPE_TRIANGLELIST, layout);
+	if (!d)
+		return;
+	RG_Buf_MarkRead (&in);
+	RG_Buf_StampRead (cmdread);
+	d->nvb = (Uint8) in.layout.num_slots;
+	for (s = 0; s < d->nvb; s++)
+	{
+		d->vb[s] = in.vb[s];
+		d->vb_ofs[s] = in.vb_ofs[s];
+	}
+	/* one record: the command's first instance is 0 and its instances 1
+	 * (cull_clear_comp writes them) */
+	if (in.const_slot >= 0)
+		d->vb_ofs[in.const_slot] = RGF_ConstRecord (&in, 1);
+	d->indexed = RGD_INDIRECT;
+	d->ib = in.ib;
+	d->ib_size = (isize == 4) ? SDL_GPU_INDEXELEMENTSIZE_32BIT : SDL_GPU_INDEXELEMENTSIZE_16BIT;
+	d->indirect = cmdbuf;
+	d->indirect_ofs = (Uint32)(uintptr_t) indirect;
+	RGF_CommitDraw (d, ps);
+}
+
 void RG_DrawArrays (GLenum mode, GLint first, GLsizei count)
 {
 	const rpipestate_t	*ps = R_PipelineState ();
@@ -1233,10 +1324,13 @@ static void RGF_Replay (SDL_GPURenderPass *pass)
 			SDL_GPUBufferBinding	ib;
 
 			ib.buffer = (d->indexed == RGD_QUADS) ? rgf_quadbuf :
-				    (d->indexed == RGD_BUFFER) ? d->ib : rgf_ibuf;
+				    (d->indexed == RGD_BUFFER || d->indexed == RGD_INDIRECT) ? d->ib : rgf_ibuf;
 			ib.offset = (d->indexed == RGD_STREAM) ? d->ib_ofs : 0;
 			SDL_BindGPUIndexBuffer (pass, &ib, d->ib_size);
-			SDL_DrawGPUIndexedPrimitives (pass, d->count, d->instances, d->first_index, 0, 0);
+			if (d->indexed == RGD_INDIRECT)
+				SDL_DrawGPUIndexedPrimitivesIndirect (pass, d->indirect, d->indirect_ofs, 1);
+			else
+				SDL_DrawGPUIndexedPrimitives (pass, d->count, d->instances, d->first_index, 0, 0);
 		}
 		else
 			SDL_DrawGPUPrimitives (pass, d->count, d->instances, d->first_vertex, 0);
@@ -1334,7 +1428,10 @@ static void RGF_EndSegment (void)
 			rgf_frame_draws += rgf_numdraws;
 			rgf_frame_segments++;
 			for (i = 0; i < rgf_numdraws; i++)
+			{
 				rgf_frame_indexed += (rgf_draws[i].indexed == RGD_BUFFER);
+				rgf_frame_indirect += (rgf_draws[i].indexed == RGD_INDIRECT);
+			}
 		}
 		rgf_clear_mask = 0;
 	}
@@ -1415,6 +1512,278 @@ void RG_Clear (GLbitfield mask, const float color[4], float depth, int stencil)
 		rgf_clear_stencil = (Uint8) stencil;
 }
 
+/* ------------------------------------------------------------------ */
+/* Asynchronous readbacks (#340 P5c)                                   */
+/* ------------------------------------------------------------------ */
+
+/* A ring of downloads.  Each goes into the command buffer open when it is
+ * asked for, and is read once the fence of the submit that carried that
+ * command buffer has signalled: the frame's own at its end
+ * (SDL_SubmitGPUCommandBufferAndAcquireFence, taken only when a download is
+ * aboard), or at once after a mid-frame submit, which waits anyway.  Nothing
+ * stalls for it; gl_hiz_stats reads one or two frames late. */
+#define RG_READBACKS		8
+/* A completed read nobody collected is reclaimed after this many frames. */
+#define RG_READBACK_ABANDON	8
+
+enum {
+	RGR_FREE,
+	RGR_RECORDED,		/* in rgf_cmd, not submitted */
+	RGR_SUBMITTED,		/* submitted; `fence` signals when it is done */
+	RGR_READY,		/* the bytes are in `tb` */
+	RGR_FAILED		/* the submit or the wait failed */
+};
+
+typedef struct {
+	int			state;
+	unsigned int		ticket;
+	SDL_GPUTransferBuffer	*tb;
+	Uint32			cap, size;
+	SDL_GPUFence		*fence;		/* shared by every read of one submit */
+	unsigned long		done_frame;	/* rgf_frames when it became READY / FAILED */
+	qboolean		discard;	/* nobody will collect it: freed once done */
+} rgreadback_t;
+
+static rgreadback_t	rgr_ring[RG_READBACKS];
+static unsigned int	rgr_ticket;
+static unsigned long	rgr_requested, rgr_collected, rgr_refused, rgr_abandoned, rgr_failed, rgr_discarded;
+
+static qboolean RGF_ReadbacksRecorded (void)
+{
+	int	i;
+
+	for (i = 0; i < RG_READBACKS; i++)
+	{
+		if (rgr_ring[i].state == RGR_RECORDED)
+			return true;
+	}
+	return false;
+}
+
+static void RGF_ReadbackDone (rgreadback_t *r, int state)
+{
+	r->state = state;
+	r->fence = NULL;
+	r->done_frame = rgf_frames;
+	if (state == RGR_FAILED)
+		rgr_failed++;
+}
+
+/* rgf_cmd went out: with `fence` (NULL: the submit failed) the reads it
+ * carried complete when it signals; `waited`, they are complete now. */
+static void RGF_ReadbacksSubmitted (SDL_GPUFence *fence, qboolean waited)
+{
+	int	i;
+
+	for (i = 0; i < RG_READBACKS; i++)
+	{
+		rgreadback_t	*r = &rgr_ring[i];
+
+		if (r->state != RGR_RECORDED)
+			continue;
+		if (waited)
+			RGF_ReadbackDone (r, RGR_READY);
+		else if (!fence)
+			RGF_ReadbackDone (r, RGR_FAILED);
+		else
+		{
+			r->state = RGR_SUBMITTED;
+			r->fence = fence;
+		}
+	}
+}
+
+/* `fence` has signalled: every read it carried is READY, and it is released
+ * once, here. */
+static void RGF_ReadbackFenceDone (SDL_GPUFence *fence)
+{
+	int	i;
+
+	for (i = 0; i < RG_READBACKS; i++)
+	{
+		if (rgr_ring[i].state == RGR_SUBMITTED && rgr_ring[i].fence == fence)
+			RGF_ReadbackDone (&rgr_ring[i], RGR_READY);
+	}
+	SDL_ReleaseGPUFence (rg_dev, fence);
+}
+
+static void RGF_ReadbacksAge (void)
+{
+	int	i;
+
+	for (i = 0; i < RG_READBACKS; i++)
+	{
+		rgreadback_t	*r = &rgr_ring[i];
+
+		if (r->state == RGR_SUBMITTED && SDL_QueryGPUFence (rg_dev, r->fence))
+			RGF_ReadbackFenceDone (r->fence);
+		if ((r->state == RGR_READY || r->state == RGR_FAILED) &&
+		    (r->discard || rgf_frames - r->done_frame > RG_READBACK_ABANDON))
+		{
+			if (r->discard)
+				rgr_discarded++;
+			else
+				rgr_abandoned++;
+			r->state = RGR_FREE;
+		}
+	}
+}
+
+unsigned int RG_Frame_ReadbackRequest (const SDL_GPUBufferRegion *buf)
+{
+	rgreadback_t		*r = NULL;
+	SDL_GPUCopyPass		*copy;
+	SDL_GPUTransferBufferLocation d;
+	int			i;
+
+	/* No frame, no frame fence to read it by: the caller reads
+	 * synchronously there (RG_ReadBuffer). */
+	if (!rgf_active || !buf || !buf->size)
+	{
+		rgr_refused++;
+		return 0;
+	}
+	for (i = 0; i < RG_READBACKS && !r; i++)
+	{
+		if (rgr_ring[i].state == RGR_FREE)
+			r = &rgr_ring[i];
+	}
+	if (!r)
+	{
+		rgr_refused++;
+		return 0;
+	}
+	if (!r->tb || r->cap < buf->size)
+	{
+		SDL_GPUTransferBufferCreateInfo	ci;
+
+		if (r->tb)
+			SDL_ReleaseGPUTransferBuffer (rg_dev, r->tb);
+		SDL_zero (ci);
+		ci.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
+		ci.size = (buf->size + 255) & ~255u;
+		r->tb = SDL_CreateGPUTransferBuffer (rg_dev, &ci);
+		r->cap = r->tb ? ci.size : 0;
+		if (!r->tb)
+		{
+			RGF_Warn ("SDL_GPU: cannot create a %u-byte download buffer (%s)\n",
+				  (unsigned int) ci.size, SDL_GetError ());
+			rgr_refused++;
+			return 0;
+		}
+	}
+	/* What is recorded lands first, as RG_Frame_Readback's does: the
+	 * segment's draws in their pass, or with none its uploads alone, the
+	 * pending clear kept (a request just after a dispatch splits nothing). */
+	if (rgf_numdraws)
+		RGF_EndSegment ();
+	else if (!RGF_CopyOnly ())
+	{
+		rgr_refused++;
+		return 0;
+	}
+	if (!RGF_EnsureCmd ())
+	{
+		rgr_refused++;
+		return 0;
+	}
+	copy = SDL_BeginGPUCopyPass (rgf_cmd);
+	if (!copy)
+	{
+		rgr_refused++;
+		return 0;
+	}
+	SDL_zero (d);
+	d.transfer_buffer = r->tb;
+	SDL_DownloadFromGPUBuffer (copy, buf, &d);
+	SDL_EndGPUCopyPass (copy);
+	if (!++rgr_ticket)
+		rgr_ticket = 1;
+	r->ticket = rgr_ticket;
+	r->size = buf->size;
+	r->fence = NULL;
+	r->discard = false;
+	r->state = RGR_RECORDED;
+	rgr_requested++;
+	rgf_frame_areads++;
+	return r->ticket;
+}
+
+int RG_ReadbackCollect (unsigned int ticket, void *data, Uint32 size)
+{
+	rgreadback_t	*r = NULL;
+	void		*map;
+	int		i;
+
+	for (i = 0; i < RG_READBACKS && !r; i++)
+	{
+		if (ticket && rgr_ring[i].state != RGR_FREE && rgr_ring[i].ticket == ticket)
+			r = &rgr_ring[i];
+	}
+	if (!r)
+		return -1;
+	if (r->state == RGR_SUBMITTED && SDL_QueryGPUFence (rg_dev, r->fence))
+		RGF_ReadbackFenceDone (r->fence);
+	if (r->state == RGR_RECORDED || r->state == RGR_SUBMITTED)
+		return 0;
+	if (r->state == RGR_FAILED)
+	{
+		r->state = RGR_FREE;
+		return -1;
+	}
+	map = SDL_MapGPUTransferBuffer (rg_dev, r->tb, false);
+	r->state = RGR_FREE;
+	if (!map)
+	{
+		RGF_Warn ("SDL_GPU: cannot map the download buffer (%s)\n", SDL_GetError ());
+		rgr_failed++;
+		return -1;
+	}
+	memcpy (data, map, q_min (size, r->size));
+	SDL_UnmapGPUTransferBuffer (rg_dev, r->tb);
+	rgr_collected++;
+	return 1;
+}
+
+void RG_ReadbackDiscard (unsigned int ticket)
+{
+	int	i;
+
+	for (i = 0; i < RG_READBACKS; i++)
+	{
+		rgreadback_t	*r = &rgr_ring[i];
+
+		if (!ticket || r->state == RGR_FREE || r->ticket != ticket)
+			continue;
+		/* one still in flight keeps its slot until its download is done:
+		 * the next frame's start frees it (RGF_ReadbacksAge) */
+		if (r->state == RGR_READY || r->state == RGR_FAILED)
+		{
+			r->state = RGR_FREE;
+			rgr_discarded++;
+		}
+		else
+			r->discard = true;
+		return;
+	}
+}
+
+static void RGF_ReadbacksShutdown (void)
+{
+	int	i;
+
+	for (i = 0; i < RG_READBACKS; i++)
+	{
+		rgreadback_t	*r = &rgr_ring[i];
+
+		if (r->state == RGR_SUBMITTED)
+			RGF_ReadbackFenceDone (r->fence);
+		if (r->tb)
+			SDL_ReleaseGPUTransferBuffer (rg_dev, r->tb);
+		memset (r, 0, sizeof(*r));
+	}
+}
+
 /* What a frame's end releases and rewinds, once its command buffer is
  * submitted. */
 static void RGF_EndOfFrame (void)
@@ -1428,7 +1797,16 @@ static void RGF_EndOfFrame (void)
 
 static void RGF_Submit (void)
 {
-	if (rgf_cmd && !SDL_SubmitGPUCommandBuffer (rgf_cmd))
+	/* A fence only when a download is aboard: that is what reads it. */
+	if (rgf_cmd && RGF_ReadbacksRecorded ())
+	{
+		SDL_GPUFence	*fence = SDL_SubmitGPUCommandBufferAndAcquireFence (rgf_cmd);
+
+		if (!fence)
+			RGF_Warn ("SDL_GPU: submit failed (%s)\n", SDL_GetError ());
+		RGF_ReadbacksSubmitted (fence, false);
+	}
+	else if (rgf_cmd && !SDL_SubmitGPUCommandBuffer (rgf_cmd))
 		RGF_Warn ("SDL_GPU: submit failed (%s)\n", SDL_GetError ());
 	rgf_cmd = NULL;
 	RGF_EndOfFrame ();
@@ -1451,15 +1829,19 @@ static qboolean RGF_SubmitMidFrame (void)
 	if (!fence)
 	{
 		RGF_Warn ("SDL_GPU: submit failed (%s)\n", SDL_GetError ());
+		RGF_ReadbacksSubmitted (NULL, false);
 		return false;
 	}
 	if (!SDL_WaitForGPUFences (rg_dev, true, &fence, 1))
 	{
 		RGF_Warn ("SDL_GPU: waiting for submitted work failed (%s)\n", SDL_GetError ());
 		SDL_ReleaseGPUFence (rg_dev, fence);
+		RGF_ReadbacksSubmitted (NULL, false);
 		return false;
 	}
 	SDL_ReleaseGPUFence (rg_dev, fence);
+	/* the asynchronous reads this carried are done too */
+	RGF_ReadbacksSubmitted (NULL, true);
 	return true;
 }
 
@@ -1665,6 +2047,9 @@ void RG_Frame_End (qboolean show)
 	rgf_last_cpasses = rgf_frame_cpasses;
 	rgf_last_reads = rgf_frame_reads;
 	rgf_last_waits = rgf_frame_waits;
+	rgf_last_indirect = rgf_frame_indirect;
+	rgf_last_areads = rgf_frame_areads;
+	rgf_last_cdropped = RG_ComputeDropped () - rgf_cdropped_base;
 	rgf_frames++;
 }
 
@@ -1776,6 +2161,7 @@ void RG_Frame_Shutdown (void)
 	if (!rg_dev)
 		return;
 	SDL_WaitForGPUIdle (rg_dev);
+	RGF_ReadbacksShutdown ();
 	while (rgf_numretired_bufs)
 		SDL_ReleaseGPUBuffer (rg_dev, rgf_retired_bufs[--rgf_numretired_bufs]);
 	if (rgf_vbuf)	SDL_ReleaseGPUBuffer (rg_dev, rgf_vbuf);
@@ -1811,8 +2197,13 @@ void RG_Frame_Status (void)
 	Con_Printf ("[RENDERER] SDL_GPU storage slots last frame: %d bound to a buffer, %d to the "
 		    "stand-in\n", rgf_last_ssbo, rgf_last_standin);
 	Con_Printf ("[RENDERER] SDL_GPU compute last frame: %d passes, %d readbacks, %d fence waits; "
-		    "since boot %lu passes, %lu readbacks, %lu fence waits; indirect draws none until P5c\n",
+		    "since boot %lu passes, %lu readbacks, %lu fence waits\n",
 		    rgf_last_cpasses, rgf_last_reads, rgf_last_waits, rgf_cpasses, rgf_reads, rgf_waits);
+	Con_Printf ("[RENDERER] SDL_GPU last frame: %d indirect draws, %lu dispatches dropped, %d "
+		    "asynchronous readbacks asked; asynchronous readbacks since boot %lu asked, %lu "
+		    "collected, %lu refused, %lu failed, %lu discarded, %lu never collected\n",
+		    rgf_last_indirect, rgf_last_cdropped, rgf_last_areads, rgr_requested, rgr_collected,
+		    rgr_refused, rgr_failed, rgr_discarded, rgr_abandoned);
 	RG_Compute_Status ();
 	Con_Printf ("[RENDERER] SDL_GPU scene depth %s (%s); drawing into framebuffer %u (%dx%d%s)\n",
 		    RGF_DepthName (rgf_depth_fmt), rgf_depth_sampled ? "sampled too" : "not sampled",

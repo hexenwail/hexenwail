@@ -719,6 +719,7 @@ void R_FreeWorldCull (void);
 void R_DispatchWorldCull (void);
 void R_DrawWorldCulled (void);
 qboolean R_WorldCullAvailable (void);
+void R_WorldCull_Init (void);	/* worldcull_verify (#340 P5c) */
 void R_BuildHiZ (void);
 void R_FreeHiZ (void);
 void R_BuildHiZForNextFrame (void);

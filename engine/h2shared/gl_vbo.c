@@ -611,13 +611,14 @@ void R_DrawArrays (GLenum mode, GLint first, GLsizei count)
 #ifndef USE_GLES
 /* The indirect indexed draw (#340 P5a-1): the GPU world cull's, one per
  * texture bucket, its command at byte offset `indirect` of the buffer bound
- * to GL_DRAW_INDIRECT_BUFFER.  SDL_GPU's is P5c. */
+ * to GL_DRAW_INDIRECT_BUFFER.  SDL_GPU's is SDL_DrawGPUIndexedPrimitivesIndirect
+ * (P5c, rg_frame.c). */
 void R_DrawElementsIndirect (GLenum mode, GLenum type, const void *indirect)
 {
 #ifdef USE_SDL_GPU
 	if (R_GPU ())
 	{
-		RG_NoteUnhandled ("R_DrawElementsIndirect (the indirect draw is P5c)");
+		RG_DrawElementsIndirect (mode, type, indirect);
 		return;
 	}
 #endif
