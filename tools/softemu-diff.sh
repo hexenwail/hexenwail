@@ -52,7 +52,8 @@
 # honest numbers they were set from and the broken builds that fail them.
 #
 # FRAMES=<names> narrows every check to those frames (a check whose frames
-# are not all in it is skipped).
+# are not all in it is skipped), and SECTIONS=<names> names check 6's
+# REPORT sections (tools/lut-diff.sh runs it on its own graveyard).
 #
 # Which LUT r_softemu 3 reads (the colormap one, 32^3) has no structural
 # check: the frame is palette colours either way, and its world shaders band
@@ -62,13 +63,13 @@
 # Exit status is 1 if any check fails.  Requires ImageMagick and python3.
 set -uo pipefail
 
-[ $# -eq 3 ] || { sed -n '2,55p' "$0"; exit 2; }
+[ $# -eq 3 ] || { sed -n '2,57p' "$0"; exit 2; }
 GL=$1; GPU=$2; GAME=$3
 PSNR_MIN=${PSNR_MIN:-42}
 SOFTEMU_MIN=${SOFTEMU_MIN:-40}
 MIN_CHANGED=${MIN_CHANGED:-2000}
 MIN_METRIC=${MIN_METRIC:-500}
-SECTIONS="GY POOLS"
+SECTIONS=${SECTIONS:-"GY POOLS"}
 HERE=$(cd "$(dirname "$0")" && pwd)
 
 FRAMES=${FRAMES:-"01-gy-off 02-gy-se1 03-gy-se2 04-gy-se3 05-gy-se1-naive 06-gy-se1-riem 07-gy-se1-auto

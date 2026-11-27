@@ -133,7 +133,7 @@ check(named and named <= shots, "softemu-diff.sh names frames the steps never sh
       % " ".join(sorted(named - shots)))
 check(shots <= named, "the steps shoot frames softemu-diff.sh never checks: %s"
       % " ".join(sorted(shots - named)))
-m = re.search(r'^SECTIONS="([A-Z ]+)"', diff, re.M)
+m = re.search(r'^SECTIONS=\$\{SECTIONS:-"([A-Z ]+)"\}', diff, re.M)
 check(m is not None, "softemu-diff.sh: no SECTIONS list found")
 for s in (m.group(1).split() if m else []):
     body = re.search(r"^cmd gpu_unrouted reset\n(?:(?!^cmd gpu_unrouted reset).*\n)*?"

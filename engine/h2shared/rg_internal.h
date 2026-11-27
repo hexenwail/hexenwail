@@ -12,6 +12,7 @@
  *                  copy pass per segment, the scene target and the present
  *   rg_target.c    framebuffers and renderbuffers, keyed by the GL names, and
  *                  the blits between them (P4a-2)
+ *   rg_compute.c   compute dispatches, a compute pass each (P5a-2)
  *
  * Copyright (C) 2026  Contributors of the uHexen2 project
  *
@@ -159,6 +160,18 @@
 #ifndef GL_DECR_WRAP
 #define GL_DECR_WRAP			0x8508
 #endif
+#ifndef GL_READ_ONLY
+#define GL_READ_ONLY			0x88B8
+#endif
+#ifndef GL_WRITE_ONLY
+#define GL_WRITE_ONLY			0x88B9
+#endif
+#ifndef GL_READ_WRITE
+#define GL_READ_WRITE			0x88BA
+#endif
+#ifndef GL_DRAW_INDIRECT_BUFFER
+#define GL_DRAW_INDIRECT_BUFFER		0x8F3F
+#endif
 
 /* rg_device.c */
 extern SDL_GPUDevice	*rg_dev;
@@ -247,6 +260,21 @@ void	RG_Res_TargetOnly (GLuint name);
  * rg_frame.c calls this ahead of each segment's copy pass, so an upload
  * queued into a new target lands after its clear. */
 void	RG_Res_ClearTargets (SDL_GPUCommandBuffer *cmd);
+/* Image unit `unit` (R_BindImageTexture's shadow) as a compute pass's
+ * read-write binding for a stage image of dimensionality `type`, realized
+ * now with its storage usage.  `cover` is the dispatch's extent in
+ * invocations: the binding cycles only when the dispatch overwrites the
+ * whole texture (write-only, one level and one layer, every texel covered),
+ * since cycling discards what the texture held.  False, and counted, when
+ * the unit holds nothing SDL_GPU can bind so: the dispatch is dropped
+ * (#340 P5a-2). */
+qboolean RG_Res_StorageImage (int unit, rg_textype_t type, const Uint32 cover[3],
+			      SDL_GPUStorageTextureReadWriteBinding *out);
+/* The dispatch that bound image unit `unit` was recorded: its texture holds
+ * what the pass wrote, not GL's zeros (RG_ReadTexture). */
+void	RG_Res_StorageImageWritten (int unit);
+/* Whether image unit `unit` holds the texture the open segment draws into. */
+qboolean RG_Res_ImageIsTarget (int unit);
 
 /* ------------------------------------------------------------------ */
 /* rg_shader.c                                                         */
@@ -255,6 +283,7 @@ void	RG_Res_ClearTargets (SDL_GPUCommandBuffer *cmd);
 #define RG_MAX_STAGE_SAMPLERS	16
 #define RG_MAX_STAGE_UBOS	4
 #define RG_MAX_STAGE_SSBOS	8
+#define RG_MAX_STAGE_IMAGES	8	/* GL 4.3's minimum of image units */
 
 typedef struct {
 	char		name[32];
@@ -282,8 +311,8 @@ typedef enum {
 				 * the flushed u_poseverttype names another pose block of
 				 * the same stage */
 	RG_SSBO_COMPUTE_FED	/* only the light cluster fills it, and every read is behind
-				 * a uniform C leaves 0 without compute: unbound is expected
-				 * while gl_renderer_caps.compute_shaders is off (P5) */
+				 * a uniform C leaves 0 without a grid: unbound is expected
+				 * while R_LightCluster_Available () is false (#340 P5a-2) */
 } rg_ssbokind_t;
 
 /* A read-only storage block (#340 P2e).  GL binds it by binding point and
@@ -298,6 +327,15 @@ typedef struct {
 	int		point;		/* the GL_SHADER_STORAGE_BUFFER binding point, -1 none */
 } rgssbo_t;
 
+/* A compute stage's storage image (#340 P5a-2): set 1, binding 0..n-1.
+ * IMGBIND takes one number for GL and Vulkan, so the binding is also the
+ * GL image unit R_BindImageTexture names. */
+typedef struct {
+	char		name[32];
+	Uint8		binding;
+	Uint8		type;		/* rg_textype_t */
+} rgimage_t;
+
 typedef struct {
 	int		num_samplers;
 	rgsampler_t	samplers[RG_MAX_STAGE_SAMPLERS];
@@ -305,6 +343,12 @@ typedef struct {
 	rgubo_t		ubos[RG_MAX_STAGE_UBOS];
 	int		num_ssbos;	/* read-only storage buffers, the reflection row's */
 	rgssbo_t	ssbos[RG_MAX_STAGE_SSBOS];
+	/* a compute stage's set 1 (#340 P5a-2): storage images, then
+	 * read-write storage buffers, each slot counted from 0 */
+	int		num_images;
+	rgimage_t	images[RG_MAX_STAGE_IMAGES];
+	int		num_rwssbos;
+	rgssbo_t	rwssbos[RG_MAX_STAGE_SSBOS];
 } rgstage_t;
 
 typedef struct {
@@ -331,6 +375,9 @@ int	RG_ProgramCount (void);
  * (-1 otherwise). */
 int	RG_StoragePoint (const char *block);
 rg_ssbokind_t RG_StorageKind (const char *block, int *format);
+/* The binding point of a compute stage's storage block: its own table
+ * (the world cull's blocks), then RG_StoragePoint's (#340 P5a-2). */
+int	RG_ComputeStoragePoint (const char *block);
 
 /* ------------------------------------------------------------------ */
 /* rg_pipeline.c                                                       */
@@ -492,5 +539,35 @@ qboolean RG_Frame_TargetHolds (const SDL_GPUTexture *tex);
 /* End the open segment and hand back the frame's command buffer, for a blit
  * or a copy between passes; NULL outside a frame or on a device failure. */
 SDL_GPUCommandBuffer *RG_Frame_Break (void);
+
+/* Compute (#340 P5a-2, rg_compute.c).  The command buffer a compute pass
+ * goes into, after the open segment's draws -- and its clear, when
+ * `touches_target` says the dispatch reads or writes the texture the segment
+ * draws into -- or, with no draws, after a copy pass of the queued uploads
+ * alone, the pending clear kept for the next render pass.  NULL on a device
+ * failure.  RG_Frame_ComputeEnd after the pass, `dispatched` false when the
+ * dispatch was dropped: outside a frame (the palette LUT at boot) it submits
+ * what was recorded, as RG_Frame_Flush does. */
+/* `samples`: the dispatch reads a texture through a sampler, so what the
+ * command buffer has recorded is submitted and waited on first (SDL 3.4.12
+ * syncs a texture's return to SAMPLER for the graphics stages only). */
+SDL_GPUCommandBuffer *RG_Frame_ComputeBegin (qboolean touches_target, qboolean samples);
+void	RG_Frame_ComputeEnd (qboolean dispatched);
+/* The zeroed storage stand-in, for a slot with nothing bound. */
+SDL_GPUBuffer *RG_Frame_Standin (void);
+/* Block `block`'s flushed copy and its size, for a dispatch's push. */
+const void *RG_Frame_BlockFlushed (int block, int *size);
+/* Read `bytes` back from one texture region or one buffer region (the other
+ * NULL) into `dst`, synchronously: what is recorded lands first, and is
+ * submitted and waited on.  In a frame the frame goes on in a new command
+ * buffer with none of the end-of-frame work done (RGF_SubmitMidFrame). */
+qboolean RG_Frame_Readback (const SDL_GPUTextureRegion *tex, const SDL_GPUBufferRegion *buf,
+			    void *dst, Uint32 bytes);
+
+/* ------------------------------------------------------------------ */
+/* rg_compute.c                                                        */
+/* ------------------------------------------------------------------ */
+
+void	RG_Compute_Status (void);
 
 #endif /* RG_INTERNAL_H */

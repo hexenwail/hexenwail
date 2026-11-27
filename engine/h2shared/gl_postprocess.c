@@ -1609,6 +1609,8 @@ static GLuint PP_CreatePaletteTexture (void)
 
 static qboolean PP_BuildPaletteLUT_GPU (softemu_metric_t metric)
 {
+	GLint	loc;
+
 	pp_lut_gpu_built = false;
 
 	if (pp_lut_gpu_failed || !glTexImage3D_fp)
@@ -1628,6 +1630,11 @@ static qboolean PP_BuildPaletteLUT_GPU (softemu_metric_t metric)
 			pp_lut_gpu_failed = true;
 			return false;
 		}
+		/* u_palette reads unit 0, which TEXBIND(0) already says to GL; the
+		 * Vulkan SPIR-V keeps only its slot, so -gpu is told (#340 P5a-2). */
+		R_UseProgram (pp_palette_init_prog[metric]);
+		loc = R_ProgramSamplerLoc (pp_palette_init_prog[metric], "u_palette");
+		R_ProgramSamplerUnit (pp_palette_init_prog[metric], loc, "u_palette", 0);
 	}
 
 	if (!pp_palette_tex)
@@ -1680,6 +1687,73 @@ static void PP_FreePaletteGPU (void)
 	}
 	pp_lut_gpu_failed = false;
 	pp_lut_gpu_built = false;
+}
+
+/*
+===============
+PP_LutCheck_f
+
+r_softemu_lutcheck (#340 P5a-2): the live palette LUT read back through
+R_ReadTexImage, its CRC-32, and how many of its cells differ from the table
+PP_FillPaletteGrid gives for the same metric.  On either backend, so the GPU
+builder can be held to GL's, and both to the CPU's, by number: a pass that
+never ran, wrote one slice, or read a missing palette shows here as a CRC
+that moved and a count far from 0.
+===============
+*/
+static void PP_LutCheck_f (void)
+{
+	static float	palcolors[256][3];
+	unsigned char	*live, *cpu, *grid;
+	unsigned long	live_crc, cpu_crc;
+	int		i, diff = 0;
+
+	if (!pp_lut_built || !pp_palette_lut || pp_lut_metric >= SOFTEMU_METRIC_COUNT)
+	{
+		Con_Printf ("r_softemu_lutcheck: no palette LUT has been built\n");
+		return;
+	}
+	live = (unsigned char *) malloc (PP_LUT_TEXELS * 4);
+	cpu = (unsigned char *) malloc (PP_LUT_TEXELS * 4);
+	grid = (unsigned char *) malloc (PP_LUT_TEXELS);
+	if (!live || !cpu || !grid)
+	{
+		Con_Printf ("r_softemu_lutcheck: out of memory\n");
+		free (live); free (cpu); free (grid);
+		return;
+	}
+	if (!R_ReadTexImage (GL_TEXTURE_3D, pp_palette_lut, 0, GL_RGBA, GL_UNSIGNED_BYTE, live))
+	{
+		Con_Printf ("r_softemu_lutcheck: the LUT cannot be read back\n");
+		free (live); free (cpu); free (grid);
+		return;
+	}
+	/* PP_BuildPaletteLUT_CPU's table, resolved to colour as PP_UploadLUT
+	 * stores it. */
+	for (i = 0; i < 255; i++)
+	{
+		unsigned int pal = d_8to24table[i];
+		PP_NormalizeColor(pp_lut_metric, (int)((pal >> 0) & 0xff), (int)((pal >> 8) & 0xff),
+				  (int)((pal >> 16) & 0xff), palcolors[i]);
+	}
+	PP_FillPaletteGrid(pp_lut_metric, palcolors, 255, grid);
+	for (i = 0; i < PP_LUT_TEXELS; i++)
+	{
+		unsigned int c = d_8to24table[grid[i]];
+		cpu[i * 4 + 0] = (c >>  0) & 0xff;
+		cpu[i * 4 + 1] = (c >>  8) & 0xff;
+		cpu[i * 4 + 2] = (c >> 16) & 0xff;
+		cpu[i * 4 + 3] = 255;
+		diff += memcmp (live + i * 4, cpu + i * 4, 4) != 0;
+	}
+	live_crc = SDL_crc32 (0, live, PP_LUT_TEXELS * 4);
+	cpu_crc = SDL_crc32 (0, cpu, PP_LUT_TEXELS * 4);
+	Con_Printf ("r_softemu_lutcheck: %s metric, %s-built LUT crc32 %08lx, CPU grid crc32 %08lx, "
+		    "%d of %d cells differ\n", PP_MetricName (pp_lut_metric),
+		    pp_lut_gpu_built ? "GPU" : "CPU", live_crc, cpu_crc, diff, PP_LUT_TEXELS);
+	free (live);
+	free (cpu);
+	free (grid);
 }
 
 #else	/* USE_GLES: no compute shaders on this tier at all */
@@ -2347,6 +2421,17 @@ void GL_PostProcess_Init (void)
 	Cvar_SetCallback(&r_hdr, PP_FormatChanged);
 	Cvar_SetCallback(&r_bloom, PP_FormatChanged);
 	Cvar_SetCallback(&r_softemu_metric, PP_MetricChanged);
+#ifndef USE_GLES
+	{
+		/* vid_restart runs this again, after Host_Init, where adding a
+		 * command is fatal */
+		static qboolean	added;
+
+		if (!added)
+			Cmd_AddCommand ("r_softemu_lutcheck", PP_LutCheck_f);
+		added = true;
+	}
+#endif
 
 	/* Report only -- deliberately NOT Cvar_Set("r_hdr", "0"), which is what
 	 * d2c46f078 did here.  PP_HDRActive() already gates every functional

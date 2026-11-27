@@ -193,6 +193,28 @@ qboolean RG_BlitFramebuffer (GLint sx0, GLint sy0, GLint sx1, GLint sy1,
 			     GLbitfield mask, GLenum filter);
 GLuint	RG_FramebufferBinding (GLenum pname);
 
+/* gl_compute.c's and gl_texbind.c's compute seams (#340 P5a-2), with GL's
+ * signatures.  The image units are context state, as GL has them: unit N is
+ * what a compute stage's storage image at set-1 binding N writes (IMGBIND
+ * takes one number for both).  RG_DispatchCompute runs the bound compute
+ * program in a compute pass of its own -- after the open segment's draws,
+ * or after a copy pass alone when it has none -- so every dispatch is ordered
+ * after what came before and RG_MemoryBarrier has nothing left to do but be
+ * counted.  The readbacks are synchronous: what is recorded is submitted and
+ * waited on, and the frame goes on in a new command buffer.  Each answers
+ * false, counted, when it cannot do what GL would. */
+void	RG_BindImageTexture (GLuint unit, GLuint texture, GLint level, GLboolean layered,
+			     GLint layer, GLenum access, GLenum format);
+void	RG_DispatchCompute (GLuint groups_x, GLuint groups_y, GLuint groups_z);
+void	RG_MemoryBarrier (GLbitfield barriers);
+void	RG_ProgramDelete (GLuint program);
+qboolean RG_ReadBuffer (GLenum target, GLintptr offset, GLsizeiptr size, void *data);
+qboolean RG_ReadTexture (GLenum target, GLuint texture, GLint level, GLenum format,
+			 GLenum type, void *pixels);
+/* Whether a texture of `internalformat` on `target` can be sampled and bound
+ * as a storage image with `access`: SDL_GPUTextureSupportsFormat. */
+qboolean RG_StorageFormatOk (GLenum internalformat, GLenum target, GLenum access);
+
 /* gl_vidsdl.c GL_BeginRendering: the frame's render target size. */
 void	RG_BeginFrame (int width, int height);
 

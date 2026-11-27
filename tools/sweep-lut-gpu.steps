@@ -1,0 +1,164 @@
+# sweep-lut-gpu.steps -- r_softemu's palette LUT built by the GPU under -gpu,
+# against GL (#340 P5a-2), on demo1.  Needs the retail data in
+# <basedir>/data1.
+#
+# Since P5a-2 -gpu runs compute: PP_BuildPaletteLUT_GPU's dispatch is a
+# compute pass of rg_compute.c's (storage image unit 0 the 128^3 LUT, the
+# 256x1 palette on unit 0), at boot outside any frame and again inside one at
+# every r_softemu_metric change.  Before it, -gpu took the CPU builder and GL
+# the GPU one, and the two tables disagree by a few thousand ties (naive).
+# Now both sides build on the GPU, so the tables must be EQUAL, and
+# r_softemu_lutcheck says so by number: it reads the live LUT back through
+# R_ReadTexImage (a synchronous SDL_GPU download under -gpu), prints its
+# CRC-32 and how many cells differ from PP_FillPaletteGrid's CPU table for
+# the same metric.
+#
+# Run the SAME binary both ways, with identical settings:
+#
+#   A="-fsaa 0 +gamma 1 +map demo1"
+#   STEPS=tools/sweep-lut-gpu.steps ENGINE=$E ./tools/headless-drive.sh script /tmp/lut-gl ~/hexen2 $A
+#   VK_ICD_FILENAMES=<lvp_icd json> VK_LAYER_PATH=<vulkan-validation-layers>/share/vulkan/explicit_layer.d \
+#       VK_KHRONOS_VALIDATION_VALIDATE_SYNC=true VK_KHRONOS_VALIDATION_ENABLE_MESSAGE_LIMIT=false \
+#       STEPS=tools/sweep-lut-gpu.steps ENGINE=$E \
+#       ./tools/headless-drive.sh script /tmp/lut-gpu ~/hexen2 -gpu +gpu_allow_software 1 +gpu_debug 1 $A
+#   ./tools/lut-diff.sh /tmp/lut-gl /tmp/lut-gpu ~/hexen2/data1
+#
+# Sync validation is on for P5 (the two VK_KHRONOS_VALIDATION_ variables;
+# the message limit off, so a hazard every frame is counted every frame).
+#
+# THE FRAMES, all on sweep-softemu-gpu.steps' graveyard camera, which
+# repeats exactly under pause:
+#   01-09  sweep-softemu-gpu.steps' nine graveyard states, frame for frame
+#          (01 r_softemu 0, 02 1 at metric -1, 03 2, 04 3, 05 naive,
+#          06 Riemersma, 07 back to -1, 08 r_dither 0, 09 r_scale 0.5)
+#   10-12  r_softemu 1 at r_softemu_metric 0, 1, 2, each followed by
+#          r_softemu_lutcheck: three rebuilds, each inside a frame
+#   13     a round trip -1, 0, -1: each `cmd` is typed with frames after it,
+#          so 0 rebuilds naive and -1 rebuilds OKLab again, and the table
+#          must be 12's (renderer_status counts 9 dispatches by then)
+# then a map change (demo1 again) and the check once more: the table
+# survives it.  No frame there: the console's state after a load is the
+# harness's timing on either backend (#553), not the LUT.
+# REPORT-BOOT holds the boot's gpu_unrouted (a dispatch outside any frame);
+# REPORT-GY spans 01-09, REPORT-METRIC 10-13, REPORT-MAP the map change, each
+# reset at its start.  A load makes two glGetError calls into the null table
+# (LM_BuildStyleLayers' error drain, benign, on master too); lut-diff.sh
+# allows those in REPORT-MAP and nothing else.
+#
+# THE CHECKS are tools/lut-diff.sh's; its header has the thresholds and the
+# broken builds that fail them.
+
+sleep 20
+cmd echo REPORT-BOOT-BEGIN
+cmd gpu_unrouted
+cmd echo REPORT-BOOT-END
+cmd god
+cmd notarget
+cmd noclip
+cmd con_notifytime 0
+cmd viewsize 120
+cmd crosshair 0
+cmd showpause 0
+cmd r_skyspeed_back 0
+cmd r_skyspeed_front 0
+cmd r_flatlightstyles 1
+cmd r_dynamic 0
+cmd r_lightclusters 0
+cmd r_gpulightstyles 0
+cmd r_gpucull 0
+cmd gl_hiz_cull 0
+cmd r_ssao 0
+cmd r_bloom 0
+cmd r_dlight_occlusion 0
+cmd r_alias_gpu 0
+cmd r_particles 0
+cmd fog 0
+cmd gl_texture_anisotropy 1
+cmd r_oit 0
+cmd r_waterwarp 0
+cmd r_motionblur 0
+cmd r_softparticles 0
+cmd r_scale 1
+cmd gl_fxaa 0
+cmd contrast 1
+cmd gl_waterwarp_speed 0
+cmd r_caustics 0
+cmd gl_glows 0
+cmd r_drawviewmodel 0
+cmd r_drawentities 0
+cmd r_wateralpha 0.33
+cmd r_lavaalpha 0
+cmd r_water_pixel_warp 0
+cmd r_softemu 0
+cmd r_softemu_metric -1
+cmd r_dither 0.5
+cmd r_softemu_dither_screen 1
+cmd r_softemu_dither_texture 1
+cmd r_softemu_lightmap_banding -1
+cmd r_softemu_mdl_warp -1
+cmd r_softemu_spans 0
+sleep 2
+
+# --- 01-09: sweep-softemu-gpu.steps' graveyard ---
+cmd setpos -918 -2034 0 -20 45 0
+sleep 2
+cmd pause
+cmd gpu_unrouted reset
+shot 01-gy-off
+cmd r_softemu 1
+shot 02-gy-se1
+cmd r_softemu 2
+shot 03-gy-se2
+cmd r_softemu 3
+shot 04-gy-se3
+cmd r_softemu 1
+cmd r_softemu_metric 0
+shot 05-gy-se1-naive
+cmd r_softemu_metric 1
+shot 06-gy-se1-riem
+cmd r_softemu_metric -1
+shot 07-gy-se1-auto
+cmd r_dither 0
+shot 08-gy-se1-dither0
+cmd r_dither 0.5
+cmd r_scale 0.5
+shot 09-gy-se1-scale050
+cmd r_scale 1
+cmd echo REPORT-GY-BEGIN
+cmd gpu_unrouted
+cmd echo REPORT-GY-END
+
+# --- 10-13: each metric, and its table read back ---
+cmd gpu_unrouted reset
+cmd r_softemu_metric 0
+shot 10-gy-lut-naive
+cmd r_softemu_lutcheck
+cmd r_softemu_metric 1
+shot 11-gy-lut-riem
+cmd r_softemu_lutcheck
+cmd r_softemu_metric 2
+shot 12-gy-lut-oklab
+cmd r_softemu_lutcheck
+cmd r_softemu_metric -1
+cmd r_softemu_metric 0
+cmd r_softemu_metric -1
+shot 13-gy-lut-roundtrip
+cmd r_softemu_lutcheck
+cmd echo REPORT-METRIC-BEGIN
+cmd gpu_unrouted
+cmd renderer_status
+cmd echo REPORT-METRIC-END
+cmd pause
+
+# --- across a map change ---
+cmd gpu_unrouted reset
+console
+enter map demo1
+sleep 15
+cmd r_softemu_lutcheck
+cmd echo REPORT-MAP-BEGIN
+cmd gpu_unrouted
+cmd renderer_status
+cmd echo REPORT-MAP-END
+cmd pause
+sleep 1

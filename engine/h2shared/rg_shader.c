@@ -151,7 +151,7 @@ enum {
 
 typedef struct {
 	Uint32		op;		/* the instruction that defines the id */
-	Uint32		a, b, c, d, e;	/* its first operands after the result id */
+	Uint32		a, b, c, d, e, f;	/* its first operands after the result id */
 	Uint32		set, binding;
 	qboolean	has_set, has_binding, block, bufblock;
 	const char	*name;
@@ -177,6 +177,25 @@ static const struct {
 	{ "BoneBuffer",		4, RG_SSBO_POSE, PV_IQM },	/* gl_mesh.c ssbo_bones */
 	{ "GpuParticleBuffer",	0, RG_SSBO_NEEDED, -1 },	/* r_part.c, never drawn */
 	{ "LightBuffer",	LIGHT_SSBO_BINDING, RG_SSBO_COMPUTE_FED, -1 },	/* gl_lightcluster.c, compute: P5 */
+};
+
+/* The compute stages' storage blocks, read-only and read-write, by name
+ * (#340 P5a-2).  Their GL points overlap the graphics table's (SurfaceBuffer
+ * and InstanceBuffer are both point 0), so a compute stage looks here first
+ * and then in rg_storage_points, which has LightBuffer: SSBO_RO / SSBO_RW's
+ * `gl` in each *_comp.glsl, which tools/test_rg_sources.py holds this to. */
+static const struct {
+	const char	*block;
+	int		point;
+} rg_compute_points[] = {
+	{ "SurfaceBuffer",	0 },	/* gl_worldcull.c cull_surf_ssbo */
+	{ "MarkSurfBuffer",	1 },	/* cull_marksurf_ssbo */
+	{ "VisBuffer",		2 },	/* the PVS, GL_Upload */
+	{ "IndirectBuffer",	3 },	/* cull_indirect_buf, read-write */
+	{ "SrcIndexBuffer",	4 },	/* cull_src_ibo */
+	{ "DstIndexBuffer",	5 },	/* cull_dst_ibo, read-write */
+	{ "DedupBuffer",	6 },	/* cull_dedup_ssbo, read-write */
+	{ "StatsBuffer",	7 },	/* cull_stats_ssbo, read-write */
 };
 
 static int RG_StorageRow (const char *block)
@@ -206,6 +225,18 @@ rg_ssbokind_t RG_StorageKind (const char *block, int *format)
 	return (i < 0) ? RG_SSBO_NEEDED : rg_storage_points[i].kind;
 }
 
+int RG_ComputeStoragePoint (const char *block)
+{
+	int	i;
+
+	for (i = 0; i < (int)(sizeof(rg_compute_points) / sizeof(rg_compute_points[0])); i++)
+	{
+		if (!strcmp (rg_compute_points[i].block, block))
+			return rg_compute_points[i].point;
+	}
+	return RG_StoragePoint (block);
+}
+
 /* An OpTypeImage's Dim and Arrayed operands as the texture kind a unit
  * holds.  Anything else (1D, rect, buffer) reads as 2D; no stage in
  * engine/shaders declares one. */
@@ -218,14 +249,16 @@ static rg_textype_t RG_ImageType (Uint32 dim, Uint32 arrayed)
 	return arrayed ? RG_TT_2D_ARRAY : RG_TT_2D;
 }
 
-/* The sampler and uniform-block bindings of one stage, by name. */
+/* The sampler and uniform-block bindings of one stage, by name; for a
+ * compute stage (rw_set 1, -1 for a graphics one) its read-write storage
+ * images and buffers too. */
 static qboolean RG_Reflect (const Uint32 *w, size_t nwords, int sampler_set, int ubo_set,
-			    rgstage_t *out, const char *blob)
+			    int rw_set, rgstage_t *out, const char *blob)
 {
 	spvid_t		*ids;
 	Uint32		bound, id;
 	size_t		p;
-	int		nssbo = 0;
+	int		nssbo = 0, nrw = 0;
 
 	memset (out, 0, sizeof(*out));
 	if (nwords < 5 || w[0] != 0x07230203u)
@@ -267,7 +300,7 @@ static qboolean RG_Reflect (const Uint32 *w, size_t nwords, int sampler_set, int
 					d->set = w[p + 3], d->has_set = true;
 			}
 			break;
-		case SPV_OpTypeImage:		/* result, sampled type, dim, depth, arrayed, ms */
+		case SPV_OpTypeImage:		/* result, sampled type, dim, depth, arrayed, ms, sampled */
 			if (wc >= 7 && w[p + 1] < bound)
 			{
 				ids[w[p + 1]].op = op;
@@ -276,6 +309,7 @@ static qboolean RG_Reflect (const Uint32 *w, size_t nwords, int sampler_set, int
 				ids[w[p + 1]].c = w[p + 4];	/* depth: 1 a shadow sampler */
 				ids[w[p + 1]].d = w[p + 2];	/* sampled type */
 				ids[w[p + 1]].e = w[p + 6];	/* multisampled */
+				ids[w[p + 1]].f = (wc >= 8) ? w[p + 7] : 0;	/* 2: a storage image */
 			}
 			break;
 		case SPV_OpTypeInt:		/* result, width, signedness */
@@ -360,17 +394,59 @@ static qboolean RG_Reflect (const Uint32 *w, size_t nwords, int sampler_set, int
 			else
 				s->unit = RG_UNIT_NONE;
 		}
+		else if (rw_set >= 0 && v->b == SPV_ScUniformConstant && ty->op == SPV_OpTypeImage &&
+			 ty->f == 2)
+		{
+			/* A storage image (#340 P5a-2): set 1, before the read-write
+			 * buffers.  Its binding is the GL image unit as well (IMGBIND
+			 * takes one number), which is how rg_compute.c finds what
+			 * R_BindImageTexture put there. */
+			rgimage_t	*im;
+			const char	*nm = v->name ? v->name : "";
+
+			if (out->num_images == RG_MAX_STAGE_IMAGES || !v->has_binding ||
+			    v->binding >= RG_MAX_STAGE_IMAGES || (int)v->set != rw_set)
+			{
+				Con_Printf ("SDL_GPU: %s: storage image %s outside set %d's 0..%d\n",
+					    blob, nm, rw_set, RG_MAX_STAGE_IMAGES - 1);
+				free (ids);
+				return false;
+			}
+			im = &out->images[out->num_images++];
+			q_strlcpy (im->name, nm, sizeof(im->name));
+			im->binding = (Uint8) v->binding;
+			im->type = RG_ImageType (ty->a, ty->b);
+		}
 		else if (ty->op == SPV_OpTypeStruct &&
 			 ((v->b == SPV_ScStorageBuffer && ty->block) || (v->b == SPV_ScUniform && ty->bufblock)))
 		{
 			/* A storage block: StorageBuffer + Block from SPIR-V 1.3, Uniform
-			 * + BufferBlock before.  Only the read-only set's (the samplers'
-			 * set) are bound by slot here; a compute stage's read-write set
-			 * is P5's.  `slot` holds the raw binding until RG_CheckStage
-			 * knows how many textures come first. */
+			 * + BufferBlock before: the read-only set's (the samplers' set),
+			 * and a compute stage's read-write set (rw_set).  `slot` holds
+			 * the raw binding until RG_CheckStage knows how many textures
+			 * come first. */
 			rgssbo_t	*sb;
 			int		format;
 
+			if (v->has_binding && rw_set >= 0 && (int)v->set == rw_set)
+			{
+				/* read-write (#340 P5a-2): `slot` the raw set-1 binding,
+				 * past the images, until RG_CheckStage */
+				if (nrw == RG_MAX_STAGE_SSBOS || v->binding > 255)
+				{
+					Con_Printf ("SDL_GPU: %s: more than %d read-write storage blocks, or a "
+						    "binding past 255\n", blob, RG_MAX_STAGE_SSBOS);
+					free (ids);
+					return false;
+				}
+				sb = &out->rwssbos[nrw++];
+				q_strlcpy (sb->name, ty->name ? ty->name : "", sizeof(sb->name));
+				sb->slot = (Uint8) v->binding;
+				sb->point = RG_ComputeStoragePoint (sb->name);
+				sb->kind = RG_SSBO_NEEDED;
+				sb->format = -1;
+				continue;
+			}
 			if (!v->has_binding || (int)v->set != sampler_set)
 				continue;
 			if (nssbo == RG_MAX_STAGE_SSBOS || v->binding > 255)
@@ -383,7 +459,7 @@ static qboolean RG_Reflect (const Uint32 *w, size_t nwords, int sampler_set, int
 			sb = &out->ssbos[nssbo++];
 			q_strlcpy (sb->name, ty->name ? ty->name : "", sizeof(sb->name));
 			sb->slot = (Uint8) v->binding;
-			sb->point = RG_StoragePoint (sb->name);
+			sb->point = (rw_set >= 0) ? RG_ComputeStoragePoint (sb->name) : RG_StoragePoint (sb->name);
 			sb->kind = (Uint8) RG_StorageKind (sb->name, &format);
 			sb->format = (Sint8) format;
 		}
@@ -407,6 +483,7 @@ static qboolean RG_Reflect (const Uint32 *w, size_t nwords, int sampler_set, int
 	}
 	free (ids);
 	out->num_ssbos = nssbo;
+	out->num_rwssbos = nrw;
 	/* SDL_GPU numbers each class densely from 0, and the recorder indexes
 	 * its binding arrays with these: a hole or a repeat would hand SDL a
 	 * NULL texture or write past the array. */
@@ -477,7 +554,7 @@ static const void *RG_LoadBlob (const char *blob, size_t *size, void **owned)
 
 /* Reflect a stage and hold it to the counts this binary was built with. */
 static qboolean RG_CheckStage (rprog_id_t id, int stage, const void *code, size_t size,
-			       int sampler_set, int ubo_set, rgstage_t *out)
+			       int sampler_set, int ubo_set, int rw_set, rgstage_t *out)
 {
 	const rprog_refl_t	*refl = R_Program_Reflection (id, stage);
 	const char		*blob = R_Program_Blob (id, stage);
@@ -487,7 +564,7 @@ static qboolean RG_CheckStage (rprog_id_t id, int stage, const void *code, size_
 		Con_Printf ("SDL_GPU: %s has no reflection row\n", blob);
 		return false;
 	}
-	if (!RG_Reflect ((const Uint32 *) code, size / 4, sampler_set, ubo_set, out, blob))
+	if (!RG_Reflect ((const Uint32 *) code, size / 4, sampler_set, ubo_set, rw_set, out, blob))
 		return false;
 	if (refl->ro_storage_buffers > RG_MAX_STAGE_SSBOS)
 	{
@@ -523,6 +600,48 @@ static qboolean RG_CheckStage (rprog_id_t id, int stage, const void *code, size_
 			out->ssbos[i].slot = (Uint8) slot;
 		}
 	}
+	/* Set 1 (#340 P5a-2): the storage images at 0..n-1, image unit N at
+	 * binding N, then the read-write buffers, their slots counted from 0
+	 * past the images, each once. */
+	if (out->num_images != refl->rw_storage_textures || out->num_rwssbos != refl->rw_storage_buffers)
+	{
+		Con_Printf ("SDL_GPU: %s.vk.spv from %s has %d storage images and %d read-write storage "
+			    "blocks, this build expects %d and %d\n", blob, rg_spvsource, out->num_images,
+			    out->num_rwssbos, refl->rw_storage_textures, refl->rw_storage_buffers);
+		return false;
+	}
+	{
+		Uint32	seen = 0;
+		int	i;
+
+		for (i = 0; i < out->num_images; i++)
+		{
+			Uint8	b = out->images[i].binding;
+
+			if (b >= out->num_images || (seen & (1u << b)))
+			{
+				Con_Printf ("SDL_GPU: %s: storage image bindings are not 0..%d, each once\n",
+					    blob, out->num_images - 1);
+				return false;
+			}
+			seen |= 1u << b;
+		}
+		seen = 0;
+		for (i = 0; i < out->num_rwssbos; i++)
+		{
+			int	slot = (int) out->rwssbos[i].slot - out->num_images;
+
+			if (slot < 0 || slot >= out->num_rwssbos || (seen & (1u << slot)))
+			{
+				Con_Printf ("SDL_GPU: %s: read-write storage block %s at binding %d is not one of "
+					    "slots 0..%d after the %d images\n", blob, out->rwssbos[i].name,
+					    out->rwssbos[i].slot, out->num_rwssbos - 1, out->num_images);
+				return false;
+			}
+			seen |= 1u << slot;
+			out->rwssbos[i].slot = (Uint8) slot;
+		}
+	}
 	if (out->num_samplers != refl->samplers || out->num_ubos != refl->uniform_buffers)
 	{
 		Con_Printf ("SDL_GPU: %s.vk.spv from %s has %d samplers and %d uniform blocks, this "
@@ -552,7 +671,7 @@ static SDL_GPUShader *RG_MakeShader (rprog_id_t id, int stage, SDL_GPUShaderStag
 		return NULL;
 	if (!RG_CheckStage (id, stage, code, size,
 			    kind == SDL_GPU_SHADERSTAGE_VERTEX ? 0 : 2,
-			    kind == SDL_GPU_SHADERSTAGE_VERTEX ? 1 : 3, out))
+			    kind == SDL_GPU_SHADERSTAGE_VERTEX ? 1 : 3, -1, out))
 	{
 		SDL_free (owned);
 		return NULL;
@@ -586,8 +705,9 @@ static SDL_GPUComputePipeline *RG_MakeCompute (rprog_id_t id, rgstage_t *out)
 
 	if (!code)
 		return NULL;
-	/* Compute: set 0 samplers, set 2 uniform buffers. */
-	if (!RG_CheckStage (id, RPROG_STAGE_COMPUTE, code, size, 0, 2, out))
+	/* Compute: set 0 samplers and read-only storage, set 1 read-write
+	 * storage, set 2 uniform buffers. */
+	if (!RG_CheckStage (id, RPROG_STAGE_COMPUTE, code, size, 0, 2, 1, out))
 	{
 		SDL_free (owned);
 		return NULL;
@@ -668,6 +788,28 @@ const rgprog_t *RG_Program (GLuint name)
 int RG_ProgramCount (void)
 {
 	return rg_numprogs;
+}
+
+void RG_ProgramDelete (GLuint program)
+{
+	rgprog_t	*p;
+
+	if (program == 0 || (int)program > rg_numprogs)
+		return;
+	p = rg_progs[program - 1];
+	if (!p->compute)
+	{
+		/* rg_pipeline.c caches pipelines by program; nothing deletes a
+		 * graphics program under -gpu, so none is torn down here. */
+		RG_NoteUnhandled ("glDeleteProgram of a graphics program (kept)");
+		return;
+	}
+	/* The name is not handed out again (RG_ProgramCreate numbers in order),
+	 * so a dispatch through it after this finds no pipeline and is counted.
+	 * SDL releases the pipeline once the work recorded with it retires. */
+	if (p->cs)
+		SDL_ReleaseGPUComputePipeline (rg_dev, p->cs);
+	p->cs = NULL;
 }
 
 GLint RG_ProgramBlock (GLuint program, const char *block)

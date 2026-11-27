@@ -9,8 +9,9 @@
  */
 
 /* gl_compute.h's implementation; see the header for the contract.  The GL
- * arm of each seam is the bare call (#340 P5a-1); the SDL_GPU arms that
- * need rg_compute.c note the call until P5a-2 builds it. */
+ * arm of each seam is the bare call (#340 P5a-1); each SDL_GPU arm is the
+ * backend call of the same name (P5a-2: rg_compute.c, rg_resource.c,
+ * rg_buffer.c, rg_shader.c). */
 
 #include "quakedef.h"
 #include "gl_texbind.h"
@@ -26,7 +27,7 @@ void R_DispatchCompute (GLuint groups_x, GLuint groups_y, GLuint groups_z)
 #ifdef USE_SDL_GPU
 	if (R_GPU ())
 	{
-		RG_NoteUnhandled ("R_DispatchCompute (compute is P5a-2)");
+		RG_DispatchCompute (groups_x, groups_y, groups_z);
 		return;
 	}
 #endif
@@ -38,7 +39,7 @@ void R_MemoryBarrier (GLbitfield barriers)
 #ifdef USE_SDL_GPU
 	if (R_GPU ())
 	{
-		RG_NoteUnhandled ("R_MemoryBarrier (compute is P5a-2)");
+		RG_MemoryBarrier (barriers);
 		return;
 	}
 #endif
@@ -50,7 +51,7 @@ void R_DeleteProgram (GLuint program)
 #ifdef USE_SDL_GPU
 	if (R_GPU ())
 	{
-		RG_NoteUnhandled ("R_DeleteProgram (compute is P5a-2)");
+		RG_ProgramDelete (program);
 		return;
 	}
 #endif
@@ -76,8 +77,7 @@ qboolean R_ReadBuffer (GLenum target, GLintptr offset, GLsizeiptr size, void *da
 #ifdef USE_SDL_GPU
 	if (R_GPU ())
 	{
-		RG_NoteUnhandled ("R_ReadBuffer (compute is P5a-2)");
-		return false;
+		return RG_ReadBuffer (target, offset, size, data);
 	}
 #endif
 	if (!glGetBufferSubData_fp)
@@ -92,8 +92,7 @@ qboolean R_ReadTexImage (GLenum target, GLuint texture, GLint level, GLenum form
 #ifdef USE_SDL_GPU
 	if (R_GPU ())
 	{
-		RG_NoteUnhandled ("R_ReadTexImage (compute is P5a-2)");
-		return false;
+		return RG_ReadTexture (target, texture, level, format, type, pixels);
 	}
 #endif
 	if (!glGetTexImage_fp)
@@ -109,7 +108,7 @@ qboolean R_StorageFormatOk (GLenum internalformat, GLenum target, GLenum access)
 #ifdef USE_SDL_GPU
 	if (R_GPU ())
 	{
-		return false;
+		return RG_StorageFormatOk (internalformat, target, access);
 	}
 #endif
 	(void) internalformat;

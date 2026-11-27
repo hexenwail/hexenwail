@@ -97,6 +97,10 @@ typedef struct {
 	/* the usage tex was created with: t->usage is the definition's, and a
 	 * same-size re-definition changes it without re-creating tex */
 	SDL_GPUTextureUsageFlags tex_usage;
+	/* the storage usage R_BindImageTexture asked for (#340 P5a-2), kept
+	 * across re-definitions: SDL fixes usage when the texture is made, and
+	 * the binds come after the definition */
+	SDL_GPUTextureUsageFlags storage;
 } rgtex_t;
 
 static rgtex_t		*rgt;
@@ -107,6 +111,16 @@ static int		rgt_numfree, rgt_maxfree;
 
 /* Per unit, per dimensionality: RG_BindTexture's exact record. */
 static GLuint		rgt_units[RT_MAX_TEXTURE_UNITS][RG_TT_COUNT];
+
+/* GL's image units, as glBindImageTexture left them (#340 P5a-2). */
+typedef struct {
+	GLuint		tex;
+	GLint		level, layer;
+	GLboolean	layered;
+	GLenum		access, format;
+} rgimageunit_t;
+static rgimageunit_t	rgt_images[RG_MAX_STAGE_IMAGES];
+static unsigned long	rgt_storage_recreated, rgt_readbacks;
 
 /* Released only after the frame's command buffer is submitted: a recorded
  * draw can still name one when the delete or re-creation happens. */
@@ -274,11 +288,15 @@ void RG_DeleteTextures (GLsizei n, const GLuint *textures)
 		RGT_DropUploads (t);
 		RGT_Retire (t->tex);
 		t->alive = false;
-		/* GL: deleting a bound texture unbinds it from every unit. */
+		/* GL: deleting a bound texture unbinds it from every unit,
+		 * image units included. */
 		for (u = 0; u < RT_MAX_TEXTURE_UNITS; u++)
 			for (k = 0; k < RG_TT_COUNT; k++)
 				if (rgt_units[u][k] == textures[i])
 					rgt_units[u][k] = 0;
+		for (u = 0; u < RG_MAX_STAGE_IMAGES; u++)
+			if (rgt_images[u].tex == textures[i])
+				rgt_images[u].tex = 0;
 		if (rgt_numfree == rgt_maxfree)
 		{
 			rgt_maxfree = rgt_maxfree ? rgt_maxfree * 2 : 256;
@@ -592,6 +610,8 @@ static void RGT_Realize (rgtex_t *t)
 
 	if (!t->defined)
 		return;
+	/* A texture made without the storage usage a bind asks for was
+	 * re-created by RG_BindImageTexture, before anything realizes it. */
 	if (t->tex && t->tex_levels >= q_min (t->levels, RGT_FullChain (t)))
 		return;
 	if (t->tex)
@@ -711,7 +731,7 @@ void RG_TexImage (GLenum target, GLuint tex, GLint level, GLint internalformat,
 		t->w = lw;
 		t->h = lh;
 		t->d = ld;
-		t->usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+		t->usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | t->storage;
 		/* Storage with no data is a render target in this engine
 		 * (gl_postprocess.c, gl_worldcull.c); P4 binds them. */
 		if (depthfmt)
@@ -1141,6 +1161,252 @@ qboolean RG_Res_ForDraw (GLuint unit, rg_textype_t type, rg_sampclass_t sclass, 
 }
 
 /* ------------------------------------------------------------------ */
+/* Storage images and readback (#340 P5a-2)                            */
+/* ------------------------------------------------------------------ */
+
+/* The usage a storage bind with GL `access` needs: SDL_GPU reads a texture
+ * in the pass that writes it only with SIMULTANEOUS_READ_WRITE. */
+static SDL_GPUTextureUsageFlags RGT_StorageUsage (GLenum access)
+{
+	if (access == GL_READ_WRITE)
+		return SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_SIMULTANEOUS_READ_WRITE;
+	if (access == GL_READ_ONLY)
+		return SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_READ;
+	return SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE;
+}
+
+static SDL_GPUTextureType RGT_SDLType (rg_textype_t type)
+{
+	switch (type)
+	{
+	case RG_TT_3D:		return SDL_GPU_TEXTURETYPE_3D;
+	case RG_TT_CUBE:	return SDL_GPU_TEXTURETYPE_CUBE;
+	case RG_TT_2D_ARRAY:	return SDL_GPU_TEXTURETYPE_2D_ARRAY;
+	case RG_TT_CUBE_ARRAY:	return SDL_GPU_TEXTURETYPE_CUBE_ARRAY;
+	default:		return SDL_GPU_TEXTURETYPE_2D;
+	}
+}
+
+/* Whether usage `have` serves the storage binds that asked for `want`:
+ * SDL_GPU writes through SIMULTANEOUS_READ_WRITE as through WRITE. */
+static qboolean RGT_HasStorage (SDL_GPUTextureUsageFlags have, SDL_GPUTextureUsageFlags want)
+{
+	if (have & SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_SIMULTANEOUS_READ_WRITE)
+		have |= SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE;
+	return (have & want) == want;
+}
+
+qboolean RG_StorageFormatOk (GLenum internalformat, GLenum target, GLenum access)
+{
+	rg_textype_t		type;
+	SDL_GPUTextureFormat	fmt;
+	int			layer, bpp;
+	qboolean		rgb, depth;
+
+	if (!rg_dev || !RGT_Target (target, &type, &layer) ||
+	    !RGT_Format ((GLint) internalformat, &fmt, &bpp, &rgb, &depth))
+		return false;
+	/* RGB is stored RGBA with alpha forced at upload, which a shader's
+	 * stores would bypass; depth is no storage format at all. */
+	if (rgb || depth)
+		return false;
+	return SDL_GPUTextureSupportsFormat (rg_dev, fmt, RGT_SDLType (type),
+					     SDL_GPU_TEXTUREUSAGE_SAMPLER | RGT_StorageUsage (access));
+}
+
+void RG_BindImageTexture (GLuint unit, GLuint texture, GLint level, GLboolean layered,
+			  GLint layer, GLenum access, GLenum format)
+{
+	rgimageunit_t	*u;
+	rgtex_t		*t;
+
+	if (unit >= RG_MAX_STAGE_IMAGES)
+	{
+		RG_NoteUnhandled ("image unit above 7 (dropped)");
+		return;
+	}
+	u = &rgt_images[unit];
+	u->tex = texture;
+	u->level = level;
+	u->layered = layered;
+	u->layer = layer;
+	u->access = access;
+	u->format = format;
+	t = RGT_Get (texture);
+	if (!t)
+		return;
+	t->storage |= RGT_StorageUsage (access);
+	if (!t->defined)
+		return;
+	t->usage |= t->storage;
+	if (t->tex && !RGT_HasStorage (t->tex_usage, t->storage))
+	{
+		/* Made without it, and SDL fixes usage at creation: a new object,
+		 * made at the next realize, as RG_TexImage's re-definition does.
+		 * Lost contents are counted; a texture nothing wrote loses none. */
+		if (!t->unwritten)
+			RG_NoteUnhandled ("texture bound as a storage image after it was written "
+					  "(re-created, contents lost)");
+		RGT_FlushIfRead (t);
+		RG_Frame_ReleaseTarget (t->tex);
+		RGT_Retire (t->tex);
+		t->tex = NULL;
+		t->tex_levels = 0;
+		rgt_recreated++;
+		rgt_storage_recreated++;
+	}
+}
+
+qboolean RG_Res_ImageIsTarget (int unit)
+{
+	rgtex_t	*t = (unit >= 0 && unit < RG_MAX_STAGE_IMAGES) ? RGT_Get (rgt_images[unit].tex) : NULL;
+
+	return t && t->tex && RG_Frame_TargetHolds (t->tex);
+}
+
+qboolean RG_Res_StorageImage (int unit, rg_textype_t type, const Uint32 cover[3],
+			      SDL_GPUStorageTextureReadWriteBinding *out)
+{
+	const rgimageunit_t	*u;
+	rgtex_t			*t;
+	SDL_GPUTextureFormat	fmt;
+	int			bpp, lw, lh, ld;
+	qboolean		rgb, depth;
+	SDL_GPUTextureUsageFlags need;
+
+	SDL_zero (*out);
+	if (unit < 0 || unit >= RG_MAX_STAGE_IMAGES)
+		return false;
+	u = &rgt_images[unit];
+	t = RGT_Get (u->tex);
+	if (!t || !t->defined)
+	{
+		RG_NoteUnhandled ("dispatch with no defined texture at a storage image's unit (dropped)");
+		return false;
+	}
+	if (t->type != type)
+	{
+		RG_NoteUnhandled ("storage image unit holding a texture of another dimensionality (dropped)");
+		return false;
+	}
+	/* SDL_GPU views a storage image in the texture's own format. */
+	if (!RGT_Format ((GLint) u->format, &fmt, &bpp, &rgb, &depth) || fmt != t->fmt || rgb)
+	{
+		RG_NoteUnhandled ("storage image bound in a format other than its texture's (dropped)");
+		return false;
+	}
+	if (u->access == GL_READ_ONLY)
+	{
+		/* a read-only image is set 0's, which no stage in engine/shaders has */
+		RG_NoteUnhandled ("read-only storage image (dropped)");
+		return false;
+	}
+	if (u->level < 0 || u->level >= t->levels)
+	{
+		RG_NoteUnhandled ("storage image at a level the texture does not define (dropped)");
+		return false;
+	}
+	/* SDL_GPU binds one subresource: a 3D level whole, one layer of the
+	 * others.  So GL's layered bind is a 3D texture's, and a single slice
+	 * of one, or every layer of an array, cannot be bound. */
+	if (type == RG_TT_3D ? !u->layered : (u->layered && type != RG_TT_2D))
+	{
+		RG_NoteUnhandled ("storage image bound layered on an array, or one slice of a 3D "
+				  "texture: SDL_GPU binds a 3D level whole and one array layer (dropped)");
+		return false;
+	}
+	need = RGT_StorageUsage (u->access);
+	RGT_Realize (t);
+	if (!t->tex || !RGT_HasStorage (t->tex_usage, need))
+	{
+		RG_NoteUnhandled ("storage image unit holding a texture without storage usage (dropped)");
+		return false;
+	}
+	lw = q_max (1, t->w >> u->level);
+	lh = q_max (1, t->h >> u->level);
+	ld = (type == RG_TT_3D) ? q_max (1, t->d >> u->level) : 1;
+	out->texture = t->tex;
+	out->mip_level = (Uint32) u->level;
+	out->layer = (type == RG_TT_3D || type == RG_TT_2D) ? 0 : (Uint32) u->layer;
+	out->cycle = (u->access == GL_WRITE_ONLY && t->tex_levels == 1 &&
+		      (type == RG_TT_3D || (type == RG_TT_2D && t->d == 1)) &&
+		      cover[0] >= (Uint32) lw && cover[1] >= (Uint32) lh && cover[2] >= (Uint32) ld);
+	return true;
+}
+
+void RG_Res_StorageImageWritten (int unit)
+{
+	rgtex_t	*t = (unit >= 0 && unit < RG_MAX_STAGE_IMAGES) ? RGT_Get (rgt_images[unit].tex) : NULL;
+
+	if (t)
+		t->unwritten = false;
+}
+
+qboolean RG_ReadTexture (GLenum target, GLuint texture, GLint level, GLenum format,
+			 GLenum type, void *pixels)
+{
+	rgtex_t			*t = RGT_Get (texture);
+	rg_textype_t		ttype;
+	int			layer, lw, lh, ld;
+	Uint32			bytes;
+	SDL_GPUTextureRegion	r;
+
+	if (!t || !t->defined || !RGT_Target (target, &ttype, &layer) || ttype != t->type ||
+	    level < 0 || level >= t->levels)
+	{
+		RG_NoteUnhandled ("texture readback of a texture or level that is not defined (nothing read)");
+		return false;
+	}
+	if (ttype == RG_TT_2D_ARRAY || ttype == RG_TT_CUBE_ARRAY)
+	{
+		RG_NoteUnhandled ("texture readback of an array (nothing read)");
+		return false;
+	}
+	/* GL converts on the way out; this reads the texels as they are, so
+	 * the pair has to name the texture's own layout. */
+	if (!(t->fmt == SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM && format == GL_RGBA &&
+	      type == GL_UNSIGNED_BYTE) && !RGT_RawOk (t->fmt, format, type))
+	{
+		RG_NoteUnhandled ("texture readback into a format/type other than the texture's (nothing read)");
+		return false;
+	}
+	lw = q_max (1, t->w >> level);
+	lh = q_max (1, t->h >> level);
+	ld = (ttype == RG_TT_3D) ? q_max (1, t->d >> level) : 1;
+	/* GL_PACK_ALIGNMENT is GL's 4: a row that is not whole words would be
+	 * padded there and packed here. */
+	if (((Uint32) lw * t->bpp) % 4)
+	{
+		RG_NoteUnhandled ("texture readback with rows GL would pad (nothing read)");
+		return false;
+	}
+	bytes = (Uint32) lw * lh * ld * t->bpp;
+	/* What was recorded and queued lands first: the uploads, so the
+	 * texture is also made by now if anything ever wrote it. */
+	RG_Frame_Flush ();
+	RGT_Realize (t);
+	if (!t->tex)
+		return false;
+	if (t->unwritten)
+	{
+		/* GL's zeros, where a Vulkan image never written is undefined. */
+		memset (pixels, 0, bytes);
+		return true;
+	}
+	SDL_zero (r);
+	r.texture = t->tex;
+	r.mip_level = (Uint32) level;
+	r.layer = (Uint32) layer;
+	r.w = (Uint32) lw;
+	r.h = (Uint32) lh;
+	r.d = (Uint32) ld;
+	if (!RG_Frame_Readback (&r, NULL, pixels, bytes))
+		return false;
+	rgt_readbacks++;
+	return true;
+}
+
+/* ------------------------------------------------------------------ */
 /* Render targets (#340 P4a-2)                                         */
 /* ------------------------------------------------------------------ */
 
@@ -1403,6 +1669,7 @@ void RG_Res_EndFrame (void)
 void RG_Res_Init (void)
 {
 	memset (rgt_units, 0, sizeof(rgt_units));
+	memset (rgt_images, 0, sizeof(rgt_images));
 	rgs_count = 0;
 	rgs_overflowed = false;
 	RGT_CreatePlaceholders ();
@@ -1458,9 +1725,10 @@ void RG_Res_Status (void)
 		alive += rgt[i].alive;
 		made += (rgt[i].alive && rgt[i].tex);
 	}
-	Con_Printf ("[RENDERER] SDL_GPU textures: %d names, %d created (%lu creates, %lu re-creates), "
-		    "%d samplers (%lu cache flushes), %lu uploads / %lu KB, %u bytes queued, "
-		    "%lu render targets cleared\n",
-		    alive, made, rgt_created, rgt_recreated, rgs_count, rgs_flushes,
-		    rgt_uploads, rgt_upload_bytes / 1024, (unsigned int)rgt_pending_bytes, rgt_cleared);
+	Con_Printf ("[RENDERER] SDL_GPU textures: %d names, %d created (%lu creates, %lu re-creates, "
+		    "%lu for storage usage), %d samplers (%lu cache flushes), %lu uploads / %lu KB, "
+		    "%u bytes queued, %lu render targets cleared, %lu read back\n",
+		    alive, made, rgt_created, rgt_recreated, rgt_storage_recreated, rgs_count, rgs_flushes,
+		    rgt_uploads, rgt_upload_bytes / 1024, (unsigned int)rgt_pending_bytes, rgt_cleared,
+		    rgt_readbacks);
 }

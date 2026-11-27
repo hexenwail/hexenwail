@@ -135,11 +135,11 @@ void R_BindImageTexture (GLuint unit, GLuint texture, GLint level, GLboolean lay
 			 GLint layer, GLenum access, GLenum format)
 {
 #ifdef USE_SDL_GPU
-	/* Compute storage images are P5 (#340); nothing reaches here under
-	 * -gpu while R_HiZ_Available and the compute callers stay off. */
+	/* The image unit, shadowed: the dispatch binds what unit N holds at its
+	 * stage's storage image N (#340 P5a-2). */
 	if (R_GPU ())
 	{
-		RG_NoteUnhandled ("R_BindImageTexture (compute storage image)");
+		RG_BindImageTexture (unit, texture, level, layered, layer, access, format);
 		return;
 	}
 #endif

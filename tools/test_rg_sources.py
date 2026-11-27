@@ -358,6 +358,48 @@ Checked, from the sources (stock python3, lint.yml):
       caps.compute_shaders, R_BuildWorldCull's and the light cluster's
       STANDIN_PINS), and R_Shadow_Prepare returns under R_GPU () before the
       cube maps (GPU_GATES), which P5b's cluster would otherwise wake.
+  the compute backend and the GPU palette LUT under -gpu (#340 P5a-2,
+  check_compute_backend), which tools/sweep-lut-gpu.steps and
+  tools/lut-diff.sh check:
+    * each compute seam's SDL_GPU arm is the backend call of its name, its
+      parameters in order (COMPUTE_SEAMS), and R_BindImageTexture's is
+      RG_BindImageTexture: the image units are shadowed, not noted;
+    * GL_Init_NullGL turns compute_shaders and indirect_draw on before
+      GL_PostProcess_Init (which builds the LUT); the light cluster's Build
+      and ShadesWorld return false under R_GPU () in lockstep (GPU_GATES:
+      a yes from ShadesWorld with no grid stands the CPU dlights down), and
+      the cull, Hi-Z and SSAO gates stay; RGF_StandinExpected excuses
+      LightBuffer while R_LightCluster_Available () is false, the per-frame
+      truth, which is lc_valid_this_frame;
+    * RG_CheckStage reads a compute stage's set 1 (RG_MakeCompute passes
+      it, the graphics stages -1): its storage images at 0..n-1 and its
+      read-write buffers after them, held to the reflection row's counts;
+      every image in engine/shaders/*_comp.glsl is IMGBIND(b, fmt), one
+      number for the GL image unit and the Vulkan set-1 binding (layout.inc
+      spells both arms with b), dense from 0 in each file, and rg_compute.c
+      binds stage image N from image unit N;
+    * rg_compute_points is exactly the GL point of every SSBO_RO / SSBO_RW
+      block a compute stage declares that rg_storage_points lacks;
+    * rg_compute.c: one compute pass per dispatch, begun after
+      RG_Frame_ComputeBegin (the segment's draws land first, or its uploads
+      alone in a copy pass), every read-write buffer bound with cycle false,
+      an image cycled only when RG_Res_StorageImage says the dispatch
+      overwrites all of it (write-only, one level, one layer, every texel
+      covered); each uniform block pushed from its flushed mirror;
+    * RG_BindImageTexture adds the storage usage before the texture is
+      made, and re-creates (counted) one made without it; RG_TexImage keeps
+      it across a re-definition;
+    * the readbacks: RG_Frame_Readback lands what is recorded first and
+      submits through RGF_SubmitMidFrame, which waits on a fence and runs
+      none of the end-of-frame work (RG_Buf_EndFrame would rewind the
+      storage stream mid-frame); RGF_CopyOnly runs no render pass;
+    * sync validation's two read-after-write hazards stay fixed: an element
+      buffer is made without VERTEX usage (SDL returns a buffer to its first
+      usage after a copy, vertex before index), and the stream's indices
+      are drawn from an INDEX-only copy of the stream, rgf_ibuf;
+    * gl_postprocess.c's builder names u_palette's unit (R_ProgramSamplerUnit)
+      before it dispatches, and r_softemu_lutcheck reads the LUT through
+      R_ReadTexImage and no GL entry point.
 
 Usage: test_rg_sources.py [--root DIR]
 """
@@ -1576,8 +1618,11 @@ BUFFER_PINS = (
     ("rg_frame.c", "RG_DrawIndexed", r"\bd\s*=\s*RGF_BeginDraw\s*\(\s*prog\s*,\s*prim\s*,\s*layout\s*\)\s*;\s*"
      r"if\s*\(\s*!\s*d\s*\)\s*return\s*;\s*RG_Buf_MarkRead\s*\(\s*&in\s*\)\s*;",
      "a recorded draw, and only a recorded one, marks its buffers read"),
-    ("rg_frame.c", "RGF_Submit", r"\bRG_Buf_EndFrame\s*\(\s*\)\s*;",
+    ("rg_frame.c", "RGF_EndOfFrame", r"\bRG_Buf_EndFrame\s*\(\s*\)\s*;",
      "retired buffers are released after the frame's command buffer is submitted"),
+    ("rg_frame.c", "RGF_Submit", r"\bSDL_SubmitGPUCommandBuffer\s*\(\s*rgf_cmd\s*\).*"
+     r"\brgf_cmd\s*=\s*NULL\s*;\s*RGF_EndOfFrame\s*\(\s*\)\s*;",
+     "the end-of-frame work runs after the frame's command buffer is submitted"),
     ("rg_buffer.c", "RG_BufferSubData", r"\bRGB_FlushIfRead\s*\(\s*b\s*\)\s*;\s*RGB_Queue\s*\(\s*b\s*,\s*"
      r"\(Uint32\)\s*offset\s*,\s*\(Uint32\)\s*size\s*,\s*data\s*,\s*false\s*\)\s*;",
      "a partial update ends a segment that reads the buffer, then queues without cycling: a cycled "
@@ -1659,10 +1704,22 @@ def check_buffers(root):
 SSBO_DECL = re.compile(r"\b(?:VERT_SSBO|FRAG_SSBO)\s*\(\s*(\w+)\s*,\s*\w+\s*\)[^;{]*?\bbuffer\s+(\w+)\s*\{")
 SSBO_PLAIN = re.compile(r"layout\s*\(\s*std430\s*,\s*binding\s*=\s*(\w+)\s*\)[^;{]*?\bbuffer\s+(\w+)\s*\{")
 STORAGE_PINS = (
-    ("rg_buffer.c", "RGB_Create", r"\bci\.usage\s*=\s*SDL_GPU_BUFFERUSAGE_VERTEX\s*\|\s*SDL_GPU_BUFFERUSAGE_INDEX\s*\|"
-     r"\s*SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ\s*;",
-     "every buffer is made with vertex, index and graphics storage-read usage: GL does not say which a "
-     "name will be, and a storage slot bound to a buffer without it is a validation error"),
+    ("rg_buffer.c", "RGB_Create", r"\bci\.usage\s*=\s*RGB_Usage\s*\(\s*target\s*\)\s*;",
+     "every buffer is made with RGB_Usage's flags for the target that made it"),
+    ("rg_buffer.c", "RGB_Usage", r"^\{\s*SDL_GPUBufferUsageFlags\s+usage\s*=\s*SDL_GPU_BUFFERUSAGE_VERTEX\s*\|"
+     r"\s*SDL_GPU_BUFFERUSAGE_INDEX\s*\|\s*SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ\s*\|"
+     r"\s*SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ\s*\|\s*SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE\s*\|"
+     r"\s*SDL_GPU_BUFFERUSAGE_INDIRECT\s*;\s*if\s*\(\s*target\s*==\s*GL_ELEMENT_ARRAY_BUFFER\s*\)\s*"
+     r"usage\s*&=\s*~\s*SDL_GPU_BUFFERUSAGE_VERTEX\s*;\s*return\s+usage\s*;\s*\}?\s*$",
+     "every buffer is made with index, graphics and compute storage and indirect usage, and vertex "
+     "unless it is an element buffer: GL does not say which a name will be, a slot bound to a buffer "
+     "without the usage is a validation error, and SDL returns a buffer to its first usage after a "
+     "copy -- vertex before index -- so an element buffer with both is read as indices unsynced "
+     "(#340 P5a-2, sync validation)"),
+    ("rg_buffer.c", "RG_BufferData", r"if\s*\(\s*\(\s*!\s*b->buf\s*\|\|\s*b->size\s*!=\s*\(Uint32\)\s*size\s*\|\|"
+     r"\s*b->usage\s*!=\s*RGB_Usage\s*\(\s*target\s*\)\s*\)\s*&&\s*!\s*RGB_Create\s*\(\s*b\s*,"
+     r"\s*\(Uint32\)\s*size\s*,\s*target\s*\)\s*\)",
+     "a respecify through a target that wants other usage makes the buffer again (#340 P5a-2)"),
     ("rg_buffer.c", "RG_Buf_Storage", r"if\s*\(\s*p->offset\s*!=\s*0\s*\)\s*\{[^{}]*\breturn\s+NULL\s*;\s*\}",
      "a storage range at a non-zero offset is refused: SDL_GPU binds the buffer whole, and the "
      "shader would read from its start"),
@@ -1746,12 +1803,18 @@ def check_storage(root):
     b = body_named(root, "engine/h2shared/gl_vidsdl.c", "GL_Init_NullGL")
     if b is not None:
         on = sorted(set(re.findall(r"\bgl_renderer_caps\.(\w+)\s*=\s*true\s*;", b)))
-        if on != ["float_color_buffer", "shader_storage", "skeletal_animation", "texture_lod_bias"]:
+        if on != ["compute_shaders", "float_color_buffer", "indirect_draw", "shader_storage",
+                  "skeletal_animation", "texture_lod_bias"]:
             fail("engine/h2shared/gl_vidsdl.c: GL_Init_NullGL turns on %s; under -gpu exactly "
                  "shader_storage, skeletal_animation (#340 P2e), texture_lod_bias (sampler "
-                 "mip_lod_bias, GitHub #521) and float_color_buffer (r_hdr's RGBA16F targets, P4e) "
-                 "are real -- compute_shaders would "
-                 "run the light cluster, culling and SSAO against the null table (P5)" % (on or "nothing"))
+                 "mip_lod_bias, GitHub #521), float_color_buffer (r_hdr's RGBA16F targets, P4e), "
+                 "compute_shaders and indirect_draw (P5a-2: rg_compute.c, each pass not routed yet "
+                 "behind a gate of its own) are real" % (on or "nothing"))
+        on = re.search(r"\bgl_renderer_caps\.compute_shaders\s*=\s*true\s*;", b)
+        init = re.search(r"\bGL_PostProcess_Init\s*\(\s*\)\s*;", b)
+        if not (on and init and on.end() <= init.start()):
+            fail("engine/h2shared/gl_vidsdl.c: GL_Init_NullGL must set compute_shaders before "
+                 "GL_PostProcess_Init () -- it builds the palette LUT (#340 P5a-2)")
         # postprocess is the one that follows the chain (#340 P4a-2, check_render_targets).
         other = [c for c in re.findall(r"\bgl_renderer_caps\.(\w+)\s*=\s*([^;]+);", b)
                  if c[1].strip() not in ("true", "false", "GL_RENDERER_DESKTOP_43", '"SDL_GPU"')
@@ -1825,15 +1888,19 @@ STANDIN_PINS = (
      "nothing bound is counted unless the caller proved the slot unread"),
     ("engine/h2shared/rg_frame.c", "RGF_StandinExpected",
      r"^\s*int\s+i\s*,\s*pv\s*;\s*switch\s*\(\s*sb->kind\s*\)\s*\{\s*"
-     r"case\s+RG_SSBO_COMPUTE_FED\s*:\s*return\s+!\s*gl_renderer_caps\.compute_shaders\s*;\s*"
+     r"case\s+RG_SSBO_COMPUTE_FED\s*:\s*return\s+!\s*R_LightCluster_Available\s*\(\s*\)\s*;\s*"
      r"case\s+RG_SSBO_POSE\s*:\s*pv\s*=\s*RGF_PoseVertType\s*\(\s*st\s*\)\s*;\s*"
      r"if\s*\(\s*pv\s*<\s*0\s*\|\|\s*pv\s*==\s*sb->format\s*\)\s*return\s+false\s*;\s*"
      r"for\s*\(\s*i\s*=\s*0\s*;\s*i\s*<\s*st->num_ssbos\s*;\s*i\+\+\s*\)\s*\{\s*"
      r"const\s+rgssbo_t\s*\*o\s*=\s*&st->ssbos\[i\]\s*;\s*"
      r"if\s*\(\s*o\s*!=\s*sb\s*&&\s*o->kind\s*==\s*RG_SSBO_POSE\s*&&\s*o->format\s*==\s*pv\s*\)\s*return\s+true\s*;\s*\}\s*"
      r"return\s+false\s*;\s*default\s*:\s*return\s+false\s*;\s*\}\s*$",
-     "a compute-fed block is excused only while compute is off, a pose block only while the draw's "
-     "pose type is another pose block's of the same stage, and nothing else ever"),
+     "a compute-fed block is excused only while the light cluster has no grid this frame (#340 "
+     "P5a-2), a pose block only while the draw's pose type is another pose block's of the same "
+     "stage, and nothing else ever"),
+    ("engine/h2shared/gl_lightcluster.c", "R_LightCluster_Available",
+     r"^\s*\{\s*return\s+lc_valid_this_frame\s*;\s*\}?\s*$",
+     "the per-frame truth: the grid was built and dispatched for this frame"),
     ("engine/h2shared/rg_frame.c", "RGF_PoseVertType",
      r"!strcmp\s*\(\s*st->ubos\[i\]\.name\s*,\s*\"VertParams\"\s*\).*"
      r"\bb\s*=\s*RG_Frame_BlockIndex\s*\(\s*\"VertParams\"\s*\)\s*;.*"
@@ -2074,6 +2141,14 @@ GPU_GATES = (
     ("engine/hexen2/r_part.c", "R_GPU_Particles_Init", "",
      r"\bGL_CreateParticleResources\s*\(", None,
      "the GPU particle buffers are raw GL, into the null table, for a path nothing draws"),
+    ("engine/h2shared/gl_lightcluster.c", "R_LightCluster_Build", "false",
+     r"\bR_MaxStorageBindings\s*\(|\bR_Program_Create\s*\(|\bif\s*\(\s*lc_failed\b", None,
+     "the light cluster is P5b: compute is on under -gpu since P5a-2, and its buffer, LcParams "
+     "mirror and grid are not routed yet"),
+    ("engine/h2shared/gl_lightcluster.c", "R_LightCluster_ShadesWorld", "false",
+     r"\breturn\s+r_lightclusters\b", None,
+     "in lockstep with R_LightCluster_Build's: a yes with no grid stands the CPU dlights down and the "
+     "world goes unlit (#340 P5a-2)"),
     ("engine/h2shared/gl_shadow.c", "R_Shadow_Prepare", "",
      r"\bSH_BuildPrograms\s*\(|\bSH_Select\s*\(", r"\bsh_ndraws\s*=\s*0\s*;",
      "the cube shadow maps are P6: once P5b brings the light cluster up under -gpu, "
@@ -3369,39 +3444,38 @@ def check_bloom(root):
 
 
 # The compute seams (#340 P5a-1): gl_compute.c's, whitespace dropped.  Each
-# entry: (parameters, the GL arm, the SDL_GPU arm as a regex).  A note arm
-# names the seam and the sub-phase that builds its backend.
-_NOTE = r'if\(R_GPU\(\)\)\{RG_NoteUnhandled\("%s\(compute is P5a-2\)"\);return%s;\}'
+# entry: (parameters, the GL arm, the SDL_GPU arm as a regex).  Since P5a-2
+# each SDL_GPU arm is the backend call of the seam's name.
 COMPUTE_SEAMS = {
     "R_DispatchCompute": ("groups_x,groups_y,groups_z",
                           "{glDispatchCompute_fp(groups_x,groups_y,groups_z);}",
-                          _NOTE % ("R_DispatchCompute ", "")),
+                          r"if\(R_GPU\(\)\)\{RG_DispatchCompute\(groups_x,groups_y,groups_z\);return;\}"),
     "R_MemoryBarrier": ("barriers", "{glMemoryBarrier_fp(barriers);}",
-                        _NOTE % ("R_MemoryBarrier ", "")),
+                        r"if\(R_GPU\(\)\)\{RG_MemoryBarrier\(barriers\);return;\}"),
     "R_DeleteProgram": ("program", "{glDeleteProgram_fp(program);}",
-                        _NOTE % ("R_DeleteProgram ", "")),
+                        r"if\(R_GPU\(\)\)\{RG_ProgramDelete\(program\);return;\}"),
     "R_MaxStorageBindings": ("", "{GLintn=0;glGetIntegerv_fp(GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS,&n);"
                                  "return(int)n;}",
                              r"if\(R_GPU\(\)\)\{returnRG_MaxStorageBindings\(\);\}"),
     "R_ReadBuffer": ("target,offset,size,data",
                      "{if(!glGetBufferSubData_fp)returnfalse;"
                      "glGetBufferSubData_fp(target,offset,size,data);returntrue;}",
-                     _NOTE % ("R_ReadBuffer ", "false")),
+                     r"if\(R_GPU\(\)\)\{returnRG_ReadBuffer\(target,offset,size,data\);\}"),
     "R_ReadTexImage": ("target,texture,level,format,type,pixels",
                        "{if(!glGetTexImage_fp)returnfalse;R_BindTextureForEdit(target,texture);"
                        "glGetTexImage_fp(target,level,format,type,pixels);"
                        "R_BindTextureForEdit(target,0);returntrue;}",
-                       _NOTE % ("R_ReadTexImage ", "false")),
+                       r"if\(R_GPU\(\)\)\{returnRG_ReadTexture\(target,texture,level,format,type,pixels\);\}"),
     "R_StorageFormatOk": ("internalformat,target,access",
                           "{(void)internalformat;(void)target;(void)access;returntrue;}",
-                          r"if\(R_GPU\(\)\)\{returnfalse;\}"),
+                          r"if\(R_GPU\(\)\)\{returnRG_StorageFormatOk\(internalformat,target,access\);\}"),
 }
 # Where the compute passes live: the whole of each file, or the functions named.
 COMPUTE_FILES = {
     "engine/h2shared/gl_lightcluster.c": None,
     "engine/h2shared/gl_worldcull.c": None,
     "engine/h2shared/gl_ssao.c": None,
-    "engine/h2shared/gl_postprocess.c": {"PP_BuildPaletteLUT_GPU", "PP_FreePaletteGPU"},
+    "engine/h2shared/gl_postprocess.c": {"PP_BuildPaletteLUT_GPU", "PP_FreePaletteGPU", "PP_LutCheck_f"},
 }
 # Each file's dispatches in source order, each followed at once by its
 # barrier: (the dispatch's groups, the barrier's bits), whitespace dropped.  A
@@ -3472,7 +3546,7 @@ COMPUTE_GATES = (
     ("engine/h2shared/gl_postprocess.c", "PP_BuildPaletteLUT_GPU",
      r"if\s*\(\s*!\s*gl_renderer_caps\.compute_shaders\s*\|\|[^)]*\)\s*return\s+false\s*;",
      r"\bR_Program_Create\s*\(|\bR_DispatchCompute\s*\(",
-     "the palette LUT: the CPU builder runs instead (P5a-2 lifts it)"),
+     "the palette LUT: a GL without compute (and -gpu before P5a-2) takes the CPU builder"),
     ("engine/h2shared/gl_worldcull.c", "R_HiZ_Available", _ANSWER_GATE, r"\breturn\s*\(",
      "Hi-Z (P5d lifts it)"),
     ("engine/h2shared/gl_ssao.c", "R_SSAO_WantsSceneFBO", _ANSWER_GATE, r"\breturn\s+r_ssao\b",
@@ -3507,7 +3581,7 @@ def check_compute(root):
         m = re.search(r"#\s*ifdef\s+USE_SDL_GPU\b(.*?)#\s*endif", bodies[fn], re.S)
         a = re.sub(r"\s+(?=[^\"]*(?:\"[^\"]*\"[^\"]*)*$)", "", m.group(1)) if m else ""
         if not re.fullmatch(arm_rx, a):
-            fail("%s: %s's SDL_GPU arm must be `%s` (#340 P5a-1), found `%s`" % (rel, fn, arm_rx, a))
+            fail("%s: %s's SDL_GPU arm must be `%s` (#340 P5a-1, P5a-2), found `%s`" % (rel, fn, arm_rx, a))
     extra = set(heads) - set(COMPUTE_SEAMS)
     if extra:
         fail("%s: %s not in COMPUTE_SEAMS -- pin its arms" % (rel, ", ".join(sorted(extra))))
@@ -3618,8 +3692,8 @@ def check_compute(root):
             continue
         pc = strip_c_comments(p.read_text(errors="replace"))
         if re.search(r"\bR_DeleteProgram\s*\(", pc):
-            fail("%s: calls R_DeleteProgram -- its -gpu arm is a note until P5a-2, so only the compute "
-                 "passes, whose programs -gpu never builds, may (#340 P5a-1)" % prel)
+            fail("%s: calls R_DeleteProgram -- RG_ProgramDelete releases compute pipelines alone, so "
+                 "only the compute passes may (#340 P5a-2)" % prel)
         if re.search(r"\bR_(?:DispatchCompute|MemoryBarrier|ReadBuffer|ReadTexImage)\s*\(", pc):
             fail("%s: reaches a compute seam outside the compute passes (#340 P5a-1)" % prel)
         # the indirect draw: its -gpu arm is a note until P5c, so the cull's draw alone
@@ -3674,6 +3748,297 @@ def check_compute(root):
                  "(#340 P5a-1)" % (brel, fn, bind, call))
 
 
+# rg_compute.c, whitespace dropped (#340 P5a-2): what each dispatch does, in
+# this order inside RG_DispatchCompute.
+COMPUTE_DISPATCH_ORDER = (
+    "cmd=RG_Frame_ComputeBegin(target,st->num_samplers>0);",
+    "if(!RGC_Bind(st,cover,img,rw,smp,ro))",
+    "pass=SDL_BeginGPUComputePass(cmd,img,(Uint32)st->num_images,rw,(Uint32)st->num_rwssbos);",
+    "SDL_BindGPUComputePipeline(pass,prog->cs);",
+    "SDL_BindGPUComputeSamplers(pass,0,smp,(Uint32)st->num_samplers);",
+    "SDL_BindGPUComputeStorageBuffers(pass,0,ro,(Uint32)st->num_ssbos);",
+    "SDL_PushGPUComputeUniformData(cmd,u->binding,data,(Uint32)size);",
+    "SDL_DispatchGPUCompute(pass,groups_x,groups_y,groups_z);",
+    "SDL_EndGPUComputePass(pass);",
+    "RG_Frame_ComputeEnd(true);",
+)
+COMPUTE_BIND_PINS = (
+    ("RG_Res_StorageImage(im->binding,(rg_textype_t)im->type,cover,&img[im->binding])",
+     "storage image N is what image unit N holds: IMGBIND gives GL and Vulkan one number"),
+    ("rw[sb->slot].buffer=buf;rw[sb->slot].cycle=false;",
+     "a read-write buffer never cycles: the cull's indirect buffer keeps the first index written at "
+     "creation, its dedup buffer the frame count"),
+    ("SDL_GPUBuffer*buf=RG_Buf_Storage(sb->point,false,&read);if(!buf)returnfalse;",
+     "a read-write buffer with nothing SDL_GPU can bind at its point drops the dispatch"),
+    ("ro[sb->slot]=buf?buf:RG_Frame_Standin();",
+     "a read-only buffer is its point's, or the zeroed stand-in"),
+    ("RG_Res_ForDraw(s->unit,(rg_textype_t)s->type,(rg_sampclass_t)s->sclass,s->shadow,&smp[s->binding])",
+     "the samplers are bound as a draw's are"),
+)
+# RG_Res_StorageImage's cycle rule, whitespace dropped.
+CYCLE_RULE = ("out->cycle=(u->access==GL_WRITE_ONLY&&t->tex_levels==1&&(type==RG_TT_3D||(type==RG_TT_2D&&"
+              "t->d==1))&&cover[0]>=(Uint32)lw&&cover[1]>=(Uint32)lh&&cover[2]>=(Uint32)ld);")
+IMG_DECL = re.compile(r"\buniform\s+(?:\w+\s+)*[iu]?image(?:1D|2D|3D|Cube|2DArray|CubeArray)\b")
+
+
+def check_compute_backend(root):
+    """#340 P5a-2: the SDL_GPU compute backend and the GPU palette LUT."""
+    rc = "engine/h2shared/rg_compute.c"
+    if not (root / rc).is_file():
+        fail("%s: missing -- the #340 P5a-2 compute backend" % rc)
+        return
+    cm = (root / "engine/CMakeLists.txt").read_text()
+    if not re.search(r"\$\{COMMONDIR\}/rg_buffer\.c\s*\n\s*\$\{COMMONDIR\}/rg_compute\.c\b", cm):
+        fail("engine/CMakeLists.txt: rg_compute.c must be in RG_SOURCES, after rg_buffer.c (#340 P5a-2)")
+    b = body_named(root, rc, "RG_DispatchCompute")
+    if b is not None:
+        s = squash(b)
+        at = 0
+        for step in COMPUTE_DISPATCH_ORDER:
+            i = s.find(step, at)
+            if i < 0:
+                fail("%s: RG_DispatchCompute must make `%s` after the steps before it -- the order is "
+                     "the segment's end, the bindings, then one pass holding one dispatch (#340 P5a-2)"
+                     % (rc, step))
+                break
+            at = i + len(step)
+        for n in ("SDL_BeginGPUComputePass(", "SDL_DispatchGPUCompute(", "SDL_EndGPUComputePass("):
+            if s.count(n) != 1:
+                fail("%s: RG_DispatchCompute has %d `%s` -- exactly one dispatch per compute pass: two "
+                     "in a pass are unordered (#340 P5a-2)" % (rc, s.count(n), n))
+    b = body_named(root, rc, "RGC_Bind")
+    if b is not None:
+        s = squash(b)
+        for pin, why in COMPUTE_BIND_PINS:
+            if pin not in s:
+                fail("%s: RGC_Bind must make `%s` -- %s (#340 P5a-2)" % (rc, pin, why))
+        if "cycle=true" in s:
+            fail("%s: RGC_Bind cycles something -- buffers never, images by RG_Res_StorageImage's rule "
+                 "(#340 P5a-2)" % rc)
+    code = strip_c_comments((root / rc).read_text(errors="replace"))
+    for m in re.finditer(r"[\w\]\)]\s*(?:\.|->)\s*cycle\s*=\s*([^;]+);", code):
+        if m.group(1).strip() != "false":
+            fail("%s: a binding cycled from `%s` -- only RG_Res_StorageImage decides an image's "
+                 "(#340 P5a-2)" % (rc, m.group(0)))
+    b = body_named(root, rc, "RG_MemoryBarrier")
+    if b is not None and re.search(r"\bSDL_\w+\s*\(", b):
+        fail("%s: RG_MemoryBarrier calls SDL -- every dispatch is a pass of its own, so a barrier is "
+             "already met and only counted (#340 P5a-2)" % rc)
+
+    rr = "engine/h2shared/rg_resource.c"
+    b = body_named(root, rr, "RG_Res_StorageImage")
+    if b is not None and CYCLE_RULE not in squash(b):
+        fail("%s: RG_Res_StorageImage must cycle exactly `%s` -- cycling discards what the texture held, "
+             "so only a write-only dispatch over all of a one-level, one-layer texture may (#340 P5a-2)"
+             % (rr, CYCLE_RULE))
+    if b is not None:
+        s = squash(b)
+        for pin, why in (
+                ("if(type==RG_TT_3D?!u->layered:(u->layered&&type!=RG_TT_2D))",
+                 "SDL_GPU binds a 3D level whole and one layer of anything else: GL's layered bind is a 3D "
+                 "texture's, and one slice of a 3D texture or every layer of an array is refused"),
+                ("out->layer=(type==RG_TT_3D||type==RG_TT_2D)?0:(Uint32)u->layer;",
+                 "a 3D texture is bound at layer 0, which is all of its depth"),
+                ("if(!RGT_Format((GLint)u->format,&fmt,&bpp,&rgb,&depth)||fmt!=t->fmt||rgb)",
+                 "the image's GL format must be its texture's: SDL_GPU views a storage image in its own")):
+            if pin not in s:
+                fail("%s: RG_Res_StorageImage must make `%s` -- %s (#340 P5a-2)" % (rr, pin, why))
+    b = body_named(root, rr, "RG_BindImageTexture")
+    if b is not None:
+        s = squash(b)
+        for pin in ("t->storage|=RGT_StorageUsage(access);", "t->usage|=t->storage;",
+                    "if(t->tex&&!RGT_HasStorage(t->tex_usage,t->storage))", "RGT_Retire(t->tex);t->tex=NULL;",
+                    "rgt_storage_recreated++;"):
+            if pin not in s:
+                fail("%s: RG_BindImageTexture must make `%s` -- the storage usage goes on before the "
+                     "texture is made, and one made without it is made again, counted (#340 P5a-2)"
+                     % (rr, pin))
+    b = body_named(root, rr, "RGT_StorageUsage")
+    if b is not None and not re.search(r"GL_READ_WRITE\s*\)\s*return\s+SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_"
+                                       r"SIMULTANEOUS_READ_WRITE\s*;", b):
+        fail("%s: a GL_READ_WRITE image needs COMPUTE_STORAGE_SIMULTANEOUS_READ_WRITE: SDL_GPU reads a "
+             "texture in the pass that writes it with nothing else (#340 P5a-2)" % rr)
+    b = body_named(root, rr, "RG_TexImage")
+    if b is not None and "t->usage=SDL_GPU_TEXTUREUSAGE_SAMPLER|t->storage;" not in squash(b):
+        fail("%s: RG_TexImage must keep the storage usage across a re-definition "
+             "(`t->usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | t->storage;`, #340 P5a-2)" % rr)
+
+    # set 1 in the reflection
+    rs = "engine/h2shared/rg_shader.c"
+    b = body_named(root, rs, "RG_MakeCompute")
+    if b is not None and "RG_CheckStage(id,RPROG_STAGE_COMPUTE,code,size,0,2,1,out)" not in squash(b):
+        fail("%s: RG_MakeCompute must check set 1 (`RG_CheckStage (..., 0, 2, 1, out)`) -- the read-write "
+             "images and buffers a compute pass binds (#340 P5a-2)" % rs)
+    b = body_named(root, rs, "RG_MakeShader")
+    if b is not None and not re.search(r"\?\s*1\s*:\s*3\s*,\s*-1\s*,\s*out\s*\)", b):
+        fail("%s: RG_MakeShader must pass rw_set -1: a graphics stage has no read-write set (#340 P5a-2)" % rs)
+    b = body_named(root, rs, "RG_CheckStage")
+    if b is not None:
+        s = squash(b)
+        for pin in ("out->num_images!=refl->rw_storage_textures||out->num_rwssbos!=refl->rw_storage_buffers",
+                    "if(b>=out->num_images||(seen&(1u<<b)))",
+                    "intslot=(int)out->rwssbos[i].slot-out->num_images;"):
+            if pin not in s:
+                fail("%s: RG_CheckStage must make `%s` -- set 1 is the images at 0..n-1, then the "
+                     "read-write buffers, held to the reflection row (#340 P5a-2)" % (rs, pin))
+    # rg_compute_points against the compute stages
+    code = strip_c_comments((root / rs).read_text(errors="replace"))
+    m = re.search(r"\brg_compute_points\s*\[\s*\]\s*=\s*\{(.*?)\};", code, re.S)
+    table = {e.group(1): int(e.group(2)) for e in re.finditer(r"\{\s*\"(\w+)\"\s*,\s*(\d+)\s*\}",
+                                                               m.group(1))} if m else {}
+    gtab = re.search(r"\brg_storage_points\s*\[\s*\]\s*=\s*\{(.*?)\};", code, re.S)
+    graphics = set(re.findall(r"\{\s*\"(\w+)\"", gtab.group(1))) if gtab else set()
+    if not m:
+        fail("%s: no rg_compute_points[] (#340 P5a-2)" % rs)
+    defs = {}
+    for mm in re.finditer(r"^\s*#\s*define\s+(\w+)\s+(\d+)\b",
+                          (root / "engine/h2shared/gl_lightcluster.h").read_text(), re.M):
+        defs[mm.group(1)] = int(mm.group(2))
+    declared = {}
+    images = {}
+    for p in sorted((root / "engine/shaders").glob("*_comp.glsl")):
+        src = strip_c_comments(p.read_text(errors="replace"))
+        for d in re.finditer(r"\bSSBO_R[OW]\s*\(\s*(\w+)\s*,\s*\w+\s*\)[^;{]*?\bbuffer\s+(\w+)\s*\{", src):
+            v = int(d.group(1)) if d.group(1).isdigit() else defs.get(d.group(1))
+            prev = declared.setdefault(d.group(2), (v, p.name))
+            if prev[0] != v:
+                fail("engine/shaders: compute block %s is GL point %s in %s and %s in %s (#340 P5a-2)"
+                     % (d.group(2), prev[0], prev[1], v, p.name))
+        nums = []
+        for line in src.splitlines():
+            if IMG_DECL.search(line):
+                g = re.match(r"\s*IMGBIND\s*\(\s*(\d+)\s*,\s*\w+\s*\)", line)
+                if not g:
+                    fail("engine/shaders/%s: storage image `%s` is not IMGBIND(b, fmt) -- one number is "
+                         "what makes image unit N the set-1 binding N rg_compute.c binds (#340 P5a-2)"
+                         % (p.name, line.strip()))
+                    continue
+                nums.append(int(g.group(1)))
+        images[p.name] = nums
+        if sorted(nums) != list(range(len(nums))):
+            fail("engine/shaders/%s: storage images at IMGBIND %s, not 0..%d each once -- set 1 numbers "
+                 "them densely, so image unit N has to be the N-th (#340 P5a-2)"
+                 % (p.name, nums, len(nums) - 1))
+    for name, (v, where) in sorted(declared.items()):
+        if name in graphics:
+            continue
+        if name not in table:
+            fail("%s: rg_compute_points has no %s (%s, GL point %s) -- its compute slot would find no "
+                 "buffer (#340 P5a-2)" % (rs, name, where, v))
+        elif table[name] != v:
+            fail("%s: rg_compute_points maps %s to %s, %s binds it at %s (#340 P5a-2)"
+                 % (rs, name, table[name], where, v))
+    for name in sorted(set(table) - set(declared)):
+        fail("%s: rg_compute_points names %s, which no compute stage declares -- drop it" % rs)
+    if not images:
+        fail("engine/shaders: no *_comp.glsl -- the P5a-2 image check has nothing to hold")
+    lay = strip_c_comments((root / "engine/shaders/layout.inc").read_text(errors="replace"))
+    arms = re.findall(r"#\s*define\s+IMGBIND\s*\(\s*b\s*,\s*fmt\s*\)\s*layout\s*\(([^)]*)\)", lay)
+    if len(arms) != 3 or not re.fullmatch(r"\s*set\s*=\s*1\s*,\s*binding\s*=\s*b\s*,\s*fmt\s*", arms[0]) or \
+            any(not re.fullmatch(r"\s*binding\s*=\s*b\s*,\s*fmt\s*", a) for a in arms[1:]):
+        fail("engine/shaders/layout.inc: IMGBIND must be `set = 1, binding = b` under VULKAN and "
+             "`binding = b` in the other two arms -- one number for the GL unit and the set-1 binding "
+             "(#340 P5a-2)")
+
+    # the frame: readbacks and copy-only passes
+    rf = "engine/h2shared/rg_frame.c"
+    b = body_named(root, rf, "RGF_SubmitMidFrame")
+    if b is not None:
+        s = squash(b)
+        if "SDL_SubmitGPUCommandBufferAndAcquireFence(rgf_cmd)" not in s or \
+                "SDL_WaitForGPUFences(rg_dev,true,&fence,1)" not in s:
+            fail("%s: RGF_SubmitMidFrame must submit with a fence and wait on it (#340 P5a-2)" % rf)
+        if re.search(r"\bRGF_EndOfFrame\b|\bRG_Buf_EndFrame\b|\bRG_Res_EndFrame\b|\brgf_active\s*=", b):
+            fail("%s: RGF_SubmitMidFrame runs end-of-frame work -- RG_Buf_EndFrame would rewind the "
+                 "storage stream the frame's later draws take buffers from (#340 P5a-2)" % rf)
+    b = body_named(root, rf, "RG_Frame_Readback")
+    if b is not None:
+        s = squash(b)
+        order = ["RGF_EndSegment();", "SDL_BeginGPUCopyPass(rgf_cmd)", "SDL_EndGPUCopyPass(copy);",
+                 "ok=RGF_SubmitMidFrame();", "SDL_MapGPUTransferBuffer(rg_dev,tb,false)"]
+        at = 0
+        for step in order:
+            i = s.find(step, at)
+            if i < 0:
+                fail("%s: RG_Frame_Readback must make `%s` in order: what is recorded lands, the "
+                     "download, the submit and wait, then the map (#340 P5a-2)" % (rf, step))
+                break
+            at = i + len(step)
+        if "if(!rgf_active)RGF_EndOfFrame();" not in s:
+            fail("%s: RG_Frame_Readback outside a frame must finish as RG_Frame_Flush does "
+                 "(RGF_EndOfFrame) (#340 P5a-2)" % rf)
+    b = body_named(root, rf, "RGF_CopyOnly")
+    if b is not None and (re.search(r"\bSDL_BeginGPURenderPass\b|\bRGF_EndSegment\b|\brgf_clear_mask\b", b)
+                          or "RGF_CopyPass()" not in squash(b)):
+        fail("%s: RGF_CopyOnly must run the copy pass and no render pass, leaving the pending clear "
+             "(#340 P5a-2)" % rf)
+    b = body_named(root, rf, "RG_Frame_ComputeBegin")
+    if b is not None and "if(rgf_numdraws||(rgf_clear_mask&&touches_target))RGF_EndSegment();" \
+            "elseif(!RGF_CopyOnly())returnNULL;if(samples&&!RGF_SubmitMidFrame())returnNULL;" not in squash(b):
+        fail("%s: RG_Frame_ComputeBegin must end the segment when it has draws (or a clear of what the "
+             "dispatch touches), otherwise run its copy pass alone, and submit and wait before a dispatch "
+             "that samples: SDL 3.4.12 syncs a texture's return to SAMPLER for the graphics stages only "
+             "(#340 P5a-2)" % rf)
+    b = body_named(root, rf, "RGF_SubmitMidFrame")
+    if b is not None and not re.search(r"if\s*\(\s*!\s*SDL_WaitForGPUFences\s*\([^;]*\)\s*\)\s*\{[^}]*return\s+false\s*;", b):
+        fail("%s: RGF_SubmitMidFrame must answer false when the wait fails -- a readback would map "
+             "unfinished data (#340 P5a-2)" % rf)
+    b = body_named(root, rr, "RGT_HasStorage")
+    if b is None or "if(have&SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_SIMULTANEOUS_READ_WRITE)have|=" \
+            "SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE;return(have&want)==want;" not in squash(b):
+        fail("%s: RGT_HasStorage must count SIMULTANEOUS_READ_WRITE as WRITE: a texture bound both ways "
+             "would otherwise be re-created and lose what the first pass wrote (#340 P5a-2)" % rr)
+    b = body_named(root, rc, "RG_DispatchCompute")
+    if b is not None and "RG_Res_StorageImageWritten(st->images[i].binding);" not in squash(b):
+        fail("%s: RG_DispatchCompute must mark each image written once the dispatch is recorded "
+             "(#340 P5a-2)" % rc)
+    b = body_named(root, rf, "RG_Frame_ComputeEnd")
+    if b is not None and "if(!rgf_active)RGF_Submit();" not in squash(b):
+        fail("%s: RG_Frame_ComputeEnd outside a frame must submit -- the boot-time LUT is otherwise "
+             "never run (#340 P5a-2)" % rf)
+    # sync validation: the stream's indices from an INDEX-only buffer
+    b = body_named(root, rf, "RGF_CopyPass")
+    if b is not None:
+        s = squash(b)
+        if "RGF_EnsureBuffer(&rgf_vbuf,&rgf_vbuf_size,stream,SDL_GPU_BUFFERUSAGE_VERTEX)" not in s or \
+                "RGF_EnsureBuffer(&rgf_ibuf,&rgf_ibuf_size,stream,SDL_GPU_BUFFERUSAGE_INDEX)" not in s or \
+                "dst.buffer=rgf_ibuf;SDL_UploadToGPUBuffer(copy,&src,&dst,true);" not in s:
+            fail("%s: the stream must be a VERTEX-only buffer and its indices an INDEX-only copy, "
+                 "rgf_ibuf: SDL syncs a copy for the first usage alone (#340 P5a-2, sync validation)" % rf)
+    b = body_named(root, rf, "RGF_Replay")
+    if b is not None and "(d->indexed==RGD_BUFFER)?d->ib:rgf_ibuf;" not in squash(b):
+        fail("%s: RGF_Replay must draw the stream's indices from rgf_ibuf (#340 P5a-2)" % rf)
+
+    # the LUT
+    pp = "engine/h2shared/gl_postprocess.c"
+    b = body_named(root, pp, "PP_BuildPaletteLUT_GPU")
+    if b is not None:
+        s = squash(b)
+        u = s.find('loc=R_ProgramSamplerLoc(pp_palette_init_prog[metric],"u_palette");'
+                   'R_ProgramSamplerUnit(pp_palette_init_prog[metric],loc,"u_palette",0);')
+        d = s.find("R_DispatchCompute(")
+        if u < 0 or d < 0 or u > d:
+            fail("%s: PP_BuildPaletteLUT_GPU must name u_palette's unit 0 (R_ProgramSamplerUnit) before "
+                 "its dispatch -- the Vulkan SPIR-V keeps only the slot, and -gpu would bind a white "
+                 "placeholder (#340 P5a-2)" % pp)
+    b = body_named(root, pp, "PP_LutCheck_f")
+    if b is None or "R_ReadTexImage(GL_TEXTURE_3D,pp_palette_lut,0,GL_RGBA,GL_UNSIGNED_BYTE,live)" \
+            not in squash(b) or "PP_FillPaletteGrid(pp_lut_metric,palcolors,255,grid);" not in squash(b):
+        fail("%s: PP_LutCheck_f must read the live LUT through R_ReadTexImage and compare it with "
+             "PP_FillPaletteGrid's table for the same metric (#340 P5a-2)" % pp)
+    if not re.search(r'Cmd_AddCommand\s*\(\s*"r_softemu_lutcheck"\s*,\s*PP_LutCheck_f\s*\)',
+                     strip_c_comments((root / pp).read_text(errors="replace"))):
+        fail("%s: r_softemu_lutcheck is not registered (#340 P5a-2)" % pp)
+    tb = body_named(root, "engine/h2shared/gl_texbind.c", "R_BindImageTexture")
+    if tb is not None:
+        m = re.search(r"#\s*ifdef\s+USE_SDL_GPU\b(.*?)#\s*endif", tb, re.S)
+        if not m or squash(m.group(1)) != ("if(R_GPU()){RG_BindImageTexture(unit,texture,level,layered,"
+                                           "layer,access,format);return;}"):
+            fail("gl_texbind.c: R_BindImageTexture's SDL_GPU arm must be exactly "
+                 "`RG_BindImageTexture (unit, texture, level, layered, layer, access, format); return;` "
+                 "-- the image unit, shadowed (#340 P5a-2)")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     ap.add_argument("--root", type=Path, default=ROOT)
@@ -3702,6 +4067,7 @@ def main(argv=None):
     check_screen_warp(root)
     check_bloom(root)
     check_compute(root)
+    check_compute_backend(root)
     nfiles = 0
     rg_files = []
     for p in sorted(eng.rglob("*")):
