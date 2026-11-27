@@ -259,6 +259,8 @@ jobs:
       # The HexenWorld client clock (#308): cl.time must advance without
       # svc_time, mtime must follow entity updates, and entities must be
       # drawn interpolated in [0, 1] rather than frozen or extrapolated.
+      # A new entity is drawn at its first origin, not lerped out of the
+      # slot's stale history (#567).
       - name: Unit test HexenWorld client clock
         run: |
           set -euo pipefail

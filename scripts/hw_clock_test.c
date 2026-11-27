@@ -11,11 +11,16 @@
  *     HWCL_Frame       parse whatever arrived: HWCL_ClockEntityUpdate
  *     CL_AdvanceTime   cl.time += host_frametime
  *     HWCL_ApplyState  HWCL_ClockLatch, then HWCL_ClockPushSample per entity
- *     CL_RelinkEntities  origin = [1] + HWCL_LerpPoint () * ([0] - [1])
+ *     CL_RelinkEntities  forcelink: origin = [0]
+ *                        else:      origin = [1] + HWCL_LerpPoint () * ([0] - [1])
  *
  * -- against a simulated server moving one entity at constant speed, and
  * checks that the clock moves, that the lerp fraction stays in [0, 1], and
- * that the entity is drawn moving smoothly rather than snapping.
+ * that the entity is drawn moving smoothly rather than snapping.  #567
+ * adds an entity's first frames: drawn at its first origin, not slid out
+ * of whatever the slot held before.  The reset condition itself
+ * (!was_on || model_changed) is mirrored here, not shared: the source pin
+ * tools/test_delta_held_lerp.py guards HWCL_CopyEntity's copy of it.
  *
  * Build and run:
  *     cc -Wall -Wextra -o /tmp/hwclocktest scripts/hw_clock_test.c -lm && /tmp/hwclocktest
@@ -71,14 +76,18 @@ typedef struct
 	hwcl_clock_t	clock;
 	vec3_t		msg_origins[2];
 	qboolean	was_on;
+	int		ent_model;	/* ent->model */
+	qboolean	forcelink;	/* this frame's CopyEntity set it */
 	float		frac;
 	float		drawn;		/* x drawn this frame */
 	/* newest state the parser has, as HWCL_ParsePacketEntities leaves it */
 	vec3_t		server_state;
+	int		state_model;
 	qboolean	have_state;
 	/* server: a queue of updates in flight */
 	double		arrive[MAX_SENT];
 	float		x[MAX_SENT];
+	int		model[MAX_SENT];
 	int		sent, delivered;
 } session_t;
 
@@ -87,15 +96,24 @@ static void session_init (session_t *s)
 	memset (s, 0, sizeof(*s));
 }
 
-/* The server writes one update, of the entity at x, arriving at the client
- * at the given realtime. */
-static void server_send (session_t *s, float x, double arrive)
+/* The server writes one update, of the entity at x with the given model,
+ * arriving at the client at the given realtime.  ABSENT: the update does
+ * not carry the entity (removed, or out of view); the clock still runs. */
+#define ABSENT	(-1e30f)
+
+static void server_send_model (session_t *s, float x, int model, double arrive)
 {
 	if (s->sent == MAX_SENT)
 		return;
 	s->x[s->sent] = x;
+	s->model[s->sent] = model;
 	s->arrive[s->sent] = arrive;
 	s->sent++;
+}
+
+static void server_send (session_t *s, float x, double arrive)
+{
+	server_send_model (s, x, 1, arrive);
 }
 
 /* One host frame of a HexenWorld session, in _Host_Frame's order. */
@@ -108,8 +126,12 @@ static void client_frame (session_t *s, double frametime)
 	/* HWCL_Frame: every packet that has arrived by now. */
 	while (s->delivered < s->sent && s->arrive[s->delivered] <= s->realtime)
 	{
-		s->server_state[0] = s->x[s->delivered];
-		s->have_state = true;
+		s->have_state = s->x[s->delivered] != ABSENT;
+		if (s->have_state)
+		{
+			s->server_state[0] = s->x[s->delivered];
+			s->state_model = s->model[s->delivered];
+		}
 		HWCL_ClockEntityUpdate (&s->clock, s->cl_time);
 		s->delivered++;
 	}
@@ -119,20 +141,31 @@ static void client_frame (session_t *s, double frametime)
 
 	/* HWCL_ApplyState */
 	new_update = HWCL_ClockLatch (&s->clock, s->mtime);
+	s->forcelink = false;
 	if (s->have_state)
-	{
+	{	/* HWCL_CopyEntity */
+		qboolean reset = !s->was_on || s->ent_model != s->state_model;
+
+		s->forcelink = reset;
 		HWCL_ClockPushSample (s->msg_origins, s->server_state,
-				s->was_on && new_update);
-		/* First sight: CopyEntity sets forcelink, and relink snaps. */
-		if (!s->was_on)
-			VectorCopy (s->msg_origins[0], s->msg_origins[1]);
+				s->was_on && new_update, reset);
 		s->was_on = true;
+		s->ent_model = s->state_model;
+	}
+	else if (s->was_on)
+	{	/* HWCL_ClearEntity: memset */
+		memset (s->msg_origins, 0, sizeof(s->msg_origins));
+		s->ent_model = 0;
+		s->was_on = false;
 	}
 
-	/* CL_RelinkEntities */
+	/* CL_RelinkEntities: forcelink snaps to [0], otherwise lerp */
 	s->frac = HWCL_ClockLerpFrac (s->cl_time, s->mtime, false);
-	s->drawn = s->msg_origins[1][0] +
-		s->frac * (s->msg_origins[0][0] - s->msg_origins[1][0]);
+	if (s->forcelink)
+		s->drawn = s->msg_origins[0][0];
+	else
+		s->drawn = s->msg_origins[1][0] +
+			s->frac * (s->msg_origins[0][0] - s->msg_origins[1][0]);
 }
 
 /* ------------------------------------------------------------------ */
@@ -293,6 +326,79 @@ static void test_stall_holds_newest (void)
 		s.cl_time);
 }
 
+/* #567: an entity's first frames.  CopyEntity raises forcelink for an
+ * entity new to its slot (or back in view, or with a different model) and
+ * relink snaps it to its first origin -- but the frames after that, until
+ * the next update, lerp from msg_origins[1].  Unless first sight resets
+ * [1] too, that is whatever the slot held: zero after HWCL_ClearEntity, or
+ * the previous model's last origin.  Live on ravdm2, whose spawn is the
+ * world origin: the paladin's sword swipe, sent at z 25, was drawn at
+ * z 15.5-24.4 on its second frame in 6 of 8 swings.  An entity must be drawn
+ * at its first origin until its second update, then move on from there
+ * and never back. */
+#define SPAWN	40.0f	/* within relink's 100-unit teleport snap of [1] */
+
+static void first_sight_case (const char *what, float before, int before_model)
+{
+	session_t s;
+	const double ft = 1.0 / 144.0, interval = 0.05, latency = 0.020;
+	const double appear = 1.0;
+	int frame, held = 0, off_spawn = 0, behind = 0, backwards = 0;
+	qboolean seen = false;
+	float last = SPAWN, worst = SPAWN;
+	double t;
+
+	session_init (&s);
+	for (t = 0.0; t < appear - 1e-9; t += interval)
+		server_send_model (&s, before, before_model, t + latency);
+	for (; t < 3.0; t += interval)
+		server_send_model (&s, SPAWN + (float)(SPEED * (t - appear)), 2,
+				t + latency);
+
+	for (frame = 0; frame < 144 * 3; frame++)
+	{
+		client_frame (&s, ft);
+		if (!s.have_state || s.state_model != 2)
+			continue;	/* the new entity has not arrived */
+		seen = true;
+		/* until its second update lands, [0] is still the spawn */
+		if (s.msg_origins[0][0] == SPAWN)
+		{
+			held++;
+			if (s.drawn != SPAWN)
+				off_spawn++;
+		}
+		if (s.drawn < SPAWN - 1e-3f)
+		{
+			behind++;
+			if (s.drawn < worst)
+				worst = s.drawn;
+		}
+		if (s.drawn < last - 1e-3f)
+			backwards++;
+		last = s.drawn;
+	}
+
+	CHECK (seen, "%s: the new entity never arrived", what);
+	CHECK (held > 1, "%s: only %d frame(s) before its second update; the "
+		"case proves nothing", what, held);
+	CHECK (off_spawn == 0, "%s: drawn away from its first origin on %d of "
+		"its %d first frame(s)", what, off_spawn, held);
+	CHECK (behind == 0, "%s: drawn behind its spawn point on %d frame(s), "
+		"as far back as %.2f (spawn %.2f)", what, behind, worst, SPAWN);
+	CHECK (backwards == 0, "%s: drawn moving backwards on %d frame(s)",
+		what, backwards);
+}
+
+static void test_first_sight_starts_at_spawn (void)
+{
+	/* nothing in the slot: HWCL_ClearEntity left the history at zero */
+	first_sight_case ("new entity in a cleared slot", ABSENT, 0);
+	/* the slot held another model at -50 right up to the switch: inside
+	 * relink's 100-unit teleport check, which would otherwise snap it */
+	first_sight_case ("model change in a live slot", -50.0f, 1);
+}
+
 /* Siege: hwsv sends svc_time once at connect.  It used to be written into
  * mtime[0], after which CL_LerpPoint pinned cl.time at T+0.1.  It must now
  * leave the clock and mtime alone, before or after entity updates, and
@@ -384,6 +490,7 @@ int main (void)
 	test_svc_time_is_not_a_clock_step ();
 	test_latch_once_per_frame ();
 	test_lerp_frac_edges ();
+	test_first_sight_starts_at_spawn ();
 
 	printf ("hw_clock_test: %d checks, %d failure(s)\n", checks, failures);
 	return failures != 0;

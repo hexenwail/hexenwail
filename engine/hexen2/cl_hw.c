@@ -1407,13 +1407,15 @@ static void HWCL_CopyEntity (int entitynum, const hwcl_entity_state_t *state,
 	qmodel_t *model;
 	qboolean was_on;
 	qboolean model_changed;
+	qboolean reset;
 
 	model = HWCL_ModelForEntity (state, player);
 	was_on = (ent->baseline.flags & BE_ON) != 0;
 	model_changed = ent->model != model;
 	if (model_changed && ent->efrag)
 		R_RemoveEfrags (ent);
-	if (!was_on || model_changed)
+	reset = !was_on || model_changed;
+	if (reset)
 		ent->forcelink = true;
 
 	ent->baseline.flags = BE_ON;
@@ -1427,8 +1429,8 @@ static void HWCL_CopyEntity (int entitynum, const hwcl_entity_state_t *state,
 	ent->baseline.abslight = state->abslight;
 	ent->baseline.alpha = (byte)state->alpha;
 
-	HWCL_ClockPushSample (ent->msg_origins, state->origin, was_on && new_update);
-	HWCL_ClockPushSample (ent->msg_angles, state->angles, was_on && new_update);
+	HWCL_ClockPushSample (ent->msg_origins, state->origin, was_on && new_update, reset);
+	HWCL_ClockPushSample (ent->msg_angles, state->angles, was_on && new_update, reset);
 	ent->msgtime = cl.mtime[0];
 	ent->model = model;
 	ent->frame = HWCL_ClampModelFrame (model, state->frame);

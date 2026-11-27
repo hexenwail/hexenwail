@@ -60,13 +60,23 @@ static qboolean HWCL_ClockLatch (hwcl_clock_t *clock, double mtime[2])
 /* An entity's msg_origins or msg_angles, [0] newest.  HWCL_ApplyState
  * runs every rendered frame, so the history may only move when an update
  * arrived: shifting it every frame, as the first port did, left [1] == [0]
- * from the second frame on and nothing ever interpolated. */
+ * from the second frame on and nothing ever interpolated.
+ *
+ * reset is first sight of the entity in this slot (new, back in view, or a
+ * different model): there is no previous sample, so both ends take the new
+ * one, as CL_ParseUpdate's forcelink does for a new or dropped entity in
+ * Hexen II and Quake.  Without
+ * it [1] kept whatever the slot held -- zero after HWCL_ClearEntity -- and
+ * once the forcelink frame had snapped the entity to [0], the frames after
+ * it slid it back toward that stale point until the next update (#567). */
 static void HWCL_ClockPushSample (vec3_t history[2], const vec3_t value,
-		qboolean new_update)
+		qboolean new_update, qboolean reset)
 {
 	if (new_update)
 		VectorCopy (history[0], history[1]);
 	VectorCopy (value, history[0]);
+	if (reset)
+		VectorCopy (value, history[1]);
 }
 
 /* The fraction between msg_origins[1] and msg_origins[0] to draw at time
