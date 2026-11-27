@@ -203,13 +203,14 @@ When the target is closer than about twice the muzzle's distance, or the
 re-aim would turn the shot more than 15 degrees, that shot fires exactly as
 stock instead, so nothing point blank is ever skipped.
 
-It covers every missile a player weapon fires in the base game. Melee, the
-sunstaff beam, the bone shards' instant hit and the tomed meteor staff's
-tornado (it rises from the ground, not the eye) do not move, and neither do
-artifacts such as the polymorph ram. It needs Hexenwail's bundled base-game
-gamecode from this release on: Raven's own `progs.dat`, a mod's gamecode, the
-Portal of Praevus gamecode and older hand-copied Hexenwail gamecode do not read
-it, and fire from the eye whatever it is set to.
+It covers every missile a player weapon fires, in the base game and in the
+Portal of Praevus, the Demoness included. Melee, the sunstaff beam, the bone
+shards' instant hit, the Demoness's chain lightning and the tomed meteor
+staff's tornado (it rises from the ground, not the eye) do not move, and
+neither do artifacts such as the polymorph ram. It needs Hexenwail's bundled
+gamecode from this release on: Raven's own `progs.dat`, a mod's gamecode and
+older hand-copied Hexenwail gamecode do not read it, and fire from the eye
+whatever it is set to. HexenWorld does not have it yet (#574).
 
 ## Server tick rate
 

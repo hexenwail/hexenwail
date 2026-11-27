@@ -21,6 +21,23 @@ and recording it here with the upstream ref.  See gamecode/vendor/README.md.
 Hexenwail fork (diverges from 1.29c):
 =====================================
 
+2026-11-27 [GitHub #567, Portals]:
+- muzzle.hc (portals): NEW, identical to h2's.  MuzzleFix() after every
+  Portal of Praevus player missile: the same 19 sites as the base game, plus
+  the Demoness's blood rain, both acid orb shots, both flame orb streams and
+  the lightning ball.  Offsets come from the Portals view models in pak3,
+  which override most of data1's; the classic weapons' tips did not move.
+  Off by default (sv_muzzlespawn 0), so byte-for-byte vanilla; the chain
+  lightning is hitscan and untouched.
+- bldrain.hc: only the centre blood rain shot moves.  The tomed side shots
+  are parallel to it, and re-aiming them at the crosshair would collapse the
+  spread, so they stay vanilla.
+- muzzle.hc (h2, portals): a missile with a hull field (the flame stream
+  flies as HULL_POINT) hits the world as the point origin + mins, so that
+  point is what is traced to the muzzle; tracearea would pick a box hull from
+  its 12-unit size.  No change for any h2 missile: none sets a hull field
+  except the crossbow bolt, which is 0-sized, so its point is its origin.
+
 2026-11-27 [GitHub #567]:
 - muzzle.hc (h2): NEW.  MuzzleFix(), called after every player weapon
   missile is built: axe blades, both purifier missiles, the tomed vorpal

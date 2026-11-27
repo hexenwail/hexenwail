@@ -325,6 +325,7 @@ local entity missile;
 
 	setsize(missile,'0 0 0','0 0 0');
 	setorigin(missile,self.origin+self.proj_ofs+v_forward*8);
+	MuzzleFix (missile, self, '34 0 -11');	// crossbow.mdl shoot2..shoot4
 };
 
 

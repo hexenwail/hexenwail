@@ -434,6 +434,7 @@ void TheOldBallAndChain (void)
 	setmodel(newmis,"models/scrbpbdy.mdl");
 	setsize(newmis,'0 0 0','0 0 0');
 	setorigin(newmis,self.origin+self.proj_ofs+v_forward*12);
+	MuzzleFix (newmis, self, '33 0 -12');	// scarabst.mdl scarab2
 
 	wings=spawn();
 	setmodel(wings,"models/scrbpwng.mdl");
@@ -533,6 +534,7 @@ void Drilla (float power_value)
 	setmodel(newmis,"models/scrbstp1.mdl");
 	setsize(newmis,'0 0 0','0 0 0');
 	setorigin(newmis,self.origin+self.proj_ofs+v_forward*8);
+	MuzzleFix (newmis, self, '30 0 -12');	// scarabst.mdl build15
 
     self.attack_finished = time + power_value/10;
 	newmis.lifetime=time+7;

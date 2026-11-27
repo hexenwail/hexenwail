@@ -247,6 +247,7 @@ local entity missile;
   setmodel(missile, "models/hamthrow.mdl");
   setsize(missile,'-1 -2 -4','1 2 4');
   setorigin(missile, self.origin+self.proj_ofs + v_forward * FL_SWIM);
+  MuzzleFix (missile, self, '22 2 -6');	// warhamer.mdl Throw7
   missile.avelocity = '-500 0 0';
   missile.aflag = 0;
   missile.level= 4;

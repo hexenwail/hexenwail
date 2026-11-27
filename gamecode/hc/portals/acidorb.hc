@@ -221,6 +221,8 @@ entity acidblob;
 	thinktime acidblob : 0.1;
 
 	setorigin(acidblob,org);
+	if (acidblob.classname == "acidblob")
+		MuzzleFix (acidblob, self, '33 -15 -15');	// sucwp2.mdl acidon141, left hand
 }
 
 void AcidMissileTouch (void)
@@ -286,6 +288,7 @@ vector spread;
 	setsize(newmis,'0 0 0','0 0 0');
 
 	setorigin(newmis,self.origin+self.proj_ofs+v_forward*8-v_right*12 + v_right*(offset*3) + '0 0 2');
+	MuzzleFix (newmis, self, '33 -15 -15' + '0 1 0'*(offset*3));	// sucwp2.mdl acidon58, left hand
 	sound(newmis,CHAN_AUTO,"succubus/acidfire.wav",1,ATTN_NORM);
 
 	newmis.think=SUB_Remove;//AcidMissileFade;

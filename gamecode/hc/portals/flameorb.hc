@@ -486,6 +486,7 @@ void flamestream_fire ()
 	newmis.level=0;
 	newmis.hull=HULL_POINT;
 	setorigin(newmis,newmis.o_angle);
+	MuzzleFix (newmis, self, '33 -18 -10');	// sucwp3.mdl fireon52, left hand
 	newmis.wallspot=newmis.origin;
 	newmis.count = 20;
 	newmis.cnt = 0;
@@ -581,6 +582,7 @@ void flameswarm_fire()
 	newmis.level=0;
 	newmis.hull=HULL_POINT;
 	setorigin(newmis,newmis.o_angle);
+	MuzzleFix (newmis, self, '33 -18 -10');	// sucwp3.mdl fireon136, left hand
 	newmis.wallspot=newmis.origin;
 	newmis.angles = vectoangles(newmis.velocity);
 	newmis.effects (+) EF_DIMLIGHT;
