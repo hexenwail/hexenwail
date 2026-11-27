@@ -2,7 +2,7 @@
 """sv_muzzlespawn: every player missile goes through MuzzleFix, and at the
 default the vanilla code is all that runs (GitHub #567).
 
-gamecode/hc/h2/muzzle.hc moves a player missile from eye height to the
+muzzle.hc, in both shipped trees (gamecode/hc/h2 and gamecode/hc/portals), moves a player missile from eye height to the
 weapon's muzzle when the engine cvar sv_muzzlespawn is 1.  The contract that
 keeps the default byte-for-byte vanilla is spread across many files, so this
 pins each piece of it in the source:
@@ -16,7 +16,8 @@ pins each piece of it in the source:
     new or missed site must be added to SITES or, with its reason, to ALLOWED;
   - MuzzleFix never makes two builtin calls in one statement (hcc reuses
     the return slot, so the first result is lost);
-  - muzzle.hc is compiled into progs.dat and progs2.dat ahead of the weapons;
+  - muzzle.hc is compiled into every image of its tree ahead of the weapons,
+    and the two trees' copies are identical;
   - the engine registers the cvar archived with default "0", and the Game
     menu row is what sets it.
 
@@ -28,7 +29,6 @@ import re
 import sys
 
 ROOT = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).resolve().parents[1]
-H2 = ROOT / "gamecode/hc/h2"
 errors = []
 
 # (file, function, Raven's spawn expression, MuzzleFix calls in the function)
@@ -68,7 +68,26 @@ ALLOWED = {
     ("ravenstf.hc", "create_raven"): "self is the raven missile, not the player",
     ("ravenstf.hc", "ravenstaff_fire"): "smoke puffs, not a missile",
 }
-WEAPON_FILES = sorted({f for f, *_ in SITES} | {f for f, _ in ALLOWED})
+
+# Portal of Praevus: the same weapons (near-copies of h2's), plus the Demoness.
+SITES_PORTALS = SITES + [
+    ("bldrain.hc", "FireBloodMissile",
+     "self.origin+self.proj_ofs+v_forward*f_dist-v_right*12+v_right*(offset*3)-'006'", 1),
+    ("acidorb.hc", "FireAcidBlob", "self.origin+self.proj_ofs+v_forward*8-v_right*12-'003'", 1),
+    ("acidorb.hc", "FireAcidMissile",
+     "self.origin+self.proj_ofs+v_forward*8-v_right*12+v_right*(offset*3)+'002'", 1),
+    ("flameorb.hc", "flamestream_fire", "self.origin+self.proj_ofs+v_forward*16-v_right*16-v_up*16", 1),
+    ("flameorb.hc", "flameswarm_fire", "self.origin+self.proj_ofs+v_forward*16-v_right*24-v_up*16", 1),
+    ("lightwp.hc", "FireLightningBall", "self.origin+self.proj_ofs+v_forward*10", 1),
+]
+ALLOWED_PORTALS = {k: v for k, v in ALLOWED.items() if k != ("warhamer.hc", "test_traceline")}
+ALLOWED_PORTALS.update({
+    ("lightwp.hc", "shebitch_chain_lightning_strike"): "hitscan lightning, no missile",
+})
+TREES = [
+    ("h2", SITES, ALLOWED, ("progs.src", "progs2.src")),
+    ("portals", SITES_PORTALS, ALLOWED_PORTALS, ("progs.src",)),
+]
 
 
 def squash(s):
@@ -96,82 +115,105 @@ def strip_comments(s):
     return re.sub(r"//[^\n]*", "", s)
 
 
-src = {}
-for f in WEAPON_FILES + ["muzzle.hc"]:
-    p = H2 / f
-    if not p.exists():
-        errors.append(f"{p.relative_to(ROOT)} is missing")
-        continue
-    src[f] = strip_comments(p.read_text(encoding="latin-1"))
-
-if "muzzle.hc" in src:
-    fns = functions(src["muzzle.hc"])
-    body = fns.get("MuzzleFix")
-    if body is None:
-        errors.append("muzzle.hc defines no MuzzleFix")
-    else:
-        stmts = [s for s in squash(body).split(";") if s and not s.startswith("local")]
-        if not stmts or not stmts[0].startswith('if(!cvar("sv_muzzlespawn"))return'):
-            errors.append("MuzzleFix must start with `if (!cvar(\"sv_muzzlespawn\")) return;`, "
-                          "so the default reads and writes nothing")
-        elif len(stmts) < 2 or not stmts[1].startswith("if(!(shooter.flags&FL_CLIENT))return"):
-            errors.append("MuzzleFix's second statement must return for non-clients: the tornado "
-                          "and eidolon reach the same fire functions and must stay vanilla")
-        # hcc leaves every builtin's result in one shared return slot, so a
-        # second builtin call in the same statement overwrites the first:
-        # `vlen (a) <= 2 * vlen (b)' compares b with itself.  That bug shipped
-        # in the first cut of this file and turned the feature off silently.
-        for st in stmts:
-            calls = re.findall(r"\b(vlen|normalize|vectoangles|cvar|vectoyaw)\(", st)
-            if len(calls) > 1:
-                errors.append(f"MuzzleFix: two builtin calls in one statement ({', '.join(calls)}): `{st}`")
-    if re.search(r"^\s*\.\w", src["muzzle.hc"], re.M):
-        errors.append("muzzle.hc declares an entity field; that changes the savegame field set")
-
-for f, fn, expr, calls in SITES:
-    if f not in src:
-        continue
-    body = functions(src[f]).get(fn)
-    if body is None:
-        errors.append(f"{f}: no function {fn}")
-        continue
-    flat = squash(body)
-    at = flat.find(squash(expr))
-    if at < 0:
-        errors.append(f"{f}:{fn}: Raven's spawn expression `{expr}` is gone; the default path must stay vanilla")
-        continue
-    for call in re.findall(r"MuzzleFix\(([\w.]+),([\w.]+),", flat):
-        if call[1] != "self":
-            errors.append(f"{f}:{fn}: MuzzleFix's shooter must be self, got {call[1]}")
-    got = flat.count("MuzzleFix(")
-    if got != calls:
-        errors.append(f"{f}:{fn}: {got} MuzzleFix calls, expected {calls}")
-    elif calls and "MuzzleFix(" not in flat[at:]:
-        errors.append(f"{f}:{fn}: MuzzleFix must come after the vanilla spawn")
-
-pinned = {(f, fn) for f, fn, *_ in SITES}
-spawn = re.compile(r"self\.origin\s*\+\s*self\.proj_ofs")
-seen = set()
-for f in WEAPON_FILES:
-    if f not in src:
-        continue
-    for fn, body in functions(src[f]).items():
-        if not spawn.search(body):
+def check_tree(tree, SITES, ALLOWED, srcs):
+    TREE = ROOT / "gamecode/hc" / tree
+    WEAPON_FILES = sorted({f for f, *_ in SITES} | {f for f, _ in ALLOWED})
+    errors = []
+    src = {}
+    for f in WEAPON_FILES + ["muzzle.hc"]:
+        p = TREE / f
+        if not p.exists():
+            errors.append(f"{p.relative_to(ROOT)} is missing")
             continue
-        seen.add((f, fn))
-        if (f, fn) not in pinned and (f, fn) not in ALLOWED:
-            errors.append(f"{f}:{fn} positions something at self.origin + self.proj_ofs; "
-                          "pin it in SITES (and call MuzzleFix) or say why in ALLOWED")
-for f, fn in sorted(set(ALLOWED) - seen):
-    errors.append(f"ALLOWED names {f}:{fn}, which no longer uses self.origin + self.proj_ofs")
+        src[f] = strip_comments(p.read_text(encoding="latin-1"))
 
-for name in ("progs.src", "progs2.src"):
-    p = H2 / name
-    lines = [l.split("//")[0].strip() for l in p.read_text(encoding="latin-1").splitlines()]
-    if "muzzle.hc" not in lines:
-        errors.append(f"{name} does not compile muzzle.hc")
-    elif lines.index("muzzle.hc") > lines.index("gauntlet.hc"):
-        errors.append(f"{name}: muzzle.hc must come before the weapon files")
+    if "muzzle.hc" in src:
+        fns = functions(src["muzzle.hc"])
+        body = fns.get("MuzzleFix")
+        if body is None:
+            errors.append("muzzle.hc defines no MuzzleFix")
+        else:
+            stmts = [s for s in squash(body).split(";") if s and not s.startswith("local")]
+            if not stmts or not stmts[0].startswith('if(!cvar("sv_muzzlespawn"))return'):
+                errors.append("MuzzleFix must start with `if (!cvar(\"sv_muzzlespawn\")) return;`, "
+                              "so the default reads and writes nothing")
+            elif len(stmts) < 2 or not stmts[1].startswith("if(!(shooter.flags&FL_CLIENT))return"):
+                errors.append("MuzzleFix's second statement must return for non-clients: the tornado "
+                              "and eidolon reach the same fire functions and must stay vanilla")
+            # hcc leaves every builtin's result in one shared return slot, so a
+            # second builtin call in the same statement overwrites the first:
+            # `vlen (a) <= 2 * vlen (b)' compares b with itself.  That bug shipped
+            # in the first cut of this file and turned the feature off silently.
+            for st in stmts:
+                calls = re.findall(r"\b(vlen|normalize|vectoangles|cvar|vectoyaw)\(", st)
+                if len(calls) > 1:
+                    errors.append(f"MuzzleFix: two builtin calls in one statement ({', '.join(calls)}): `{st}`")
+        if re.search(r"^\s*\.\w", src["muzzle.hc"], re.M):
+            errors.append("muzzle.hc declares an entity field; that changes the savegame field set")
+
+    for f, fn, expr, calls in SITES:
+        if f not in src:
+            continue
+        body = functions(src[f]).get(fn)
+        if body is None:
+            errors.append(f"{f}: no function {fn}")
+            continue
+        flat = squash(body)
+        at = flat.find(squash(expr))
+        if at < 0:
+            errors.append(f"{f}:{fn}: Raven's spawn expression `{expr}` is gone; the default path must stay vanilla")
+            continue
+        for call in re.findall(r"MuzzleFix\(([\w.]+),([\w.]+),", flat):
+            if call[1] != "self":
+                errors.append(f"{f}:{fn}: MuzzleFix's shooter must be self, got {call[1]}")
+        got = flat.count("MuzzleFix(")
+        if got != calls:
+            errors.append(f"{f}:{fn}: {got} MuzzleFix calls, expected {calls}")
+        elif calls and "MuzzleFix(" not in flat[at:]:
+            errors.append(f"{f}:{fn}: MuzzleFix must come after the vanilla spawn")
+        elif calls:
+            # The spawn expression is sometimes only stored (`org=...',
+            # `o_angle=...') and the setorigin comes later.  Nothing may set
+            # the missile's origin or velocity after the last MuzzleFix, or it
+            # undoes the move and leaves a re-aimed shot at the eye.
+            tail = flat[flat.rindex("MuzzleFix("):]
+            for m in set(re.findall(r"MuzzleFix\(([\w.]+),", flat)):
+                if re.search(r"setorigin\(%s," % re.escape(m), tail) or \
+                        re.search(r"(?<![\w.])%s\.velocity=" % re.escape(m), tail):
+                    errors.append(f"{f}:{fn}: {m}'s origin or velocity is set after MuzzleFix")
+
+    pinned = {(f, fn) for f, fn, *_ in SITES}
+    spawn = re.compile(r"self\.origin\s*\+\s*self\.proj_ofs")
+    seen = set()
+    for f in WEAPON_FILES:
+        if f not in src:
+            continue
+        for fn, body in functions(src[f]).items():
+            if not spawn.search(body):
+                continue
+            seen.add((f, fn))
+            if (f, fn) not in pinned and (f, fn) not in ALLOWED:
+                errors.append(f"{f}:{fn} positions something at self.origin + self.proj_ofs; "
+                              "pin it in SITES (and call MuzzleFix) or say why in ALLOWED")
+    for f, fn in sorted(set(ALLOWED) - seen):
+        errors.append(f"ALLOWED names {f}:{fn}, which no longer uses self.origin + self.proj_ofs")
+
+    for name in srcs:
+        p = TREE / name
+        lines = [l.split("//")[0].strip() for l in p.read_text(encoding="latin-1").splitlines()]
+        if "muzzle.hc" not in lines:
+            errors.append(f"{name} does not compile muzzle.hc")
+        elif lines.index("muzzle.hc") > lines.index("gauntlet.hc"):
+            errors.append(f"{name}: muzzle.hc must come before the weapon files")
+    return [f"{tree}: {e}" for e in errors], src.get("muzzle.hc")
+
+
+copies = {}
+for tree, sites, allowed, srcs in TREES:
+    errs, copies[tree] = check_tree(tree, sites, allowed, srcs)
+    errors += errs
+if None not in copies.values() and len(set(copies.values())) != 1:
+    errors.append("gamecode/hc/h2/muzzle.hc and gamecode/hc/portals/muzzle.hc differ (beyond comments); keep them identical")
 
 sv = (ROOT / "engine/hexen2/sv_main.c").read_text()
 if not re.search(r'\{\s*"sv_muzzlespawn"\s*,\s*"0"\s*,\s*CVAR_ARCHIVE\s*\}', sv):
@@ -185,4 +227,5 @@ if not case or 'Cvar_SetValue ("sv_muzzlespawn"' not in case.group(1):
 
 if errors:
     sys.exit("FAIL:\n  " + "\n  ".join(errors))
-print(f"PASS {len(SITES)} player missile spawns go through MuzzleFix, vanilla when sv_muzzlespawn is 0 (#567)")
+print(f"PASS {len(SITES)} base-game and {len(SITES_PORTALS)} Portals player missile spawns go through "
+      "MuzzleFix, vanilla when sv_muzzlespawn is 0 (#567)")

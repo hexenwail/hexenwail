@@ -160,6 +160,8 @@ entity meteor;
 	thinktime meteor : 0.1;
 
 	setorigin(meteor,org);
+	if (meteor.classname == "meteor")
+		MuzzleFix (meteor, self, '18 0 -8');	// meteor.mdl Shoot1
 }
 
 void() tornato_die = [++24 .. 47]

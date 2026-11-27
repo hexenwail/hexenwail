@@ -49,7 +49,7 @@ float MUZZLE_NEAR = 2;			// target nearer than this many muzzle lengths: vanilla
 
 void MuzzleFix (entity missile, entity shooter, vector muzzle)
 {
-	local vector fwd, rgt, upv, eye, spot, goal, oldvel, olddir, newdir, newvel, turn;
+	local vector fwd, rgt, upv, eye, spot, goal, mzhit, oldvel, olddir, newdir, newvel, turn;
 	local float len;
 
 	if (!cvar("sv_muzzlespawn"))
@@ -82,15 +82,26 @@ void MuzzleFix (entity missile, entity shooter, vector muzzle)
 	if (vlen (goal - eye) <= MUZZLE_NEAR * len)
 		return;
 
-	tracearea (eye, spot, missile.mins, missile.maxs, FALSE, shooter);
+	// A missile with a hull field (the flame stream, HULL_POINT) hits the
+	// world as the point origin + mins: the point hull's clip_mins is 0, so
+	// SV_HullForEntity offsets the trace by -mins.  Trace that point; no
+	// builtin can trace with the missile's own hull field.  Any other missile
+	// moves as its box, which is what tracearea traces.
+	if (missile.hull)
+		traceline (eye + missile.mins, spot + missile.mins, FALSE, shooter);
+	else
+		tracearea (eye, spot, missile.mins, missile.maxs, FALSE, shooter);
 	if (trace_allsolid || trace_startsolid)
 		return;
 	if (trace_fraction < 1)
 	{
-		len = vlen (trace_endpos - eye);
+		mzhit = trace_endpos;
+		if (missile.hull)
+			mzhit = mzhit - missile.mins;
+		len = vlen (mzhit - eye);
 		if (len <= MUZZLE_PULLBACK)
 			return;
-		spot = eye + (trace_endpos - eye) * ((len - MUZZLE_PULLBACK) / len);
+		spot = eye + (mzhit - eye) * ((len - MUZZLE_PULLBACK) / len);
 	}
 	if (vlen (goal - spot) < 1)
 		return;

@@ -123,6 +123,7 @@ entity lball;//,star1,star2;
 
 	lball.scale=0.75;
 	setorigin(lball,self.origin+self.proj_ofs+v_forward*10);
+	MuzzleFix (lball, self, '25 0 -10');	// sucwp4.mdl fidle1, between the hands
 	sound(self,CHAN_AUTO,"succubus/firelbal.wav",1,ATTN_NORM);
 
 	lball.turn_time=2;

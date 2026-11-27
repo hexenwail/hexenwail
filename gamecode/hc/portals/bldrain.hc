@@ -178,6 +178,11 @@ float f_dist;
 	setsize(newmis,'0 0 0','0 0 0');
 
 	setorigin(newmis,self.origin+self.proj_ofs+v_forward*f_dist-v_right*12 + v_right*(offset*3) - '0 0 6');
+	// Only the centre shot.  The tomed side shots fly parallel to it, 9
+	// units apart; re-aimed at the crosshair they would all meet in one spot
+	// and the spread would be gone.
+	if (!offset)
+		MuzzleFix (newmis, self, '33 -14 -15');	// sucwp1.mdl fire7, left hand
 	sound(newmis,CHAN_AUTO,"succubus/brnfire.wav",1,ATTN_NORM);
 
 	newmis.think=BloodMissileFade;

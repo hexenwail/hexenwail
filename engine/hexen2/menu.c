@@ -5249,7 +5249,7 @@ static const char *M_Game_Note (int row)
 {
 	switch (row)
 	{
-	case GAME_MUZZLE:	return "Hexenwail progs; not Portals or mods";	/* sv_muzzlespawn */
+	case GAME_MUZZLE:	return "Needs Hexenwail gamecode; not in mods";	/* sv_muzzlespawn */
 	default:		return NULL;
 	}
 }
