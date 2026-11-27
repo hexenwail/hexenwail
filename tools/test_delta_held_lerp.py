@@ -39,9 +39,10 @@ Checked here:
   * svc_clear_edicts sets forcelink on the entity it removes (a re-send in the
     same client frame, before any relink drops it, is new);
   * svc_reference sets LERP_RESETANIM when it restores a different ->model.
-  engine/hexen2/cl_hw.c, HWCL_CopyEntity -- why HexenWorld needed no change:
+  engine/hexen2/cl_hw.c, HWCL_CopyEntity --
   * it stamps ent->msgtime = cl.mtime[0] unconditionally for every active
-    entity on every pass, and sets forcelink only on !was_on || model_changed.
+    entity on every pass, and sets forcelink only on !was_on || model_changed;
+  * that same reset re-seeds msg_origins/msg_angles [1] (#567).
   engine/hexen2/gl_rmain.c, R_AliasResolveLerp --
   * the stale-threshold reset (uhexen2-43f8) is still there.
 """
@@ -304,7 +305,7 @@ else:
         errors.append("svc_clear_edicts: a removed entity must get forcelink = true, or one re-sent before a relink "
                       "drops it lerps from where it left")
 
-# -- HexenWorld: why it needed no change ----------------------------------
+# -- HexenWorld: HWCL_CopyEntity -----------------------------------------
 ce = body_of(hw, r"static void HWCL_CopyEntity \(int entitynum, const hwcl_entity_state_t \*state,\s*"
                  r"qboolean player, qboolean new_update\)\s*\{")
 if ce is None:
@@ -315,8 +316,16 @@ else:
         errors.append("HWCL_CopyEntity: must stamp ent->msgtime = cl.mtime[0] unconditionally; "
                       "CL_RelinkEntities' held branch would otherwise freeze HexenWorld entities")
     fls = re.findall(r"if \(([^)]*(?:\)[^)]*)?)\)\s*ent->forcelink\s*=\s*true\s*;", ce)
-    if fls != ["!was_on || model_changed"] or len(re.findall(r"\bforcelink\b", ce)) != 1:
-        errors.append("HWCL_CopyEntity: forcelink must be set only for !was_on || model_changed")
+    rst = re.findall(r"\breset\s*=\s*([^;]*);", ce)
+    if fls != ["reset"] or rst != ["!was_on || model_changed"] or len(re.findall(r"\bforcelink\b", ce)) != 1:
+        errors.append("HWCL_CopyEntity: forcelink must be set only for reset = !was_on || model_changed")
+    # #567: a forcelink snap with a stale msg_origins[1] slides the entity
+    # back toward the slot's old contents for the rest of the interval.
+    calls = re.findall(r"HWCL_ClockPushSample\s*\([^;]*;", ce)
+    pushes = re.findall(r"HWCL_ClockPushSample\s*\(\s*ent->(msg_\w+)\s*,[^;]*,\s*reset\s*\)\s*;", ce)
+    if len(calls) != 2 or sorted(pushes) != ["msg_angles", "msg_origins"]:
+        errors.append("HWCL_CopyEntity: both HWCL_ClockPushSample calls (msg_origins, msg_angles) must pass reset, "
+                      "or a new entity lerps out of the slot's stale history (#567)")
 
 # -- uhexen2-43f8's stale-threshold reset stays ---------------------------
 res = body_of(rmain, r"static void R_AliasResolveLerp \(entity_t \*e, aliashdr_t \*paliashdr,\s*"
