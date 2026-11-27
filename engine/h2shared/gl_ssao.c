@@ -37,7 +37,10 @@
 #include "gl_pipeline.h"
 #include "gl_postprocess.h"
 #include "gl_matrix.h"
+#include "gl_vbo.h"	/* R_DrawArrays: the composite's draw (#340 P5a-1) */
 #include "gl_ssao.h"
+#include "gl_fbo.h"	/* the depth snapshots, through the seam (#340 P5a-1) */
+#include "gl_compute.h"	/* dispatch, barriers, program deletes (#340 P5a-1) */
 #ifdef USE_SDL_GPU
 #include "rg_device.h"	/* R_GPU (): -gpu does not raise the chain for SSAO */
 #endif
@@ -108,8 +111,8 @@ static void SS_DeleteTargets (void)
 			*tex[i] = 0;
 		}
 	}
-	if (ss_world_fbo) { glDeleteFramebuffers_fp (1, &ss_world_fbo); ss_world_fbo = 0; }
-	if (ss_scene_fbo) { glDeleteFramebuffers_fp (1, &ss_scene_fbo); ss_scene_fbo = 0; }
+	if (ss_world_fbo) { R_DeleteFramebuffers (1, &ss_world_fbo); ss_world_fbo = 0; }
+	if (ss_scene_fbo) { R_DeleteFramebuffers (1, &ss_scene_fbo); ss_scene_fbo = 0; }
 	ss_w = ss_h = ss_scale = 0;
 }
 
@@ -119,14 +122,14 @@ void R_SSAO_Shutdown (void)
 
 	SS_DeleteTargets ();
 	R_PipelineForgetProgram ();	/* GL reuses program names */
-	if (ss_prep_prog) { glDeleteProgram_fp (ss_prep_prog); ss_prep_prog = 0; }
-	if (ss_mip_prog) { glDeleteProgram_fp (ss_mip_prog); ss_mip_prog = 0; }
+	if (ss_prep_prog) { R_DeleteProgram (ss_prep_prog); ss_prep_prog = 0; }
+	if (ss_mip_prog) { R_DeleteProgram (ss_mip_prog); ss_mip_prog = 0; }
 	for (i = 0; i < 3; i++)
-		if (ss_eval_prog[i]) { glDeleteProgram_fp (ss_eval_prog[i]); ss_eval_prog[i] = 0; }
-	if (ss_filter_prog) { glDeleteProgram_fp (ss_filter_prog); ss_filter_prog = 0; }
-	if (ss_comp_prog) { glDeleteProgram_fp (ss_comp_prog); ss_comp_prog = 0; }
-	if (ss_ubo) { GL_ForgetBuffer (ss_ubo); glDeleteBuffers_fp (1, &ss_ubo); ss_ubo = 0; }
-	if (ss_vao) { glDeleteVertexArrays_fp (1, &ss_vao); ss_vao = 0; }
+		if (ss_eval_prog[i]) { R_DeleteProgram (ss_eval_prog[i]); ss_eval_prog[i] = 0; }
+	if (ss_filter_prog) { R_DeleteProgram (ss_filter_prog); ss_filter_prog = 0; }
+	if (ss_comp_prog) { R_DeleteProgram (ss_comp_prog); ss_comp_prog = 0; }
+	if (ss_ubo) { GL_ForgetBuffer (ss_ubo); R_DeleteBuffers (1, &ss_ubo); ss_ubo = 0; }
+	if (ss_vao) { R_DeleteVertexArrays (1, &ss_vao); ss_vao = 0; }
 	ss_failed = false;
 	ss_world_valid = false;
 }
@@ -135,6 +138,11 @@ static void SS_BindBlock (GLuint prog)
 {
 	GLuint	blk;
 
+#ifdef USE_SDL_GPU
+	/* The SPIR-V fixes the block's slot; the mirror is P5e's (#340). */
+	if (R_GPU ())
+		return;
+#endif
 	if (!prog || !glGetUniformBlockIndex_fp || !glUniformBlockBinding_fp)
 		return;
 	blk = glGetUniformBlockIndex_fp (prog, "SsaoParams");
@@ -147,24 +155,19 @@ static void SS_BindBlock (GLuint prog)
  * so the texture units are assigned here, once, at program build.  The units
  * are SSAO_TEX_UNIT + 0..3, the same units SS_BindTex uses at draw time, in
  * sampler order.  GitHub #448. */
-static void SS_BindSamplers (GLuint prog)
+static void SS_BindSamplers (void)
 {
-	static const char *const names[4] =
-	{
-		"u_world_depth", "u_scene_depth", "filtered_ao", "prepared_depth"
-	};
 	GLint	loc;
-	int	i;
 
-	if (!prog || !glGetUniformLocation_fp || !glUniform1i_fp)
-		return;
-	R_UseProgram (prog);
-	for (i = 0; i < 4; i++)
-	{
-		loc = glGetUniformLocation_fp (prog, names[i]);
-		if (loc >= 0)
-			glUniform1i_fp (loc, SSAO_TEX_UNIT + i);
-	}
+	R_UseProgram (ss_comp_prog);
+	loc = R_ProgramSamplerLoc (ss_comp_prog, "u_world_depth");
+	R_ProgramSamplerUnit (ss_comp_prog, loc, "u_world_depth", SSAO_TEX_UNIT);
+	loc = R_ProgramSamplerLoc (ss_comp_prog, "u_scene_depth");
+	R_ProgramSamplerUnit (ss_comp_prog, loc, "u_scene_depth", SSAO_TEX_UNIT + 1);
+	loc = R_ProgramSamplerLoc (ss_comp_prog, "filtered_ao");
+	R_ProgramSamplerUnit (ss_comp_prog, loc, "filtered_ao", SSAO_TEX_UNIT + 2);
+	loc = R_ProgramSamplerLoc (ss_comp_prog, "prepared_depth");
+	R_ProgramSamplerUnit (ss_comp_prog, loc, "prepared_depth", SSAO_TEX_UNIT + 3);
 	R_UseProgram (0);
 }
 
@@ -199,13 +202,13 @@ static qboolean SS_BuildPrograms (void)
 		SS_BindBlock (ss_eval_prog[q]);
 	SS_BindBlock (ss_filter_prog);
 	SS_BindBlock (ss_comp_prog);
-	SS_BindSamplers (ss_comp_prog);
+	SS_BindSamplers ();
 
-	glGenBuffers_fp (1, &ss_ubo);
+	R_GenBuffers (1, &ss_ubo);
 	GL_BindBuffer (GL_UNIFORM_BUFFER, ss_ubo);
-	glBufferData_fp (GL_UNIFORM_BUFFER, sizeof(ssao_params_t), NULL, GL_DYNAMIC_DRAW);
+	R_BufferData (GL_UNIFORM_BUFFER, sizeof(ssao_params_t), NULL, GL_DYNAMIC_DRAW);
 	GL_BindBuffer (GL_UNIFORM_BUFFER, 0);
-	glGenVertexArrays_fp (1, &ss_vao);
+	R_GenVertexArrays (1, &ss_vao);
 	return true;
 }
 
@@ -226,16 +229,16 @@ static GLuint SS_Tex2D (GLsizei levels, GLenum fmt, int w, int h, GLenum min_fil
 static qboolean SS_DepthTarget (int w, int h, GLuint *tex, GLuint *fbo)
 {
 	GLenum	none = GL_NONE, status;
-	GLint	prev = 0;
+	GLuint	prev;
 
 	*tex = SS_Tex2D (1, GL_DEPTH24_STENCIL8, w, h, GL_NEAREST);
-	glGetIntegerv_fp (GL_DRAW_FRAMEBUFFER_BINDING, &prev);
-	glGenFramebuffers_fp (1, fbo);
-	glBindFramebuffer_fp (GL_DRAW_FRAMEBUFFER, *fbo);
-	glFramebufferTexture2D_fp (GL_DRAW_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, *tex, 0);
-	glDrawBuffers_fp (1, &none);
-	status = glCheckFramebufferStatus_fp (GL_DRAW_FRAMEBUFFER);
-	glBindFramebuffer_fp (GL_DRAW_FRAMEBUFFER, (GLuint)prev);
+	prev = R_FramebufferBinding (GL_DRAW_FRAMEBUFFER_BINDING);
+	R_GenFramebuffers (1, fbo);
+	R_BindFramebuffer (GL_DRAW_FRAMEBUFFER, *fbo);
+	R_FramebufferTexture2D (GL_DRAW_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, *tex, 0);
+	R_DrawBuffers (1, &none);
+	status = R_CheckFramebufferStatus (GL_DRAW_FRAMEBUFFER);
+	R_BindFramebuffer (GL_DRAW_FRAMEBUFFER, prev);
 	return status == GL_FRAMEBUFFER_COMPLETE;
 }
 
@@ -316,21 +319,21 @@ static qboolean SS_EnsureTargets (int w, int h, int scale)
 
 static void SS_Blit (GLuint dst_fbo)
 {
-	GLint	prev_draw = 0, prev_read = 0;
+	GLuint	prev_draw, prev_read;
 
-	glGetIntegerv_fp (GL_DRAW_FRAMEBUFFER_BINDING, &prev_draw);
-	glGetIntegerv_fp (GL_READ_FRAMEBUFFER_BINDING, &prev_read);
-	glBindFramebuffer_fp (GL_READ_FRAMEBUFFER, (GLuint)prev_draw);
-	glBindFramebuffer_fp (GL_DRAW_FRAMEBUFFER, dst_fbo);
-	glBlitFramebuffer_fp (0, 0, ss_w, ss_h, 0, 0, ss_w, ss_h, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
-	glBindFramebuffer_fp (GL_DRAW_FRAMEBUFFER, (GLuint)prev_draw);
-	glBindFramebuffer_fp (GL_READ_FRAMEBUFFER, (GLuint)prev_read);
+	prev_draw = R_FramebufferBinding (GL_DRAW_FRAMEBUFFER_BINDING);
+	prev_read = R_FramebufferBinding (GL_READ_FRAMEBUFFER_BINDING);
+	R_BindFramebuffer (GL_READ_FRAMEBUFFER, prev_draw);
+	R_BindFramebuffer (GL_DRAW_FRAMEBUFFER, dst_fbo);
+	R_BlitFramebuffer (0, 0, ss_w, ss_h, 0, 0, ss_w, ss_h, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+	R_BindFramebuffer (GL_DRAW_FRAMEBUFFER, prev_draw);
+	R_BindFramebuffer (GL_READ_FRAMEBUFFER, prev_read);
 }
 
 static void SS_Upload (void)
 {
 	GL_BindBuffer (GL_UNIFORM_BUFFER, ss_ubo);
-	glBufferSubData_fp (GL_UNIFORM_BUFFER, 0, sizeof(ss_params), &ss_params);
+	R_BufferSubData (GL_UNIFORM_BUFFER, 0, sizeof(ss_params), &ss_params);
 	GL_BindBuffer (GL_UNIFORM_BUFFER, 0);
 	GL_BindBufferBase (GL_UNIFORM_BUFFER, SSAO_UBO_BINDING, ss_ubo);
 }
@@ -371,7 +374,10 @@ qboolean R_SSAO_WantsSceneFBO (void)
 #endif
 	return r_ssao.integer > 0 && !ss_failed &&
 	       gl_renderer_caps.compute_shaders && glBindImageTexture_fp &&
-	       glBlitFramebuffer_fp && glTexStorage2D_fp;
+	       glBlitFramebuffer_fp && glTexStorage2D_fp &&
+	       R_StorageFormatOk (GL_RG16F, GL_TEXTURE_2D, GL_READ_WRITE) &&
+	       R_StorageFormatOk (GL_R8, GL_TEXTURE_2D, GL_WRITE_ONLY) &&
+	       R_StorageFormatOk (GL_R32UI, GL_TEXTURE_2D, GL_READ_WRITE);
 }
 
 static qboolean SS_Active (void)
@@ -449,7 +455,7 @@ void R_SSAO_CaptureWorld (void)
 		GLint	vp[4];
 		float	proj[16], vx, vtop, vw, vh;
 
-		glGetIntegerv_fp (GL_VIEWPORT, vp);
+		R_GetViewport (vp);
 		GL_GetProjection (proj);
 		vx = (float)vp[0];
 		vw = (float)q_max (vp[2], 1);
@@ -465,8 +471,8 @@ void R_SSAO_CaptureWorld (void)
 	SS_BindTex (0, ss_world_tex);
 	R_BindImageTexture (0, ss_pyramid, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RG16F);
 	R_UseProgram (ss_prep_prog);
-	glDispatchCompute_fp ((ss_aow + 7) / 8, (ss_aoh + 7) / 8, 1);
-	glMemoryBarrier_fp (GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+	R_DispatchCompute ((ss_aow + 7) / 8, (ss_aoh + 7) / 8, 1);
+	R_MemoryBarrier (GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
 	SS_UnbindImages (1);
 	SS_UnbindTex (1);
 	R_UseProgram (0);
@@ -492,7 +498,7 @@ void R_SSAO_Apply (void)
 	R_TexSubImage2D (GL_TEXTURE_2D, ss_mismatch, 0, 0, 0, ss_mismatch_w, ss_mismatch_h,
 			    GL_RED_INTEGER, GL_UNSIGNED_INT, zeros);
 	R_BindTextureForEdit (GL_TEXTURE_2D, 0);
-	glMemoryBarrier_fp (GL_TEXTURE_UPDATE_BARRIER_BIT);
+	R_MemoryBarrier (GL_TEXTURE_UPDATE_BARRIER_BIT);
 
 	/* mip: scene depth in, the whole pyramid and the tile tags out */
 	SS_BindTex (0, ss_scene_tex);
@@ -501,8 +507,8 @@ void R_SSAO_Apply (void)
 				    level == 0 ? GL_READ_WRITE : GL_WRITE_ONLY, GL_RG16F);
 	R_BindImageTexture (5, ss_mismatch, 0, GL_FALSE, 0, GL_READ_WRITE, GL_R32UI);
 	R_UseProgram (ss_mip_prog);
-	glDispatchCompute_fp ((ss_aow + 15) / 16, (ss_aoh + 15) / 16, 1);
-	glMemoryBarrier_fp (GL_TEXTURE_FETCH_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+	R_DispatchCompute ((ss_aow + 15) / 16, (ss_aoh + 15) / 16, 1);
+	R_MemoryBarrier (GL_TEXTURE_FETCH_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
 	SS_UnbindImages (6);
 
 	/* evaluate: AO and receiver edges */
@@ -512,8 +518,8 @@ void R_SSAO_Apply (void)
 	R_BindImageTexture (0, ss_ao, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R8);
 	R_BindImageTexture (1, ss_edges, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R8);
 	R_UseProgram (ss_eval_prog[quality - 1]);
-	glDispatchCompute_fp ((ss_aow + 7) / 8, (ss_aoh + 7) / 8, 1);
-	glMemoryBarrier_fp (GL_TEXTURE_FETCH_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+	R_DispatchCompute ((ss_aow + 7) / 8, (ss_aoh + 7) / 8, 1);
+	R_MemoryBarrier (GL_TEXTURE_FETCH_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
 	SS_UnbindImages (2);
 
 	/* filter twice: ao -> filtered, then filtered -> ao with the final
@@ -524,15 +530,15 @@ void R_SSAO_Apply (void)
 	SS_Upload ();
 	SS_BindTex (0, ss_ao);
 	R_BindImageTexture (0, ss_filtered, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R8);
-	glDispatchCompute_fp ((ss_aow + 15) / 16, (ss_aoh + 7) / 8, 1);
-	glMemoryBarrier_fp (GL_TEXTURE_FETCH_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+	R_DispatchCompute ((ss_aow + 15) / 16, (ss_aoh + 7) / 8, 1);
+	R_MemoryBarrier (GL_TEXTURE_FETCH_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
 	SS_UnbindImages (1);
 	ss_params.settings[2] = 1.0f;
 	SS_Upload ();
 	SS_BindTex (0, ss_filtered);
 	R_BindImageTexture (0, ss_ao, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R8);
-	glDispatchCompute_fp ((ss_aow + 15) / 16, (ss_aoh + 7) / 8, 1);
-	glMemoryBarrier_fp (GL_TEXTURE_FETCH_BARRIER_BIT);
+	R_DispatchCompute ((ss_aow + 15) / 16, (ss_aoh + 7) / 8, 1);
+	R_MemoryBarrier (GL_TEXTURE_FETCH_BARRIER_BIT);
 	SS_UnbindImages (1);
 
 	/* composite into the scene, world receivers only */
@@ -546,7 +552,7 @@ void R_SSAO_Apply (void)
 
 	cull = R_GetCull ();
 	blend = R_GetBlend ();
-	depthtest = glIsEnabled_fp (GL_DEPTH_TEST) ? true : false;
+	depthtest = R_GetDepthTest ();
 	depthmask = R_GetDepthMask ();
 	R_SetCull (false);
 	R_SetDepthTest (false);
@@ -555,9 +561,9 @@ void R_SSAO_Apply (void)
 	R_SetBlend (true);
 	R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	R_UseProgram (ss_comp_prog);
-	glBindVertexArray_fp (ss_vao);
-	glDrawArrays_fp (GL_TRIANGLES, 0, 3);
-	glBindVertexArray_fp (0);
+	R_BindVertexArray (ss_vao);
+	R_DrawArrays (GL_TRIANGLES, 0, 3);
+	R_BindVertexArray (0);
 
 	R_SetBlend (blend);
 	R_SetColorMask (true, true, true, true);

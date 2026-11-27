@@ -32,6 +32,9 @@
 #include "gl_pipeline.h"
 #include "gl_lightcluster.h"
 #endif
+#ifdef USE_SDL_GPU
+#include "rg_device.h"	/* R_GPU (): the occlusion row's -gpu ceiling (#340 P5a-1) */
+#endif
 #include "sbar.h"
 #include "menu_pointer.h"
 #include "sdl_inc.h"
@@ -2857,6 +2860,10 @@ static void M_Options_Key (int k)
 static int M_DlightOcclusionMax (void)
 {
 #if defined(GLQUAKE) && !defined(USE_GLES)
+#ifdef USE_SDL_GPU
+	if (R_GPU ())	/* the cube maps are P6 of #340 (R_Shadow_Prepare) */
+		return 1;
+#endif
 	if (!R_LightCluster_ShadesWorld ())
 		return 1;
 #endif
@@ -4529,11 +4536,18 @@ static void M_Graphics_AdjustSliders (int dir)
 
 static const char *M_Graphics_Note (int row)
 {
-	/* the row stops at Walls on desktop without the clusters: say why --
-	 * the cvar, or, with it on, a GPU the grid cannot run on */
+	/* the row stops at Walls on desktop without the clusters, and under
+	 * -gpu until P6: say why -- -gpu, the cvar, or, with it on, a GPU the
+	 * grid cannot run on */
 	if (row == GFX_DLOCCLUSION && M_DlightOcclusionMax () < M_DLOCCLUSION_MAX)
+	{
+#ifdef USE_SDL_GPU
+		if (R_GPU ())
+			return "Shadows are not on -gpu yet";
+#endif
 		return Cvar_VariableValue ("r_lightclusters") ? "This GPU cannot draw the shadow maps"
 							       : "Shadows need r_lightclusters 1";
+	}
 	switch (row)
 	{
 	case GFX_CONMAXCOLS:	return "Wrap console text at this width";	/* con_maxcols */

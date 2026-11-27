@@ -308,6 +308,22 @@ void RG_SetViewport (int x, int y, int width, int height)
 	rgf_vp[3] = height;
 }
 
+void RG_GetViewport (int vp[4])
+{
+	if (rgf_vp_set)
+	{
+		vp[0] = rgf_vp[0];
+		vp[1] = rgf_vp[1];
+		vp[2] = rgf_vp[2];
+		vp[3] = rgf_vp[3];
+		return;
+	}
+	vp[0] = 0;
+	vp[1] = 0;
+	vp[2] = rgf_w;
+	vp[3] = rgf_h;
+}
+
 void RG_SetScissor (qboolean enable, int x, int y, int width, int height)
 {
 	rgf_scissor_on = enable;

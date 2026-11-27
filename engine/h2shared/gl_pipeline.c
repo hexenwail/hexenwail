@@ -412,6 +412,19 @@ void R_SetViewport (int x, int y, int width, int height)
 	glViewport_fp (x, y, width, height);
 }
 
+/* glGetIntegerv (GL_VIEWPORT): x, y, width, height (#340 P5a-1). */
+void R_GetViewport (GLint vp[4])
+{
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_GetViewport (vp);
+		return;
+	}
+#endif
+	glGetIntegerv_fp (GL_VIEWPORT, vp);
+}
+
 /* The values glClear writes, GL's defaults until set.  Not draw state, so
  * nothing is folded: every GL arm below is the bare call the call site used
  * to make.  Under -gpu they are what the next render pass clears to

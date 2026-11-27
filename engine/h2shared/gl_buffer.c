@@ -622,8 +622,8 @@ void GL_DeleteParticleResources (GLuint ssbo, GLuint vao)
  * glBindBufferBase_fp / glBindBufferRange_fp call exists outside this file;
  * the one remaining way to stale that cache is deleting a buffer and having
  * GL hand the name back out, which GL_ForgetBuffer covers.
- * (gl_mesh.c and gl_shader.c bind through this wrapper since #340 P2e;
- * the compute files still bind raw, so the argument stands.)
+ * (gl_mesh.c and gl_shader.c bind through this wrapper since #340 P2e,
+ * the compute files since P5a-1; binding unconditionally stays, it is free.)
  *
  * Under -gpu the element and array bindings are what a VAO and a pointer
  * capture (rg_buffer.c), and the storage target is what glBufferData fills

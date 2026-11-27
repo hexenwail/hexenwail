@@ -18,9 +18,10 @@ python3 plus a C compiler (lint.yml):
       #ifdef USE_SDL_GPU / if (R_GPU ()) and calls RG_ProgramSampler /
       RG_ProgramSamplerUnit with the same arguments.
     * no other glGetUniformLocation or glUniform1i call in the engine,
-      except gl_postprocess.c's OIT resolve (P6) and gl_ssao.c (P5), raw GL
-      until those phases route their programs (RAW_OK, by function where it
-      names them; each entry must still have such calls);
+      except gl_postprocess.c's OIT resolve (P6), raw GL until that phase
+      routes its programs (RAW_OK, by function where it names them; each
+      entry must still have such calls).  gl_ssao.c's composite goes through
+      the seam since P5a-1;
   the call sites
     * each R_ProgramSamplerUnit (prog, loc, "name", unit) names the sampler
       its location was looked up for -- `p->u_x` was assigned from
@@ -84,7 +85,9 @@ RG_FRAME_C = "engine/h2shared/rg_frame.c"
 RG_INTERNAL_H = "engine/h2shared/rg_internal.h"
 SHADERS = "engine/shaders"
 CONST_HEADERS = ("engine/h2shared/gl_shader.h", "engine/h2shared/gl_lightcluster.h",
-                 "engine/h2shared/gl_shadow.h", "engine/h2shared/gl_texbind.h")
+                 "engine/h2shared/gl_shadow.h", "engine/h2shared/gl_texbind.h",
+                 # SSAO_TEX_UNIT, the composite's first unit (#340 P5a-1)
+                 "engine/h2shared/gl_ssao.c")
 SCAN_DIRS = ("engine/h2shared", "engine/hexen2", "engine/hexenworld")
 # Not engine call sites: the loader table, the loader, the generated null-GL
 # table, and the WEBSOFT canvas blit (raw GLES, outside the renderer).
@@ -95,13 +98,13 @@ NOT_SITES = {"engine/h2shared/gl_func.h", "engine/h2shared/gl_vidsdl.c",
 RAW_OK = {
     "engine/h2shared/gl_postprocess.c": ("the OIT resolve, P6 on #340 (gated off under -gpu)",
                                          {"OIT_InitShader", "OIT_EndTranslucency"}),
-    "engine/h2shared/gl_ssao.c": ("SSAO, compute and its composite, P5 on #340", None),
 }
 # The programs those files set up, which therefore have no seam set-up.  The
-# post-process and bloom programs went through the seam at P4a-1.
-RAW_PROGRAMS = {"oit_resolve", "oit_resolve_msaa", "ssao_composite"}
+# post-process and bloom programs went through the seam at P4a-1, the SSAO
+# composite at P5a-1.
+RAW_PROGRAMS = {"oit_resolve", "oit_resolve_msaa"}
 # Files whose functions set sampler units through the seam.
-SETUP_FILES = (SHADER_C, SHADOW_C, "engine/h2shared/gl_postprocess.c")
+SETUP_FILES = (SHADER_C, SHADOW_C, "engine/h2shared/gl_postprocess.c", "engine/h2shared/gl_ssao.c")
 
 # The unit each sampler is bound at, as the C spells it.
 CANON = {"u_texture%d" % n: str(n) for n in range(5)}
@@ -117,6 +120,10 @@ CANON.update({
     # scene, the softemu palette LUT and the bloom result; each bloom pass
     # reads its source at 0
     "scene": "0", "paletteLUT": "1", "u_bloom": "2", "u_scene": "0",
+    # the SSAO composite (gl_ssao.c SS_BindSamplers, #340 P5a-1): the units
+    # SS_BindTex / R_SSAO_Apply bind its four textures on, in sampler order
+    "u_world_depth": "SSAO_TEX_UNIT", "u_scene_depth": "SSAO_TEX_UNIT + 1",
+    "filtered_ao": "SSAO_TEX_UNIT + 2", "prepared_depth": "SSAO_TEX_UNIT + 3",
 })
 # (program, sampler) left without a unit, and why that is right.  Empty
 # since #532: an unset sampler reads unit 0 on GL and is counted under -gpu

@@ -40,6 +40,9 @@ void	R_DrawElementsInstanced (GLenum mode, GLsizei count, GLenum type, const voi
  * enabled attribute is routed (a bufferless fullscreen pass); anything else is
  * counted and dropped. */
 void	R_DrawArrays (GLenum mode, GLint first, GLsizei count);
+#ifndef USE_GLES
+void	R_DrawElementsIndirect (GLenum mode, GLenum type, const void *indirect);
+#endif
 void	GL_ImmBegin (void);
 void	GL_ImmVertex3f (float x, float y, float z);
 void	GL_ImmVertex2f (float x, float y);

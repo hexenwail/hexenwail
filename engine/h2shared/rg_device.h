@@ -110,6 +110,9 @@ void	RG_UniformBlockFlushed (const char *name);
 
 /* gl_pipeline.c: dynamic state the pipeline object does not carry. */
 void	RG_SetViewport (int x, int y, int width, int height);
+/* The viewport the next draw takes, (0, 0, frame size) until one is set:
+ * R_GetViewport's answer, as glGetIntegerv (GL_VIEWPORT) is GL's (#340 P5a-1). */
+void	RG_GetViewport (int vp[4]);
 void	RG_SetScissor (qboolean enable, int x, int y, int width, int height);
 /* gl_pipeline.c R_ClearBuffers: glClear's GL_COLOR / DEPTH / STENCIL bits,
  * with the values it clears to.  Ends the open segment if it has draws, so
@@ -151,6 +154,9 @@ void	RG_BindBufferRange (GLenum target, GLuint index, GLuint buffer, GLintptr of
 			    GLsizeiptr size);
 void	RG_Upload (GLenum target, const void *data, size_t numbytes, GLuint *outbuf,
 		   GLintptr *outofs);
+/* GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS: the storage binding points the
+ * backend shadows (R_MaxStorageBindings, #340 P5a-1). */
+int	RG_MaxStorageBindings (void);
 
 /* gl_vbo.c R_DrawElements / R_DrawElementsInstanced (rg_frame.c): an
  * indexed draw from the bound VAO, with the bound program and the current
