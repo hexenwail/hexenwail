@@ -276,11 +276,33 @@ qboolean RG_Res_StorageImage (int unit, rg_textype_t type, const Uint32 cover[3]
 void	RG_Res_StorageImageWritten (int unit);
 /* Whether image unit `unit` holds the texture the open segment draws into. */
 qboolean RG_Res_ImageIsTarget (int unit);
+/* Whether image unit `unit` holds the texture a sampler of dimensionality
+ * `type` reading GL unit `sunit` would sample (#340 P5d). */
+qboolean RG_Res_ImageSampled (int unit, GLuint sunit, rg_textype_t type);
+/* Image unit `unit`'s binding `b` (RG_Res_StorageImage's) moved onto a
+ * scratch texture of the bound level's size and format, made once per shape
+ * and kept: a dispatch that samples a texture and writes one of its levels
+ * would have that level in the storage layout while the sampler's view,
+ * which takes in every level, says read-only -- Vulkan faults it
+ * (VUID-vkCmdDispatch-imageLayout-00344, the Hi-Z reduce).  `home` is where
+ * the caller copies the scratch to once the pass ends, `size` the extent,
+ * and `preload` whether the level's texels must be copied in first, which
+ * GL keeps where a dispatch stores nothing.  False, and counted, when no
+ * scratch can be made: the dispatch is dropped. */
+qboolean RG_Res_StorageScratch (int unit, const Uint32 cover[3], SDL_GPUStorageTextureReadWriteBinding *b,
+				SDL_GPUTextureLocation *home, Uint32 size[3], qboolean *preload);
+/* A dispatch's bindings begin: the scratch textures it is handed are not
+ * the ones a full table gives up while it binds. */
+void	RG_Res_ScratchBegin (void);
 /* Whether a sampler of dimensionality `type` reading GL unit `unit` would
  * be handed a texture of the engine's rather than a placeholder: what a
  * dispatch that samples has to wait for (#340 P5c).  The placeholders are
  * written once, at boot. */
 qboolean RG_Res_UnitHolds (GLuint unit, rg_textype_t type);
+/* Whether GL unit `unit`, for dimensionality `type`, holds the texture the
+ * open segment draws into: a dispatch sampling it ends the segment first, a
+ * pending clear of it among that (#340 P5d). */
+qboolean RG_Res_UnitIsTarget (GLuint unit, rg_textype_t type);
 
 /* ------------------------------------------------------------------ */
 /* rg_shader.c                                                         */
@@ -550,6 +572,12 @@ void	RG_Frame_SceneTarget (rgtarget_t *out);
  * reading it would be a feedback loop; a delete or a re-definition of it
  * has to let the segment's draws land first). */
 qboolean RG_Frame_TargetHolds (const SDL_GPUTexture *tex);
+/* Whether a compute dispatch's bindings are being made: between
+ * RG_Frame_ComputeBegin, which ended the segment's render pass, and
+ * RG_Frame_ComputeEnd.  A target's texture is sampler-readable then
+ * (#340 P5d: the Hi-Z copy reads the post chain's scene depth while its
+ * framebuffer is still the one bound). */
+qboolean RG_Frame_ComputeBinding (void);
 /* End the open segment and hand back the frame's command buffer, for a blit
  * or a copy between passes; NULL outside a frame or on a device failure. */
 SDL_GPUCommandBuffer *RG_Frame_Break (void);

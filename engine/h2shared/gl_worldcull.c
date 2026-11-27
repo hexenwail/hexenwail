@@ -34,6 +34,21 @@
 #include "rg_device.h"	/* R_GPU (), the CullParams mirror, the stats readback (#340 P5c) */
 #endif
 
+/* The -gpu standalone depth copy's format; older GL headers (mingw's) lack
+ * them, as gl_postprocess.c has them for the scene FBO. */
+#ifndef GL_DEPTH24_STENCIL8
+#define GL_DEPTH24_STENCIL8 0x88F0
+#endif
+#ifndef GL_DEPTH_STENCIL_ATTACHMENT
+#define GL_DEPTH_STENCIL_ATTACHMENT 0x821A
+#endif
+#ifndef GL_DEPTH_STENCIL
+#define GL_DEPTH_STENCIL 0x84F9
+#endif
+#ifndef GL_UNSIGNED_INT_24_8
+#define GL_UNSIGNED_INT_24_8 0x84FA
+#endif
+
 /* ------------------------------------------------------------------ */
 /* Data structures matching GLSL std430 layout                         */
 /* ------------------------------------------------------------------ */
@@ -144,6 +159,15 @@ static unsigned int	*cull_bucket_first;
 static mleaf_t		*wc_last_leaf;
 static float		wc_last_frust[16];
 static qboolean		wc_last_hiz;
+/* and, with Hi-Z on, what its test compared against (#340 P5d) */
+static float		wc_last_prevmvp[16], wc_last_depthrange[2];
+static int		wc_last_hizw, wc_last_hizh, wc_last_mips;
+static qboolean		wc_last_rz;
+/* worldcull_verify asked with Hi-Z on: it runs right after the next mark
+ * dispatch, while the pyramid is still the one that dispatch read -- the
+ * frame's end rebuilds it (#340 P5d). */
+static qboolean		wc_verify_pending;
+static void		WC_Verify (void);
 
 static qboolean	cull_initialized;
 
@@ -187,6 +211,10 @@ static qboolean	cull_initialized;
 typedef struct {
 	GLint	size[4];	/* xy = scene extent, zw unused */
 } hiz_params_t;
+
+/* What hiz_copy reads: GL uploads it, -gpu pushes it as the registered
+ * mirror of the block (#340 P5d, the CullParams pattern below). */
+static hiz_params_t	hiz_params;
 
 /* Mirrors the std140 CullParams block.  All members vec4/mat4/ivec4, so
  * the std140 offsets are exact by construction, pinned by
@@ -270,9 +298,13 @@ static void WC_BindHizParamsBlock (GLuint program)
 	GLuint	blk;
 
 #ifdef USE_SDL_GPU
-	/* The SPIR-V fixes the block's slot; the mirror is P5d's (#340). */
+	/* The SPIR-V fixes the block's slot; each dispatch pushes the mirror
+	 * by the block's name (#340 P5d). */
 	if (R_GPU ())
+	{
+		RG_UniformBlockRegister ("HizParams", &hiz_params, sizeof(hiz_params));
 		return;
+	}
 #endif
 	if (!program || !glGetUniformBlockIndex_fp || !glUniformBlockBinding_fp)
 		return;
@@ -599,6 +631,7 @@ void R_FreeWorldCull (void)
 	free(cull_cpu_marks); cull_cpu_marks = NULL;
 	free(cull_bucket_first); cull_bucket_first = NULL;
 	wc_last_leaf = NULL;
+	wc_verify_pending = false;
 	R_FreeHiZ();
 	cull_initialized = false;
 	cull_total_indices = 0;
@@ -629,8 +662,10 @@ static int R_HiZ_MipCount (int w, int h)
 static qboolean R_HiZ_Available (void)
 {
 #ifdef USE_SDL_GPU
-	/* Hi-Z is compute, P5 of #340: off under -gpu until it is routed. */
-	if (R_GPU ())
+	/* A scene depth the device cannot sample binds a placeholder, whose
+	 * zeros are reversed-Z's far plane: a pyramid that culls nothing, paid
+	 * for every frame (#340 P5d; RG_DepthSampled, P4b). */
+	if (R_GPU () && !RG_DepthSampled ())
 		return false;
 #endif
 	return (gl_hiz_cull.integer != 0)
@@ -652,6 +687,16 @@ static qboolean R_HiZ_EnsureResources (int scene_w, int scene_h)
 	{
 		R_DeleteTextures (1, &hiz_pyramid_tex);
 		hiz_pyramid_tex = 0;
+	}
+	/* True on GL; under -gpu a device that cannot write R32F from compute
+	 * runs without Hi-Z (decision 12, #340 P5d). */
+	if (!R_StorageFormatOk (GL_R32F, GL_TEXTURE_2D, GL_WRITE_ONLY))
+	{
+		static int	warned;
+
+		if (!warned++)
+			Con_Printf ("Hi-Z: this device cannot write R32F storage images, Hi-Z is off\n");
+		return false;
 	}
 
 	hiz_width = scene_w;
@@ -681,6 +726,19 @@ static qboolean R_HiZ_EnsureResources (int scene_w, int scene_h)
 		Con_Printf("Hi-Z: compute shader failed, disabling\n");
 		R_FreeHiZ();
 		return false;
+	}
+	/* Both read unit 0, which TEXBIND(0) already says to GL; the Vulkan
+	 * SPIR-V keeps only the slot, so -gpu is told (#340 P5d). */
+	{
+		GLint	loc;
+
+		R_UseProgram (hiz_copy_prog);
+		loc = R_ProgramSamplerLoc (hiz_copy_prog, "u_scene_depth");
+		R_ProgramSamplerUnit (hiz_copy_prog, loc, "u_scene_depth", 0);
+		R_UseProgram (hiz_reduce_prog);
+		loc = R_ProgramSamplerLoc (hiz_reduce_prog, "u_src");
+		R_ProgramSamplerUnit (hiz_reduce_prog, loc, "u_src", 0);
+		R_UseProgram (0);
 	}
 
 	Con_DPrintf("Hi-Z: %dx%d pyramid, %d mips\n",
@@ -732,10 +790,23 @@ void R_FreeHiZ (void)
  * or 0 on failure. */
 static GLuint R_HiZ_ResolveStandaloneDepth (int scene_w, int scene_h)
 {
-	GLenum status;
+	GLenum	status;
+	GLenum	fmt = GL_DEPTH_COMPONENT24, attach = GL_DEPTH_ATTACHMENT;
+	qboolean	ok;
 
 	if (scene_w <= 0 || scene_h <= 0)
 		return 0;
+#ifdef USE_SDL_GPU
+	/* Framebuffer 0 is a render target there, in the scene's own depth
+	 * format, which GL_DEPTH24_STENCIL8 names (rg_resource.c RGT_Format);
+	 * the backend copies depth only between textures of one format, the
+	 * GL_SoftDepth_Capture arrangement (#340 P4b, P5d). */
+	if (R_GPU ())
+	{
+		fmt = GL_DEPTH24_STENCIL8;
+		attach = GL_DEPTH_STENCIL_ATTACHMENT;
+	}
+#endif
 
 	if (hiz_resolve_depth_tex && hiz_resolve_fbo &&
 	    hiz_resolve_w == scene_w && hiz_resolve_h == scene_h)
@@ -757,16 +828,17 @@ static GLuint R_HiZ_ResolveStandaloneDepth (int scene_w, int scene_h)
 
 	R_GenTextures(1, &hiz_resolve_depth_tex);
 	R_BindTextureForEdit (GL_TEXTURE_2D, hiz_resolve_depth_tex);
-	R_TexImage2D(GL_TEXTURE_2D, hiz_resolve_depth_tex, 0, GL_DEPTH_COMPONENT24,
+	R_TexImage2D(GL_TEXTURE_2D, hiz_resolve_depth_tex, 0, fmt,
 			scene_w, scene_h,
-			GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, NULL);
+			(fmt == GL_DEPTH24_STENCIL8) ? GL_DEPTH_STENCIL : GL_DEPTH_COMPONENT,
+			(fmt == GL_DEPTH24_STENCIL8) ? GL_UNSIGNED_INT_24_8 : GL_UNSIGNED_INT, NULL);
 	R_TexSetFilter(GL_TEXTURE_2D, hiz_resolve_depth_tex, GL_NEAREST, GL_NEAREST);
 	R_TexSetWrap(GL_TEXTURE_2D, hiz_resolve_depth_tex, GL_CLAMP_TO_EDGE);
 	R_BindTextureForEdit (GL_TEXTURE_2D, 0);
 
 	R_GenFramebuffers(1, &hiz_resolve_fbo);
 	R_BindFramebuffer(GL_DRAW_FRAMEBUFFER, hiz_resolve_fbo);
-	R_FramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+	R_FramebufferTexture2D(GL_DRAW_FRAMEBUFFER, attach,
 			       GL_TEXTURE_2D, hiz_resolve_depth_tex, 0);
 	/* Depth-only FBO needs DRAW_BUFFER = NONE for completeness on strict
 	 * drivers.  READ_BUFFER state is irrelevant since we only ever bind
@@ -798,13 +870,16 @@ blit:
 	 * GL_NEAREST is the only valid filter for depth blits. */
 	R_BindFramebuffer(GL_READ_FRAMEBUFFER, 0);
 	R_BindFramebuffer(GL_DRAW_FRAMEBUFFER, hiz_resolve_fbo);
-	R_BlitFramebuffer(0, 0, scene_w, scene_h,
-			  0, 0, scene_w, scene_h,
-			  GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+	/* Always made on GL.  A copy the backend declines leaves an older
+	 * frame's depth in the texture, and a pyramid built from it culls
+	 * what this frame's matrix sees (#340 P5d). */
+	ok = R_BlitFramebuffer(0, 0, scene_w, scene_h,
+			       0, 0, scene_w, scene_h,
+			       GL_DEPTH_BUFFER_BIT, GL_NEAREST);
 	R_BindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
 	R_BindFramebuffer(GL_READ_FRAMEBUFFER, 0);
 
-	return hiz_resolve_depth_tex;
+	return ok ? hiz_resolve_depth_tex : 0;
 }
 
 void R_BuildHiZForNextFrame (void)
@@ -812,6 +887,9 @@ void R_BuildHiZForNextFrame (void)
 	GLuint	scene_depth_tex;
 	int	scene_w, scene_h;
 	int	mip;
+#ifdef USE_SDL_GPU
+	unsigned long	dropped = 0;
+#endif
 
 	hiz_pyramid_valid = false;
 	if (!R_HiZ_Available())
@@ -852,26 +930,35 @@ void R_BuildHiZForNextFrame (void)
 	if (!R_HiZ_EnsureResources(scene_w, scene_h))
 		return;
 
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+		dropped = RG_ComputeDropped ();
+#endif
+
 	/* Copy scene depth -> mip 0 */
 	R_UseProgram (hiz_copy_prog);
 	R_BindTextureSlot (0, scene_depth_tex);
 	R_BindImageTexture (0, hiz_pyramid_tex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R32F);
+	/* Pushed unconditionally every dispatch.  u_size used to be a
+	 * loose uniform, which is per-PROGRAM state and so survived
+	 * between frames on its own; a block member is global and any
+	 * future writer of this binding point would silently win. */
+	hiz_params.size[0] = scene_w;
+	hiz_params.size[1] = scene_h;
+	hiz_params.size[2] = 0;
+	hiz_params.size[3] = 0;
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+		RG_UniformBlockFlushed ("HizParams");
+	else
+#endif
 	{
-		/* Pushed unconditionally every dispatch.  u_size used to be a
-		 * loose uniform, which is per-PROGRAM state and so survived
-		 * between frames on its own; a block member is global and any
-		 * future writer of this binding point would silently win. */
-		hiz_params_t params;
 		GLuint ubo;
 		GLintptr ofs;
 
-		params.size[0] = scene_w;
-		params.size[1] = scene_h;
-		params.size[2] = 0;
-		params.size[3] = 0;
-		GL_Upload(GL_UNIFORM_BUFFER, &params, sizeof(params), &ubo, &ofs);
+		GL_Upload(GL_UNIFORM_BUFFER, &hiz_params, sizeof(hiz_params), &ubo, &ofs);
 		GL_BindBufferRange(GL_UNIFORM_BUFFER, HIZ_PARAMS_UBO_BINDING,
-				   ubo, ofs, sizeof(params));
+				   ubo, ofs, sizeof(hiz_params));
 	}
 	R_DispatchCompute((scene_w + 7) / 8, (scene_h + 7) / 8, 1);
 	R_MemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
@@ -882,28 +969,36 @@ void R_BuildHiZForNextFrame (void)
 	{
 		/* Per-mip CullParams upload (the HizParams pattern above):
 		 * zero-filled so the members this program never reads are
-		 * zero, never stale ring data. */
+		 * zero, never stale ring data.  The cull's own mirror: each
+		 * of its dispatches refills it whole before it flushes. */
 		int src_w = scene_w, src_h = scene_h;
 		for (mip = 1; mip < hiz_mip_count; mip++)
 		{
 			int dst_w = src_w > 1 ? src_w >> 1 : 1;
 			int dst_h = src_h > 1 ? src_h >> 1 : 1;
-			cull_params_t params;
-			GLuint ubo;
-			GLintptr ofs;
 
 			R_BindImageTexture (0, hiz_pyramid_tex, mip, GL_FALSE, 0,
 					    GL_WRITE_ONLY, GL_R32F);
-			memset(&params, 0, sizeof(params));
-			params.reduce[0] = src_w;
-			params.reduce[1] = src_h;
-			params.reduce[2] = dst_w;
-			params.reduce[3] = dst_h;
-			params.reduce2[0] = mip - 1;
-			params.reduce2[1] = gl_clipcontrol_able ? 1 : 0;
-			GL_Upload(GL_UNIFORM_BUFFER, &params, sizeof(params), &ubo, &ofs);
-			GL_BindBufferRange(GL_UNIFORM_BUFFER, CULL_PARAMS_UBO_BINDING,
-					   ubo, ofs, sizeof(params));
+			memset(&cull_params, 0, sizeof(cull_params));
+			cull_params.reduce[0] = src_w;
+			cull_params.reduce[1] = src_h;
+			cull_params.reduce[2] = dst_w;
+			cull_params.reduce[3] = dst_h;
+			cull_params.reduce2[0] = mip - 1;
+			cull_params.reduce2[1] = gl_clipcontrol_able ? 1 : 0;
+#ifdef USE_SDL_GPU
+			if (R_GPU ())
+				RG_UniformBlockFlushed ("CullParams");
+			else
+#endif
+			{
+				GLuint ubo;
+				GLintptr ofs;
+
+				GL_Upload(GL_UNIFORM_BUFFER, &cull_params, sizeof(cull_params), &ubo, &ofs);
+				GL_BindBufferRange(GL_UNIFORM_BUFFER, CULL_PARAMS_UBO_BINDING,
+						   ubo, ofs, sizeof(cull_params));
+			}
 			R_DispatchCompute((dst_w + 7) / 8, (dst_h + 7) / 8, 1);
 			R_MemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
 			src_w = dst_w;
@@ -913,6 +1008,13 @@ void R_BuildHiZForNextFrame (void)
 
 	R_UseProgram (0);
 	R_BindTextureSlot (0, 0);
+#ifdef USE_SDL_GPU
+	/* A level the backend dropped holds an older frame's depth, or none:
+	 * culling against it hides what is in view.  Next frame runs without
+	 * Hi-Z, and renderer_status counts the drop (#340 P5d). */
+	if (R_GPU () && RG_ComputeDropped () != dropped)
+		return;
+#endif
 	hiz_pyramid_valid = true;
 }
 
@@ -1128,6 +1230,13 @@ void R_DispatchWorldCull (void)
 	cull_params.hizsize[1] = (float)hiz_height;
 	cull_params.depthrange[0] = hiz_prev_depthrange[0];
 	cull_params.depthrange[1] = hiz_prev_depthrange[1];
+	memcpy(wc_last_prevmvp, hiz_prev_mvp, sizeof(wc_last_prevmvp));
+	wc_last_depthrange[0] = hiz_prev_depthrange[0];
+	wc_last_depthrange[1] = hiz_prev_depthrange[1];
+	wc_last_hizw = hiz_width;
+	wc_last_hizh = hiz_height;
+	wc_last_mips = hiz_mip_count;
+	wc_last_rz = gl_clipcontrol_able;
 #ifdef USE_SDL_GPU
 	if (R_GPU ())
 		RG_UniformBlockFlushed ("CullParams");
@@ -1178,6 +1287,11 @@ void R_DispatchWorldCull (void)
 	if (R_GPU ())
 		WC_StatsCollect ();
 #endif
+	if (wc_verify_pending)
+	{
+		wc_verify_pending = false;
+		WC_Verify ();
+	}
 
 	R_UseProgram (0);
 }
@@ -1224,7 +1338,13 @@ void R_DrawWorldCulled (void)
 	if (!lm_atlas_texture)
 		return;
 	if (!WC_CullRan ())
+	{
+		/* No MVP kept for this frame: the one kept is an older frame's,
+		 * and paired with the pyramid this frame's depth builds it would
+		 * cull against the wrong view (#340 P5d). */
+		R_HiZ_ForgetView ();
 		return;
+	}
 
 	/* Bind world VAO but replace its IBO with the compute-written dest IBO */
 	R_BindVertexArray(world_vao);
@@ -1303,7 +1423,7 @@ void R_DrawWorldCulled (void)
 
 
 /* ------------------------------------------------------------------ */
-/* worldcull_verify (#340 P5c)                                         */
+/* worldcull_verify (#340 P5c, Hi-Z P5d)                               */
 /* ------------------------------------------------------------------ */
 
 static int WC_CompareUint (const void *a, const void *b)
@@ -1313,10 +1433,179 @@ static int WC_CompareUint (const void *a, const void *b)
 	return (x > y) - (x < y);
 }
 
-/* cull_mark_comp's tests on the CPU, Hi-Z off: the surface marksurface `ms`
- * draws, or NULL.  `pvs` is the view leaf's, decompressed; `seen` the dedup
- * across leaves. */
-static const gpu_surface_t *WC_CpuAccepts (const gpu_marksurf_t *ms, const byte *pvs, byte *seen)
+/* The Hi-Z pyramid read back, a level per mip, rows as GL numbers them. */
+#define WC_MAX_MIPS	16
+typedef struct {
+	float	*lv[WC_MAX_MIPS];
+	int	w[WC_MAX_MIPS], h[WC_MAX_MIPS];
+	int	mips;
+} wc_pyramid_t;
+
+/* The texels a nearest fetch at u (in [0, 1] of n texels) can land on: one,
+ * or the two either side of a boundary it sits within rounding of.  Clamped
+ * to the edge, as the pyramid's wrap is. */
+static void WC_TexelRange (float u, int n, int *a, int *b)
+{
+	double	x = (double) u * n;
+	double	k = floor (x + 0.5);
+
+	*a = *b = (int) floor (x);
+	/* 1/64 of a texel: Vulkan promises 4 bits of subtexel precision, and
+	 * the devices here have 8 */
+	if (fabs (x - k) < 1.0 / 64.0 && k > 0 && k < n)
+	{
+		*a = (int) k - 1;
+		*b = (int) k;
+	}
+	*a = q_max (0, q_min (n - 1, *a));
+	*b = q_max (0, q_min (n - 1, *b));
+}
+
+/* The lowest and highest value a nearest fetch at (u, v) of level `mip` can
+ * return, over the texels rounding leaves it between. */
+static void WC_Fetch (const wc_pyramid_t *p, int mip, float u, float v, float *lo, float *hi)
+{
+	int	x0, x1, y0, y1, x, y;
+
+	WC_TexelRange (u, p->w[mip], &x0, &x1);
+	WC_TexelRange (v, p->h[mip], &y0, &y1);
+	*lo = *hi = p->lv[mip][y0 * p->w[mip] + x0];
+	for (y = y0; y <= y1; y++)
+	{
+		for (x = x0; x <= x1; x++)
+		{
+			float	t = p->lv[mip][y * p->w[mip] + x];
+
+			*lo = q_min (*lo, t);
+			*hi = q_max (*hi, t);
+		}
+	}
+}
+
+/* cull_mark_comp's Hi-Z test on the CPU, in its order and in float, over the
+ * pyramid read back and what the last dispatch was given: 1 the surface is
+ * culled, 0 kept, -1 too close to call -- where the GPU's rounding of the
+ * same arithmetic could land either side (a corner on the w = 0 plane, a
+ * rectangle whose size is a power of two, a sample on a texel boundary
+ * between unequal texels, a depth within 1e-5 of the occluder). */
+static int WC_CpuHiZ (const gpu_surface_t *s, const wc_pyramid_t *p)
+{
+	const float	*m = wc_last_prevmvp;
+	const float	W = (float) wc_last_hizw, H = (float) wc_last_hizh;
+	float		rx0 = 1.0f, ry0 = 1.0f, rx1 = -1.0f, ry1 = -1.0f;
+	float		dnear = wc_last_rz ? 0.0f : 1.0f;
+	float		r0x, r0y, r1x, r1y, dim, cu, cv, texel, lo, hi, occ_lo = 0.0f, occ_hi = 0.0f;
+	static const float	su[4] = { -0.5f, 0.5f, -0.5f, 0.5f }, sv[4] = { -0.5f, -0.5f, 0.5f, 0.5f };
+	double		l;
+	int		ci, mip, k, amb = 0;
+
+	for (ci = 0; ci < 8; ci++)
+	{
+		float	x = (ci & 1) ? s->maxs[0] : s->mins[0];
+		float	y = (ci & 2) ? s->maxs[1] : s->mins[1];
+		float	z = (ci & 4) ? s->maxs[2] : s->mins[2];
+		/* u_cprevmvp * vec4(c, 1): the block holds the matrix column by column */
+		float	cx = m[0] * x + m[4] * y + m[8] * z + m[12];
+		float	cy = m[1] * x + m[5] * y + m[9] * z + m[13];
+		float	cz = m[2] * x + m[6] * y + m[10] * z + m[14];
+		float	cw = m[3] * x + m[7] * y + m[11] * z + m[15];
+		float	nx, ny, nz, dn;
+
+		if (fabsf (cw) < 1e-3f)
+			amb = 1;
+		if (cw <= 0.0f)
+			return amb ? -1 : 0;
+		nx = cx / cw;
+		ny = cy / cw;
+		nz = cz / cw;
+		dn = wc_last_rz ? nz : (nz * 0.5f + 0.5f);
+		dnear = wc_last_rz ? q_max (dnear, dn) : q_min (dnear, dn);
+		rx0 = q_min (rx0, nx); ry0 = q_min (ry0, ny);
+		rx1 = q_max (rx1, nx); ry1 = q_max (ry1, ny);
+	}
+	dnear = wc_last_depthrange[0] + (wc_last_depthrange[1] - wc_last_depthrange[0]) * dnear;
+	rx0 = q_max (-1.0f, q_min (1.0f, rx0)); ry0 = q_max (-1.0f, q_min (1.0f, ry0));
+	rx1 = q_max (-1.0f, q_min (1.0f, rx1)); ry1 = q_max (-1.0f, q_min (1.0f, ry1));
+	r0x = (rx0 * 0.5f + 0.5f) * W; r0y = (ry0 * 0.5f + 0.5f) * H;
+	r1x = (rx1 * 0.5f + 0.5f) * W; r1y = (ry1 * 0.5f + 0.5f) * H;
+	dim = q_max (r1x - r0x, r1y - r0y);
+	if (fabsf (dim - 0.5f) < 1e-3f)
+		amb = 1;
+	if (dim <= 0.5f)
+		return amb ? -1 : 0;
+	l = log2 ((double) dim);
+	/* in log2, so relative: dim within 0.07% of a power of two */
+	if (fabs (l - floor (l + 0.5)) < 1e-3)
+		amb = 1;
+	mip = (int) ceil (l);
+	mip = q_max (0, q_min (wc_last_mips - 1, mip));
+	cu = (r0x + r1x) * 0.5f / W;
+	cv = (r0y + r1y) * 0.5f / H;
+	texel = (float) (1 << mip) / q_max (W, H);
+	for (k = 0; k < 4; k++)
+	{
+		WC_Fetch (p, mip, cu + su[k] * texel, cv + sv[k] * texel, &lo, &hi);
+		if (k == 0)
+		{
+			occ_lo = lo;
+			occ_hi = hi;
+		}
+		else if (wc_last_rz)	/* the occluder is the least of the four */
+		{
+			occ_lo = q_min (occ_lo, lo);
+			occ_hi = q_min (occ_hi, hi);
+		}
+		else			/* the greatest */
+		{
+			occ_lo = q_max (occ_lo, lo);
+			occ_hi = q_max (occ_hi, hi);
+		}
+	}
+	/* culled where the surface's nearest depth is behind the occluder:
+	 * below it under reversed-Z, above it forward */
+	if (wc_last_rz ? (dnear < occ_lo - 1e-5f) : (dnear > occ_hi + 1e-5f))
+		return amb ? -1 : 1;
+	if (wc_last_rz ? (dnear >= occ_hi + 1e-5f) : (dnear <= occ_lo - 1e-5f))
+		return amb ? -1 : 0;
+	return -1;
+}
+
+/* hiz_reduce_comp on the CPU: the texels of level `mip` that are not the
+ * reduce of the level below.  min and max are exact, so this is too. */
+static int WC_PyramidOff (const wc_pyramid_t *p, int mip)
+{
+	const float	*src = p->lv[mip - 1], *dst = p->lv[mip];
+	int		sw = p->w[mip - 1], sh = p->h[mip - 1], x, y, off = 0;
+
+#define WC_RED(a, b)	(wc_last_rz ? q_min ((a), (b)) : q_max ((a), (b)))
+#define WC_SRC(px, py)	src[q_min ((py), sh - 1) * sw + q_min ((px), sw - 1)]
+	for (y = 0; y < p->h[mip]; y++)
+	{
+		for (x = 0; x < p->w[mip]; x++)
+		{
+			int	sx = x * 2, sy = y * 2;
+			float	r = WC_RED (WC_RED (WC_SRC (sx, sy), WC_SRC (sx + 1, sy)),
+					    WC_RED (WC_SRC (sx, sy + 1), WC_SRC (sx + 1, sy + 1)));
+
+			if ((sw & 1) && sx + 2 < sw)
+				r = WC_RED (r, WC_RED (WC_SRC (sx + 2, sy), WC_SRC (sx + 2, sy + 1)));
+			if ((sh & 1) && sy + 2 < sh)
+				r = WC_RED (r, WC_RED (WC_SRC (sx, sy + 2), WC_SRC (sx + 1, sy + 2)));
+			off += (r != dst[y * p->w[mip] + x]);
+		}
+	}
+#undef WC_SRC
+#undef WC_RED
+	return off;
+}
+
+/* cull_mark_comp's tests on the CPU: the surface marksurface `ms` draws, or
+ * NULL.  `pvs` is the view leaf's, decompressed; `seen` the dedup across
+ * leaves.  With `p`, the Hi-Z test too, between the frustum and the dedup as
+ * the shader has it: a surface too close to call is drawn when `keep_amb`
+ * says so and counted in `amb`, a culled one in `hiz`. */
+static const gpu_surface_t *WC_CpuAccepts (const gpu_marksurf_t *ms, const byte *pvs, byte *seen,
+					   const wc_pyramid_t *p, qboolean keep_amb, int *hiz, int *amb)
 {
 	extern int		world_num_indices;
 	const gpu_surface_t	*s;
@@ -1340,6 +1629,15 @@ static const gpu_surface_t *WC_CpuAccepts (const gpu_marksurf_t *ms, const byte 
 		if (fn[0] * pv[0] + fn[1] * pv[1] + fn[2] * pv[2] + fn[3] < -512.0f)
 			return NULL;
 	}
+	if (p)
+	{
+		int	h = WC_CpuHiZ (s, p);
+
+		*amb += (h < 0);
+		*hiz += (h > 0);
+		if (h > 0 || (h < 0 && !keep_amb))
+			return NULL;
+	}
 	if (seen[ms->surf_idx])
 		return NULL;
 	seen[ms->surf_idx] = 1;
@@ -1349,73 +1647,26 @@ static const gpu_surface_t *WC_CpuAccepts (const gpu_marksurf_t *ms, const byte 
 	return s;
 }
 
-/* Reads the last frame's indirect commands and compacted indices back and
- * checks them against cull_mark_comp's tests run on the CPU over the same
- * inputs: per bucket the count, the first index (fixed at the build) and the
- * indices as a multiset, since the atomicAdd compaction orders them however
- * the invocations land.  The chain pass draws every surface the cull draws,
- * after it, so a cull that draws the wrong thing or nothing hardly shows in
- * a frame; this is what does.  Both backends, and the same line on each. */
-static void R_WorldCull_Verify_f (void)
+/* What cull_mark_comp would have written for the last dispatch, on the CPU,
+ * in its order: per bucket the count (`nwant`) and the indices (`want`, from
+ * `first`).  Returns the surfaces accepted; `hiz` and `amb` count the
+ * marksurfaces the Hi-Z test culled and could not call. */
+static int WC_CpuCull (const byte *pvs, byte *seen, const wc_pyramid_t *p, qboolean keep_amb,
+		       unsigned int *want, int *nwant, int *first, int *total, int *hiz, int *amb)
 {
-	qmodel_t		*m = cl.worldmodel;
-	gpu_indirect_cmd_t	*cmds = NULL;
-	unsigned int		*dst = NULL, *want = NULL;
-	int			*nwant = NULL, *first = NULL;
-	byte			*seen = NULL;
-	int			i, b, pass, total = 0, accepted = 0;
-	int			bad_count = 0, bad_first = 0, bad_cmd = 0, bad_idx = 0;
-	unsigned int		gpu_total = 0;
 	extern unsigned int	*world_index_data;
-	extern cvar_t		r_gpucull;
-	const byte		*pvs;
+	int			i, b, pass, accepted = 0;
 
-	if (!cull_initialized || !m || !cull_cpu_surfs || !cull_cpu_marks || !cull_bucket_first ||
-	    !cull_dst_ibo || !wc_last_leaf || !world_index_data)
-	{
-		CON_Printf (_PRINT_NONOTIFY, "worldcull_verify: no cull this frame (r_gpucull %d, built %d)\n",
-			    r_gpucull.integer, cull_initialized);
-		return;
-	}
-	if (wc_last_hiz)
-	{
-		CON_Printf (_PRINT_NONOTIFY, "worldcull_verify: the last dispatch had Hi-Z on, which the CPU "
-			    "cannot follow; set gl_hiz_cull 0\n");
-		return;
-	}
-	cmds = (gpu_indirect_cmd_t *) malloc (cull_num_buckets * sizeof(gpu_indirect_cmd_t));
-	dst = (unsigned int *) malloc (cull_total_indices * sizeof(unsigned int));
-	want = (unsigned int *) malloc (cull_total_indices * sizeof(unsigned int));
-	nwant = (int *) calloc (cull_num_buckets, sizeof(int));
-	first = (int *) calloc (cull_num_buckets, sizeof(int));
-	seen = (byte *) calloc (cull_num_surfs, 1);
-	if (!cmds || !dst || !want || !nwant || !first || !seen)
-	{
-		CON_Printf (_PRINT_NONOTIFY, "worldcull_verify: out of memory\n");
-		goto done;
-	}
-	GL_BindBuffer(GL_DRAW_INDIRECT_BUFFER, cull_indirect_buf);
-	i = R_ReadBuffer(GL_DRAW_INDIRECT_BUFFER, 0, cull_num_buckets * sizeof(gpu_indirect_cmd_t), cmds);
-	GL_BindBuffer(GL_DRAW_INDIRECT_BUFFER, 0);
-	GL_BindBuffer(GL_SHADER_STORAGE_BUFFER, cull_dst_ibo);
-	i = i && R_ReadBuffer(GL_SHADER_STORAGE_BUFFER, 0, cull_total_indices * sizeof(unsigned int), dst);
-	GL_BindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
-	if (!i)
-	{
-		CON_Printf (_PRINT_NONOTIFY, "worldcull_verify: the cull's buffers cannot be read back\n");
-		goto done;
-	}
-
-	/* cull_mark_comp's tests over the same marksurfaces, in its order:
-	 * the counts per bucket first, then where each bucket's indices go */
-	pvs = Mod_LeafPVS (wc_last_leaf, m);
+	*total = 0;
 	for (pass = 0; pass < 2; pass++)
 	{
 		memset (nwant, 0, cull_num_buckets * sizeof(int));
 		memset (seen, 0, cull_num_surfs);
+		*hiz = *amb = 0;
 		for (i = 0; i < cull_num_marksurfs; i++)
 		{
-			const gpu_surface_t	*s = WC_CpuAccepts (&cull_cpu_marks[i], pvs, seen);
+			const gpu_surface_t	*s = WC_CpuAccepts (&cull_cpu_marks[i], pvs, seen, p, keep_amb,
+								    hiz, amb);
 
 			if (!s)
 				continue;
@@ -1430,10 +1681,145 @@ static void R_WorldCull_Verify_f (void)
 			break;
 		for (b = 0; b < cull_num_buckets; b++)
 		{
-			first[b] = total;
-			total += nwant[b];
+			first[b] = *total;
+			*total += nwant[b];
 		}
 	}
+	return accepted;
+}
+
+/* Whether sorted `a` (na) is a sub-multiset of sorted `b` (nb). */
+static qboolean WC_SubMultiset (const unsigned int *a, int na, const unsigned int *b, int nb)
+{
+	int	i = 0, j = 0;
+
+	while (i < na && j < nb)
+	{
+		if (a[i] == b[j])
+		{
+			i++;
+			j++;
+		}
+		else if (a[i] > b[j])
+			j++;
+		else
+			return false;
+	}
+	return i == na;
+}
+
+/* The pyramid the last dispatch culled against, read back, and its levels
+ * held to hiz_reduce_comp run on the CPU.  Called right after that dispatch,
+ * before the frame's end builds the next one.  Mip 0 is the copy of the
+ * scene depth, which this cannot read back under -gpu (D24S8): the
+ * gl_hiz_stats counts against GL's are what hold it (tools/hiz-diff.sh). */
+static qboolean WC_ReadPyramid (wc_pyramid_t *p, int *off)
+{
+	int	mip;
+
+	*off = 0;
+	if (!hiz_pyramid_tex || !hiz_pyramid_valid ||
+	    hiz_width != wc_last_hizw || hiz_height != wc_last_hizh || hiz_mip_count != wc_last_mips ||
+	    wc_last_mips < 1 || wc_last_mips > WC_MAX_MIPS)
+	{
+		CON_Printf (_PRINT_NONOTIFY, "worldcull_verify: the Hi-Z pyramid the last dispatch read is gone "
+			    "(rebuilt at another size, or not valid now)\n");
+		return false;
+	}
+	p->mips = wc_last_mips;
+	for (mip = 0; mip < p->mips; mip++)
+	{
+		p->w[mip] = q_max (1, wc_last_hizw >> mip);
+		p->h[mip] = q_max (1, wc_last_hizh >> mip);
+		p->lv[mip] = (float *) malloc ((size_t) p->w[mip] * p->h[mip] * sizeof(float));
+		if (!p->lv[mip] ||
+		    !R_ReadTexImage (GL_TEXTURE_2D, hiz_pyramid_tex, mip, GL_RED, GL_FLOAT, p->lv[mip]))
+		{
+			CON_Printf (_PRINT_NONOTIFY, "worldcull_verify: the Hi-Z pyramid cannot be read back\n");
+			return false;
+		}
+		if (mip)
+			*off += WC_PyramidOff (p, mip);
+	}
+	return true;
+}
+
+/* Reads the last frame's indirect commands and compacted indices back and
+ * checks them against cull_mark_comp's tests run on the CPU over the same
+ * inputs: per bucket the count, the first index (fixed at the build) and the
+ * indices as a multiset, since the atomicAdd compaction orders them however
+ * the invocations land.  The chain pass draws every surface the cull draws,
+ * after it, so a cull that draws the wrong thing or nothing hardly shows in
+ * a frame; this is what does.  Both backends, and the same line on each.
+ *
+ * With Hi-Z on (#340 P5d) the CPU runs that test too, against the pyramid
+ * read back -- each of whose levels is first held to the reduce of the one
+ * below -- with the MVP and depth range the dispatch was given.  A surface
+ * too close to call may go either way, so a bucket agrees when the GPU drew
+ * at least what the CPU draws with every such surface culled, and at most
+ * what it draws with every one kept.  Asked with Hi-Z on, it runs right
+ * after the next mark dispatch (wc_verify_pending), against the pyramid that
+ * dispatch read, whatever moves in between. */
+static void WC_Verify (void)
+{
+	qmodel_t		*m = cl.worldmodel;
+	gpu_indirect_cmd_t	*cmds = NULL;
+	unsigned int		*dst = NULL, *want = NULL, *want_lo = NULL;
+	int			*nwant = NULL, *first = NULL, *nwant_lo = NULL, *first_lo = NULL;
+	byte			*seen = NULL;
+	int			i, b, total = 0, total_lo = 0, accepted, hiz = 0, amb = 0, hiz_lo = 0, amb_lo = 0;
+	int			bad_count = 0, bad_first = 0, bad_cmd = 0, bad_idx = 0, off = 0;
+	unsigned int		gpu_total = 0;
+	extern unsigned int	*world_index_data;
+	extern cvar_t		r_gpucull;
+	const byte		*pvs;
+	wc_pyramid_t		pyr, *p = NULL;
+
+	memset (&pyr, 0, sizeof(pyr));
+	if (!cull_initialized || !m || !cull_cpu_surfs || !cull_cpu_marks || !cull_bucket_first ||
+	    !cull_dst_ibo || !wc_last_leaf || !world_index_data)
+	{
+		CON_Printf (_PRINT_NONOTIFY, "worldcull_verify: no cull this frame (r_gpucull %d, built %d)\n",
+			    r_gpucull.integer, cull_initialized);
+		return;
+	}
+	cmds = (gpu_indirect_cmd_t *) malloc (cull_num_buckets * sizeof(gpu_indirect_cmd_t));
+	dst = (unsigned int *) malloc (cull_total_indices * sizeof(unsigned int));
+	want = (unsigned int *) malloc (cull_total_indices * sizeof(unsigned int));
+	want_lo = (unsigned int *) malloc (cull_total_indices * sizeof(unsigned int));
+	nwant = (int *) calloc (cull_num_buckets, sizeof(int));
+	first = (int *) calloc (cull_num_buckets, sizeof(int));
+	nwant_lo = (int *) calloc (cull_num_buckets, sizeof(int));
+	first_lo = (int *) calloc (cull_num_buckets, sizeof(int));
+	seen = (byte *) calloc (cull_num_surfs, 1);
+	if (!cmds || !dst || !want || !want_lo || !nwant || !first || !nwant_lo || !first_lo || !seen)
+	{
+		CON_Printf (_PRINT_NONOTIFY, "worldcull_verify: out of memory\n");
+		goto done;
+	}
+	if (wc_last_hiz)
+	{
+		if (!WC_ReadPyramid (&pyr, &off))
+			goto done;
+		p = &pyr;
+	}
+	GL_BindBuffer(GL_DRAW_INDIRECT_BUFFER, cull_indirect_buf);
+	i = R_ReadBuffer(GL_DRAW_INDIRECT_BUFFER, 0, cull_num_buckets * sizeof(gpu_indirect_cmd_t), cmds);
+	GL_BindBuffer(GL_DRAW_INDIRECT_BUFFER, 0);
+	GL_BindBuffer(GL_SHADER_STORAGE_BUFFER, cull_dst_ibo);
+	i = i && R_ReadBuffer(GL_SHADER_STORAGE_BUFFER, 0, cull_total_indices * sizeof(unsigned int), dst);
+	GL_BindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+	if (!i)
+	{
+		CON_Printf (_PRINT_NONOTIFY, "worldcull_verify: the cull's buffers cannot be read back\n");
+		goto done;
+	}
+
+	/* cull_mark_comp's tests over the same marksurfaces, in its order: once
+	 * keeping the surfaces too close to call, once culling them */
+	pvs = Mod_LeafPVS (wc_last_leaf, m);
+	accepted = WC_CpuCull (pvs, seen, p, true, want, nwant, first, &total, &hiz, &amb);
+	WC_CpuCull (pvs, seen, p, false, want_lo, nwant_lo, first_lo, &total_lo, &hiz_lo, &amb_lo);
 
 	for (b = 0; b < cull_num_buckets; b++)
 	{
@@ -1444,7 +1830,7 @@ static void R_WorldCull_Verify_f (void)
 			bad_first++;
 		if (cmds[b].instanceCount != 1 || cmds[b].baseVertex != 0 || cmds[b].baseInstance != 0)
 			bad_cmd++;
-		if (n != (unsigned int) nwant[b])
+		if (n < (unsigned int) nwant_lo[b] || n > (unsigned int) nwant[b])
 		{
 			bad_count++;
 			continue;
@@ -1452,21 +1838,40 @@ static void R_WorldCull_Verify_f (void)
 		if (!n || f != cull_bucket_first[b] || (size_t) f + n > (size_t) cull_total_indices)
 			continue;
 		qsort (dst + f, n, sizeof(unsigned int), WC_CompareUint);
-		qsort (want + first[b], n, sizeof(unsigned int), WC_CompareUint);
-		if (memcmp (dst + f, want + first[b], n * sizeof(unsigned int)))
+		qsort (want + first[b], nwant[b], sizeof(unsigned int), WC_CompareUint);
+		qsort (want_lo + first_lo[b], nwant_lo[b], sizeof(unsigned int), WC_CompareUint);
+		if (!WC_SubMultiset (want_lo + first_lo[b], nwant_lo[b], dst + f, n) ||
+		    !WC_SubMultiset (dst + f, n, want + first[b], nwant[b]))
 			bad_idx++;
 	}
 	CON_Printf (_PRINT_NONOTIFY, "worldcull_verify: %d surfaces accepted, %d indices on the CPU, %u on the "
 		    "GPU; of %d buckets %d disagree on the count, %d on the first index, %d on the rest of "
 		    "the command, %d on the indices\n", accepted, total, gpu_total, cull_num_buckets,
 		    bad_count, bad_first, bad_cmd, bad_idx);
+	if (p)
+		CON_Printf (_PRINT_NONOTIFY, "worldcull_verify: Hi-Z pyramid %dx%d in %d levels, %d texels off "
+			    "the reduce of the level below; %d marksurfaces culled by it on the CPU, %d too close "
+			    "to call\n", wc_last_hizw, wc_last_hizh, wc_last_mips, off, hiz, amb);
 done:
+	for (i = 0; i < WC_MAX_MIPS; i++)
+		free (pyr.lv[i]);
 	free (cmds);
 	free (dst);
 	free (want);
+	free (want_lo);
 	free (nwant);
 	free (first);
+	free (nwant_lo);
+	free (first_lo);
 	free (seen);
+}
+
+static void R_WorldCull_Verify_f (void)
+{
+	if (cull_initialized && gl_hiz_cull.integer && wc_last_hiz)
+		wc_verify_pending = true;
+	else
+		WC_Verify ();
 }
 
 void R_WorldCull_Init (void)
