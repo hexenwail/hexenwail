@@ -878,60 +878,52 @@ EMSCRIPTEN_KEEPALIVE void Hexenwail_ResizeCanvas (int css_width, int css_height)
 
 //====================================
 
+/*
+ * The window icon is the Hammer of Thyrion "XII" art (engine/resource/
+ * hexenwail.svg), embedded as a 128px RGBA PNG by tools/gen_icons.sh.  It
+ * replaces the 32px one-bit xbm the engine inherited from uHexen2, which drew
+ * a red stencil in taskbars and alt-tab switchers.
+ *
+ * Every desktop target sets it: X11 and Windows take it per window, and on
+ * macOS SDL hands it to NSApp as the Dock icon, which is the only icon a bare
+ * (non-.app) binary gets.  Wayland ignores it unless the compositor speaks
+ * xdg-toplevel-icon; there the icon comes from the .desktop file that the app
+ * id set in Sys_SDLInit names.  The browser has no window icon to set.
+ */
+#if !defined(__EMSCRIPTEN__)
+#include "../resource/hexenwail_icon.h"
+#include "stb_image.h"	/* declarations only; img_load.c holds the implementation */
+#endif
+
 static void VID_SetIcon (void)
 {
-/* from Kristian Duske:  "AFAIK, the application icon must be present in
- * Contents/Resources and it must be set in the Info.plist file. It will
- * then be used by Finder and Dock as well as for individual windows
- * unless overridden by a document icon. So SDL_WM_SetIcon() is probably
- * not necessary, and will likely use a low-res image anyway." */
-#if !defined(PLATFORM_OSX)
-
-#	include "xbm_icon.h"	/* the xbm data */
+#if !defined(__EMSCRIPTEN__)
 	SDL_Surface	*icon;
-	SDL_Color	color;
-	Uint8		*ptr;
-	int		i, mask;
-	SDL_Palette	*palette;
+	unsigned char	*rgba;
+	int		w, h, channels;
 
-	icon = SDL_CreateSurface(hx2icon_width, hx2icon_height, SDL_PIXELFORMAT_INDEX8);
-	if (icon == NULL)
+	rgba = stbi_load_from_memory (hexenwail_icon_png, (int) sizeof(hexenwail_icon_png),
+				      &w, &h, &channels, 4);
+	if (rgba == NULL || w != HEXENWAIL_ICON_SIZE || h != HEXENWAIL_ICON_SIZE)
+	{
+		Con_SafeDPrintf ("VID_SetIcon: embedded icon failed to decode\n");
+		if (rgba)
+			stbi_image_free (rgba);
 		return;
-
-	SDL_SetSurfaceColorKey(icon, true, 0);
-
-	palette = SDL_CreatePalette(256);
-	if (palette)
-	{
-		color.r = 255;
-		color.g = 255;
-		color.b = 255;
-		color.a = 255;
-		SDL_SetPaletteColors(palette, &color, 0, 1);	/* just in case */
-		color.r = 192;
-		color.g = 0;
-		color.b = 0;
-		color.a = 255;
-		SDL_SetPaletteColors(palette, &color, 1, 1);
-		SDL_SetSurfacePalette(icon, palette);
-		SDL_DestroyPalette(palette);
 	}
 
-	ptr = (Uint8 *)icon->pixels;
-	/* one bit represents a pixel, black or white:  each
-	 * byte in the xbm array contains data for 8 pixels. */
-	for (i = 0; i < (int) sizeof(hx2icon_bits); i++)
+	/* stb_image returns R,G,B,A bytes in memory order, which SDL names
+	 * ABGR8888 on little-endian and RGBA8888 on big-endian; RGBA32 is the
+	 * alias that means "these bytes" on both. */
+	icon = SDL_CreateSurfaceFrom (w, h, SDL_PIXELFORMAT_RGBA32, rgba, w * 4);
+	if (icon)
 	{
-		for (mask = 1; mask != 0x100; mask <<= 1)
-		{
-			*ptr = (hx2icon_bits[i] & mask) ? 1 : 0;
-			ptr++;
-		}
+		if (!SDL_SetWindowIcon (window, icon))
+			Con_SafeDPrintf ("VID_SetIcon: %s\n", SDL_GetError());
+		SDL_DestroySurface (icon);	/* SDL copied the pixels */
 	}
-
-	SDL_SetWindowIcon(window, icon);
-	SDL_DestroySurface(icon);
-#endif /* !OSX */
+	stbi_image_free (rgba);
+#endif
 }
 
 /*

@@ -121,6 +121,13 @@ Sys_SDLInit — call early from platform main()
 */
 void Sys_SDLInit (void)
 {
+	/* The app id is the Flatpak/AppStream id and the .desktop file's basename.
+	 * On Wayland SDL sends it as the xdg-toplevel app_id, which is how the
+	 * compositor finds the window's icon and groups it with its launcher;
+	 * on X11 it becomes WM_CLASS.  Must precede SDL_Init to reach the video
+	 * backend. */
+	SDL_SetAppMetadata("Hexenwail", HW_BASE_VERSION, "io.github.hexenwail.hexenwail");
+
 	if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS))
 		Sys_Error("SDL failed to initialize: %s", SDL_GetError());
 }

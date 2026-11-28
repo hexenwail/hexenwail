@@ -14,13 +14,11 @@
 
 // Icon file to use
 //
-#if defined(H2W)
-#define RES_ICONFILE	"../../resource/hexenworld.ico"
-#elif defined(H2MP)
-#define RES_ICONFILE	"../resource/h2mp.ico"
-#else
-#define RES_ICONFILE	"../resource/hexen2.ico"
-#endif
+// One executable serves Hexen II, the mission pack and HexenWorld, so it has
+// one icon: the Hammer of Thyrion "XII" art, generated from
+// resource/hexenwail.svg by tools/gen_icons.sh (16 to 256 px).  The older
+// per-game hexen2/h2mp/hexenworld .ico files stay as upstream shipped them.
+#define RES_ICONFILE	"../resource/hexenwail.ico"
 
 // String
 //
