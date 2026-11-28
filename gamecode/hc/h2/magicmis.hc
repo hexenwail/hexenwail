@@ -154,7 +154,7 @@ vector spread;
 	{
 		newmis.scale=0.5;
 		setorigin(newmis,self.origin+self.proj_ofs+v_forward*8+v_right*7+'0 0 5');
-		MuzzleFix (newmis, self, '32 -9 -16');	// spllbook.mdl mfire5
+		MuzzleFix (newmis, self, '23 7 -4');	// spllbook.mdl mfire5, casting hand
 		sound(newmis,CHAN_AUTO,"necro/mmfire.wav",1,ATTN_NORM);
 	}
 

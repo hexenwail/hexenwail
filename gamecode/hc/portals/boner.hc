@@ -366,7 +366,7 @@ vector org;
 		newmis.avelocity=randomv('777 777 777','-777 -777 -777');
 		setmodel(newmis,"models/bonelump.mdl");
 		setsize(newmis,'0 0 0','0 0 0');
-		MuzzleFix (newmis, self, '34 -4 -15');	// spllbook.mdl fire3
+		MuzzleFix (newmis, self, '23 11 -4');	// spllbook.mdl fire3, casting hand
 //newmis.think=power_trail;
 //thinktime newmis : 0;
 		self.greenmana-=20;
@@ -384,7 +384,7 @@ vector org;
 		newmis.angles=vectoangles(newmis.velocity);
 //		newmis.avelocity_z=random(777,-777);
 		// Keeps the shot pattern: vanilla's right offset is ofs_y + 12.
-		MuzzleFix (newmis, self, '34 -4 -15' + '0 1 0'*ofs_y + '0 0 1'*ofs_z);
+		MuzzleFix (newmis, self, '23 11 -4' + '0 1 0'*ofs_y + '0 0 1'*ofs_z);	// spllbook.mdl fire3, casting hand
 
 		newmis.wrq_effect_id = starteffect(CE_BONESHARD, newmis.origin, newmis.velocity,
 			newmis.angles,newmis.avelocity);
