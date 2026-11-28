@@ -184,10 +184,8 @@ Checked, from the sources (stock python3, lint.yml):
   seams, and three GL-only paths stay off under -gpu, each by
   `#ifdef USE_SDL_GPU / if (R_GPU ()) return[ false];` at the body's own
   level, ahead of the first thing the path does (GPU_GATES):
-    * OIT (P6): OIT_CreateFBO, OIT_BeginTranslucency, OIT_EndTranslucency
-      and OIT_Active.  The OIT twins read their targets through
-      sampler2DMS, which -gpu drops; once P4 turns post-process on under
-      -gpu, r_oit 1 would otherwise lose every translucent;
+    * (OIT: OIT_CreateFBO, OIT_BeginTranslucency, OIT_EndTranslucency and
+      OIT_Active were gated here until P6c lifted them: check_p6c);
     * (the soft-particle depth snapshot, GL_SoftDepth_Capture, was gated
       here until P4b lifted it: check_soft_particles);
     * the GPU particle buffers: R_GPU_Particles_Init makes none, where it
@@ -274,6 +272,19 @@ Checked, from the sources (stock python3, lint.yml):
     * the gates stay: R_Shadow_Prepare and the five OIT gates (GPU_GATES),
       PP_SceneSamples (check_postprocess); RG_MAX_BLOCKS is at least the
       24 P6 needs, with ShadowPass and OitParams among the blocks counted.
+      (P6b lifted the first, P6c the OIT five.)
+  MRT and OIT under -gpu, no MSAA (#340 P6c, check_p6c):
+    * the OIT gates are gone; OIT_CreateFBO refuses only samples > 1 under
+      -gpu, said, before it makes a target, and sends r_oit 2 to 1, said
+      and counted, on a device that cannot blend into R32F / RGBA32F;
+      OIT_InitShader builds no MSAA resolve there;
+    * up to RG_MAX_COLOR (2 .. 8) colour targets: glDrawBuffers takes
+      ATT0 .. n-1 in order; each target is keyed with its own format and
+      blend (draw buffer i's blend_eff_*), begun with its own clear
+      (glClear's into all, glClearBufferfv (GL_COLOR, i) into i's), and
+      RG_Frame_TargetHolds looks at all of them;
+    * the device is asked COLOR_ATTACHMENT_BLEND (0x100) for R32F and
+      RGBA32F; renderer_status reads P6c.
   the post-process chain on SDL_GPU render targets (#340 P4a-2,
   check_render_targets), which tools/sweep-pp-gpu.steps and tools/pp-diff.sh
   draw:
@@ -1939,13 +1950,14 @@ def check_storage(root):
     b = body_named(root, "engine/h2shared/gl_vidsdl.c", "GL_Init_NullGL")
     if b is not None:
         on = sorted(set(re.findall(r"\bgl_renderer_caps\.(\w+)\s*=\s*true\s*;", b)))
-        if on != ["compute_shaders", "float_color_buffer", "indirect_draw", "shader_storage",
-                  "skeletal_animation", "texture_lod_bias"]:
+        if on != ["compute_shaders", "float_color_buffer", "indexed_blending", "indirect_draw", "oit",
+                  "shader_storage", "skeletal_animation", "texture_lod_bias"]:
             fail("engine/h2shared/gl_vidsdl.c: GL_Init_NullGL turns on %s; under -gpu exactly "
                  "shader_storage, skeletal_animation (#340 P2e), texture_lod_bias (sampler "
                  "mip_lod_bias, GitHub #521), float_color_buffer (r_hdr's RGBA16F targets, P4e), "
                  "compute_shaders and indirect_draw (P5a-2: rg_compute.c, each pass not routed yet "
-                 "behind a gate of its own) are real" % (on or "nothing"))
+                 "behind a gate of its own), indexed_blending and oit (a blend per colour target, "
+                 "P6c) are real" % (on or "nothing"))
         on = re.search(r"\bgl_renderer_caps\.compute_shaders\s*=\s*true\s*;", b)
         init = re.search(r"\bGL_PostProcess_Init\s*\(\s*\)\s*;", b)
         if not (on and init and on.end() <= init.start()):
@@ -2261,22 +2273,6 @@ def check_standin(root):
 # (file, function, what the gate returns, the first thing it must come before,
 #  what must come before the gate or None, why).  #340 P3a.
 GPU_GATES = (
-    ("engine/h2shared/gl_postprocess.c", "OIT_CreateFBO", "false",
-     r"\bOIT_DeleteFBO\s*\(|\bR_GenTextures\s*\(|\bgl\w+_fp\s*\(", None,
-     "OIT is P6: its twins read sampler2DMS, which -gpu drops"),
-    ("engine/h2shared/gl_postprocess.c", "OIT_BeginTranslucency", "",
-     r"\boit_in_pass\s*=|\bgl\w+_fp\s*\(|\bR_Set\w+\s*\(", None,
-     "OIT is P6: once P4 runs post-process under -gpu, r_oit 1 would draw every translucent into nothing"),
-    ("engine/h2shared/gl_postprocess.c", "OIT_EndTranslucency", "",
-     r"\boit_in_pass\s*=|\bgl\w+_fp\s*\(|\bR_\w+\s*\(", None,
-     "OIT is P6: the resolve samples the twins' sampler2DMS targets"),
-    ("engine/h2shared/gl_postprocess.c", "OIT_Active", "false",
-     r"\breturn\s+oit_available\b", None,
-     "OIT is P6: callers must see sorted blending under -gpu"),
-    ("engine/h2shared/gl_postprocess.c", "OIT_InitShader", "false",
-     r"\bR_Program_Create\s*\(|\bgl\w+_fp\s*\(|\bPP_BindUniformBlock\s*\(", None,
-     "OIT is P6: the null glBlendFunci is not NULL, so every -gpu boot reached it, and it is raw GL "
-     "for a resolve -gpu never draws (#340 P4a-1)"),
     ("engine/hexen2/r_part.c", "R_GPU_Particles_Init", "",
      r"\bGL_CreateParticleResources\s*\(", None,
      "the GPU particle buffers are raw GL, into the null table, for a path nothing draws"),
@@ -3399,24 +3395,26 @@ def check_p6b(root):
                      % (rel, m.group(0)))
     if fr is not None:
         b = body_named(root, "engine/h2shared/rg_frame.c", "RGF_EndSegment") or ""
-        need = ("ct.cycle = false;", "ds.cycle = false;", "ds.layer = (Uint8) rgf_tgt.dlayer;")
+        need = ("ct[i].cycle = false;", "ds.cycle = false;", "ds.layer = (Uint8) rgf_tgt.dlayer;")
         for w in need:
             if squash(w) not in squash(b):
-                fail("rg_frame.c: RGF_EndSegment must set `%s` on the pass it begins (#340 P6b)" % w)
+                fail("rg_frame.c: RGF_EndSegment must set `%s` on the pass it begins (#340 P6b; per colour target "
+                     "since P6c)" % w)
         cd = re.search(r"ds\.clear_depth\s*=\s*\(\s*rgf_clear_mask\s*&\s*GL_DEPTH_BUFFER_BIT\s*\)\s*\?\s*"
                        r"rgf_pass_clear_depth\s*:\s*rgf_clear_depth\s*;", b)
         if not cd:
             fail("rg_frame.c: RGF_EndSegment must clear depth to rgf_pass_clear_depth when the pass's "
                  "mask asks, and to rgf_clear_depth (glClearDepth's) on a first pass nothing asked of: "
                  "glClearBufferfv's value is its own pass's alone (#340 P6b)")
-        if not re.search(r"\bpass\s*=\s*SDL_BeginGPURenderPass\s*\(\s*rgf_cmd\s*,\s*rgf_tgt\.color\s*\?\s*&ct\s*:"
-                         r"\s*NULL\s*,\s*rgf_tgt\.color\s*\?\s*1\s*:\s*0\s*,\s*rgf_tgt\.depth\s*\?\s*&ds\s*:"
+        if not re.search(r"\bpass\s*=\s*SDL_BeginGPURenderPass\s*\(\s*rgf_cmd\s*,\s*rgf_tgt\.ncolor\s*\?\s*ct\s*:"
+                         r"\s*NULL\s*,\s*\(\s*Uint32\s*\)\s*rgf_tgt\.ncolor\s*,\s*rgf_tgt\.depth\s*\?\s*&ds\s*:"
                          r"\s*NULL\s*\)", b):
-            fail("rg_frame.c: RGF_EndSegment must begin a depth-only pass with no colour target (#340 P6b)")
+            fail("rg_frame.c: RGF_EndSegment must begin a pass with the target's ncolor colour targets, "
+                 "none for a depth-only one (#340 P6b, P6c)")
         bd = body_named(root, "engine/h2shared/rg_frame.c", "RGF_BeginDraw") or ""
-        if not re.search(r"if\s*\(\s*!rgf_tgt_ok\s*\|\|\s*\(\s*!rgf_tgt\.color\s*&&\s*!rgf_tgt\.depth\s*\)\s*\)", bd):
+        if not re.search(r"if\s*\(\s*!rgf_tgt_ok\s*\|\|\s*\(\s*!rgf_tgt\.ncolor\s*&&\s*!rgf_tgt\.depth\s*\)\s*\)", bd):
             fail("rg_frame.c: RGF_BeginDraw must draw into a depth-only target and drop only an incomplete "
-                 "one or one with neither (#340 P6b: the shadow maps)")
+                 "one or one with neither (#340 P6b: the shadow maps; ncolor since P6c)")
         qc = body_named(root, "engine/h2shared/rg_frame.c", "RGF_QueueClear") or ""
         cb = body_named(root, "engine/h2shared/rg_frame.c", "RG_ClearBuffer") or ""
         if not re.search(r"rgf_pass_clear_depth\s*=\s*depth\s*;\s*if\s*\(\s*keep\s*\)\s*rgf_clear_depth\s*=\s*depth\s*;", qc):
@@ -3424,13 +3422,17 @@ def check_p6b(root):
                  "(#340 P6b)")
         if not re.search(r"if\s*\(\s*buffer\s*==\s*GL_DEPTH\s*&&\s*drawbuffer\s*==\s*0\s*\)\s*\{\s*"
                          r"RGF_QueueClear\s*\(\s*GL_DEPTH_BUFFER_BIT\s*,\s*NULL\s*,\s*value\s*\[\s*0\s*\]\s*,"
-                         r"\s*0\s*,\s*false\s*\)\s*;\s*return\s*;\s*\}\s*RG_NoteUnhandled\s*\(", cb):
+                         r"\s*0\s*,\s*false\s*,\s*-1\s*\)\s*;\s*return\s*;\s*\}\s*"
+                         r"if\s*\(\s*buffer\s*==\s*GL_COLOR\s*&&\s*drawbuffer\s*>=\s*0\s*&&\s*drawbuffer\s*<\s*RG_MAX_COLOR\s*\)"
+                         r"\s*\{\s*RGF_QueueClear\s*\(\s*GL_COLOR_BUFFER_BIT\s*,\s*value\s*,\s*0\.0f\s*,\s*0\s*,\s*false\s*,"
+                         r"\s*drawbuffer\s*\)\s*;\s*return\s*;\s*\}\s*RG_NoteUnhandled\s*\(", cb):
             fail("rg_frame.c: RG_ClearBuffer must queue GL_DEPTH's clear of draw buffer 0 without touching "
-                 "glClearDepth's value, and count everything else (#340 P6b; colour is P6c)")
+                 "glClearDepth's value, GL_COLOR i's into draw buffer i alone, and count everything else "
+                 "(#340 P6b, P6c)")
         rc = body_named(root, "engine/h2shared/rg_frame.c", "RG_Clear") or ""
-        if squash("RGF_QueueClear (mask, color, depth, stencil, true);") not in squash(rc):
-            fail("rg_frame.c: RG_Clear must be RGF_QueueClear (..., true): glClear's depth is the first "
-                 "pass's from then on (#340 P6b)")
+        if squash("RGF_QueueClear (mask, color, depth, stencil, true, -1);") not in squash(rc):
+            fail("rg_frame.c: RG_Clear must be RGF_QueueClear (..., true, -1): glClear's depth is the first "
+                 "pass's from then on, its colour every target's (#340 P6b, P6c)")
         gs = body_named(root, "engine/h2shared/rg_frame.c", "RG_GetScissor") or ""
         if squash(gs).strip("{}") != squash("memcpy (box, rgf_scissor, sizeof(rgf_scissor));return rgf_scissor_on;"):
             fail("rg_frame.c: RG_GetScissor must hand back RG_SetScissor's box and switch (#340 P6b)")
@@ -3507,16 +3509,16 @@ def check_p6b(root):
                 not re.search(r"#define\s+RGV_FILTER_LINEAR\s+0x00001000u", dv):
             fail("rg_device.c: the depth linear-filter probe must read optimal-tiling "
                  "VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT (0x1000) (#340 P6b)")
-        if not re.search(r'"\[RENDERER\] SDL_GPU P6b: ', dv):
-            fail("rg_device.c: the renderer_status phase line must read P6b (#340 P6b)")
+        if not re.search(r'"\[RENDERER\] SDL_GPU P6[b-z]: ', dv):
+            fail("rg_device.c: the renderer_status phase line must read P6b or later (#340 P6b)")
     pp = code_of("engine/h2shared/rg_pipeline.c")
     if pp is not None:
-        if not re.search(r"if\s*\(\s*k->color_fmt\s*!=\s*SDL_GPU_TEXTUREFORMAT_INVALID\s*\)\s*\{\s*"
-                         r"ci\.target_info\.color_target_descriptions\s*=\s*&ct\s*;\s*"
-                         r"ci\.target_info\.num_color_targets\s*=\s*1\s*;\s*\}", pp) or \
+        if not re.search(r"if\s*\(\s*k->ncolor\s*\)\s*\{\s*"
+                         r"ci\.target_info\.color_target_descriptions\s*=\s*ct\s*;\s*"
+                         r"ci\.target_info\.num_color_targets\s*=\s*k->ncolor\s*;\s*\}", pp) or \
                 len(re.findall(r"num_color_targets\s*=", pp)) != 1:
-            fail("rg_pipeline.c: a pipeline has one colour target only when the target has a colour format: "
-                 "a depth-only one has none, or SDL refuses it and every shadow draw drops (#340 P6b)")
+            fail("rg_pipeline.c: a pipeline has the target's ncolor colour targets, a depth-only one none, "
+                 "or SDL refuses it and every shadow draw drops (#340 P6b, P6c)")
     # The gate and the menu's -gpu ceiling are gone.
     prep = body_named(root, "engine/h2shared/gl_shadow.c", "R_Shadow_Prepare") or ""
     if re.search(r"if\s*\(\s*(?:R|SH)_GPU\s*\(\s*\)\s*\)\s*return\b", prep):
@@ -3524,6 +3526,134 @@ def check_p6b(root):
     menu = code_of("engine/hexen2/menu.c")
     if menu is not None and re.search(r"\bR_GPU\s*\(", menu):
         fail("engine/hexen2/menu.c: the occlusion row's -gpu ceiling is back (#340 P6b lifted it)")
+
+
+def check_p6c(root):
+    """#340 P6c: MRT and OIT (r_oit 1 and 2) under -gpu, no MSAA."""
+    def code_of(rel):
+        p = root / rel
+        if not p.is_file():
+            fail("%s: missing -- the #340 P6c pins have nothing to read" % rel)
+            return None
+        return strip_c_comments(p.read_text(errors="replace"))
+
+    pp = "engine/h2shared/gl_postprocess.c"
+    if code_of(pp) is None:
+        return
+    # The five gates are gone: OIT draws under -gpu.
+    for fn in ("OIT_BeginTranslucency", "OIT_EndTranslucency", "OIT_Active", "OIT_InitShader"):
+        b = body_named(root, pp, fn) or ""
+        if not b:
+            fail("%s: no %s (#340 P6c)" % (pp, fn))
+        elif re.search(r"if\s*\(\s*R_GPU\s*\(\s*\)\s*\)\s*(?:/\*.*?\*/\s*)?return\b", b, re.S):
+            fail("%s: %s returns under -gpu again -- P6c lifted the OIT gates (#340)" % (pp, fn))
+    cf = body_named(root, pp, "OIT_CreateFBO") or ""
+    gate = re.search(r"if\s*\(\s*R_GPU\s*\(\s*\)\s*&&\s*samples\s*>\s*1\s*\)\s*\{\s*Con_SafePrintf\s*\(\s*"
+                     r'"OIT: unavailable with MSAA under -gpu \(no multisample sampling\)\\n"\s*\)\s*;\s*'
+                     r"oit_samples\s*=\s*0\s*;\s*return\s+false\s*;\s*\}", cf)
+    first = re.search(r"\bR_GenTextures\s*\(", cf)
+    if not (gate and first and gate.start() < first.start()):
+        fail("%s: OIT_CreateFBO must refuse samples > 1 under -gpu, said, before it makes a target: SDL_GPU "
+             "samples no multisampled texture, so neither the per-sample resolve nor the composite's "
+             "moment reads can run (#340 P6c, Q4: P6e)" % pp)
+    if re.search(r"if\s*\(\s*R_GPU\s*\(\s*\)\s*\)\s*return\s+false\s*;", cf):
+        fail("%s: OIT_CreateFBO refuses -gpu outright again -- P6c lifted that gate (#340)" % pp)
+    if not re.search(r"else\s+if\s*\(\s*R_GPU\s*\(\s*\)\s*&&\s*!\s*\(\s*RG_TargetFormatBlends\s*\(\s*GL_R32F\s*\)\s*&&\s*"
+                     r"RG_TargetFormatBlends\s*\(\s*GL_RGBA32F\s*\)\s*\)\s*\)\s*\{\s*mboit_available\s*=\s*false\s*;\s*"
+                     r'Con_SafePrintf\s*\(\s*"OIT: the device cannot blend into the MBOIT moment targets', cf):
+        fail("%s: OIT_CreateFBO must send r_oit 2 to 1, said, when the device cannot blend into R32F or "
+             "RGBA32F (optional in Vulkan; RG_TargetFormatBlends counts it) (#340 P6c, top risk 7)" % pp)
+    ib = body_named(root, pp, "OIT_InitShader") or ""
+    if not re.search(r"#\s*ifdef\s+USE_SDL_GPU\s+if\s*\(\s*!\s*R_GPU\s*\(\s*\)\s*\)\s*#\s*endif\s+"
+                     r"oit_resolve_prog_msaa\s*=\s*R_Program_Create\s*\(\s*RPROG_OIT_RESOLVE_MSAA\s*\)", ib):
+        fail("%s: OIT_InitShader must not build RPROG_OIT_RESOLVE_MSAA under -gpu: its sampler2DMS can "
+             "never be bound (#340 P6c)" % pp)
+    # The pass state -gpu builds each OIT pipeline from (the plan's proxies
+    # 6-9): GL's own code, pinned here because -gpu's frames rest on it.
+    bt = squash(body_named(root, pp, "OIT_BeginTranslucency") or "")
+    if bt.count("R_SetDepthMask(false);") != 2:
+        fail("%s: OIT_BeginTranslucency must turn depth writes off in both arms (MBOIT's moments, WBOIT): "
+             "a translucent that writes depth hides the ones behind it (#340 P6c, proxy 9)" % pp)
+    nb = squash(body_named(root, pp, "OIT_NextPass") or "")
+    for w in ("R_DrawBuffers(1,&one);", "R_SetDepthMask(false);",
+              "R_BindTextureTarget((oit_samples>1)?MBOIT_TMU_B0_MS:MBOIT_TMU_B0,textarget,mboit_b0_tex);",
+              "R_BindTextureTarget((oit_samples>1)?MBOIT_TMU_MOM_MS:MBOIT_TMU_MOM,textarget,mboit_mom_tex);"):
+        if w not in nb:
+            fail("%s: OIT_NextPass must make `%s`: the composite draws accum alone, reading the moment "
+                 "targets (#340 P6c, proxies 5-6)" % (pp, w))
+    eb = squash(body_named(root, pp, "OIT_EndTranslucency") or "")
+    cull = eb.find("R_SetCull(false);")
+    draw = eb.find("R_DrawArrays(GL_TRIANGLES,0,3);")
+    vp = eb.find("R_SetViewport(saved_viewport[0],saved_viewport[1],saved_viewport[2],saved_viewport[3]);")
+    if not (0 <= cull < draw < vp and "R_GetViewport(saved_viewport);" in eb):
+        fail("%s: OIT_EndTranslucency must turn culling off before the resolve's draw and put the saved "
+             "viewport back after it (uhexen2-z4r1, uhexen2-osya; #340 P6c, proxies 7-8)" % pp)
+
+    # The pipeline: N colour targets, each its own blend.
+    pl = code_of("engine/h2shared/rg_pipeline.c")
+    if pl is not None:
+        mk = body_named(root, "engine/h2shared/rg_pipeline.c", "RG_MakeKey") or ""
+        if not re.search(r"int\s+b\s*=\s*q_min\s*\(\s*i\s*,\s*RP_MAX_BLEND_TARGETS\s*-\s*1\s*\)\s*;\s*"
+                         r"k->blend_src\s*\[\s*i\s*\]\s*=\s*s->blend_eff_src\s*\[\s*b\s*\]\s*;\s*"
+                         r"k->blend_dst\s*\[\s*i\s*\]\s*=\s*s->blend_eff_dst\s*\[\s*b\s*\]\s*;", mk):
+            fail("rg_pipeline.c: RG_MakeKey must key draw buffer i's blend from blend_eff_*[i] (the last "
+                 "indexed one past them): WBOIT's revealage blends ZERO, ONE_MINUS_SRC_COLOR beside "
+                 "accum's ONE, ONE (#340 P6c)")
+        if not re.search(r"k->color_fmt\s*\[\s*i\s*\]\s*=\s*tgt->cfmt\s*\[\s*i\s*\]\s*;", mk):
+            fail("rg_pipeline.c: RG_MakeKey must key every colour target's format (#340 P6c)")
+        cp = body_named(root, "engine/h2shared/rg_pipeline.c", "RG_CreatePipeline") or ""
+        if not re.search(r"for\s*\(\s*i\s*=\s*0\s*;\s*i\s*<\s*k->ncolor\s*;\s*i\+\+\s*\)\s*\{\s*"
+                         r"ct\s*\[\s*i\s*\]\s*\.format\s*=\s*\(SDL_GPUTextureFormat\)\s*k->color_fmt\s*\[\s*i\s*\]\s*;", cp) or \
+                not re.search(r"RG_BlendFactor\s*\(\s*k->blend_src\s*\[\s*i\s*\]\s*\)", cp) or \
+                not re.search(r"RG_BlendFactor\s*\(\s*k->blend_dst\s*\[\s*i\s*\]\s*\)", cp):
+            fail("rg_pipeline.c: RG_CreatePipeline must describe each colour target with its own format "
+                 "and blend (#340 P6c)")
+    ri = code_of("engine/h2shared/rg_internal.h")
+    if ri is not None:
+        m = re.search(r"#define\s+RG_MAX_COLOR\s+(\d+)", ri)
+        if not m or not (2 <= int(m.group(1)) <= 8):
+            fail("rg_internal.h: RG_MAX_COLOR must be 2 .. 8: OIT needs 2, SDL_GPU takes 8 (#340 P6c)")
+    # The pass: a clear per colour target.
+    fr = code_of("engine/h2shared/rg_frame.c")
+    if fr is not None:
+        es = body_named(root, "engine/h2shared/rg_frame.c", "RGF_EndSegment") or ""
+        if not re.search(r"for\s*\(\s*i\s*=\s*0\s*;\s*i\s*<\s*rgf_tgt\.ncolor\s*;\s*i\+\+\s*\)\s*\{\s*"
+                         r"ct\s*\[\s*i\s*\]\s*\.texture\s*=\s*rgf_tgt\.color\s*\[\s*i\s*\]\s*;", es) or \
+                not re.search(r"if\s*\(\s*rgf_clear_cbits\s*&\s*\(\s*1u\s*<<\s*i\s*\)\s*\)\s*\{\s*"
+                              r"ct\s*\[\s*i\s*\]\s*\.load_op\s*=\s*SDL_GPU_LOADOP_CLEAR\s*;\s*"
+                              r"ct\s*\[\s*i\s*\]\s*\.clear_color\.r\s*=\s*rgf_clear_rgba\s*\[\s*i\s*\]\s*\[\s*0\s*\]\s*;", es):
+            fail("rg_frame.c: RGF_EndSegment must begin each colour target with its own clear: WBOIT clears "
+                 "accum to 0 and revealage to 1 (#340 P6c)")
+        qc = body_named(root, "engine/h2shared/rg_frame.c", "RGF_QueueClear") or ""
+        if not re.search(r"if\s*\(\s*drawbuffer\s*>=\s*0\s*&&\s*rgf_tgt_ok\s*&&\s*drawbuffer\s*>=\s*rgf_tgt\.ncolor\s*\)\s*"
+                         r"return\s*;", qc) or \
+                not re.search(r"if\s*\(\s*drawbuffer\s*<\s*0\s*\|\|\s*drawbuffer\s*==\s*i\s*\)\s*\{\s*"
+                              r"memcpy\s*\(\s*rgf_clear_rgba\s*\[\s*i\s*\]\s*,\s*color\s*,", qc):
+            fail("rg_frame.c: RGF_QueueClear must clear glClear's colour into every target and "
+                 "glClearBufferfv's into its draw buffer alone, none past the target's (#340 P6c)")
+        th = body_named(root, "engine/h2shared/rg_frame.c", "RG_Frame_TargetHolds") or ""
+        if not re.search(r"for\s*\(\s*i\s*=\s*0\s*;\s*i\s*<\s*rgf_tgt\.ncolor\s*;\s*i\+\+\s*\)", th):
+            fail("rg_frame.c: RG_Frame_TargetHolds must look at every colour target: the second is a "
+                 "texture a draw into the pass must not sample (#340 P6c)")
+    tg = code_of("engine/h2shared/rg_target.c")
+    if tg is not None:
+        db = body_named(root, "engine/h2shared/rg_target.c", "RG_DrawBuffers") or ""
+        if not re.search(r"if\s*\(\s*bufs\s*\[\s*i\s*\]\s*!=\s*GL_COLOR_ATTACHMENT0\s*\+\s*\(GLenum\)\s*i\s*\)\s*break\s*;", db) or \
+                not re.search(r"if\s*\(\s*n\s*>=\s*1\s*&&\s*n\s*<=\s*RG_MAX_COLOR\s*&&\s*i\s*==\s*n\s*\)", db):
+            fail("rg_target.c: RG_DrawBuffers must take GL_COLOR_ATTACHMENT0 .. n-1 in order, n up to "
+                 "RG_MAX_COLOR, and refuse anything else (#340 P6c)")
+    # The device is asked what it blends into.
+    dv = code_of("engine/h2shared/rg_device.c")
+    if dv is not None:
+        if not re.search(r"#define\s+RGV_BLEND\s+0x00000100u", dv) or \
+                not re.search(r"if\s*\(\s*fp\.optimal\s*&\s*RGV_BLEND\s*\)", dv):
+            fail("rg_device.c: the blend probe must read optimal-tiling "
+                 "VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT (0x100) (#340 P6c)")
+        for fmt, vk in (("R32_FLOAT", 100), ("R32G32B32A32_FLOAT", 109)):
+            if not re.search(r"\{\s*SDL_GPU_TEXTUREFORMAT_%s\s*,\s*%d\s*\}" % (fmt, vk), dv):
+                fail("rg_device.c: RGV_BLEND_FORMATS must ask about %s (VkFormat %d) (#340 P6c)" % (fmt, vk))
+        if not re.search(r'"\[RENDERER\] SDL_GPU P6[c-z]: ', dv):
+            fail("rg_device.c: the renderer_status phase line must read P6c or later (#340 P6c)")
 
 
 def squash(s):
@@ -3581,13 +3711,13 @@ def check_render_targets(root):
         ex = re.search(r"\bif\s*\(\s*RGTG_HasExtra\s*\(\s*f\s*\)\s*\)\s*return\s+GL_FRAMEBUFFER_UNSUPPORTED\s*;", b)
         ok = re.search(r"\breturn\s+GL_FRAMEBUFFER_COMPLETE\s*;", b)
         if not (ex and ok and ex.start() < ok.start()):
-            fail("%s: RGTG_Complete must return GL_FRAMEBUFFER_UNSUPPORTED for a second colour "
-                 "attachment before it can return COMPLETE -- OIT's MRT (P6) drawn into one target "
-                 "would lose every translucent (#340 P4a-2)" % rt)
-        for asp, usage in (("color", "COLOR_TARGET"), ("depth", "DEPTH_STENCIL_TARGET")):
-            if not re.search(r"\bRG_Res_RenderTarget\s*\(\s*f->%s\s*,\s*SDL_GPU_TEXTUREUSAGE_%s\b" % (asp, usage), b):
+            fail("%s: RGTG_Complete must return GL_FRAMEBUFFER_UNSUPPORTED for a colour attachment past "
+                 "RG_MAX_COLOR before it can return COMPLETE -- never one silently dropped from the pass "
+                 "(#340 P4a-2, P6c)" % rt)
+        for asp, usage in ((r"RGTG_Color\s*\(\s*f\s*,\s*i\s*\)", "COLOR_TARGET"), (r"f->depth", "DEPTH_STENCIL_TARGET")):
+            if not re.search(r"\bRG_Res_RenderTarget\s*\(\s*%s\s*,\s*SDL_GPU_TEXTUREUSAGE_%s\b" % (asp, usage), b):
                 fail("%s: RGTG_Complete must realize the %s attachment through RG_Res_RenderTarget "
-                     "with SDL_GPU_TEXTUREUSAGE_%s (#340 P4a-2)" % (rt, asp, usage))
+                     "with SDL_GPU_TEXTUREUSAGE_%s (#340 P4a-2; every colour attachment since P6c)" % (rt, asp, usage))
     b = body_named(root, rt, "RGTG_Resolve")
     if b is not None and not re.search(r"\bif\s*\(\s*fbo\s*==\s*0\s*\)\s*\{\s*RG_Frame_SceneTarget\s*\(\s*out\s*\)\s*;"
                                        r"\s*return\s+true\s*;", b):
@@ -3713,9 +3843,9 @@ def check_render_targets(root):
                  "the clear wipes it (#548)" % rf)
     b = body_named(root, rf, "RGF_BeginDraw")
     if b is not None:
-        if not re.search(r"\bRG_PipelineFor\s*\(\s*prog\s*,\s*prim\s*,\s*layout\s*,\s*rgf_tgt\.cfmt\s*,\s*rgf_tgt\.dfmt\s*\)", b):
-            fail("%s: RGF_BeginDraw must build the pipeline for the current target's formats (rgf_tgt.cfmt, "
-                 "rgf_tgt.dfmt) -- the scene's fail r_hdr's RGBA16F and a colour-only target (#340 P4a-2)" % rf)
+        if not re.search(r"\bRG_PipelineFor\s*\(\s*prog\s*,\s*prim\s*,\s*layout\s*,\s*&rgf_tgt\s*\)", b):
+            fail("%s: RGF_BeginDraw must build the pipeline for the current target's formats (&rgf_tgt) -- "
+                 "the scene's fail r_hdr's RGBA16F, a colour-only target and OIT's two (#340 P4a-2, P6c)" % rf)
         if re.search(r"\brgf_t[wh]\b", b) or not re.search(r"\bsc_x1\s*=\s*rgf_tgt\.w\s*;\s*sc_y1\s*=\s*rgf_tgt\.h\s*;", b):
             fail("%s: RGF_BeginDraw must clamp the scissor to the current target (rgf_tgt.w / .h), not the "
                  "scene's size (#340 P4a-2)" % rf)
@@ -5436,6 +5566,7 @@ def main(argv=None):
     check_ssao(root)
     check_p6a(root)
     check_p6b(root)
+    check_p6c(root)
     check_compute_waits(root)
     nfiles = 0
     rg_files = []

@@ -43,7 +43,10 @@ static int		rg_vk_max2d;
 /* The depth formats it filters linearly, a bit per RGV_DEPTH_FORMATS entry,
  * asked the same way (#340 P6b). */
 static Uint32		rg_vk_depth_linear;
-static int		RG_VulkanMax2D (const char *name, Uint32 *depth_linear);
+/* The colour formats it blends into, a bit per RGV_BLEND_FORMATS entry
+ * (#340 P6c). */
+static Uint32		rg_vk_blend;
+static int		RG_VulkanMax2D (const char *name, Uint32 *depth_linear, Uint32 *blend);
 static SDL_GPUPresentMode	rg_present_mode = SDL_GPU_PRESENTMODE_VSYNC;
 static float		rg_clear[3] = { 0.25f, 0.5f, 0.75f };
 
@@ -276,8 +279,9 @@ qboolean RG_CreateDevice (SDL_Window *window, int vsync)
 
 	name = SDL_GetStringProperty (SDL_GetGPUDeviceProperties (rg_dev),
 				      SDL_PROP_GPU_DEVICE_NAME_STRING, "unknown device");
-	rg_vk_depth_linear = 0;
-	rg_vk_max2d = !strcmp (RG_DriverName (), "vulkan") ? RG_VulkanMax2D (name, &rg_vk_depth_linear) : 0;
+	rg_vk_depth_linear = rg_vk_blend = 0;
+	rg_vk_max2d = !strcmp (RG_DriverName (), "vulkan")
+		? RG_VulkanMax2D (name, &rg_vk_depth_linear, &rg_vk_blend) : 0;
 	Con_SafePrintf ("SDL_GPU: %s on %s, present %s, debug %s%s, shaders from %s, textures to %d\n",
 			RG_DriverName (), name, rg_headless ? "headless" : RG_PresentModeName (rg_present_mode),
 			debug ? "on" : "off", software ? ", software drivers allowed" : "",
@@ -327,7 +331,7 @@ void RG_Shutdown (void)
 	rg_win = NULL;
 	rg_headless = false;
 	rg_vk_max2d = 0;
-	rg_vk_depth_linear = 0;
+	rg_vk_depth_linear = rg_vk_blend = 0;
 	rg_active = false;
 }
 
@@ -410,6 +414,7 @@ typedef struct {
 } rgvkfmtprops_t;
 typedef void (RG_VKAPI *rgvk_fmtprops_t) (void *device, int format, rgvkfmtprops_t *props);
 #define RGV_FILTER_LINEAR	0x00001000u	/* VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT */
+#define RGV_BLEND		0x00000100u	/* VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT */
 /* rg_vk_depth_linear: the device was asked.  Unasked (a driver other than
  * Vulkan, or the instance failed) is not a "no": the sampler keeps what GL
  * asked for, as before P6b, and renderer_status says it is unknown. */
@@ -427,6 +432,37 @@ static const struct {
 	{ SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT,	129 },	/* VK_FORMAT_D24_UNORM_S8_UINT */
 	{ SDL_GPU_TEXTUREFORMAT_D32_FLOAT_S8_UINT,	130 },	/* VK_FORMAT_D32_SFLOAT_S8_UINT */
 };
+
+/* The float colour formats a blended render target here can have.  Vulkan
+ * makes blending mandatory for R16G16B16A16_SFLOAT and optional for the
+ * 32-bit ones, which MBOIT's moment targets are (#340 P6c). */
+static const struct {
+	SDL_GPUTextureFormat	sdl;
+	int			vk;
+} RGV_BLEND_FORMATS[] = {
+	{ SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT,	97 },	/* VK_FORMAT_R16G16B16A16_SFLOAT */
+	{ SDL_GPU_TEXTUREFORMAT_R32_FLOAT,		100 },	/* VK_FORMAT_R32_SFLOAT */
+	{ SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT,	109 },	/* VK_FORMAT_R32G32B32A32_SFLOAT */
+};
+
+qboolean RG_FormatBlendsAsked (void)
+{
+	return (rg_vk_blend & RGV_ASKED) != 0;
+}
+
+qboolean RG_FormatBlends (SDL_GPUTextureFormat fmt)
+{
+	size_t	i;
+
+	if (!(rg_vk_blend & RGV_ASKED))
+		return true;
+	for (i = 0; i < sizeof(RGV_BLEND_FORMATS) / sizeof(RGV_BLEND_FORMATS[0]); i++)
+	{
+		if (RGV_BLEND_FORMATS[i].sdl == fmt)
+			return (rg_vk_blend >> i) & 1;
+	}
+	return true;	/* blending into the others is mandatory */
+}
 
 qboolean RG_DepthFiltersAsked (void)
 {
@@ -452,8 +488,9 @@ qboolean RG_DepthFiltersLinear (SDL_GPUTextureFormat fmt)
  * step fails or no device has that name.  SDL's Vulkan backend names the
  * device with its deviceName, so the two match.  *depth_linear gets the
  * RGV_DEPTH_FORMATS it filters linearly in optimal tiling, the tiling SDL
- * makes every texture in (#340 P6b); 0 when that cannot be asked. */
-static int RG_VulkanMax2D (const char *name, Uint32 *depth_linear)
+ * makes every texture in (#340 P6b); 0 when that cannot be asked.  *blend
+ * the same for the RGV_BLEND_FORMATS it blends into (#340 P6c). */
+static int RG_VulkanMax2D (const char *name, Uint32 *depth_linear, Uint32 *blend)
 {
 	rgvk_gipa_t	gipa;
 	rgvk_create_t	create;
@@ -501,8 +538,20 @@ static int RG_VulkanMax2D (const char *name, Uint32 *depth_linear)
 						if (fp.optimal & RGV_FILTER_LINEAR)
 							*depth_linear |= 1u << k;
 					}
+					for (k = 0; fmtprops && k < sizeof(RGV_BLEND_FORMATS) / sizeof(RGV_BLEND_FORMATS[0]); k++)
+					{
+						rgvkfmtprops_t	fp;
+
+						memset (&fp, 0, sizeof(fp));
+						fmtprops (devs[i], RGV_BLEND_FORMATS[k].vk, &fp);
+						if (fp.optimal & RGV_BLEND)
+							*blend |= 1u << k;
+					}
 					if (fmtprops)
+					{
 						*depth_linear |= RGV_ASKED;
+						*blend |= RGV_ASKED;
+					}
 				}
 			}
 		}
@@ -531,12 +580,13 @@ void RG_Status (void)
 	Con_Printf ("[RENDERER] SDL_GPU driver=%s device=%s present=%s swapchain=%s\n",
 		    RG_DriverName (), name, rg_headless ? "headless" : RG_PresentModeName (rg_present_mode),
 		    rg_dev && !rg_headless ? "SDR" : "none");
-	Con_Printf ("[RENDERER] SDL_GPU P6b: 2D, world, brush and alias models, the stencilled sky, liquids, "
+	Con_Printf ("[RENDERER] SDL_GPU P6c: 2D, world, brush and alias models, the stencilled sky, liquids, "
 		    "particles, sprites, glows, fog and mirrors drawn, post-process (gamma, contrast, r_scale, FXAA, "
 		    "r_softemu on the GPU palette LUT, the underwater warp, motion blur, bloom, HDR) on render "
 		    "targets, compute passes and readbacks, clustered dynamic lights and GPU lightstyles, "
 		    "the GPU world cull and its indirect draws, the Hi-Z pyramid with no fence wait, SSAO, "
-		    "soft particles, the dynamic lights' cube shadow maps, the world, "
+		    "soft particles, the dynamic lights' cube shadow maps, order-independent transparency "
+		    "(r_oit 1 and 2, no MSAA) on two colour targets, the world, "
 		    "brush models, sky pre-pass and alias meshes from their vertex buffers, instanced and "
 		    "skeletal alias models from their storage buffers; GL runs against "
 		    "the null table (%lu calls into %d entry points, see gpu_unrouted)\n", total, hit);

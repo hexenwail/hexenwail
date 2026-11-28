@@ -273,7 +273,12 @@ static int			rgf_scissor[4];
  * pass clears to when nothing asked.  Depth starts at 0, reversed-Z's far
  * plane: -gpu always runs reversed-Z (GL_Init_NullGL). */
 static GLbitfield		rgf_clear_mask;
-static float			rgf_clear_rgba[4];
+/* The colour each colour target clears to, and which do (bit i, target i):
+ * glClear's colour is every target's, glClearBufferfv (GL_COLOR, i) target
+ * i's alone (#340 P6c).  GL_COLOR_BUFFER_BIT is in rgf_clear_mask whenever
+ * a bit is set here. */
+static float			rgf_clear_rgba[RG_MAX_COLOR][4];
+static Uint32			rgf_clear_cbits;
 static float			rgf_clear_depth = 0.0f;
 static Uint8			rgf_clear_stencil;
 /* The depth the next pass clears to when its mask asks: glClear's value,
@@ -311,6 +316,9 @@ static int			rgf_last_areads, rgf_frame_areads;
  * (#340 P6b) */
 static int			rgf_last_depthonly, rgf_frame_depthonly;
 static int			rgf_last_layered, rgf_frame_layered;
+/* Render passes per frame with more than one colour target: OIT's WBOIT
+ * pass and MBOIT's moment pass (#340 P6c) */
+static int			rgf_last_mrt, rgf_frame_mrt;
 
 /* The storage buffers the draw being recorded reads, stamped once it is
  * committed (RG_Buf_StampRead), so an upload into one ends the segment. */
@@ -524,11 +532,12 @@ static void RGF_ResolveTarget (void)
 void RG_Frame_SceneTarget (rgtarget_t *out)
 {
 	SDL_zero (*out);
-	out->color = rgf_color;
+	out->color[0] = rgf_color;
 	out->depth = rgf_depth;
-	out->cfmt = rgf_color_fmt;
+	out->cfmt[0] = rgf_color_fmt;
+	out->ncolor = 1;
 	out->dfmt = rgf_depth_fmt;
-	out->cusage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+	out->cusage[0] = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
 	out->dusage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
 	out->w = rgf_tw;
 	out->h = rgf_th;
@@ -536,7 +545,16 @@ void RG_Frame_SceneTarget (rgtarget_t *out)
 
 qboolean RG_Frame_TargetHolds (const SDL_GPUTexture *tex)
 {
-	return tex && rgf_tgt_ok && (tex == rgf_tgt.color || tex == rgf_tgt.depth);
+	int	i;
+
+	if (!tex || !rgf_tgt_ok)
+		return false;
+	for (i = 0; i < rgf_tgt.ncolor; i++)
+	{
+		if (tex == rgf_tgt.color[i])
+			return true;
+	}
+	return tex == rgf_tgt.depth;
 }
 
 SDL_GPUTextureFormat RG_Frame_DepthFormat (void)
@@ -573,7 +591,7 @@ void RG_BeginFrame (int width, int height)
 	rgf_frame_ssbo = rgf_frame_standin = 0;
 	rgf_frame_cpasses = rgf_frame_reads = rgf_frame_waits = 0;
 	rgf_frame_indirect = rgf_frame_areads = 0;
-	rgf_frame_depthonly = rgf_frame_layered = 0;
+	rgf_frame_depthonly = rgf_frame_layered = rgf_frame_mrt = 0;
 	rgf_cdropped_base = RG_ComputeDropped ();
 	RGF_ReadbacksAge ();
 }
@@ -764,7 +782,7 @@ static rgdraw_t *RGF_BeginDraw (const rgprog_t *prog, SDL_GPUPrimitiveType prim,
 		return NULL;
 	if (rgf_tgt_dirty)
 		RGF_ResolveTarget ();
-	if (!rgf_tgt_ok || (!rgf_tgt.color && !rgf_tgt.depth))
+	if (!rgf_tgt_ok || (!rgf_tgt.ncolor && !rgf_tgt.depth))
 	{
 		/* GL draws nothing into an incomplete framebuffer either.  A
 		 * depth-only one is drawn into (#340 P6b: the shadow maps). */
@@ -796,7 +814,7 @@ static rgdraw_t *RGF_BeginDraw (const rgprog_t *prog, SDL_GPUPrimitiveType prim,
 	d = &rgf_draws[rgf_numdraws];
 	memset (d, 0, sizeof(*d));
 	rgf_npending_reads = rgf_pending_ssbo = rgf_pending_standin = 0;
-	d->pipe = RG_PipelineFor (prog, prim, layout, rgf_tgt.cfmt, rgf_tgt.dfmt);
+	d->pipe = RG_PipelineFor (prog, prim, layout, &rgf_tgt);
 	if (!d->pipe)
 	{
 		rgf_dropped++;
@@ -1464,12 +1482,12 @@ static void RGF_EndSegment (void)
 	first = (rgf_fbo == 0 && !rgf_cleared);
 	if (rgf_active && (rgf_numdraws || first || rgf_clear_mask))
 	{
-		SDL_GPUColorTargetInfo		ct;
+		SDL_GPUColorTargetInfo		ct[RG_MAX_COLOR];
 		SDL_GPUDepthStencilTargetInfo	ds;
 		SDL_GPURenderPass		*pass;
 		const float			*cc = RG_ClearColor ();
 
-		if (!rgf_tgt_ok || (!rgf_tgt.color && !rgf_tgt.depth))
+		if (!rgf_tgt_ok || (!rgf_tgt.ncolor && !rgf_tgt.depth))
 		{
 			/* Draws into it were dropped as they were recorded. */
 			RG_NoteUnhandled ("glClear of an incomplete framebuffer (ignored)");
@@ -1478,32 +1496,37 @@ static void RGF_EndSegment (void)
 		else
 		{
 			SDL_zero (ct);
-			ct.texture = rgf_tgt.color;
-			ct.store_op = SDL_GPU_STOREOP_STORE;
-			/* Never cycled, either attachment: a pass draws into what
-			 * the passes before it left, and a cycle hands it a fresh
-			 * texture.  For the shadow maps' cube-map array that would
-			 * be every cached map lost at the first face drawn
-			 * (#340 P6b). */
-			ct.cycle = false;
-			if (rgf_clear_mask & GL_COLOR_BUFFER_BIT)
+			for (i = 0; i < rgf_tgt.ncolor; i++)
 			{
-				ct.load_op = SDL_GPU_LOADOP_CLEAR;
-				ct.clear_color.r = rgf_clear_rgba[0];
-				ct.clear_color.g = rgf_clear_rgba[1];
-				ct.clear_color.b = rgf_clear_rgba[2];
-				ct.clear_color.a = rgf_clear_rgba[3];
+				ct[i].texture = rgf_tgt.color[i];
+				ct[i].store_op = SDL_GPU_STOREOP_STORE;
+				/* Never cycled, any attachment: a pass draws into
+				 * what the passes before it left, and a cycle hands
+				 * it a fresh texture.  For the shadow maps' cube-map
+				 * array that would be every cached map lost at the
+				 * first face drawn (#340 P6b). */
+				ct[i].cycle = false;
+				/* Each target its own clear (#340 P6c: WBOIT's
+				 * accum to 0, revealage to 1). */
+				if (rgf_clear_cbits & (1u << i))
+				{
+					ct[i].load_op = SDL_GPU_LOADOP_CLEAR;
+					ct[i].clear_color.r = rgf_clear_rgba[i][0];
+					ct[i].clear_color.g = rgf_clear_rgba[i][1];
+					ct[i].clear_color.b = rgf_clear_rgba[i][2];
+					ct[i].clear_color.a = rgf_clear_rgba[i][3];
+				}
+				else if (first)
+				{
+					ct[i].load_op = SDL_GPU_LOADOP_CLEAR;
+					ct[i].clear_color.r = cc[0];
+					ct[i].clear_color.g = cc[1];
+					ct[i].clear_color.b = cc[2];
+					ct[i].clear_color.a = 1.0f;
+				}
+				else
+					ct[i].load_op = SDL_GPU_LOADOP_LOAD;
 			}
-			else if (first)
-			{
-				ct.load_op = SDL_GPU_LOADOP_CLEAR;
-				ct.clear_color.r = cc[0];
-				ct.clear_color.g = cc[1];
-				ct.clear_color.b = cc[2];
-				ct.clear_color.a = 1.0f;
-			}
-			else
-				ct.load_op = SDL_GPU_LOADOP_LOAD;
 			SDL_zero (ds);
 			ds.texture = rgf_tgt.depth;
 			ds.layer = (Uint8) rgf_tgt.dlayer;
@@ -1517,8 +1540,8 @@ static void RGF_EndSegment (void)
 			ds.clear_depth = (rgf_clear_mask & GL_DEPTH_BUFFER_BIT) ? rgf_pass_clear_depth
 										 : rgf_clear_depth;
 			ds.clear_stencil = rgf_clear_stencil;
-			pass = SDL_BeginGPURenderPass (rgf_cmd, rgf_tgt.color ? &ct : NULL,
-						       rgf_tgt.color ? 1 : 0, rgf_tgt.depth ? &ds : NULL);
+			pass = SDL_BeginGPURenderPass (rgf_cmd, rgf_tgt.ncolor ? ct : NULL,
+						       (Uint32) rgf_tgt.ncolor, rgf_tgt.depth ? &ds : NULL);
 			if (pass)
 			{
 				RGF_Replay (pass);
@@ -1528,11 +1551,12 @@ static void RGF_EndSegment (void)
 				rgf_cleared = true;
 			rgf_frame_draws += rgf_numdraws;
 			rgf_frame_segments++;
-			if (!rgf_tgt.color)
+			if (!rgf_tgt.ncolor)
 			{
 				rgf_frame_depthonly++;
 				rgf_frame_layered += rgf_tgt.dlayered;
 			}
+			rgf_frame_mrt += (rgf_tgt.ncolor > 1);
 			for (i = 0; i < rgf_numdraws; i++)
 			{
 				rgf_frame_indexed += (rgf_draws[i].indexed == RGD_BUFFER);
@@ -1540,6 +1564,7 @@ static void RGF_EndSegment (void)
 			}
 		}
 		rgf_clear_mask = 0;
+		rgf_clear_cbits = 0;
 	}
 	rgf_frame_stream += rgf_streamlen;
 	RGF_ResetSegment ();
@@ -1583,30 +1608,38 @@ SDL_GPUCommandBuffer *RG_Frame_Break (void)
 }
 
 /* Queue `mask`'s clear for the next pass; `keep` false leaves the depth a
- * frame's first pass clears to as it was (glClearBufferfv, RG_ClearBuffer). */
+ * frame's first pass clears to as it was (glClearBufferfv, RG_ClearBuffer).
+ * `drawbuffer` -1 clears colour into every colour target, as glClear does;
+ * otherwise into that draw buffer's alone, as glClearBufferfv (GL_COLOR). */
 static void RGF_QueueClear (GLbitfield mask, const float color[4], float depth, int stencil,
-			    qboolean keep);
+			    qboolean keep, int drawbuffer);
 
 void RG_Clear (GLbitfield mask, const float color[4], float depth, int stencil)
 {
-	RGF_QueueClear (mask, color, depth, stencil, true);
+	RGF_QueueClear (mask, color, depth, stencil, true, -1);
 }
 
 void RG_ClearBuffer (GLenum buffer, GLint drawbuffer, const GLfloat *value)
 {
 	if (buffer == GL_DEPTH && drawbuffer == 0)
 	{
-		RGF_QueueClear (GL_DEPTH_BUFFER_BIT, NULL, value[0], 0, false);
+		RGF_QueueClear (GL_DEPTH_BUFFER_BIT, NULL, value[0], 0, false, -1);
 		return;
 	}
-	/* GL_COLOR i is MRT's per-target clear, P6c; GL_STENCIL and
-	 * GL_DEPTH_STENCIL nothing calls. */
-	RG_NoteUnhandled ("glClearBufferfv other than GL_DEPTH (per-draw-buffer colour clears are P6c; ignored)");
+	if (buffer == GL_COLOR && drawbuffer >= 0 && drawbuffer < RG_MAX_COLOR)
+	{
+		RGF_QueueClear (GL_COLOR_BUFFER_BIT, value, 0.0f, 0, false, drawbuffer);
+		return;
+	}
+	/* GL_STENCIL and GL_DEPTH_STENCIL nothing calls. */
+	RG_NoteUnhandled ("glClearBufferfv other than GL_DEPTH or GL_COLOR 0 .. RG_MAX_COLOR-1 (ignored)");
 }
 
 static void RGF_QueueClear (GLbitfield mask, const float color[4], float depth, int stencil,
-			    qboolean keep)
+			    qboolean keep, int drawbuffer)
 {
+	int	i;
+
 	const rpipestate_t	*ps = R_PipelineState ();
 
 	/* glClear writes through the depth and colour masks. */
@@ -1633,9 +1666,22 @@ static void RGF_QueueClear (GLbitfield mask, const float color[4], float depth, 
 	 * into it after this sees RG_Frame_TargetHolds and lands after it. */
 	if (rgf_tgt_dirty)
 		RGF_ResolveTarget ();
+	/* glClearBufferfv into a draw buffer that is GL_NONE (past the
+	 * target's colour targets) writes nothing. */
+	if (drawbuffer >= 0 && rgf_tgt_ok && drawbuffer >= rgf_tgt.ncolor)
+		return;
 	rgf_clear_mask |= mask;
 	if (mask & GL_COLOR_BUFFER_BIT)
-		memcpy (rgf_clear_rgba, color, sizeof(rgf_clear_rgba));
+	{
+		for (i = 0; i < RG_MAX_COLOR; i++)
+		{
+			if (drawbuffer < 0 || drawbuffer == i)
+			{
+				memcpy (rgf_clear_rgba[i], color, sizeof(rgf_clear_rgba[i]));
+				rgf_clear_cbits |= 1u << i;
+			}
+		}
+	}
 	if (mask & GL_DEPTH_BUFFER_BIT)
 	{
 		rgf_pass_clear_depth = depth;
@@ -2236,6 +2282,7 @@ void RG_Frame_End (qboolean show)
 	rgf_last_areads = rgf_frame_areads;
 	rgf_last_depthonly = rgf_frame_depthonly;
 	rgf_last_layered = rgf_frame_layered;
+	rgf_last_mrt = rgf_frame_mrt;
 	rgf_last_cdropped = RG_ComputeDropped () - rgf_cdropped_base;
 	rgf_frames++;
 	RGF_NoteTimes ();
@@ -2522,8 +2569,9 @@ void RG_Frame_Status (void)
 		    rgf_last_indirect, rgf_last_cdropped, rgf_last_areads, rgr_requested, rgr_collected,
 		    rgr_refused, rgr_failed, rgr_discarded, rgr_abandoned);
 	Con_Printf ("[RENDERER] SDL_GPU last frame: %d depth-only passes, %d of them on a layer of a "
-		    "layered depth texture (the shadow maps' faces, 6 per map drawn)\n",
-		    rgf_last_depthonly, rgf_last_layered);
+		    "layered depth texture (the shadow maps' faces, 6 per map drawn), %d with more than one "
+		    "colour target (OIT)\n",
+		    rgf_last_depthonly, rgf_last_layered, rgf_last_mrt);
 	RG_Compute_Status ();
 	Con_Printf ("[RENDERER] SDL_GPU scene depth %s (%s); drawing into framebuffer %u (%dx%d%s)\n",
 		    RGF_DepthName (rgf_depth_fmt), rgf_depth_sampled ? "sampled too" : "not sampled",

@@ -184,6 +184,8 @@ static unsigned long	rgt_cleared;
 /* Samplers of a depth texture built NEAREST where GL asked for LINEAR: the
  * device cannot filter that format (RG_DepthFiltersLinear, #340 P6b). */
 static unsigned long	rgs_depth_nearest;
+/* Render-target formats refused for want of blending (#340 P6c) */
+static unsigned long	rgt_blend_refused;
 static qboolean		rgs_depth_nearest_said;
 
 /* ------------------------------------------------------------------ */
@@ -1262,6 +1264,20 @@ static qboolean RGT_HasStorage (SDL_GPUTextureUsageFlags have, SDL_GPUTextureUsa
 	return (have & want) == want;
 }
 
+qboolean RG_TargetFormatBlends (GLenum internalformat)
+{
+	SDL_GPUTextureFormat	fmt;
+	int			bpp;
+	qboolean		rgb, depth;
+
+	if (!RGT_Format ((GLint) internalformat, &fmt, &bpp, &rgb, &depth) || depth)
+		return false;
+	if (RG_FormatBlends (fmt))
+		return true;
+	rgt_blend_refused++;
+	return false;
+}
+
 qboolean RG_StorageFormatOk (GLenum internalformat, GLenum target, GLenum access)
 {
 	rg_textype_t		type;
@@ -2031,4 +2047,14 @@ void RG_Res_Status (void)
 			    RG_DepthFiltersLinear (SDL_GPU_TEXTUREFORMAT_D16_UNORM) ? "filters" : "does not filter",
 			    RG_DepthFiltersLinear (SDL_GPU_TEXTUREFORMAT_D32_FLOAT) ? "filters" : "does not filter",
 			    rgs_depth_nearest);
+	if (!RG_FormatBlendsAsked ())
+		Con_Printf ("[RENDERER] SDL_GPU float blending: unknown (the device could not be asked; "
+			    "assumed); %lu targets refused for want of it\n", rgt_blend_refused);
+	else
+		Con_Printf ("[RENDERER] SDL_GPU float blending: RGBA16F %s, R32F %s, RGBA32F %s; %lu targets "
+			    "refused for want of it\n",
+			    RG_FormatBlends (SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT) ? "blends" : "does not blend",
+			    RG_FormatBlends (SDL_GPU_TEXTUREFORMAT_R32_FLOAT) ? "blends" : "does not blend",
+			    RG_FormatBlends (SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT) ? "blends" : "does not blend",
+			    rgt_blend_refused);
 }

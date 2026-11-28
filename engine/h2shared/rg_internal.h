@@ -187,6 +187,13 @@ qboolean RG_DepthFiltersLinear (SDL_GPUTextureFormat fmt);
 /* Whether the device could be asked; unasked, RG_DepthFiltersLinear answers
  * yes (GL's filter kept, as before #340 P6b) and renderer_status says so. */
 qboolean RG_DepthFiltersAsked (void);
+/* Whether the device blends into colour format `fmt` (#340 P6c): optional in
+ * Vulkan for R32_FLOAT and R32G32B32A32_FLOAT
+ * (VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT), asked when the device is
+ * made; true for every format whose blending is mandatory, and for all of
+ * them on a driver nothing asks (RG_FormatBlendsAsked false). */
+qboolean RG_FormatBlends (SDL_GPUTextureFormat fmt);
+qboolean RG_FormatBlendsAsked (void);
 
 /* ------------------------------------------------------------------ */
 /* rg_resource.c                                                       */
@@ -477,12 +484,7 @@ void	RG_Pipeline_Shutdown (void);
  * id RG_PipelineFor refuses (counted), so the draw is dropped. */
 Uint32	RG_LayoutIntern (const rgvlayout_t *layout);
 int	RG_LayoutCount (void);
-/* The pipeline for the current draw state (gl_pipeline.c's shadow), `prog`,
- * primitive and layout id, created on first use; NULL when the state has no
- * SDL_GPU equivalent (logged once through RG_NoteUnhandled). */
-SDL_GPUGraphicsPipeline *RG_PipelineFor (const rgprog_t *prog, SDL_GPUPrimitiveType prim,
-					 Uint32 layout, SDL_GPUTextureFormat color,
-					 SDL_GPUTextureFormat depth);
+/* RG_PipelineFor is declared after rgtarget_t, below. */
 int	RG_PipelineCount (void);
 
 /* ------------------------------------------------------------------ */
@@ -555,12 +557,21 @@ void	RG_Buf_Status (void);
 /* rg_frame.c / rg_target.c: render targets (#340 P4a-2)               */
 /* ------------------------------------------------------------------ */
 
+/* The colour targets a pass can have: OIT's MRT needs 2 (#340 P6c), and
+ * SDL_GPU takes up to 8. */
+#define RG_MAX_COLOR	4
+
 /* What a render pass draws into.  depth NULL and dfmt INVALID when there is
- * no depth attachment; color NULL and cfmt INVALID when none is drawn. */
+ * no depth attachment.  color[0 .. ncolor-1] are the colour targets, in
+ * draw-buffer order (GL_COLOR_ATTACHMENT0 + i); ncolor 0 when none is drawn,
+ * and every unused slot NULL / INVALID / 0, so two targets compare as
+ * bytes (RG_Frame_BindTarget).  The read side has GL_COLOR_ATTACHMENT0
+ * alone, the attachment a blit reads. */
 typedef struct {
-	SDL_GPUTexture			*color, *depth;
-	SDL_GPUTextureFormat		cfmt, dfmt;
-	SDL_GPUTextureUsageFlags	cusage, dusage;
+	SDL_GPUTexture			*color[RG_MAX_COLOR], *depth;
+	SDL_GPUTextureFormat		cfmt[RG_MAX_COLOR], dfmt;
+	SDL_GPUTextureUsageFlags	cusage[RG_MAX_COLOR], dusage;
+	int				ncolor;
 	int				w, h;
 	/* the layer of `depth` the pass draws into, and whether it is one
 	 * layer of a layered texture (glFramebufferTextureLayer: a layer-face
@@ -569,6 +580,14 @@ typedef struct {
 	int				dlayer;
 	qboolean			dlayered;
 } rgtarget_t;
+
+/* The pipeline for the current draw state (gl_pipeline.c's shadow), `prog`,
+ * primitive and layout id, into target `tgt`'s formats (its colour targets,
+ * each with its own blend, and its depth), created on first use; NULL when
+ * the state has no SDL_GPU equivalent (logged once through
+ * RG_NoteUnhandled). */
+SDL_GPUGraphicsPipeline *RG_PipelineFor (const rgprog_t *prog, SDL_GPUPrimitiveType prim,
+					 Uint32 layout, const rgtarget_t *tgt);
 
 void	RG_Target_Init (void);
 void	RG_Target_Shutdown (void);

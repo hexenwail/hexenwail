@@ -251,6 +251,10 @@ qboolean RG_ReadTexture (GLenum target, GLuint texture, GLint level, GLenum form
 /* Whether a texture of `internalformat` on `target` can be sampled and bound
  * as a storage image with `access`: SDL_GPUTextureSupportsFormat. */
 qboolean RG_StorageFormatOk (GLenum internalformat, GLenum target, GLenum access);
+/* Whether a render target of `internalformat` can be blended into (#340
+ * P6c, RG_FormatBlends); a no is counted, for renderer_status, so call it
+ * once per decision a refusal changes (OIT_CreateFBO). */
+qboolean RG_TargetFormatBlends (GLenum internalformat);
 
 /* gl_vidsdl.c GL_BeginRendering: the frame's render target size. */
 void	RG_BeginFrame (int width, int height);
