@@ -27,6 +27,13 @@
  * (dlshadow.inc's DLSHADOW_MAX_MAPS, four bits each). */
 #define SHADOW_MAX_MAPS		16
 
+/* gl_shadow.c's ShadowPass block (r_shadowpass_t): its size, and the byte
+ * offset of u_shadowpose.z, the pose format an alias caster's draw reads.
+ * The SDL_GPU backend reads that to know which pose buffer the draw needs
+ * (rg_frame.c RGF_PoseVertType, #340 P6b); gl_shadow.c asserts both. */
+#define SHADOWPASS_SIZE			160
+#define SHADOWPASS_POSE_FORMAT_OFS	152
+
 void	R_Shadow_Init (void);		/* cvars and commands, from R_Init */
 void	R_Shadow_Shutdown (void);	/* GL objects, before the context goes */
 void	R_Shadow_NewMap (void);		/* forget every map and the map's surface table */

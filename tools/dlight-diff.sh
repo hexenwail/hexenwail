@@ -30,10 +30,12 @@
 #      the models lit on the CPU) is the third directory's 07 exactly, when
 #      one is given (the binary before P5b, whose world takes no dynamic
 #      light at r_dynamic 0 either).
-#   6. THE TRAP: on -gpu 12 (r_dlight_occlusion 2) equals 02 exactly: the
-#      cube shadow maps are P6, R_Shadow_Prepare returns under -gpu, and the
-#      frame's DlShadow block names no map.  A gate lost draws into cube
-#      maps -gpu cannot render, and the frame changes.
+#   6. r_dlight_occlusion 2: 12 against 02 changes as many pixels on -gpu
+#      as on GL, within COUNT_TOL of GL's count (both 0 here: nothing in the
+#      lit view stands between the torch and its wall).  Until #340 P6b this
+#      was the trap that proved R_Shadow_Prepare's -gpu gate; the maps are
+#      drawn on both sides now, and tools/shadow-diff.sh checks what they
+#      stop.
 #  6l. No light through a wall: 11a and 11b are tools/dlight-leak-check.sh's
 #      scenes 1 and 3 with the torch named (its "repro"), and the mean
 #      luminance of that check's box on each is within LEAK_TOL (default
@@ -144,10 +146,9 @@ if [ -n "$OLD" ]; then
 fi
 
 # 6
-a=$(ae "$GPU/12-lit-occl2.png" "$GPU/02-lit-gpu.png")
-[ "$a" = 0 ]; report "trap: 12 = 02 on -gpu" $? "$a pixels differ, want 0"
-printf '%-32s INFO  (GL: %s pixels -- its cube maps draw, and nothing in this view stands between the torch and its wall)\n' \
-	"12 vs 02 GL" "$(ae "$GL/12-lit-occl2.png" "$GL/02-lit-gpu.png")"
+g=$(ae "$GL/12-lit-occl2.png" "$GL/02-lit-gpu.png"); v=$(ae "$GPU/12-lit-occl2.png" "$GPU/02-lit-gpu.png")
+awk -v g="$g" -v v="$v" -v t="$COUNT_TOL" 'BEGIN { d = g - v; if (d < 0) d = -d; exit !(d <= t * g) }'
+report "occlusion 2 (12 vs 02)" $? "GL $g, -gpu $v pixels changed; within $COUNT_TOL of GL's"
 
 # 6l
 boxlum() {	# png x0 y0 x1 y1 (fractions of the frame): mean Rec.601 luminance, 0..255

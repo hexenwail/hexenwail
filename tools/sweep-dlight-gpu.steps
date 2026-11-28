@@ -41,7 +41,7 @@
 # valid and empty and the CPU adds nothing either).
 #
 # THE FRAMES, every one at r_dynamic 1, r_dlight_occlusion 1 (the cube
-# shadow maps are P6), r_lightclusters 1 and r_lightclusters_models 1 unless
+# shadow maps are tools/sweep-shadow-gpu.steps'), r_lightclusters 1 and r_lightclusters_models 1 unless
 # it says otherwise.  "lit" is the leak check's lit scene, the named torch at
 # 170 312 80 on its own wall, seen from 210 200 99 looking down at it:
 #   01  lit, r_lightclusters 0: the CPU path, on both sides
@@ -69,10 +69,12 @@
 #   10  lit, r_scale 0.5: the froxel columns against a scaled viewport
 #   11a the leak check's scene 1 (the far side of the named torch's wall)
 #   11b its scene 3 (a back face in the named torch's PVS)
-#   12  lit, r_dlight_occlusion 2: THE TRAP FRAME.  The cube maps are P6
-#       and R_Shadow_Prepare returns under -gpu, so with no map drawn every
-#       light reads as unshadowed: under -gpu 12 must be 02 exactly.  On GL
-#       the maps draw, and 12 is GL's own.
+#   12  lit, r_dlight_occlusion 2: the cube maps drawn on both backends
+#       since #340 P6b (until then R_Shadow_Prepare returned under -gpu,
+#       and this was the trap frame that proved it).  Nothing in this view
+#       stands between the torch and its wall, so on GL 12 is 02 exactly,
+#       and -gpu's 12 must differ from its 02 as GL's does: by nothing.
+#       What the maps do stop is tools/sweep-shadow-gpu.steps'.
 # then a map change (demo2 again) and the lit camera's grid checked once
 # more.  No frame there: the console's state after a load is the harness's
 # timing (#553), not the cluster.
@@ -92,6 +94,8 @@
 #   03 vs 04, 03g vs 04g         121 / 121             77 / 77             10%
 #   05 vs 05f (styled light)     4581 - 4728           2958 / 2958         2000
 #   07 = before P5b, 12 = 02     0, 0                  -, 0                0
+#   (12 = 02 was the P5b gate's trap; since P6b it is the maps on both sides,
+#   and GL's 12 vs 02 is 0 too)
 #   lightcluster_verify          identical, 0 off      identical, 0 off
 #
 # Each run repeats itself exactly except the cauldron room (05, 05f, 06),

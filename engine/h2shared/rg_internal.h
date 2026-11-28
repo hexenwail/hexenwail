@@ -178,6 +178,15 @@ extern SDL_GPUDevice	*rg_dev;
 extern SDL_Window	*rg_win;
 extern qboolean		rg_headless;	/* -gpuheadless: no swapchain (#340 P5f) */
 float	*RG_ClearColor (void);		/* gpu_clearcolor, rgb */
+/* Whether the device filters depth format `fmt` linearly when it is sampled,
+ * compare on or off (#340 P6b).  Optional in Vulkan
+ * (VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT), so asked of the device
+ * when it is made; false on a driver nothing asks, and on any format but the
+ * five depth ones. */
+qboolean RG_DepthFiltersLinear (SDL_GPUTextureFormat fmt);
+/* Whether the device could be asked; unasked, RG_DepthFiltersLinear answers
+ * yes (GL's filter kept, as before #340 P6b) and renderer_status says so. */
+qboolean RG_DepthFiltersAsked (void);
 
 /* ------------------------------------------------------------------ */
 /* rg_resource.c                                                       */
@@ -250,11 +259,14 @@ void	RG_Res_EndFrame (void);
 void	RG_Res_Status (void);
 /* Texture `name` as a render target with `usage` (COLOR_TARGET or
  * DEPTH_STENCIL_TARGET), realized now: its SDL texture, format, usage and
- * size.  False unless it is a defined 2D texture created with that usage.
- * The first time a new texture is asked for, its one clear is queued
+ * size.  `layer` -1: a defined 2D texture, as glFramebufferTexture2D
+ * attaches; otherwise that layer of a 2D array, cube map or cube-map array,
+ * as glFramebufferTextureLayer does (#340 P6b).  False unless it is such a
+ * texture, created with that usage, and has the layer.  The first time a new
+ * texture is asked for, its clears are queued, one per layer
  * (RG_Res_ClearTargets): a never-written Vulkan image loads undefined, where
  * GL gives a texture defined with no data zeros (#340 P4a-2). */
-qboolean RG_Res_RenderTarget (GLuint name, SDL_GPUTextureUsageFlags usage, SDL_GPUTexture **tex,
+qboolean RG_Res_RenderTarget (GLuint name, SDL_GPUTextureUsageFlags usage, int layer, SDL_GPUTexture **tex,
 			      SDL_GPUTextureFormat *fmt, SDL_GPUTextureUsageFlags *have, int *w, int *h);
 /* Drop SAMPLER from `name`'s usage: a renderbuffer's hidden texture. */
 void	RG_Res_TargetOnly (GLuint name);
@@ -394,6 +406,9 @@ typedef struct {
 	rgimage_t	images[RG_MAX_STAGE_IMAGES];
 	int		num_rwssbos;
 	rgssbo_t	rwssbos[RG_MAX_STAGE_SSBOS];
+	/* the stage's inputs by location, and which of them are integer
+	 * typed (#340 P6b): a vertex stage's attributes */
+	Uint32		in_mask, in_int_mask, in_sint_mask;
 } rgstage_t;
 
 typedef struct {
@@ -475,8 +490,9 @@ int	RG_PipelineCount (void);
 /* ------------------------------------------------------------------ */
 
 /* What an indexed draw reads from the bound VAO.  vb[s] NULL is the
- * constant slot, whose bytes (consts, one FLOAT4 per location in layout
- * order) rg_frame.c puts in its stream and whose vb_ofs it fills. */
+ * constant slot, whose bytes (consts, one FLOAT4 -- or UINT4, an integer
+ * input's -- per location in layout order) rg_frame.c puts in its stream
+ * and whose vb_ofs it fills. */
 typedef struct {
 	rgvlayout_t	layout;
 	SDL_GPUBuffer	*vb[RG_MAX_VBUFS];
@@ -498,6 +514,16 @@ void	RG_Buf_Shutdown (void);
  * RG_Buf_MarkRead stamps those buffers as read by the open segment, once
  * the draw is recorded, so an upload into one ends the segment first. */
 qboolean RG_Buf_ForDraw (int index_bytes, rgvinput_t *in);
+/* After RG_Buf_ForDraw: every input in `mask` (a vertex stage's in_mask)
+ * the layout still lacks gets a constant, as a GL attribute with its array
+ * off reads its current value.  RG_Buf_ForDraw already feeds ATTR_POSITION ..
+ * ATTR_COLOR; this is the rest, the skeletal stages' a_indices (location 4,
+ * uvec4) where a Quake or MD3 VAO leaves it off and sshadow_alias_vert's
+ * other arms never read it: a vertex input the pipeline does not supply is
+ * VUID-VkGraphicsPipelineCreateInfo-Input-07904.  `int_mask`'s are UINT4
+ * and `sint_mask`'s INT4, (0, 0, 0, 1), GL's initial value; the rest FLOAT4,
+ * glVertexAttrib4f's. */
+void	RG_Buf_FeedInputs (rgvinput_t *in, Uint32 mask, Uint32 int_mask, Uint32 sint_mask);
 /* Whether the bound VAO is one RG_DrawArrays can draw from: made, and with
  * no attribute enabled (#340 P4e); false, and counted, otherwise.  GL core
  * draws nothing with VAO 0 bound, so neither does this. */
@@ -536,6 +562,12 @@ typedef struct {
 	SDL_GPUTextureFormat		cfmt, dfmt;
 	SDL_GPUTextureUsageFlags	cusage, dusage;
 	int				w, h;
+	/* the layer of `depth` the pass draws into, and whether it is one
+	 * layer of a layered texture (glFramebufferTextureLayer: a layer-face
+	 * of the shadow maps' cube-map array) or a whole 2D one (layer 0;
+	 * #340 P6b) */
+	int				dlayer;
+	qboolean			dlayered;
 } rgtarget_t;
 
 void	RG_Target_Init (void);

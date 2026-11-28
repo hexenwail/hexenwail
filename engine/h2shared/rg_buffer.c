@@ -1092,6 +1092,48 @@ qboolean RG_Buf_ForDraw (int index_bytes, rgvinput_t *in)
 	return true;
 }
 
+void RG_Buf_FeedInputs (rgvinput_t *in, Uint32 mask, Uint32 int_mask, Uint32 sint_mask)
+{
+	Uint32	have = 0, i;
+
+	for (i = 0; i < in->layout.num_attrs; i++)
+		have |= 1u << in->layout.attr[i].location;
+	for (i = 0; i < RG_MAX_VATTRS; i++)
+	{
+		rgvattr_t	*la;
+
+		if (!(mask & (1u << i)) || (have & (1u << i)))
+			continue;
+		if (in->const_slot < 0)
+		{
+			/* RG_Buf_ForDraw keeps a slot free for the constants */
+			in->const_slot = (int) in->layout.num_slots;
+			in->layout.slot[in->const_slot].instance = 1;
+			in->vb[in->const_slot] = NULL;		/* rg_frame.c's stream */
+			in->layout.num_slots++;
+		}
+		la = &in->layout.attr[in->layout.num_attrs++];
+		la->location = i;
+		la->slot = (Uint32) in->const_slot;
+		la->offset = (Uint32)(in->nconst * 4 * sizeof(float));
+		if ((int_mask | sint_mask) & (1u << i))
+		{
+			static const Uint32	initial[4] = { 0, 0, 0, 1 };
+
+			la->format = (int_mask & (1u << i)) ? SDL_GPU_VERTEXELEMENTFORMAT_UINT4
+							    : SDL_GPU_VERTEXELEMENTFORMAT_INT4;
+			memcpy (in->consts[in->nconst], initial, sizeof(in->consts[0]));
+		}
+		else
+		{
+			la->format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4;
+			memcpy (in->consts[in->nconst], rgb_current[i], sizeof(in->consts[0]));
+		}
+		in->nconst++;
+		in->layout.slot[in->const_slot].pitch = (Uint32)(in->nconst * 4 * sizeof(float));
+	}
+}
+
 /* ------------------------------------------------------------------ */
 /* The copy pass                                                       */
 /* ------------------------------------------------------------------ */

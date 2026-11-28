@@ -1,0 +1,257 @@
+# sweep-shadow-gpu.steps -- the dynamic lights' cube shadow maps through the
+# SDL_GPU backend (-gpu) against GL (#340 P6b).
+#
+# Since P6b -gpu draws the maps: each layer-face of the D16 cube-map array is
+# a depth-only render pass of its own (RG_FramebufferTextureLayer, ds.layer,
+# never cycled), cleared through R_ClearBufferfv's GL_DEPTH arm, the world's
+# and brush entities' runs one RG_DrawIndexed each (R_MultiDrawElements), the
+# alias casters from their pose buffers (the ShadowPass pose rule), and the
+# receivers sample it through a compare sampler, as GL does.
+#
+# THE TEST GAME.  tools/mk-shadow-testgame.py writes <basedir>/shadow: demo2
+# with every torch tools/dlight-leak-check.sh's scenes need named (so each
+# keeps its dynamic light), its cast-scene light and barrel and its recess
+# barrel added, every monster dropped; and demo2m, the same map with the
+# cast barrel an MD5 tombstone (a skeletal caster).  Nothing is committed:
+# build it from the retail data each time.  The basedir must hold data1 as a
+# directory.
+#
+# NOT HERE: the plan's frame 16, a mirror at r_dlight_occlusion 2.  No
+# texture of demo2's that a rename can make a mirror (one plane, the world
+# model's alone) shows a dynamic light's shadow from anywhere: the floor
+# under the cast scene is rtex005, on 33 planes, and the lit wall's rtex022
+# is a brush entity's too.  The mirror test game's demo1 has no dynamic
+# light.  The mirror pass draws no maps (R_Shadow_Prepare is R_SetupGL's,
+# outside it) and reads the frame's block, as GL's does.
+#
+# Run the SAME binary both ways, with identical settings; host_framerate holds
+# game time, so the torch flames land alike run to run (sweep-mirror-gpu.steps
+# explains it):
+#
+#   ./tools/mk-shadow-testgame.py <basedir>
+#   A="-fsaa 0 +gamma 1 +host_framerate 0.000001 -game shadow +map demo2"
+#   STEPS=tools/sweep-shadow-gpu.steps ENGINE=$E ./tools/headless-drive.sh script /tmp/sh-gl <basedir> $A
+#   VK_ICD_FILENAMES=<lvp_icd json> VK_LAYER_PATH=<vulkan-validation-layers>/share/vulkan/explicit_layer.d \
+#       VK_KHRONOS_VALIDATION_VALIDATE_SYNC=true VK_KHRONOS_VALIDATION_ENABLE_MESSAGE_LIMIT=false \
+#       STEPS=tools/sweep-shadow-gpu.steps ENGINE=$E \
+#       ./tools/headless-drive.sh script /tmp/sh-gpu <basedir> -gpu +gpu_allow_software 1 +gpu_debug 1 $A
+#   ./tools/shadow-diff.sh /tmp/sh-gl /tmp/sh-gpu [/tmp/sh-gpu-master]
+#
+# The third directory, optional, is the same sweep under -gpu on the binary
+# before P6b: frame 18 (r_dlight_occlusion 1) must be its 18 exactly.
+#
+# THE FRAMES, every one at r_dlight_occlusion 2, r_lightclusters 1 and
+# r_shadow_casters 2 unless it says otherwise; the r_shadow_* cvars at their
+# defaults (resolution 128, 8 lights, filter 1, 2 updates a frame, bias 1,
+# the cache on).  The cameras are the leak check's:
+#   01  lit: the torch at 170 312 80 on its own wall
+#   02  scene 2: the torch at -758 482 192, a face in its PVS behind a wall,
+#       and in the same view the recess barrel the torch's wall hides (the
+#       leak check's scene 2 and alias boxes)
+#   03  02 at r_shadow_casters 1
+#   02o 02 at r_dlight_occlusion 1: the light through the wall, which only
+#       the maps stop (the leak check: scene 2 FAILs at 1 by design)
+#   04  cast: the free-standing torch at 120 250 32, the barrel between it
+#       and the wall, r_shadow_casters 2: the barrel's shadow on the wall
+#   05  04 at r_shadow_casters 1: the barrel casts nothing
+#   06  04 with the barrel gone (r_entdist 150: the camera's distance to
+#       the torch's flame is under it, the barrel's over), its map redrawn
+#   07  04 at r_shadow_filter 0;  08  back at 1, so 08 must be 04 exactly
+#   09  04 at r_shadow_resolution 64;  10  at 512
+#   11  04 at r_shadow_maxlights 1
+#   12  01 again at r_shadow_cache 0, every map redrawn each frame: 01
+#       exactly (a static camera, so the cache is invisible)
+#   13  04 at r_shadow_debug 1: slot 0 unwrapped into the corner, each
+#       face's orientation and row order on screen
+#   14  04 at r_alias_gpu 1, the instanced alias path's casters
+#   17  04 at r_scale 0.5, with the post chain
+#   18  04 at r_dlight_occlusion 1: no map drawn or read
+# then demo2m:
+#   15  04's view with the MD5 tombstone casting (a skeletal pose buffer)
+#
+# r_shadowinfo is printed after each frame (SI-<frame>), and renderer_status
+# with it at 12 in the same console line, so the passes it counts are the
+# ones that frame drew.
+#
+# THE REPORTS.  REPORT-BOOT holds the boot's gpu_unrouted; REPORT-ALL spans
+# 01-18 on demo2 and REPORT-MAP 15 on demo2m, each reset at its start.
+# tools/shadow-diff.sh's header has the checks and the thresholds.
+#
+# THE NUMBERS, measured 2026-11-28 at 800x600, llvmpipe GL (Mesa 26.2)
+# against lavapipe -gpu with sync validation, runs 1-2 a side (run 3's PNGs
+# were truncated by a full /tmp): every frame repeats itself exactly on each
+# side (GL vs GL and -gpu vs -gpu 120 dB), so one number per frame:
+#
+#   frames                                  GL vs -gpu PSNR    gate
+#   01 02 03 04-12 14 18                    71.7 - 76.6        42
+#   13 (the debug view)                     71.9               50
+#   17 (r_scale 0.5)                        82.8               42
+#   15 (MD5 caster: the flame's phase)      51.5               42
+#   02o (GL's frame is stale, see below)    42.4               42
+#
+# The leak boxes agree within 0.001 of luminance; r_shadowinfo 17 of 17
+# identical; 12 = 01 and 08 = 04 exactly on both sides; 2 maps redrawn at 12,
+# 12 layered passes.  02o on GL equals 02 in every loaded-box run (the frame
+# X hands the harness is the one before the cvar), so "scene 2 stopped GL"
+# fails there; the same steps on NVIDIA GL change 1460 pixels, as -gpu does.
+#
+# setpos is the server's, so every camera move is made unpaused.
+
+sleep 20
+cmd echo REPORT-BOOT-BEGIN
+cmd gpu_unrouted
+cmd echo REPORT-BOOT-END
+cmd god
+cmd notarget
+cmd noclip
+cmd con_notifytime 0
+cmd viewsize 120
+cmd crosshair 0
+cmd showpause 0
+cmd cl_bob 0
+cmd cl_rollangle 0
+cmd r_skyspeed_back 0
+cmd r_skyspeed_front 0
+cmd r_flatlightstyles 1
+cmd r_dynamic 1
+cmd gl_flashblend 0
+cmd r_fullbright 0
+cmd gl_torch_dlight 1
+cmd r_lightclusters 1
+cmd r_lightclusters_models 1
+cmd r_gpulightstyles 1
+cmd r_dlight_occlusion 2
+cmd r_shadow_casters 2
+cmd r_shadow_resolution 128
+cmd r_shadow_maxlights 8
+cmd r_shadow_filter 1
+cmd r_shadow_updates 2
+cmd r_shadow_bias 1
+cmd r_shadow_cache 1
+cmd r_shadow_debug 0
+cmd r_entdist 0
+cmd r_gpucull 0
+cmd gl_hiz_cull 0
+cmd r_ssao 0
+cmd r_bloom 0
+cmd r_hdr 0
+cmd r_alias_gpu 0
+cmd r_particles 0
+cmd fog 0
+cmd gl_texture_anisotropy 1
+cmd r_oit 0
+cmd r_waterwarp 0
+cmd r_motionblur 0
+cmd r_softparticles 0
+cmd r_softemu 0
+cmd r_scale 1
+cmd gl_fxaa 0
+cmd contrast 1
+cmd gl_waterwarp_speed 0
+cmd r_caustics 0
+cmd gl_glows 0
+cmd gl_missile_glows 0
+cmd gl_other_glows 0
+cmd r_drawviewmodel 0
+cmd r_drawentities 1
+cmd r_pp_time 10
+sleep 2
+
+cmd setpos 210 200 99 20 90 0
+sleep 2
+cmd gpu_unrouted reset
+cmd echo REPORT-ALL-BEGIN
+cmd pause
+shot 01-lit
+cmd echo SI-01; r_shadowinfo
+
+cmd pause
+cmd setpos -801 608 184 17 -90 0
+sleep 2
+cmd pause
+shot 02-scene2
+cmd echo SI-02; r_shadowinfo
+cmd r_shadow_casters 1
+shot 03-scene2-casters1
+cmd echo SI-03; r_shadowinfo
+cmd r_shadow_casters 2
+cmd r_dlight_occlusion 1
+shot 02o-scene2-occl1
+cmd r_dlight_occlusion 2
+
+cmd pause
+cmd setpos 120 150 100 25 90 0
+sleep 2
+cmd pause
+shot 04-cast2
+cmd echo SI-04; r_shadowinfo
+cmd r_shadow_casters 1
+shot 05-cast1
+cmd echo SI-05; r_shadowinfo
+cmd r_shadow_casters 2
+cmd r_entdist 150
+shot 06-castbare
+cmd echo SI-06; r_shadowinfo
+cmd r_entdist 0
+cmd r_shadow_filter 0
+shot 07-filter0
+cmd echo SI-07; r_shadowinfo
+cmd r_shadow_filter 1
+shot 08-filter1
+cmd echo SI-08; r_shadowinfo
+cmd r_shadow_resolution 64
+shot 09-res64
+cmd echo SI-09; r_shadowinfo
+cmd r_shadow_resolution 512
+shot 10-res512
+cmd echo SI-10; r_shadowinfo
+cmd r_shadow_resolution 128
+cmd r_shadow_maxlights 1
+shot 11-maxlights1
+cmd echo SI-11; r_shadowinfo
+cmd r_shadow_maxlights 8
+cmd r_shadow_debug 1
+shot 13-debug
+cmd echo SI-13; r_shadowinfo
+cmd r_shadow_debug 0
+cmd r_alias_gpu 1
+shot 14-aliasgpu
+cmd echo SI-14; r_shadowinfo
+cmd r_alias_gpu 0
+cmd r_scale 0.5
+shot 17-scale050
+cmd echo SI-17; r_shadowinfo
+cmd r_scale 1
+cmd r_dlight_occlusion 1
+shot 18-occl1
+cmd echo SI-18; r_shadowinfo
+cmd r_dlight_occlusion 2
+
+cmd pause
+cmd setpos 210 200 99 20 90 0
+sleep 2
+cmd pause
+cmd r_shadow_cache 0
+shot 12-nocache
+cmd echo SI-12; r_shadowinfo; echo STATUS-12; renderer_status
+cmd r_shadow_cache 1
+cmd gpu_unrouted
+cmd echo REPORT-ALL-END
+
+cmd pause
+console
+enter map demo2m
+sleep 25
+cmd god
+cmd noclip
+cmd gpu_unrouted reset
+cmd echo REPORT-MAP-BEGIN
+cmd setpos 120 150 100 25 90 0
+sleep 2
+cmd pause
+shot 15-md5cast
+cmd echo SI-15; r_shadowinfo
+cmd renderer_status
+cmd gpu_unrouted
+cmd echo REPORT-MAP-END
+sleep 1

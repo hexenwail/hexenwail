@@ -131,6 +131,7 @@ enum {
 	SPV_OpName = 5,
 	SPV_OpTypeInt = 21,
 	SPV_OpTypeFloat = 22,
+	SPV_OpTypeVector = 23,
 	SPV_OpTypeImage = 25,
 	SPV_OpTypeSampledImage = 27,
 	SPV_OpTypeStruct = 30,
@@ -141,7 +142,9 @@ enum {
 	SPV_DecBufferBlock = 3,
 	SPV_DecBinding = 33,
 	SPV_DecDescriptorSet = 34,
+	SPV_DecLocation = 30,
 	SPV_ScUniformConstant = 0,
+	SPV_ScInput = 1,
 	SPV_ScUniform = 2,
 	SPV_ScStorageBuffer = 12,
 	SPV_Dim2D = 1,
@@ -152,8 +155,8 @@ enum {
 typedef struct {
 	Uint32		op;		/* the instruction that defines the id */
 	Uint32		a, b, c, d, e, f;	/* its first operands after the result id */
-	Uint32		set, binding;
-	qboolean	has_set, has_binding, block, bufblock;
+	Uint32		set, binding, location;
+	qboolean	has_set, has_binding, has_location, block, bufblock;
 	const char	*name;
 } spvid_t;
 
@@ -298,6 +301,8 @@ static qboolean RG_Reflect (const Uint32 *w, size_t nwords, int sampler_set, int
 					d->binding = w[p + 3], d->has_binding = true;
 				else if (w[p + 2] == SPV_DecDescriptorSet && wc >= 4)
 					d->set = w[p + 3], d->has_set = true;
+				else if (w[p + 2] == SPV_DecLocation && wc >= 4)
+					d->location = w[p + 3], d->has_location = true;
 			}
 			break;
 		case SPV_OpTypeImage:		/* result, sampled type, dim, depth, arrayed, ms, sampled */
@@ -322,6 +327,13 @@ static qboolean RG_Reflect (const Uint32 *w, size_t nwords, int sampler_set, int
 		case SPV_OpTypeFloat:		/* result, width */
 			if (wc >= 3 && w[p + 1] < bound)
 				ids[w[p + 1]].op = op;
+			break;
+		case SPV_OpTypeVector:		/* result, component type, count */
+			if (wc >= 4 && w[p + 1] < bound)
+			{
+				ids[w[p + 1]].op = op;
+				ids[w[p + 1]].a = w[p + 2];
+			}
 			break;
 		case SPV_OpTypeSampledImage:	/* result, image */
 		case SPV_OpTypeStruct:
@@ -361,6 +373,24 @@ static qboolean RG_Reflect (const Uint32 *w, size_t nwords, int sampler_set, int
 		if (ptr->op != SPV_OpTypePointer || ptr->b >= bound)
 			continue;
 		ty = &ids[ptr->b];
+		if (v->b == SPV_ScInput && v->has_location && v->location < 32)
+		{
+			/* An input by location (#340 P6b): a vertex stage's
+			 * attributes, which a draw's vertex input has to supply
+			 * whether or not the VAO enables them.  Integer ones are
+			 * fed an integer constant (RG_Buf_FeedInputs). */
+			Uint32	comp = (ty->op == SPV_OpTypeVector && ty->a < bound) ? ty->a : ptr->b;
+
+			out->in_mask |= 1u << v->location;
+			if (ids[comp].op == SPV_OpTypeInt)
+			{
+				if (ids[comp].b)
+					out->in_sint_mask |= 1u << v->location;
+				else
+					out->in_int_mask |= 1u << v->location;
+			}
+			continue;
+		}
 		if (v->b == SPV_ScUniformConstant && ty->op == SPV_OpTypeSampledImage && ty->a < bound)
 		{
 			spvid_t		*img = &ids[ty->a];

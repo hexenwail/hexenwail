@@ -10,7 +10,9 @@
 
 /* gl_fbo.h's implementation; see the header for the contract.  The GL arm
  * of each seam is the bare call (#340 P4a-1), the SDL_GPU arm rg_target.c's
- * (P4a-2), or for P6a's three a counted no-op until P6b-d. */
+ * (P4a-2).  Of P6a's three, the layer attachment and the clear are
+ * rg_target.c's and rg_frame.c's since P6b (the clear's colour draw buffers
+ * still counted until P6c), multisampled storage a counted no-op until P6d. */
 
 #include "quakedef.h"
 #include "sdl_inc.h"
@@ -110,7 +112,7 @@ void R_FramebufferTextureLayer (GLenum target, GLenum attachment, GLuint texture
 #ifdef USE_SDL_GPU
 	if (R_GPU ())
 	{
-		RG_NoteUnhandled ("R_FramebufferTextureLayer (layered attachments are P6b)");
+		RG_FramebufferTextureLayer (target, attachment, texture, level, layer);
 		return;
 	}
 #endif
@@ -122,7 +124,7 @@ void R_ClearBufferfv (GLenum buffer, GLint drawbuffer, const GLfloat *value)
 #ifdef USE_SDL_GPU
 	if (R_GPU ())
 	{
-		RG_NoteUnhandled ("R_ClearBufferfv (per-draw-buffer clears are P6b/P6c)");
+		RG_ClearBuffer (buffer, drawbuffer, value);
 		return;
 	}
 #endif

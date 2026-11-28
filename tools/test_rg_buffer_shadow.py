@@ -34,6 +34,13 @@ the RG_* entry points the gl_buffer.c seams call and checks, case by case:
     slot, the normal GL_BYTE normalized (BYTE4_NORM), the weights
     GL_UNSIGNED_BYTE normalized (UBYTE4_NORM), the bone indices integer
     (UBYTE4, glVertexAttribIPointer), and no constant slot;
+  * the inputs a stage reads that the VAO leaves off (#340 P6b,
+    RG_Buf_FeedInputs): sshadow_alias_vert drawn from a Quake mesh's VAO
+    reads a_weights (3) and a_indices (4) in an arm it never takes, and a
+    pipeline that does not supply them is a Vulkan error.  The integer one
+    gets a UINT4 constant (0, 0, 0, 1), a float one FLOAT4 at
+    glVertexAttrib4f's value, each once; an input the VAO enables or the
+    standard constants already cover gets nothing, nor does an empty mask;
   * storage (#340 P2e): every buffer is made with graphics storage-read
     usage; glBufferData fills one through GL_SHADER_STORAGE_BUFFER; a
     binding point's buffer is what a draw's storage slot gets, a range
@@ -488,6 +495,70 @@ static void skeletal_layout (void)
 	EndFrame ();
 }
 
+/* #340 P6b: a stage's inputs past what the VAO and the standard constants
+ * supply. */
+static void feed_inputs (void)
+{
+	GLuint vao, vb, ib;
+	rgvinput_t in;
+	float v[9];
+	unsigned short ix[3] = { 0, 1, 2 };
+	Uint32 i, n0, seen = 0;
+
+	memset (v, 0, sizeof(v));
+	RG_GenVertexArrays (1, &vao);
+	RG_GenBuffers (1, &vb);
+	RG_GenBuffers (1, &ib);
+	RG_BindVertexArray (vao);
+	RG_BindBuffer (GL_ARRAY_BUFFER, vb);
+	RG_BufferData (GL_ARRAY_BUFFER, sizeof(v), v, 0);
+	RG_EnableVertexAttribArray (0, true);
+	RG_VertexAttribPointer (0, 3, GL_FLOAT, GL_FALSE, false, 12, (void *) 0);
+	RG_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, ib);
+	RG_BufferData (GL_ELEMENT_ARRAY_BUFFER, sizeof(ix), ix, 0);
+	CHECK (Draw (2, &in), "a position-only VAO draws");
+	n0 = in.layout.num_attrs;
+	CHECK (in.nconst == 3 && in.const_slot == 1, "texcoord, lmcoord and color are the standard constants");
+	RG_Buf_FeedInputs (&in, 0, 0, 0);
+	CHECK (in.layout.num_attrs == n0 && in.nconst == 3, "an empty mask feeds nothing");
+	/* sshadow_alias_vert: 0 a_position, 3 a_weights, 4 a_indices (uvec4) */
+	RG_Buf_FeedInputs (&in, 0x19, 0x10, 0);
+	CHECK (in.layout.num_attrs == n0 + 1 && in.nconst == 4, "only location 4 was missing: one constant more");
+	for (i = 0; i < in.layout.num_attrs; i++)
+	{
+		const rgvattr_t *a = &in.layout.attr[i];
+
+		CHECK (!(seen & (1u << a->location)), "each location once");
+		seen |= 1u << a->location;
+		if (a->location == 4)
+		{
+			Uint32 u[4];
+
+			memcpy (u, in.consts[3], sizeof(u));
+			CHECK (a->format == SDL_GPU_VERTEXELEMENTFORMAT_UINT4 && a->slot == (Uint32) in.const_slot &&
+			       a->offset == 48, "a_indices: a UINT4 constant, after the three standard ones");
+			CHECK (u[0] == 0 && u[1] == 0 && u[2] == 0 && u[3] == 1, "GL's initial (0, 0, 0, 1)");
+		}
+	}
+	CHECK (seen == 0x1F, "locations 0..4 all supplied");
+	CHECK (in.layout.slot[in.const_slot].pitch == 64 && in.layout.slot[in.const_slot].instance,
+	       "the constant slot holds four 16-byte constants, instance rate");
+	/* A float input past the standard ones takes glVertexAttrib4f's value. */
+	RG_VertexAttrib4f (6, 0.5f, 0.25f, 0.125f, 1.0f);
+	RG_Buf_FeedInputs (&in, 0x40, 0, 0);
+	CHECK (in.nconst == 5 && in.layout.attr[in.layout.num_attrs - 1].location == 6 &&
+	       in.layout.attr[in.layout.num_attrs - 1].format == SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4 &&
+	       in.consts[4][0] == 0.5f && in.consts[4][2] == 0.125f, "a float input: FLOAT4, its current value");
+	/* A signed integer input: INT4. */
+	RG_Buf_FeedInputs (&in, 0x80, 0, 0x80);
+	CHECK (in.nconst == 6 && in.layout.attr[in.layout.num_attrs - 1].location == 7 &&
+	       in.layout.attr[in.layout.num_attrs - 1].format == SDL_GPU_VERTEXELEMENTFORMAT_INT4, "an ivec input: INT4");
+	RG_DeleteVertexArrays (1, &vao);
+	RG_DeleteBuffers (1, &vb);
+	RG_DeleteBuffers (1, &ib);
+	EndFrame ();
+}
+
 static void storage (void)
 {
 	GLuint sb, other, n1, n2, n3;
@@ -781,6 +852,7 @@ int main (void)
 	table_growth ();
 	stale_name ();
 	skeletal_layout ();
+	feed_inputs ();
 	storage ();
 	bufferless ();
 	compute_usage ();

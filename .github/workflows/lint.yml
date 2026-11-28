@@ -625,6 +625,14 @@ jobs:
       - name: Dlight test game generator names the sweep's torches
         run: python3 tools/mk-dlight-testgame.py --self-test
 
+      # tools/sweep-shadow-gpu.steps' test game: the dlight test game's demo2
+      # plus the leak check's scene 2 torch named and its recess barrel, and
+      # demo2m with the cast barrel an MD5 tombstone; each refusal on a
+      # synthetic lump, so the shadow sweep's cameras cannot quietly lose a
+      # light or a caster (#340 P6b).
+      - name: Shadow test game generator names the leak check's torches
+        run: python3 tools/mk-shadow-testgame.py --self-test
+
       # R_Mirror puts back what the reflected pass derived from the reflected
       # view (the world frame's caustics, the light grid, the view matrix and
       # frustum) before the mirror's own surfaces draw, and r_speeds' counters

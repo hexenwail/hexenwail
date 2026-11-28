@@ -499,9 +499,7 @@ qboolean R_GetScissor (GLint box[4])
 #ifdef USE_SDL_GPU
 	if (R_GPU ())
 	{
-		RG_NoteUnhandled ("R_GetScissor (P6b)");
-		box[0] = box[1] = box[2] = box[3] = 0;
-		return false;
+		return RG_GetScissor (box);
 	}
 #endif
 	if (!glIsEnabled_fp (GL_SCISSOR_TEST))

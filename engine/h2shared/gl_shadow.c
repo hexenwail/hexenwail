@@ -237,6 +237,8 @@ typedef struct {
 	int	pose[4];	/* alias: x pose 0 base, y pose 1 base, z PV_* format */
 } r_shadowpass_t;		/* 160 bytes */
 COMPILE_TIME_ASSERT(shadowpass_size, sizeof(r_shadowpass_t) == 160);
+COMPILE_TIME_ASSERT(shadowpass_size_h, sizeof(r_shadowpass_t) == SHADOWPASS_SIZE);
+COMPILE_TIME_ASSERT(shadowpass_pose_format, offsetof(r_shadowpass_t, pose) + 2 * sizeof(int) == SHADOWPASS_POSE_FORMAT_OFS);
 
 /* Mirrors the std140 DlShadow block in engine/shaders/dlshadow.inc. */
 typedef struct {
@@ -1612,15 +1614,8 @@ void R_Shadow_Prepare (void)
 		GL_BindBuffer (GL_UNIFORM_BUFFER, 0);
 	}
 
-#ifdef USE_SDL_GPU
-	/* The cube maps are P6 (#340).  The light cluster runs under -gpu
-	 * since P5b, so R_LightCluster_Available no longer holds them off at
-	 * the default r_dlight_occlusion 2: this does.  With no map drawn, the
-	 * frame's block names none and every light reads as unshadowed, which
-	 * is r_dlight_occlusion 1's picture. */
-	if (R_GPU ())
-		return;
-#endif
+	/* Under -gpu too since #340 P6b: the maps are layer-faces of an
+	 * SDL_GPU cube-map array, each a depth-only render pass. */
 	if (r_dlight_occlusion.integer >= 2 && !sh_failed && R_LightCluster_Available () &&
 	    r_shadow_maxlights.integer > 0 && world_vao && cl.worldmodel &&
 	    SH_BuildPrograms () && SH_EnsureSurfaces () && SH_EnsureTexture ())

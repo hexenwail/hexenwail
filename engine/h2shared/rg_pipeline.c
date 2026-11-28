@@ -220,6 +220,11 @@ static qboolean RG_MakeKey (rgpipekey_t *k, const rgprog_t *prog, SDL_GPUPrimiti
 	}
 	k->color_mask = (s->color_mask[0] ? 1 : 0) | (s->color_mask[1] ? 2 : 0) |
 			(s->color_mask[2] ? 4 : 0) | (s->color_mask[3] ? 8 : 0);
+	/* Blending and the colour mask act on a colour target alone: a
+	 * depth-only pass (#340 P6b) keys neither, so whatever the 3D view
+	 * left them at, its faces share one pipeline. */
+	if (color == SDL_GPU_TEXTUREFORMAT_INVALID)
+		k->blend = k->blend_src = k->blend_dst = k->color_mask = 0;
 	if (s->poly_offset_fill || (s->poly_offset_line && k->fill))
 	{
 		k->poly_offset = 1;
@@ -344,8 +349,14 @@ static SDL_GPUGraphicsPipeline *RG_CreatePipeline (const rgpipekey_t *k, const r
 		 ((k->color_mask & 2) ? SDL_GPU_COLORCOMPONENT_G : 0) |
 		 ((k->color_mask & 4) ? SDL_GPU_COLORCOMPONENT_B : 0) |
 		 ((k->color_mask & 8) ? SDL_GPU_COLORCOMPONENT_A : 0));
-	ci.target_info.color_target_descriptions = &ct;
-	ci.target_info.num_color_targets = 1;
+	/* A depth-only target (the shadow maps, #340 P6b) has no colour
+	 * target to describe: SDL refuses a pipeline whose one colour target
+	 * has no format. */
+	if (k->color_fmt != SDL_GPU_TEXTUREFORMAT_INVALID)
+	{
+		ci.target_info.color_target_descriptions = &ct;
+		ci.target_info.num_color_targets = 1;
+	}
 	if (k->depth_fmt != SDL_GPU_TEXTUREFORMAT_INVALID)
 	{
 		ci.target_info.has_depth_stencil_target = true;

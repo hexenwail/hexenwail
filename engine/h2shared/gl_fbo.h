@@ -23,10 +23,11 @@
  *
  * The layered attachment, the per-draw-buffer clear and multisampled
  * storage (#340 P6a) are seams with GL's signatures too, each GL arm the
- * bare call.  Their -gpu arms count themselves in gpu_unrouted and do
- * nothing until the sub-phase that builds them: layers are P6b (the cube
- * shadow maps), per-buffer clears P6b/P6c, multisampled storage P6d.  Every
- * caller is held off under -gpu today (R_Shadow_Prepare, the OIT gates,
+ * bare call.  Since P6b the layer is rg_target.c's (one layer of a layered
+ * texture as a depth attachment: the cube shadow maps' faces) and the clear's
+ * GL_DEPTH rg_frame.c's; a colour layer, a colour draw buffer's clear (MRT,
+ * P6c) and multisampled storage (P6d) count themselves in gpu_unrouted and do
+ * nothing, and their callers are held off under -gpu (the OIT gates,
  * PP_SceneSamples). */
 
 #ifndef GL_FBO_H

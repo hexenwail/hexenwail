@@ -114,10 +114,18 @@ void	RG_SetViewport (int x, int y, int width, int height);
  * R_GetViewport's answer, as glGetIntegerv (GL_VIEWPORT) is GL's (#340 P5a-1). */
 void	RG_GetViewport (int vp[4]);
 void	RG_SetScissor (qboolean enable, int x, int y, int width, int height);
+/* R_GetScissor's answer (#340 P6b): whether the test is on, and the box
+ * RG_SetScissor was last given, as glIsEnabled and GL_SCISSOR_BOX are GL's. */
+qboolean RG_GetScissor (int box[4]);
 /* gl_pipeline.c R_ClearBuffers: glClear's GL_COLOR / DEPTH / STENCIL bits,
  * with the values it clears to.  Ends the open segment if it has draws, so
  * the clear is the next render pass's load op (#340 P2b). */
 void	RG_Clear (GLbitfield mask, const float color[4], float depth, int stencil);
+/* gl_fbo.c R_ClearBufferfv (#340 P6b): glClearBufferfv's GL_DEPTH arm, the
+ * depth `value[0]` for the next render pass only, under the depth mask as
+ * glClear's; unlike glClear it leaves glClearDepth's value as it was.  A
+ * colour draw buffer is MRT's, P6c: counted and ignored. */
+void	RG_ClearBuffer (GLenum buffer, GLint drawbuffer, const GLfloat *value);
 
 /* gl_vbo.c GL_ImmEnd / GL_ImmDraw (rg_frame.c): one immediate-mode batch in
  * the immvert_t layout, drawn with the bound program and the current draw
@@ -188,6 +196,11 @@ void	RG_FramebufferRenderbuffer (GLenum target, GLenum attachment, GLenum rbtarg
 				    GLuint renderbuffer);
 GLenum	RG_CheckFramebufferStatus (GLenum target);
 void	RG_DrawBuffers (GLsizei n, const GLenum *bufs);
+/* One layer of a cube-map array, 2D array or cube map, level 0, as a depth
+ * attachment (#340 P6b: the shadow maps' layer-faces).  A colour layer, or a
+ * level past 0, leaves the point incomplete. */
+void	RG_FramebufferTextureLayer (GLenum target, GLenum attachment, GLuint texture,
+				    GLint level, GLint layer);
 void	RG_GenRenderbuffers (GLsizei n, GLuint *rbs);
 void	RG_DeleteRenderbuffers (GLsizei n, const GLuint *rbs);
 void	RG_BindRenderbuffer (GLenum target, GLuint rb);

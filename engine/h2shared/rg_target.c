@@ -14,8 +14,9 @@
  *
  * glCheckFramebufferStatus is honest: COMPLETE only for what a render pass
  * can be begun on -- at most one colour attachment (rg_pipeline.c builds one
- * colour target; two would be OIT's MRT, P6), a defined 2D texture with the
- * target usage for each attachment, equal sizes.  Anything else is
+ * colour target; two would be OIT's MRT, P6c), a defined 2D texture with the
+ * target usage for each attachment, or for depth one layer of a layered one
+ * (the shadow maps' cube-map array, #340 P6b), equal sizes.  Anything else is
  * incomplete, and the post-process chain turns itself off on that rather
  * than drawing into a target that is not there.
  *
@@ -75,6 +76,9 @@ typedef struct {
 	GLuint		depth;
 	GLuint		stencil;	/* GL_STENCIL_ATTACHMENT alone: complete only as depth's */
 	GLuint		extra[RGTG_EXTRA];	/* GL_COLOR_ATTACHMENT1 .. 15 */
+	/* The layer glFramebufferTextureLayer attached depth at; -1 when it
+	 * was attached whole, as a 2D texture or a renderbuffer (#340 P6b). */
+	int		dlayer;
 	/* RGTG_BAD_*: what no render pass can take (a level, a cube face, a
 	 * renderbuffer never made, MRT), by attachment point, so that what
 	 * replaces it there, or deleting it, takes it back as GL's does. */
@@ -184,6 +188,7 @@ void RG_GenFramebuffers (GLsizei n, GLuint *fbos)
 
 		memset (&rgfb[name], 0, sizeof(rgfbo_t));
 		rgfb[name].alive = true;
+		rgfb[name].dlayer = -1;
 		fbos[i] = name;
 	}
 }
@@ -272,8 +277,10 @@ static unsigned int RGTG_Point (GLenum attachment)
 }
 
 /* Attach texture name `tex` (0 detaches) at `attachment` of `f`, replacing
- * whatever was there; `bad`: as something no render pass can take. */
-static void RGTG_Attach (rgfbo_t *f, GLenum attachment, GLuint tex, qboolean bad)
+ * whatever was there; `bad`: as something no render pass can take.  `layer`
+ * the layer of a layered texture, -1 for a whole one; only a depth point
+ * keeps it (a colour layer is bad, RG_FramebufferTextureLayer). */
+static void RGTG_Attach (rgfbo_t *f, GLenum attachment, GLuint tex, qboolean bad, int layer)
 {
 	unsigned int	point = RGTG_Point (attachment);
 
@@ -291,12 +298,14 @@ static void RGTG_Attach (rgfbo_t *f, GLenum attachment, GLuint tex, qboolean bad
 		break;
 	case GL_DEPTH_ATTACHMENT:
 		f->depth = tex;
+		f->dlayer = tex ? layer : -1;
 		break;
 	case GL_STENCIL_ATTACHMENT:
 		f->stencil = tex;
 		break;
 	case GL_DEPTH_STENCIL_ATTACHMENT:
 		f->depth = f->stencil = tex;
+		f->dlayer = tex ? layer : -1;
 		break;
 	default:
 		f->extra[attachment - GL_COLOR_ATTACHMENT0 - 1] = tex;
@@ -321,7 +330,33 @@ void RG_FramebufferTexture2D (GLenum target, GLenum attachment, GLenum textarget
 		RG_NoteUnhandled ("framebuffer attachment of a cube face or a mip level (incomplete)");
 		bad = true;
 	}
-	RGTG_Attach (f, attachment, texture, bad);
+	RGTG_Attach (f, attachment, texture, bad, -1);
+}
+
+void RG_FramebufferTextureLayer (GLenum target, GLenum attachment, GLuint texture,
+				 GLint level, GLint layer)
+{
+	rgfbo_t		*f = RGTG_AttachTo (target);
+	qboolean	bad = false;
+
+	if (!f)
+		return;
+	if (texture && (level != 0 || layer < 0))
+	{
+		RG_NoteUnhandled ("layered framebuffer attachment of a mip level past 0 (incomplete)");
+		bad = true;
+	}
+	else if (texture && !(RGTG_Point (attachment) & (RGTG_BAD_DEPTH | RGTG_BAD_STENCIL)))
+	{
+		/* A colour layer would be a pass's colour target's layer: MRT and
+		 * the layered colour targets are P6c's. */
+		RG_NoteUnhandled ("layered colour attachment (P6c; incomplete)");
+		bad = true;
+	}
+	/* Whether the texture is layered, and has the layer, is RGTG_Complete's
+	 * to find: GL checks it at the attach, but either way the framebuffer
+	 * is incomplete and nothing draws. */
+	RGTG_Attach (f, attachment, texture, bad, texture ? layer : -1);
 }
 
 void RG_FramebufferRenderbuffer (GLenum target, GLenum attachment, GLenum rbtarget,
@@ -335,10 +370,10 @@ void RG_FramebufferRenderbuffer (GLenum target, GLenum attachment, GLenum rbtarg
 	if (renderbuffer && (rbtarget != GL_RENDERBUFFER || !r))
 	{
 		RG_NoteUnhandled ("framebuffer attachment of a renderbuffer never generated (incomplete)");
-		RGTG_Attach (f, attachment, 0, true);
+		RGTG_Attach (f, attachment, 0, true, -1);
 		return;
 	}
-	RGTG_Attach (f, attachment, r ? r->tex : 0, false);
+	RGTG_Attach (f, attachment, r ? r->tex : 0, false, -1);
 }
 
 void RG_DrawBuffers (GLsizei n, const GLenum *bufs)
@@ -397,7 +432,7 @@ static GLenum RGTG_Complete (const rgfbo_t *f, qboolean draw, rgtarget_t *out)
 		return GL_FRAMEBUFFER_UNSUPPORTED;	/* SDL_GPU has one depth-stencil texture */
 	if (f->color)
 	{
-		if (!RG_Res_RenderTarget (f->color, SDL_GPU_TEXTUREUSAGE_COLOR_TARGET, &t.color,
+		if (!RG_Res_RenderTarget (f->color, SDL_GPU_TEXTUREUSAGE_COLOR_TARGET, -1, &t.color,
 					  &t.cfmt, &t.cusage, &t.w, &t.h))
 			return GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT;
 	}
@@ -405,9 +440,11 @@ static GLenum RGTG_Complete (const rgfbo_t *f, qboolean draw, rgtarget_t *out)
 	{
 		int	w, h;
 
-		if (!RG_Res_RenderTarget (f->depth, SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET, &t.depth,
-					  &t.dfmt, &t.dusage, &w, &h))
+		if (!RG_Res_RenderTarget (f->depth, SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET, f->dlayer,
+					  &t.depth, &t.dfmt, &t.dusage, &w, &h))
 			return GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT;
+		t.dlayered = f->dlayer >= 0;
+		t.dlayer = t.dlayered ? f->dlayer : 0;
 		if (t.color && (w != t.w || h != t.h))
 			return GL_FRAMEBUFFER_UNSUPPORTED;	/* a render pass takes equal sizes */
 		t.w = w;
@@ -635,8 +672,10 @@ static qboolean RGTG_CopyDepth (SDL_GPUCommandBuffer *cmd, const rgtarget_t *src
 		return false;
 	SDL_zero (s);
 	s.texture = src->depth;
+	s.layer = (Uint32) src->dlayer;	/* the attached layer: GL copies that one */
 	SDL_zero (d);
 	d.texture = dst->depth;
+	d.layer = (Uint32) dst->dlayer;
 	copy = SDL_BeginGPUCopyPass (cmd);
 	if (!copy)
 		return false;
@@ -717,6 +756,7 @@ void RG_Target_TextureDeleted (GLuint tex)
 		if (f->depth == tex)
 		{
 			f->depth = 0;
+			f->dlayer = -1;
 			f->bad &= ~RGTG_BAD_DEPTH;
 			changed = true;
 		}

@@ -30,7 +30,13 @@ calls and checks, case by case:
     follow a blit into framebuffer 0 only set a flag already set, and was
     removed as dead.  The first-pass condition is pinned in
     test_rg_sources.py (RGF_EndSegment), and RG_Clear resolving a dirty
-    target before it records a clear there too.
+    target before it records a clear there too;
+  * a layer of a layered texture is a depth attachment (#340 P6b, the
+    shadow maps' cube-map array): complete with no colour, the target
+    carries the layer, and a level past 0, a colour layer, a layer the
+    texture lacks, or a layered texture attached as 2D (or a 2D one as a
+    layer) is incomplete until replaced; a depth copy reads and writes the
+    attached layers.
 
 And, lifted from rg_resource.c and rg_frame.c, compiled against stubs:
 
@@ -76,6 +82,10 @@ typedef unsigned int GLbitfield;
 #define GL_NONE 0
 #define GL_TEXTURE_2D 0x0DE1
 #define GL_TEXTURE_CUBE_MAP_POSITIVE_X 0x8515
+#define GL_TEXTURE_CUBE_MAP_ARRAY 0x9009
+#define GL_DEPTH_COMPONENT16 0x81A5
+#define GL_DEPTH_COMPONENT 0x1902
+#define GL_UNSIGNED_SHORT 0x1403
 #define GL_RGBA 0x1908
 #define GL_RGBA8 0x8058
 #define GL_UNSIGNED_BYTE 0x1401
@@ -106,7 +116,8 @@ typedef struct SDL_GPUTexture { int id; } SDL_GPUTexture;
 typedef struct SDL_GPUCommandBuffer SDL_GPUCommandBuffer;
 typedef struct SDL_GPUCopyPass SDL_GPUCopyPass;
 typedef enum { SDL_GPU_TEXTUREFORMAT_INVALID, SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
-	       SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT, SDL_GPU_TEXTUREFORMAT_D24_UNORM } SDL_GPUTextureFormat;
+	       SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT, SDL_GPU_TEXTUREFORMAT_D24_UNORM,
+	       SDL_GPU_TEXTUREFORMAT_D16_UNORM } SDL_GPUTextureFormat;
 typedef Uint32 SDL_GPUTextureUsageFlags;
 #define SDL_GPU_TEXTUREUSAGE_SAMPLER 1u
 #define SDL_GPU_TEXTUREUSAGE_COLOR_TARGET 2u
@@ -130,7 +141,7 @@ void RG_DeleteTextures (GLsizei n, const GLuint *textures);
 void RG_TexImage (GLenum target, GLuint tex, GLint level, GLint internalformat,
 		  GLsizei width, GLsizei height, GLsizei depth, GLenum format,
 		  GLenum type, const void *pixels);
-qboolean RG_Res_RenderTarget (GLuint name, SDL_GPUTextureUsageFlags usage, SDL_GPUTexture **tex,
+qboolean RG_Res_RenderTarget (GLuint name, SDL_GPUTextureUsageFlags usage, int layer, SDL_GPUTexture **tex,
 			      SDL_GPUTextureFormat *fmt, SDL_GPUTextureUsageFlags *have, int *w, int *h);
 void RG_Res_TargetOnly (GLuint name);
 /* the real header's target type */
@@ -151,6 +162,8 @@ void RG_FramebufferRenderbuffer (GLenum target, GLenum attachment, GLenum rbtarg
 				 GLuint renderbuffer);
 GLenum RG_CheckFramebufferStatus (GLenum target);
 void RG_DrawBuffers (GLsizei n, const GLenum *bufs);
+void RG_FramebufferTextureLayer (GLenum target, GLenum attachment, GLuint texture,
+				 GLint level, GLint layer);
 void RG_GenRenderbuffers (GLsizei n, GLuint *rbs);
 void RG_DeleteRenderbuffers (GLsizei n, const GLuint *rbs);
 void RG_BindRenderbuffer (GLenum target, GLuint rb);
@@ -183,9 +196,10 @@ static rgtarget_t frame_tgt;
 static qboolean frame_ok = true;
 
 /* rg_resource.c: a texture is defined, a colour or depth target, sampled
- * unless it is a renderbuffer's. */
+ * unless it is a renderbuffer's; `layers` 0 for a 2D one, else a cube-map
+ * array's layer-faces. */
 typedef struct { int alive, defined; SDL_GPUTexture tex; SDL_GPUTextureFormat fmt;
-		 SDL_GPUTextureUsageFlags usage; int w, h; } ftex_t;
+		 SDL_GPUTextureUsageFlags usage; int w, h, layers; } ftex_t;
 static ftex_t tex[256];
 static int ntex;
 void RG_GenTextures (GLsizei n, GLuint *t)
@@ -218,11 +232,17 @@ void RG_DeleteTextures (GLsizei n, const GLuint *t)
 void RG_TexImage (GLenum target, GLuint t, GLint level, GLint ifmt, GLsizei w, GLsizei h,
 		  GLsizei d, GLenum format, GLenum type, const void *pixels)
 {
-	(void) target; (void) level; (void) d; (void) format; (void) type; (void) pixels;
+	(void) level; (void) format; (void) type; (void) pixels;
 	tex[t].defined = 1;
 	tex[t].w = w;
 	tex[t].h = h;
-	if (ifmt == GL_DEPTH24_STENCIL8 || ifmt == GL_DEPTH_COMPONENT24)
+	tex[t].layers = (target == GL_TEXTURE_CUBE_MAP_ARRAY) ? d : 0;
+	if (ifmt == GL_DEPTH_COMPONENT16)
+	{
+		tex[t].fmt = SDL_GPU_TEXTUREFORMAT_D16_UNORM;
+		tex[t].usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+	}
+	else if (ifmt == GL_DEPTH24_STENCIL8 || ifmt == GL_DEPTH_COMPONENT24)
 	{
 		/* GL_DEPTH24_STENCIL8 is the scene's own format, as RGT_Format
 		 * maps it; GL_DEPTH_COMPONENT24 is not. */
@@ -236,10 +256,13 @@ void RG_TexImage (GLenum target, GLuint t, GLint level, GLint ifmt, GLsizei w, G
 		tex[t].usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
 	}
 }
-qboolean RG_Res_RenderTarget (GLuint name, SDL_GPUTextureUsageFlags usage, SDL_GPUTexture **t,
+qboolean RG_Res_RenderTarget (GLuint name, SDL_GPUTextureUsageFlags usage, int layer, SDL_GPUTexture **t,
 			      SDL_GPUTextureFormat *fmt, SDL_GPUTextureUsageFlags *have, int *w, int *h)
 {
 	if (!name || name > (GLuint) ntex || !tex[name].alive || !tex[name].defined || !(tex[name].usage & usage))
+		return false;
+	/* the real one's rule: -1 a 2D texture, else a layer it has */
+	if (layer < 0 ? tex[name].layers != 0 : (tex[name].layers == 0 || layer >= tex[name].layers))
 		return false;
 	*t = &tex[name].tex;
 	*fmt = tex[name].fmt;
@@ -278,6 +301,7 @@ SDL_GPUCommandBuffer *RG_Frame_Break (void) { breaks++; Event ('B'); return cmdb
 static SDL_GPUBlitInfo last_blit;
 static int nblits, ncopies;
 static SDL_GPUTexture *last_copy_src, *last_copy_dst;
+static Uint32 last_copy_src_layer, last_copy_dst_layer;
 void SDL_BlitGPUTexture (SDL_GPUCommandBuffer *cmd, const SDL_GPUBlitInfo *info)
 {
 	(void) cmd;
@@ -292,6 +316,8 @@ void SDL_CopyGPUTextureToTexture (SDL_GPUCopyPass *p, const SDL_GPUTextureLocati
 	(void) p; (void) w; (void) h; (void) depth; (void) cycle;
 	last_copy_src = s->texture;
 	last_copy_dst = d->texture;
+	last_copy_src_layer = s->layer;
+	last_copy_dst_layer = d->layer;
 	ncopies++;
 	Event ('D');
 }
@@ -318,6 +344,15 @@ static GLuint DepthTex (int w, int h)
 }
 
 static GLenum Status (void) { return RG_CheckFramebufferStatus (GL_FRAMEBUFFER); }
+
+static GLuint CubeArray (int res, int maps)
+{
+	GLuint t;
+	RG_GenTextures (1, &t);
+	RG_TexImage (GL_TEXTURE_CUBE_MAP_ARRAY, t, 0, GL_DEPTH_COMPONENT16, res, res, maps * 6,
+		     GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT, NULL);
+	return t;
+}
 
 /* #548 2: glDrawBuffers is the draw side's alone. */
 static void read_side_drawbuffers (void)
@@ -471,6 +506,76 @@ static void blit_after_break (void)
 	RG_DeleteFramebuffers (1, &fbo);
 }
 
+/* #340 P6b: the shadow maps' layer-faces, as gl_shadow.c attaches them. */
+static void layered_depth (void)
+{
+	GLuint fbo[2], a = CubeArray (32, 2), b = CubeArray (32, 2), d2 = DepthTex (32, 32);
+	GLuint c = ColorTex (32, 32);
+	const GLenum none = GL_NONE;
+	int u0;
+
+	RG_GenFramebuffers (2, fbo);
+	RG_BindFramebuffer (GL_FRAMEBUFFER, fbo[0]);
+	RG_DrawBuffers (1, &none);
+	RG_FramebufferTextureLayer (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, a, 0, 7);
+	CHECK (Status () == GL_FRAMEBUFFER_COMPLETE && frame_ok, "a layer-face of a depth cube array is complete");
+	CHECK (!frame_tgt.color && frame_tgt.depth == &tex[a].tex && frame_tgt.dlayer == 7 && frame_tgt.dlayered
+	       && frame_tgt.w == 32 && frame_tgt.h == 32,
+	       "the target is depth-only, on that layer, the texture's size");
+	RG_FramebufferTextureLayer (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, a, 0, 11);
+	CHECK (frame_ok && frame_tgt.dlayer == 11, "another layer re-resolves the bound target to it");
+
+	/* Each refusal is incomplete until something good replaces it. */
+	RG_FramebufferTextureLayer (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, a, 1, 0);
+	CHECK (Status () != GL_FRAMEBUFFER_COMPLETE && !frame_ok, "a level past 0 is incomplete");
+	RG_FramebufferTextureLayer (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, a, 0, 12);
+	CHECK (Status () != GL_FRAMEBUFFER_COMPLETE && !frame_ok, "a layer the texture lacks (2 x 6) is incomplete");
+	RG_FramebufferTextureLayer (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, a, 0, 0);
+	CHECK (Status () == GL_FRAMEBUFFER_COMPLETE && frame_ok && frame_tgt.dlayer == 0 && frame_tgt.dlayered,
+	       "layer 0 in its place: complete, and still layered");
+	RG_FramebufferTexture2D (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, a, 0);
+	CHECK (Status () != GL_FRAMEBUFFER_COMPLETE, "a cube array attached as a 2D texture is incomplete");
+	RG_FramebufferTextureLayer (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, d2, 0, 0);
+	CHECK (Status () != GL_FRAMEBUFFER_COMPLETE, "a 2D texture attached as a layer is incomplete");
+	RG_FramebufferTexture2D (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, d2, 0);
+	CHECK (Status () == GL_FRAMEBUFFER_COMPLETE && frame_ok && !frame_tgt.dlayered && frame_tgt.dlayer == 0,
+	       "a 2D depth texture whole: complete, not layered");
+	u0 = unhandled;
+	RG_FramebufferTextureLayer (GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, a, 0, 3);
+	CHECK (unhandled > u0 && Status () != GL_FRAMEBUFFER_COMPLETE && !frame_ok,
+	       "a colour layer is noted and incomplete (P6c)");
+	RG_FramebufferTexture2D (GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
+	RG_FramebufferTextureLayer (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, a, 0, 5);
+	CHECK (Status () == GL_FRAMEBUFFER_COMPLETE && frame_ok && frame_tgt.dlayer == 5,
+	       "the colour point detached: complete again");
+
+	/* A detach, and a delete, forget the layer. */
+	RG_FramebufferTextureLayer (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, 0, 0, 0);
+	CHECK (Status () != GL_FRAMEBUFFER_COMPLETE, "detached: nothing attached");
+	RG_FramebufferTextureLayer (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, b, 0, 9);
+	RG_DeleteTextures (1, &b);
+	CHECK (Status () != GL_FRAMEBUFFER_COMPLETE && !frame_ok, "deleting the layered texture detaches it");
+	RG_FramebufferTexture2D (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, d2, 0);
+	CHECK (frame_ok && !frame_tgt.dlayered && frame_tgt.dlayer == 0,
+	       "a 2D texture attached after a deleted layered one carries no layer");
+
+	/* A depth copy between two layer-faces of different arrays copies those. */
+	b = CubeArray (32, 2);
+	RG_FramebufferTextureLayer (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, a, 0, 4);
+	RG_BindFramebuffer (GL_FRAMEBUFFER, fbo[1]);
+	RG_DrawBuffers (1, &none);
+	RG_FramebufferTextureLayer (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, b, 0, 10);
+	RG_BindFramebuffer (GL_READ_FRAMEBUFFER, fbo[0]);
+	ncopies = 0;
+	CHECK (RG_BlitFramebuffer (0, 0, 32, 32, 0, 0, 32, 32, GL_DEPTH_BUFFER_BIT, GL_NEAREST) && ncopies == 1 &&
+	       last_copy_src == &tex[a].tex && last_copy_dst == &tex[b].tex &&
+	       last_copy_src_layer == 4 && last_copy_dst_layer == 10,
+	       "a depth copy reads layer 4 and writes layer 10");
+	RG_BindFramebuffer (GL_FRAMEBUFFER, 0);
+	RG_DeleteFramebuffers (2, fbo);
+	(void) c;
+}
+
 int main (void)
 {
 	RG_Target_Init ();
@@ -478,6 +583,7 @@ int main (void)
 	bad_attachment_replaced ();
 	delete_detaches ();
 	blit_after_break ();
+	layered_depth ();
 	RG_Target_Shutdown ();
 	if (failures)
 		return 1;
