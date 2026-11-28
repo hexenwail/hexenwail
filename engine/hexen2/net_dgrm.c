@@ -1234,7 +1234,7 @@ static qsocket_t *_Datagram_Connect (const char *host)
 	for (reps = 0; reps < 3; reps++)
 	{
 		if (reps)
-			SCR_SetLoadingStatus ("Connecting to %s... (retry %d)", host, reps);
+			SCR_SetLoadingRetry ("Connecting to %s... (retry %d)", host, reps);
 		else
 			SCR_SetLoadingStatus ("Connecting to %s...", host);
 		SZ_Clear(&net_message);

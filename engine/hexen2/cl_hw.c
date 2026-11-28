@@ -2192,7 +2192,7 @@ static void HWCL_SendConnectPacket (void)
 	Con_Printf ("Connecting to HexenWorld server %s...\n",
 			HWNET_AdrToString (&hwcl_server));
 	if (hwcl_connect_tries++)
-		SCR_SetLoadingStatus ("Connecting to %s... (retry %d)",
+		SCR_SetLoadingRetry ("Connecting to %s... (retry %d)",
 				HWNET_AdrToString (&hwcl_server), hwcl_connect_tries - 1);
 	else
 		SCR_SetLoadingStatus ("Connecting to %s...",

@@ -655,7 +655,10 @@ static void Host_Connect_f (void)
 	if (cls.state == ca_connected)
 		CL_Disconnect ();
 	SCR_BeginLoadingPlaque ();
-	SCR_SetLoadingStatus ("Connecting to %s...", name);
+	/* A local game connects over loopback, instantly: keep "Loading map"
+	 * from Host_Map_f rather than show a network stage in single player. */
+	if (q_strcasecmp (name, "local"))
+		SCR_SetLoadingStatus ("Connecting to %s...", name);
 	CL_EstablishConnection (name);
 #if defined(H2W_INTEGRATED)
 	/* A rejected hw:// address has already reported itself; leaving the

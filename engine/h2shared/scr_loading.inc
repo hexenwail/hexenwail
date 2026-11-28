@@ -51,15 +51,12 @@ static qboolean	scr_loadactive;
  * render a half-built world. */
 static qboolean	scr_loadingintick;
 
-void SCR_SetLoadingStatus (const char *fmt, ...)
+static void SCR_LoadingSetText (qboolean progress, const char *fmt, va_list argptr)
 {
 	char	text[sizeof(scr_loadstatus)];
-	va_list	argptr;
 	const char	*a, *b;
 
-	va_start (argptr, fmt);
 	q_vsnprintf (text, sizeof(text), fmt, argptr);
-	va_end (argptr);
 	if (!strcmp (text, scr_loadstatus))
 		return;
 	/* One log line per stage, not one per model: a change in the digits
@@ -80,8 +77,31 @@ void SCR_SetLoadingStatus (const char *fmt, ...)
 	}
 	q_strlcpy (scr_loadstatus, text, sizeof(scr_loadstatus));
 	/* Progress restarts the 25 s "load timeout": it is there for a load that
-	 * has stopped, and a long download or precache has not. */
-	scr_disabled_time = Sys_DoubleTime ();
+	 * has stopped, and a long download or precache has not.  On realtime,
+	 * not Sys_DoubleTime: see scr_disabled_time. */
+	if (progress)
+		scr_disabled_time = realtime;
+}
+
+void SCR_SetLoadingStatus (const char *fmt, ...)
+{
+	va_list	argptr;
+
+	va_start (argptr, fmt);
+	SCR_LoadingSetText (true, fmt, argptr);
+	va_end (argptr);
+}
+
+/* A connect retry is our own resend, not word from the server: it changes the
+ * text but must not restart the load timeout, or a dead server that is
+ * retried forever never times out. */
+void SCR_SetLoadingRetry (const char *fmt, ...)
+{
+	va_list	argptr;
+
+	va_start (argptr, fmt);
+	SCR_LoadingSetText (false, fmt, argptr);
+	va_end (argptr);
 }
 
 /* For a blocking loop, between its steps.  Draws only if the plaque is up and

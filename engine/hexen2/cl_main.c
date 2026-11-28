@@ -348,7 +348,8 @@ void CL_EstablishConnection (const char *host)
 	cls.demonum = -1;			// not in the demo loop now
 	cls.state = ca_connected;
 	cls.signon = 0;				// need all the signon messages before playing
-	SCR_SetLoadingStatus ("Waiting for server info");
+	if (!NET_IsLocalConnection (cls.netcon))
+		SCR_SetLoadingStatus ("Waiting for server info");
 
 	MSG_WriteByte (&cls.message, clc_nop);	// fixes connection getting stuck after displaying
 								// the "Connection accepted" msg..
@@ -364,6 +365,10 @@ An svc_signonnum has been received, perform a client side setup
 void CL_SignonReply (void)
 {
 	char	str[8192];
+	/* Single player signs on over loopback too, and a demo has no server.
+	 * The plaque names these stages for a remote join; locally it gets
+	 * neutral words, not "Signon n/4". */
+	qboolean	local = cls.demoplayback || NET_IsLocalConnection (cls.netcon);
 
 	Con_DPrintf ("%s: %i\n", __thisfunc__, cls.signon);
 
@@ -372,7 +377,7 @@ void CL_SignonReply (void)
 	case 1:
 		MSG_WriteByte (&cls.message, clc_stringcmd);
 		MSG_WriteString (&cls.message, "prespawn");
-		SCR_SetLoadingStatus ("Signon 1/4: receiving entities");
+		SCR_SetLoadingStatus (local ? "Spawning" : "Signon 1/4: receiving entities");
 		break;
 
 	case 2:
@@ -396,13 +401,13 @@ void CL_SignonReply (void)
 		MSG_WriteByte (&cls.message, clc_stringcmd);
 		q_snprintf (str, sizeof(str), "spawn %s", cls.spawnparms);
 		MSG_WriteString (&cls.message, str);
-		SCR_SetLoadingStatus ("Signon 2/4: spawning");
+		SCR_SetLoadingStatus (local ? "Spawning" : "Signon 2/4: spawning");
 		break;
 
 	case 3:
 		MSG_WriteByte (&cls.message, clc_stringcmd);
 		MSG_WriteString (&cls.message, "begin");
-		SCR_SetLoadingStatus ("Signon 3/4: entering game");
+		SCR_SetLoadingStatus (local ? "Entering game" : "Signon 3/4: entering game");
 		Cache_Report ();		// print remaining memory
 		break;
 
