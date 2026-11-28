@@ -1819,7 +1819,7 @@ EOF
             install -m755 ${./appimage/AppRun} $app/AppRun
             sed 's/^Exec=.*/Exec=AppRun/' ${./flatpak/io.github.hexenwail.hexenwail.desktop} \
               > $app/io.github.hexenwail.hexenwail.desktop
-            install -m644 ${./engine/resource/hexen2.png} $app/io.github.hexenwail.hexenwail.png
+            install -m644 ${./engine/resource/hexenwail-256.png} $app/io.github.hexenwail.hexenwail.png
             ln -s io.github.hexenwail.hexenwail.png $app/.DirIcon
 
             mksquashfs $app $TMPDIR/app.squashfs -root-owned -noappend -comp zstd -quiet

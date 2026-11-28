@@ -227,4 +227,7 @@ modules:
       - install -Dm755 ../scripts/get_demo.sh /app/bin/get_demo.sh
       - install -Dm644 ../flatpak/io.github.hexenwail.hexenwail.desktop /app/share/applications/io.github.hexenwail.hexenwail.desktop
       - install -Dm644 ../flatpak/io.github.hexenwail.hexenwail.metainfo.xml /app/share/metainfo/io.github.hexenwail.hexenwail.metainfo.xml
-      - install -Dm644 ../engine/resource/hexen2.png /app/share/icons/hicolor/128x128/apps/io.github.hexenwail.hexenwail.png
+      # Hammer of Thyrion "XII" icon (tools/gen_icons.sh): the SVG for scalable
+      # and a 256 px raster for AppStream, which wants one of at least 128.
+      - install -Dm644 ../engine/resource/hexenwail.svg /app/share/icons/hicolor/scalable/apps/io.github.hexenwail.hexenwail.svg
+      - install -Dm644 ../engine/resource/hexenwail-256.png /app/share/icons/hicolor/256x256/apps/io.github.hexenwail.hexenwail.png

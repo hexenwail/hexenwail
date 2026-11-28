@@ -22,6 +22,7 @@ Run the scripts directly. The Python ones need only stock `python3`, except
 | script | what it does |
 | --- | --- |
 | `qcdis.py` | disassemble `progs.dat` bytecode |
+| `gen_icons.sh` | regenerate every application icon (Windows `.ico`, SDL window icon, Flatpak/AppImage, PWA) from `engine/resource/hexenwail.svg`; gated by `test_icons.py` in `lint.yml` |
 | `edict_pick.py` | pull entities of interest out of an `edicts` console dump |
 | `headless-cfg.sh` | generate a scripted-run config that emits those dumps |
 | `headless-drive.sh` | drive the engine's menus under Xvfb with real key events |
