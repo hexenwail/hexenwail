@@ -230,13 +230,13 @@ Checked, from the sources (stock python3, lint.yml):
       for, its parameters passed through in order, and each SDL_GPU arm is
       the one rg_target.c call of the same name, its parameters in order
       (P4a-2; P4a-1's arms noted the call and answered neutrally);
-    * no gl*_fp call is left in gl_postprocess.c outside the OIT functions
-      (P6; the GPU palette-LUT builder through gl_compute.h since P5a-1,
-      check_compute), except where an
-      SDL_GPU arm excludes it and PP_RAW_OK's few, each counted: MSAA's
-      multisampled storage (P6) and shutdown's program and buffer deletes
-      (bloom's three bufferless draws are R_DrawArrays since P4e); a
-      function GPU_GATES gates whole gets no credit for its gate;
+    * no gl*_fp call is left in gl_postprocess.c (the GPU palette-LUT
+      builder through gl_compute.h since P5a-1, check_compute; the OIT
+      functions and MSAA's multisampled storage since P6a, check_p6a),
+      except where an SDL_GPU arm excludes it and PP_RAW_OK's few, each
+      counted: shutdown's program and buffer deletes (bloom's three
+      bufferless draws are R_DrawArrays since P4e); a function GPU_GATES
+      gates whole gets no credit for its gate;
     * the gates: OIT_InitShader returns false (GPU_GATES),
       PP_SceneSamples (PP_CreateFBO's sample count) forces 0 samples after
       the gl_max_samples clamp, and an FBO failure under -gpu returns from BeginFrame
@@ -248,6 +248,32 @@ Checked, from the sources (stock python3, lint.yml):
       returns, PP_BindUniformBlock returns under -gpu before any GL call,
       and the blocks registered engine-wide, BloomParams among them, fit
       under RG_MAX_BLOCKS.
+  the shadow, OIT and MSAA GL calls through seams (#340 P6a, check_p6a),
+  GL unchanged and every -gpu gate kept:
+    * the new seams are each GL arm the one bare call, parameters in
+      order, and each -gpu arm exactly `RG_NoteUnhandled ("... (P6x)")`
+      with a neutral answer: R_FramebufferTextureLayer, R_ClearBufferfv and
+      R_RenderbufferStorageMultisample (gl_fbo.c), R_MultiDrawElements
+      (gl_vbo.c, under #ifndef USE_GLES), R_GetScissor (gl_pipeline.c;
+      glIsEnabled then GL_SCISSOR_BOX, off and a zeroed box under -gpu) and
+      R_MaxCubeMapSize (gl_texcreate.c, #ifndef USE_GLES; 0, no cap);
+    * gl_shadow.c makes no gl*_fp call -gpu can reach: SH_GPU () is R_GPU ()
+      under USE_SDL_GPU and false otherwise, and every call is in a GL arm
+      an `if (SH_GPU ())` / `if (R_GPU ())` excludes, but the program
+      deletes under `if (sh_*prog)` (SHADOW_RAW_OK, counted; graphics
+      programs are restart-only under -gpu and RG_ProgramDelete is the
+      compute passes');
+    * ShadowPass is a registered mirror, sh_pass_mirror (an r_shadowpass_t
+      under USE_SDL_GPU), registered in SH_BuildPrograms' R_GPU () arm in
+      place of the GL block lookup; SH_Pass copies the pass into it and
+      flushes it under -gpu ahead of GL's GL_Upload, which is unchanged;
+    * OitParams is a registered mirror, oit_params (a file-scope
+      oit_params_t), registered in OIT_InitShader's R_GPU () arm in place
+      of oit_ubo's creation; OIT_EndTranslucency fills it, then flushes it
+      (-gpu) or uploads it into oit_ubo (GL), before the resolve's draw;
+    * the gates stay: R_Shadow_Prepare and the five OIT gates (GPU_GATES),
+      PP_SceneSamples (check_postprocess); RG_MAX_BLOCKS is at least the
+      24 P6 needs, with ShadowPass and OitParams among the blocks counted.
   the post-process chain on SDL_GPU render targets (#340 P4a-2,
   check_render_targets), which tools/sweep-pp-gpu.steps and tools/pp-diff.sh
   draw:
@@ -2887,8 +2913,6 @@ def check_mirror(root):
 PP_RAW_FUNCS = {}
 # (function, GL entry point) -> (calls, why) that stay raw in the rest.
 PP_RAW_OK = {
-    ("PP_CreateFBO", "glRenderbufferStorageMultisample"):
-        (2, "the MSAA branch's storage, P6: -gpu forces 0 samples ahead of it"),
     ("GL_PostProcess_Shutdown", "glDeleteProgram"):
         (3, "programs at shutdown, restart-only under -gpu (P4 decision 9)"),
     ("GL_PostProcess_Shutdown", "glDeleteBuffers"):
@@ -2899,6 +2923,38 @@ FBO_SEAMS = ("GenFramebuffers", "DeleteFramebuffers", "BindFramebuffer", "Frameb
              "FramebufferRenderbuffer", "CheckFramebufferStatus", "DrawBuffers",
              "GenRenderbuffers", "DeleteRenderbuffers", "BindRenderbuffer",
              "RenderbufferStorage", "BlitFramebuffer")
+
+
+# The gl_fbo.c seams P6a adds: (the -gpu arm's answer, its note).  Until
+# P6b-d builds them each counts itself and does nothing.
+P6A_FBO_SEAMS = {
+    "FramebufferTextureLayer": ("", "R_FramebufferTextureLayer (layered attachments are P6b)"),
+    "ClearBufferfv": ("", "R_ClearBufferfv (per-draw-buffer clears are P6b/P6c)"),
+    "RenderbufferStorageMultisample": ("", "R_RenderbufferStorageMultisample (MSAA targets are P6d)"),
+}
+
+
+def check_p6a_seam(rel, code, heads, bodies, fn, glcall, ret, note, gl_body=None, gpu_extra=""):
+    """A P6a seam: the GL arm exactly the bare call (or gl_body), the -gpu
+    arm exactly the note, gpu_extra, then the neutral answer."""
+    if fn not in bodies or fn not in heads:
+        fail("%s: no %s -- the #340 P6a seam is gone" % (rel, fn))
+        return
+    params = [re.findall(r"[A-Za-z_]\w*", re.sub(r"\[[^\]]*\]", "", a))[-1]
+              for a in heads[fn].split(",") if a.strip() and a.strip() != "void"]
+    got = re.sub(r"\s+", "", gl_arm(bodies[fn]))
+    want = gl_body if gl_body is not None else "{%s(%s);}" % (glcall, ",".join(params))
+    if got != want:
+        fail("%s: %s's GL arm must be exactly `%s`, found `%s` (whitespace dropped; #340 P6a)"
+             % (rel, fn, want, got))
+    arm = re.search(r"#\s*ifdef\s+USE_SDL_GPU\b(.*?)#\s*endif", bodies[fn], re.S)
+    arm = re.sub(r"\s+", "", arm.group(1)) if arm else ""
+    want = "if(R_GPU()){RG_NoteUnhandled(\"%s\");%sreturn%s;}" % (note.replace(" ", ""), gpu_extra,
+                                                                 (" " + ret).rstrip())
+    want = want.replace("return ", "return")
+    if re.sub(r"\s+", "", arm) != re.sub(r"\s+", "", want):
+        fail("%s: %s's SDL_GPU arm must be exactly `%s` -- the call counted and a neutral answer "
+             "until its sub-phase (#340 P6a); found `%s`" % (rel, fn, want, arm))
 
 
 def gl_arm(body):
@@ -2941,8 +2997,11 @@ def check_fbo_seam(root):
             fail("%s: %s's SDL_GPU arm must be exactly rg_target.c's %s, its parameters in order: want "
                  "`if(R_GPU())%s`, found `%s` (whitespace dropped; #340 P4a-2)"
                  % (rel, fn, "RG_" + name, want, arm))
-    if re.search(r"\bRG_NoteUnhandled\b|\bRG_FboZeroNames\b", code):
+    if any(re.search(r"\bRG_NoteUnhandled\b|\bRG_FboZeroNames\b", bodies.get("R_" + n, ""))
+           for n in FBO_SEAMS + ("FramebufferBinding",)) or re.search(r"\bRG_FboZeroNames\b", code):
         fail("%s: P4a-1's neutral -gpu answers are back -- every arm is rg_target.c's (#340 P4a-2)" % rel)
+    for name, (ret, note) in P6A_FBO_SEAMS.items():
+        check_p6a_seam(rel, code, heads, bodies, "R_" + name, "gl%s_fp" % name, ret, note)
     cm = (root / "engine/CMakeLists.txt").read_text()
     if not re.search(r"\$\{COMMONDIR\}/gl_texbind\.c\s*\n\s*\$\{COMMONDIR\}/gl_fbo\.c\b", cm):
         fail("engine/CMakeLists.txt: gl_fbo.c must follow gl_texbind.c in the client's source list (#340 P4a-1)")
@@ -2963,7 +3022,7 @@ def check_postprocess(root):
         if not name:
             continue
         names.add(name)
-        if name.startswith("OIT_") or name in PP_RAW_FUNCS:
+        if name in PP_RAW_FUNCS:
             continue
         body = code[b:e + 1]
         arms = [] if name in gated else gpu_arms(body)
@@ -2979,7 +3038,8 @@ def check_postprocess(root):
             ln = code.count("\n", 0, b + m.start()) + 1
             fail("%s:%d: %s calls %s_fp raw -- the post-process chain goes through gl_fbo.h, "
                  "R_SetViewport, R_ProgramSamplerLoc / R_ProgramSamplerUnit and the VAO seams, or an "
-                 "SDL_GPU arm excludes the call (#340 P4a-1)" % (rel, ln, name, m.group(1)))
+                 "SDL_GPU arm excludes the call (#340 P4a-1; the OIT functions and MSAA storage P6a)"
+                 % (rel, ln, name, m.group(1)))
     for f in PP_RAW_FUNCS:
         if f not in names:
             fail("%s: PP_RAW_FUNCS names %s, which is gone -- drop the entry" % (rel, f))
@@ -3082,10 +3142,194 @@ def check_postprocess(root):
             blocks.add(m.group(1))
     if not mx:
         fail("rg_frame.c: no #define RG_MAX_BLOCKS")
-    elif len(blocks) < 10 or '"BloomParams"' not in blocks or len(blocks) > int(mx.group(1)):
+    elif len(blocks) < 10 or not {'"BloomParams"', '"ShadowPass"', '"OitParams"'} <= blocks \
+            or len(blocks) > int(mx.group(1)) or int(mx.group(1)) < 24:
         fail("RG_MAX_BLOCKS is %s and %d distinct blocks are registered (%s): every one needs a slot, "
-             "BloomParams among them (#340 P4e), and fewer than 10 means the scan is broken (#340 P4a-1)"
+             "BloomParams (#340 P4e), ShadowPass and OitParams (P6a) among them, the cap at least the 24 "
+             "P6 needs (Q7), and fewer than 10 means the scan is broken (#340 P4a-1)"
              % (mx.group(1), len(blocks), ", ".join(sorted(blocks))))
+
+
+# gl_shadow.c's raw GL that -gpu can still reach, and why: (entry point)
+# -> (calls, why).  Graphics programs are restart-only under -gpu (P4
+# decision 9) and RG_ProgramDelete releases compute pipelines alone, so the
+# deletes stay raw, each under `if (sh_*prog)`.
+SHADOW_RAW_OK = {
+    "glDeleteProgram": (6, "SH_Fail's and R_Shadow_Shutdown's program deletes, each under "
+                           "`if (sh_*prog)`; under -gpu no program is made until P6b lifts the gate"),
+}
+
+
+def check_p6a(root):
+    """#340 P6a: the shadow, OIT and MSAA GL calls through seams."""
+    vbo, pipe, tc = ("engine/h2shared/gl_vbo.c", "engine/h2shared/gl_pipeline.c",
+                     "engine/h2shared/gl_texcreate.c")
+    sh, pp = "engine/h2shared/gl_shadow.c", "engine/h2shared/gl_postprocess.c"
+    for rel in (vbo, pipe, tc, sh, pp):
+        if not (root / rel).is_file():
+            fail("%s: missing -- the #340 P6a pins have nothing to read" % rel)
+            return
+    head_rx = r"^\w[\w \t\*]*?\b(R_\w+)\s*\(([^;{}]*)\)\s*\{"
+    for rel, fn, glcall, ret, note, gl_body, extra, gles in (
+            (vbo, "R_MultiDrawElements", "glMultiDrawElements_fp", "", "R_MultiDrawElements (P6b)",
+             None, "", True),
+            (pipe, "R_GetScissor", None, "false", "R_GetScissor (P6b)",
+             "{if(!glIsEnabled_fp(GL_SCISSOR_TEST))returnfalse;glGetIntegerv_fp(GL_SCISSOR_BOX,box);"
+             "returntrue;}", "box[0]=box[1]=box[2]=box[3]=0;", False),
+            (tc, "R_MaxCubeMapSize", None, "0", "R_MaxCubeMapSize (P6b)",
+             "{GLintsize=0;glGetIntegerv_fp(GL_MAX_CUBE_MAP_TEXTURE_SIZE,&size);returnsize;}", "", True)):
+        code = strip_c_comments((root / rel).read_text(errors="replace"))
+        heads = {m.group(1): m.group(2) for m in re.finditer(head_rx, code, re.M)}
+        bodies = {n: code[b:e + 1] for n, b, e in functions(code)}
+        check_p6a_seam(rel, code, heads, bodies, fn, glcall, ret, note, gl_body, extra)
+        m = re.search(r"\b%s\s*\(" % fn, code)
+        if gles and m:
+            stack = []
+            for f in re.finditer(r"^\s*#\s*(if|ifdef|ifndef|else|elif|endif)\b([^\n]*)", code[:m.start()], re.M):
+                kw, rest = f.group(1), f.group(2).strip()
+                if kw in ("if", "ifdef", "ifndef"):
+                    stack.append(kw == "ifndef" and rest == "USE_GLES")
+                elif kw in ("else", "elif") and stack:
+                    stack[-1] = False
+                elif kw == "endif" and stack:
+                    stack.pop()
+            if not any(stack):
+                fail("%s: %s must sit under #ifndef USE_GLES -- its only caller is the desktop shadow "
+                     "maps, and the ES tier has no %s (#340 P6a)" % (rel, fn, glcall or "such query"))
+
+    # gl_shadow.c: nothing raw -gpu can reach
+    raw = strip_c_comments((root / sh).read_text(errors="replace"))
+    if not re.search(r"#\s*ifdef\s+USE_SDL_GPU\s*\n\s*#\s*include\s+\"rg_device\.h\"[^\n]*\n\s*"
+                     r"#\s*define\s+SH_GPU\s*\(\s*\)\s+R_GPU\s*\(\s*\)\s*\n\s*#\s*else\s*\n\s*"
+                     r"#\s*define\s+SH_GPU\s*\(\s*\)\s+false\s*\n\s*#\s*endif", raw):
+        fail("%s: SH_GPU () must be `R_GPU ()` under USE_SDL_GPU and `false` otherwise -- the raw-GL "
+             "rule below reads it as R_GPU () (#340 P6a)" % sh)
+    code = re.sub(r"\bSH_GPU\s*\(\s*\)", "R_GPU ()", raw)
+    seen = {}
+    for name, b, e in functions(code):
+        body = code[b:e + 1]
+        arms = gpu_arms(body)
+        for m in re.finditer(r"\b(gl[A-Z]\w*)_fp\s*\(", body):
+            if excluded(body, arms, m.start()):
+                continue
+            if m.group(1) in SHADOW_RAW_OK and in_name_guard(body, m.start(), r"sh_\w*prog"):
+                seen[m.group(1)] = seen.get(m.group(1), 0) + 1
+                continue
+            ln = code.count("\n", 0, b + m.start()) + 1
+            fail("%s:%d: %s calls %s_fp where -gpu reaches it -- route it through gl_fbo.h, gl_vbo.h, "
+                 "gl_buffer.c's seams, R_SetViewport / R_GetViewport / R_GetScissor or R_MaxCubeMapSize, "
+                 "or put it in a GL arm (#340 P6a)" % (sh, ln, name, m.group(1)))
+    for key, (n, why) in SHADOW_RAW_OK.items():
+        if seen.get(key, 0) != n:
+            fail("%s: %d raw %s calls under `if (sh_*prog)`, SHADOW_RAW_OK expects %d (%s)"
+                 % (sh, seen.get(key, 0), key, n, why))
+
+    def body(rel, name):
+        return body_named(root, rel, name)
+
+    # ShadowPass, the mirror
+    if not re.search(r"#\s*ifdef\s+USE_SDL_GPU\b[^#]*?\bstatic\s+r_shadowpass_t\s+sh_pass_mirror\s*;[^#]*#\s*endif",
+                     raw):
+        fail("%s: ShadowPass's mirror must be `static r_shadowpass_t sh_pass_mirror;` under USE_SDL_GPU "
+             "(#340 P6a)" % sh)
+    bp = body(sh, "SH_BuildPrograms")
+    if bp is not None:
+        reg = re.search(r"#\s*ifdef\s+USE_SDL_GPU\s*\n\s*if\s*\(\s*R_GPU\s*\(\s*\)\s*\)\s*"
+                        r"RG_UniformBlockRegister\s*\(\s*\"ShadowPass\"\s*,\s*&sh_pass_mirror\s*,\s*"
+                        r"sizeof\s*\(\s*sh_pass_mirror\s*\)\s*\)\s*;\s*else\s*#\s*endif\s*\{\s*"
+                        r"blk\s*=\s*glGetUniformBlockIndex_fp\s*\(\s*sh_prog\s*,\s*\"ShadowPass\"\s*\)", bp)
+        link = re.search(r"\bsh_dbgprog\s*=\s*SH_LinkProgram\s*\(", bp)
+        if not (reg and link and link.end() < reg.start()):
+            fail("%s: SH_BuildPrograms must register ShadowPass (`RG_UniformBlockRegister (\"ShadowPass\", "
+                 "&sh_pass_mirror, sizeof(sh_pass_mirror))`) in an `if (R_GPU ())` arm whose else is "
+                 "the GL block lookup, after the programs link (#340 P6a)" % sh)
+    if len(re.findall(r"\bRG_UniformBlock(?:Register|Flushed)\s*\(\s*\"ShadowPass\"", raw)) != 2:
+        fail("%s: ShadowPass must be registered once and flushed once, in SH_Pass (#340 P6a)" % sh)
+    sp = body(sh, "SH_Pass")
+    if sp is not None:
+        arm = re.search(r"#\s*ifdef\s+USE_SDL_GPU\s*\n\s*if\s*\(\s*R_GPU\s*\(\s*\)\s*\)\s*\{\s*"
+                        r"sh_pass_mirror\s*=\s*\*\s*pass\s*;\s*RG_UniformBlockFlushed\s*\(\s*\"ShadowPass\"\s*\)"
+                        r"\s*;\s*return\s*;\s*\}\s*#\s*endif\s*GL_Upload\s*\(\s*GL_UNIFORM_BUFFER\s*,\s*pass\s*,"
+                        r"\s*sizeof\s*\(\s*\*\s*pass\s*\)\s*,\s*&buf\s*,\s*&ofs\s*\)\s*;\s*"
+                        r"GL_BindBufferRange\s*\(\s*GL_UNIFORM_BUFFER\s*,\s*UBO_BINDING_SHADOW_PASS\s*,\s*buf\s*,"
+                        r"\s*ofs\s*,\s*sizeof\s*\(\s*\*\s*pass\s*\)\s*\)\s*;\s*\}?$", sp.strip())
+        if not arm:
+            fail("%s: SH_Pass must be `#ifdef USE_SDL_GPU / if (R_GPU ()) { sh_pass_mirror = *pass; "
+                 "RG_UniformBlockFlushed (\"ShadowPass\"); return; } / #endif` and then GL's GL_Upload "
+                 "and GL_BindBufferRange of the same bytes, nothing else (#340 P6a)" % sh)
+
+    # OitParams, the mirror
+    pcode = strip_c_comments((root / pp).read_text(errors="replace"))
+    if not re.search(r"^static\s+oit_params_t\s+oit_params\s*;", pcode, re.M):
+        fail("%s: OitParams' mirror must be the file-scope `static oit_params_t oit_params;` (#340 P6a)" % pp)
+    ib = body(pp, "OIT_InitShader")
+    if ib is not None:
+        reg = re.search(r"#\s*ifdef\s+USE_SDL_GPU\s*\n\s*if\s*\(\s*R_GPU\s*\(\s*\)\s*\)\s*"
+                        r"RG_UniformBlockRegister\s*\(\s*\"OitParams\"\s*,\s*&oit_params\s*,\s*"
+                        r"sizeof\s*\(\s*oit_params\s*\)\s*\)\s*;\s*else\s*#\s*endif\s*if\s*\(\s*!\s*oit_ubo\s*\)",
+                        ib)
+        if not reg:
+            fail("%s: OIT_InitShader must register OitParams (`RG_UniformBlockRegister (\"OitParams\", "
+                 "&oit_params, sizeof(oit_params))`) in an `if (R_GPU ())` arm whose else creates oit_ubo "
+                 "(#340 P6a)" % pp)
+    eb = body(pp, "OIT_EndTranslucency")
+    if eb is not None:
+        fill = re.search(r"\boit_params\.p\[0\]\s*=\s*mboit\s*\?\s*1\s*:\s*0\s*;\s*"
+                         r"#\s*ifdef\s+USE_SDL_GPU\s*\n\s*if\s*\(\s*R_GPU\s*\(\s*\)\s*\)\s*"
+                         r"RG_UniformBlockFlushed\s*\(\s*\"OitParams\"\s*\)\s*;\s*else\s*#\s*endif\s*\{\s*"
+                         r"GL_BindBuffer\s*\(\s*GL_UNIFORM_BUFFER\s*,\s*oit_ubo\s*\)\s*;\s*"
+                         r"R_BufferSubData\s*\(\s*GL_UNIFORM_BUFFER\s*,\s*0\s*,\s*sizeof\s*\(\s*oit_params\s*\)\s*,"
+                         r"\s*&oit_params\s*\)\s*;", eb)
+        draw = re.search(r"\bR_DrawArrays\s*\(\s*GL_TRIANGLES\s*,\s*0\s*,\s*3\s*\)", eb)
+        if not (fill and draw and fill.end() < draw.start()):
+            fail("%s: OIT_EndTranslucency must set oit_params.p[0] from mboit, then flush OitParams (-gpu) "
+                 "or upload oit_params into oit_ubo (GL), before the resolve's R_DrawArrays (#340 P6a)" % pp)
+    # The re-routed call sites keep GL's arguments (review, P6a): what the
+    # seams are called with, spelled out, so "GL unchanged" is a test and
+    # not a reading.
+    for rel, fn, want in (
+            (sh, "SH_DrawMap", ("R_BindFramebuffer (GL_FRAMEBUFFER, sh_fbos[slot * 6 + f]);",
+                                "R_ClearBufferfv (GL_DEPTH, 0, &one);",
+                                "R_MultiDrawElements (GL_TRIANGLES, &sh_counts[d->wfirst[f]], GL_UNSIGNED_INT, "
+                                "&sh_offsets[d->wfirst[f]], d->wcount[f]);",
+                                "R_MultiDrawElements (GL_TRIANGLES, &sh_ecounts[sh_ents[i].first], GL_UNSIGNED_INT, "
+                                "&sh_eoffsets[sh_ents[i].first], sh_ents[i].runs);")),
+            (sh, "SH_EnsureTexture", ("maxsize = R_MaxCubeMapSize ();",
+                                      "prevfbo = R_FramebufferBinding (GL_FRAMEBUFFER_BINDING);",
+                                      "R_GenFramebuffers (maps * 6, sh_fbos);",
+                                      "status = R_CheckFramebufferStatus (GL_FRAMEBUFFER);",
+                                      "R_BindFramebuffer (GL_FRAMEBUFFER, prevfbo);")),
+            (sh, "SH_SaveState", ("s->fbo = R_FramebufferBinding (GL_FRAMEBUFFER_BINDING);",
+                                  "R_GetViewport (s->vp);", "s->scissor = R_GetScissor (s->scissor_box);")),
+            (sh, "SH_RestoreState", ("R_BindVertexArray (0);", "R_BindFramebuffer (GL_FRAMEBUFFER, s->fbo);",
+                                     "R_SetViewport (s->vp[0], s->vp[1], s->vp[2], s->vp[3]);")),
+            (sh, "SH_PassState", ("R_SetViewport (0, 0, sh_res, sh_res);", "R_BindVertexArray (world_vao);")),
+            (pp, "OIT_BeginTranslucency", ("R_ClearBufferfv(GL_COLOR, 0, zeroes);R_ClearBufferfv(GL_COLOR, 1, zeroes);",
+                                           "R_ClearBufferfv(GL_COLOR, 0, zeroes);R_ClearBufferfv(GL_COLOR, 1, ones);")),
+            (pp, "OIT_NextPass", ("R_DrawBuffers(1, &one);R_ClearBufferfv(GL_COLOR, 0, zeroes);",)),
+            (pp, "OIT_EndTranslucency", (
+                'if (oit_samples > 1){'
+                'R_ProgramSamplerUnit(oit_resolve_prog_msaa, oit_resolve_msaa_loc_accum, "TexAccum", 0);'
+                'R_ProgramSamplerUnit(oit_resolve_prog_msaa, oit_resolve_msaa_loc_reveal, "TexReveal", 1);'
+                '}else{'
+                'R_ProgramSamplerUnit(oit_resolve_prog, oit_resolve_loc_accum, "TexAccum", 0);'
+                'R_ProgramSamplerUnit(oit_resolve_prog, oit_resolve_loc_reveal, "TexReveal", 1);}',
+                "prog = (oit_samples > 1) ? oit_resolve_prog_msaa : oit_resolve_prog;",
+                "R_GetViewport(saved_viewport);",
+                "R_BindVertexArray(oit_resolve_vao);R_DrawArrays(GL_TRIANGLES, 0, 3);R_BindVertexArray(0);")),
+            (pp, "PP_CreateFBO", (
+                "R_RenderbufferStorageMultisample(GL_RENDERBUFFER, samples, color_fmt, width, height);",
+                "R_RenderbufferStorageMultisample(GL_RENDERBUFFER, samples, GL_DEPTH24_STENCIL8, width, height);"))):
+        b = body(rel, fn)
+        if b is None:
+            continue
+        flat = re.sub(r"\s+", "", b)
+        for w in want:
+            if re.sub(r"\s+", "", w) not in flat:
+                fail("%s: %s no longer makes `%s` -- the GL arguments the re-routed call had (#340 P6a)"
+                     % (rel, fn, w))
+    if len(re.findall(r"\bRG_UniformBlock(?:Register|Flushed)\s*\(\s*\"OitParams\"", pcode)) != 2:
+        fail("%s: OitParams must be registered once and flushed once, at the resolve (#340 P6a)" % pp)
 
 
 def squash(s):
@@ -4828,6 +5072,7 @@ def main(argv=None):
     check_world_cull(root)
     check_hiz(root)
     check_ssao(root)
+    check_p6a(root)
     nfiles = 0
     rg_files = []
     for p in sorted(eng.rglob("*")):

@@ -10,7 +10,7 @@
 
 /* gl_fbo.h's implementation; see the header for the contract.  The GL arm
  * of each seam is the bare call (#340 P4a-1), the SDL_GPU arm rg_target.c's
- * (P4a-2). */
+ * (P4a-2), or for P6a's three a counted no-op until P6b-d. */
 
 #include "quakedef.h"
 #include "sdl_inc.h"
@@ -104,6 +104,31 @@ void R_DrawBuffers (GLsizei n, const GLenum *bufs)
 	glDrawBuffers_fp (n, bufs);
 }
 
+void R_FramebufferTextureLayer (GLenum target, GLenum attachment, GLuint texture,
+				GLint level, GLint layer)
+{
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_NoteUnhandled ("R_FramebufferTextureLayer (layered attachments are P6b)");
+		return;
+	}
+#endif
+	glFramebufferTextureLayer_fp (target, attachment, texture, level, layer);
+}
+
+void R_ClearBufferfv (GLenum buffer, GLint drawbuffer, const GLfloat *value)
+{
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_NoteUnhandled ("R_ClearBufferfv (per-draw-buffer clears are P6b/P6c)");
+		return;
+	}
+#endif
+	glClearBufferfv_fp (buffer, drawbuffer, value);
+}
+
 void R_GenRenderbuffers (GLsizei n, GLuint *rbs)
 {
 #ifdef USE_SDL_GPU
@@ -151,6 +176,19 @@ void R_RenderbufferStorage (GLenum target, GLenum internalformat,
 	}
 #endif
 	glRenderbufferStorage_fp (target, internalformat, width, height);
+}
+
+void R_RenderbufferStorageMultisample (GLenum target, GLsizei samples, GLenum internalformat,
+				       GLsizei width, GLsizei height)
+{
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_NoteUnhandled ("R_RenderbufferStorageMultisample (MSAA targets are P6d)");
+		return;
+	}
+#endif
+	glRenderbufferStorageMultisample_fp (target, samples, internalformat, width, height);
 }
 
 qboolean R_BlitFramebuffer (GLint sx0, GLint sy0, GLint sx1, GLint sy1,

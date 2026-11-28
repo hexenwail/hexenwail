@@ -109,6 +109,8 @@
 #include "gl_pipeline.h"
 #include "gl_lightcluster.h"
 #include "gl_shadow.h"
+#include "gl_vbo.h"	/* the draws, multi-draw included (#340 P6a) */
+#include "gl_fbo.h"	/* the layer-face framebuffers (#340 P6a) */
 #ifdef USE_SDL_GPU
 #include "rg_device.h"	/* R_GPU (), the DlShadow mirror (#340 P2a) */
 #define SH_GPU()	R_GPU ()
@@ -278,6 +280,11 @@ static qboolean		sh_failed;		/* programs or FBO failed; never retry */
 static shslot_t		sh_slots[SHADOW_MAX_MAPS];
 static float		sh_facevp[6][16];
 static r_dlshadow_t	sh_block;
+#ifdef USE_SDL_GPU
+/* ShadowPass under -gpu: SH_Pass's argument is the caller's stack copy, so
+ * the registered mirror is this, and each pass is copied in (#340 P6a). */
+static r_shadowpass_t	sh_pass_mirror;
+#endif
 static int		sh_frame_updates, sh_frame_maps, sh_frame_acasts;	/* r_shadowinfo */
 
 /* The map's surface table: per world-model surface, its box (6 floats), and
@@ -403,8 +410,10 @@ static qboolean SH_BuildPrograms (void)
 		return false;
 	if (sh_prog)
 		return true;
-	if (!glFramebufferTextureLayer_fp || !glMultiDrawElements_fp || !glTexImage3D_fp ||
-	    !glClearBufferfv_fp || !glDrawBuffers_fp || !glGetUniformBlockIndex_fp)
+	/* The driver's entry points; under -gpu every call is a seam's. */
+	if (!SH_GPU () &&
+	    (!glFramebufferTextureLayer_fp || !glMultiDrawElements_fp || !glTexImage3D_fp ||
+	     !glClearBufferfv_fp || !glDrawBuffers_fp || !glGetUniformBlockIndex_fp))
 	{
 		Con_Printf ("Shadow maps: disabled, the driver lacks an entry point they need\n");
 		return SH_Fail ();
@@ -414,45 +423,58 @@ static qboolean SH_BuildPrograms (void)
 	sh_dbgprog = SH_LinkProgram (RPROG_SHADOW_DEBUG);
 	if (!sh_prog || !sh_dbgprog)
 		return SH_Fail ();
-	blk = glGetUniformBlockIndex_fp (sh_prog, "ShadowPass");
-	if (blk == GL_INVALID_INDEX)
+#ifdef USE_SDL_GPU
+	/* The block's slot is fixed in the SPIR-V and found by name at draw
+	 * time; SH_Pass flushes each pass's values into this (#340 P6a). */
+	if (R_GPU ())
+		RG_UniformBlockRegister ("ShadowPass", &sh_pass_mirror, sizeof(sh_pass_mirror));
+	else
+#endif
 	{
-		Con_Printf ("Shadow maps: disabled, no ShadowPass block in the program\n");
-		return SH_Fail ();
+		blk = glGetUniformBlockIndex_fp (sh_prog, "ShadowPass");
+		if (blk == GL_INVALID_INDEX)
+		{
+			Con_Printf ("Shadow maps: disabled, no ShadowPass block in the program\n");
+			return SH_Fail ();
+		}
+		glGetActiveUniformBlockiv_fp (sh_prog, blk, GL_UNIFORM_BLOCK_DATA_SIZE, &size);
+		if (size != (GLint)sizeof(r_shadowpass_t))
+			Con_Printf ("WARNING: uniform block ShadowPass is %d bytes on this driver, "
+				    "C mirror is %d -- shadow maps will be wrong\n",
+				    (int)size, (int)sizeof(r_shadowpass_t));
+		glUniformBlockBinding_fp (sh_prog, blk, UBO_BINDING_SHADOW_PASS);
 	}
-	glGetActiveUniformBlockiv_fp (sh_prog, blk, GL_UNIFORM_BLOCK_DATA_SIZE, &size);
-	if (size != (GLint)sizeof(r_shadowpass_t))
-		Con_Printf ("WARNING: uniform block ShadowPass is %d bytes on this driver, "
-			    "C mirror is %d -- shadow maps will be wrong\n",
-			    (int)size, (int)sizeof(r_shadowpass_t));
-	glUniformBlockBinding_fp (sh_prog, blk, UBO_BINDING_SHADOW_PASS);
 
 	/* The alias casters' program is an extra, not a requirement: without it
-	 * the maps still hold the world, and r_shadow_casters 2 reads as 1. */
+	 * the maps still hold the world, and r_shadow_casters 2 reads as 1.
+	 * Under -gpu its block is the same mirror. */
 	sh_aprog = SH_LinkProgram (RPROG_SHADOW_ALIAS);
-	if (sh_aprog)
+	if (!SH_GPU ())
 	{
-		blk = glGetUniformBlockIndex_fp (sh_aprog, "ShadowPass");
-		size = 0;
-		if (blk != GL_INVALID_INDEX)
-			glGetActiveUniformBlockiv_fp (sh_aprog, blk, GL_UNIFORM_BLOCK_DATA_SIZE, &size);
-		if (blk == GL_INVALID_INDEX || size != (GLint)sizeof(r_shadowpass_t))
+		if (sh_aprog)
 		{
-			Con_Printf ("Shadow maps: alias casters disabled, their ShadowPass block "
-				    "is %d bytes here, C mirror is %d\n", (int)size, (int)sizeof(r_shadowpass_t));
-			R_PipelineForgetProgram ();
-			glDeleteProgram_fp (sh_aprog);
-			sh_aprog = 0;
+			blk = glGetUniformBlockIndex_fp (sh_aprog, "ShadowPass");
+			size = 0;
+			if (blk != GL_INVALID_INDEX)
+				glGetActiveUniformBlockiv_fp (sh_aprog, blk, GL_UNIFORM_BLOCK_DATA_SIZE, &size);
+			if (blk == GL_INVALID_INDEX || size != (GLint)sizeof(r_shadowpass_t))
+			{
+				Con_Printf ("Shadow maps: alias casters disabled, their ShadowPass block "
+					    "is %d bytes here, C mirror is %d\n", (int)size, (int)sizeof(r_shadowpass_t));
+				R_PipelineForgetProgram ();
+				glDeleteProgram_fp (sh_aprog);
+				sh_aprog = 0;
+			}
+			else
+				glUniformBlockBinding_fp (sh_aprog, blk, UBO_BINDING_SHADOW_PASS);
 		}
-		else
-			glUniformBlockBinding_fp (sh_aprog, blk, UBO_BINDING_SHADOW_PASS);
 	}
 
 	R_UseProgram (sh_dbgprog);
 	loc = R_ProgramSamplerLoc (sh_dbgprog, "u_shadowdbg");
 	R_ProgramSamplerUnit (sh_dbgprog, loc, "u_shadowdbg", DLSHADOW_TMU);
 	R_UseProgram (0);
-	glGenVertexArrays_fp (1, &sh_dbgvao);
+	R_GenVertexArrays (1, &sh_dbgvao);
 
 	SH_BuildFaceMatrices ();
 	return true;
@@ -461,7 +483,7 @@ static qboolean SH_BuildPrograms (void)
 static void SH_FreeTexture (void)
 {
 	if (sh_maps > 0 && sh_fbos[0])
-		glDeleteFramebuffers_fp (sh_maps * 6, sh_fbos);
+		R_DeleteFramebuffers (sh_maps * 6, sh_fbos);
 	memset (sh_fbos, 0, sizeof(sh_fbos));
 	if (sh_tex)
 		R_DeleteTextures (1, &sh_tex);
@@ -476,7 +498,8 @@ static void SH_FreeTexture (void)
  * array this frame. */
 static qboolean SH_EnsureTexture (void)
 {
-	GLint	maxsize = 0, prevfbo = 0;
+	GLint	maxsize;
+	GLuint	prevfbo;
 	GLenum	status = GL_FRAMEBUFFER_COMPLETE, none = GL_NONE;
 	int	i, res = r_shadow_resolution.integer;
 	int	maps = r_shadow_maxlights.integer;
@@ -486,7 +509,7 @@ static qboolean SH_EnsureTexture (void)
 		maps = SHADOW_MAX_MAPS;
 	if (maps < 1)
 		return false;
-	glGetIntegerv_fp (GL_MAX_CUBE_MAP_TEXTURE_SIZE, &maxsize);
+	maxsize = R_MaxCubeMapSize ();
 	if (res < 16)
 		res = 16;
 	if (res > 1024)
@@ -514,24 +537,26 @@ static qboolean SH_EnsureTexture (void)
 		 * inside the face and draws faint lines along the cube's twelve
 		 * edges.  Context-wide in GL; it only ever improves cube sampling,
 		 * and nothing enables it before a map is allocated, so
-		 * r_dlight_occlusion 0 and 1 are untouched. */
-		glEnable_fp (GL_TEXTURE_CUBE_MAP_SEAMLESS);
+		 * r_dlight_occlusion 0 and 1 are untouched.  Vulkan's cube
+		 * sampling is always seamless, so -gpu has nothing to set. */
+		if (!SH_GPU ())
+			glEnable_fp (GL_TEXTURE_CUBE_MAP_SEAMLESS);
 		sh_res = res;
 		sh_maps = maps;
 		sh_filter = -1;
 
 		/* Layer-face i of the array is framebuffer i's only attachment:
 		 * depth, with the draw buffer off. */
-		glGetIntegerv_fp (GL_FRAMEBUFFER_BINDING, &prevfbo);
-		glGenFramebuffers_fp (maps * 6, sh_fbos);
+		prevfbo = R_FramebufferBinding (GL_FRAMEBUFFER_BINDING);
+		R_GenFramebuffers (maps * 6, sh_fbos);
 		for (i = 0; i < maps * 6 && status == GL_FRAMEBUFFER_COMPLETE; i++)
 		{
-			glBindFramebuffer_fp (GL_FRAMEBUFFER, sh_fbos[i]);
-			glDrawBuffers_fp (1, &none);
-			glFramebufferTextureLayer_fp (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, sh_tex, 0, i);
-			status = glCheckFramebufferStatus_fp (GL_FRAMEBUFFER);
+			R_BindFramebuffer (GL_FRAMEBUFFER, sh_fbos[i]);
+			R_DrawBuffers (1, &none);
+			R_FramebufferTextureLayer (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, sh_tex, 0, i);
+			status = R_CheckFramebufferStatus (GL_FRAMEBUFFER);
 		}
-		glBindFramebuffer_fp (GL_FRAMEBUFFER, (GLuint)prevfbo);
+		R_BindFramebuffer (GL_FRAMEBUFFER, prevfbo);
 		if (status != GL_FRAMEBUFFER_COMPLETE)
 		{
 			Con_Printf ("Shadow maps: disabled, the %dx%d depth cube array is not "
@@ -1093,6 +1118,16 @@ static void SH_Pass (const r_shadowpass_t *pass)
 	GLuint		buf;
 	GLintptr	ofs;
 
+#ifdef USE_SDL_GPU
+	/* The same values, at the same point in the draw stream: every draw
+	 * until the next pass reads this copy, as GL's range holds it. */
+	if (R_GPU ())
+	{
+		sh_pass_mirror = *pass;
+		RG_UniformBlockFlushed ("ShadowPass");
+		return;
+	}
+#endif
 	GL_Upload (GL_UNIFORM_BUFFER, pass, sizeof(*pass), &buf, &ofs);
 	GL_BindBufferRange (GL_UNIFORM_BUFFER, UBO_BINDING_SHADOW_PASS, buf, ofs, sizeof(*pass));
 }
@@ -1260,8 +1295,8 @@ static void SH_DrawAliasFace (const shdraw_t *d, int f, r_shadowpass_t *pass)
 			GL_BindBufferBase (GL_SHADER_STORAGE_BUFFER, 3, c->gm->ssbo_pose_md3);
 		else
 			GL_BindBufferBase (GL_SHADER_STORAGE_BUFFER, 1, c->gm->ssbo_pose);
-		glBindVertexArray_fp (c->gm->vao);
-		glDrawElements_fp (GL_TRIANGLES, c->gm->num_indices, GL_UNSIGNED_SHORT, NULL);
+		R_BindVertexArray (c->gm->vao);
+		R_DrawElements (GL_TRIANGLES, c->gm->num_indices, GL_UNSIGNED_SHORT, NULL);
 		sh_frame_acasts++;
 	}
 	pass->light[1] = pass->light[2] = pass->light[3] = 0.0f;
@@ -1269,7 +1304,7 @@ static void SH_DrawAliasFace (const shdraw_t *d, int f, r_shadowpass_t *pass)
 	if (drawn)
 	{
 		R_UseProgram (sh_prog);
-		glBindVertexArray_fp (world_vao);
+		R_BindVertexArray (world_vao);
 	}
 }
 
@@ -1285,16 +1320,16 @@ static void SH_DrawMap (const shdraw_t *d)
 	pass.light[0] = 1.0f / d->radius;
 	for (f = 0; f < 6; f++)
 	{
-		glBindFramebuffer_fp (GL_FRAMEBUFFER, sh_fbos[slot * 6 + f]);
-		glClearBufferfv_fp (GL_DEPTH, 0, &one);
+		R_BindFramebuffer (GL_FRAMEBUFFER, sh_fbos[slot * 6 + f]);
+		R_ClearBufferfv (GL_DEPTH, 0, &one);
 		memcpy (pass.vp, sh_facevp[f], sizeof(pass.vp));
 		if (d->wcount[f] > 0)
 		{
 			Mat4_Identity (pass.model);
 			Mat4_ApplyTranslation (pass.model, -org[0], -org[1], -org[2]);
 			SH_Pass (&pass);
-			glMultiDrawElements_fp (GL_TRIANGLES, &sh_counts[d->wfirst[f]], GL_UNSIGNED_INT,
-						&sh_offsets[d->wfirst[f]], d->wcount[f]);
+			R_MultiDrawElements (GL_TRIANGLES, &sh_counts[d->wfirst[f]], GL_UNSIGNED_INT,
+					     &sh_offsets[d->wfirst[f]], d->wcount[f]);
 		}
 		for (i = d->efirst; i < d->efirst + d->ecount; i++)
 		{
@@ -1304,8 +1339,8 @@ static void SH_DrawMap (const shdraw_t *d)
 			Mat4_ApplyTranslation (t, -org[0], -org[1], -org[2]);
 			Mat4_Multiply (t, sh_ents[i].model, pass.model);
 			SH_Pass (&pass);
-			glMultiDrawElements_fp (GL_TRIANGLES, &sh_ecounts[sh_ents[i].first], GL_UNSIGNED_INT,
-						&sh_eoffsets[sh_ents[i].first], sh_ents[i].runs);
+			R_MultiDrawElements (GL_TRIANGLES, &sh_ecounts[sh_ents[i].first], GL_UNSIGNED_INT,
+					     &sh_eoffsets[sh_ents[i].first], sh_ents[i].runs);
 		}
 		if (d->acount > 0)
 			SH_DrawAliasFace (d, f, &pass);
@@ -1317,7 +1352,8 @@ static void SH_DrawMap (const shdraw_t *d)
 /* ------------------------------------------------------------------ */
 
 typedef struct {
-	GLint		fbo, vp[4], scissor_box[4];
+	GLuint		fbo;
+	GLint		vp[4], scissor_box[4];
 	qboolean	scissor, depth_test, depth_mask, cull, stencil, poly;
 	GLenum		depth_func, cull_face;
 	double		znear, zfar;
@@ -1326,11 +1362,9 @@ typedef struct {
 
 static void SH_SaveState (shstate_t *s)
 {
-	glGetIntegerv_fp (GL_FRAMEBUFFER_BINDING, &s->fbo);
-	glGetIntegerv_fp (GL_VIEWPORT, s->vp);
-	s->scissor = glIsEnabled_fp (GL_SCISSOR_TEST) ? true : false;
-	if (s->scissor)
-		glGetIntegerv_fp (GL_SCISSOR_BOX, s->scissor_box);
+	s->fbo = R_FramebufferBinding (GL_FRAMEBUFFER_BINDING);
+	R_GetViewport (s->vp);
+	s->scissor = R_GetScissor (s->scissor_box);
 	s->depth_test = R_GetDepthTest ();
 	s->depth_mask = R_GetDepthMask ();
 	s->depth_func = R_GetDepthFunc ();
@@ -1343,10 +1377,10 @@ static void SH_SaveState (shstate_t *s)
 
 static void SH_RestoreState (const shstate_t *s)
 {
-	glBindVertexArray_fp (0);
+	R_BindVertexArray (0);
 	R_UseProgram (0);
-	glBindFramebuffer_fp (GL_FRAMEBUFFER, (GLuint)s->fbo);
-	glViewport_fp (s->vp[0], s->vp[1], s->vp[2], s->vp[3]);
+	R_BindFramebuffer (GL_FRAMEBUFFER, s->fbo);
+	R_SetViewport (s->vp[0], s->vp[1], s->vp[2], s->vp[3]);
 	/* The passes only disable the test and never move the box, so
 	 * re-setting the saved box puts back exactly what was there. */
 	if (s->scissor)
@@ -1366,7 +1400,7 @@ static void SH_RestoreState (const shstate_t *s)
 
 static void SH_PassState (void)
 {
-	glViewport_fp (0, 0, sh_res, sh_res);
+	R_SetViewport (0, 0, sh_res, sh_res);
 	GL_ResetScissor ();
 	R_SetDepthTest (true);
 	R_SetDepthMask (true);
@@ -1377,7 +1411,7 @@ static void SH_PassState (void)
 	R_SetStencilTest (false);
 	R_SetPolygonOffsetFill (false, 0.0f, 0.0f);
 	R_UseProgram (sh_prog);
-	glBindVertexArray_fp (world_vao);
+	R_BindVertexArray (world_vao);
 }
 
 static int SH_CompareScore (const void *a, const void *b)
@@ -1572,9 +1606,9 @@ void R_Shadow_Prepare (void)
 	/* Under -gpu the block is a mirror (R_Shadow_Init), not a buffer. */
 	if (!sh_ubo && !SH_GPU ())
 	{
-		glGenBuffers_fp (1, &sh_ubo);
+		R_GenBuffers (1, &sh_ubo);
 		GL_BindBuffer (GL_UNIFORM_BUFFER, sh_ubo);
-		glBufferData_fp (GL_UNIFORM_BUFFER, sizeof(sh_block), &sh_block, GL_DYNAMIC_DRAW);
+		R_BufferData (GL_UNIFORM_BUFFER, sizeof(sh_block), &sh_block, GL_DYNAMIC_DRAW);
 		GL_BindBuffer (GL_UNIFORM_BUFFER, 0);
 	}
 
@@ -1692,7 +1726,7 @@ void R_Shadow_DrawDebug (void)
 		h = saved.vp[3] - saved.vp[3] % 3;
 		w = h * 4 / 3;
 	}
-	glViewport_fp (saved.vp[0], saved.vp[1], w, h);
+	R_SetViewport (saved.vp[0], saved.vp[1], w, h);
 	GL_ResetScissor ();
 	R_SetDepthTest (false);
 	R_SetCull (false);
@@ -1704,8 +1738,8 @@ void R_Shadow_DrawDebug (void)
 	 * reaches the DLSHADOW_TMU binding: same texture object. */
 	R_BindTextureForEdit (GL_TEXTURE_CUBE_MAP_ARRAY, sh_tex);
 	R_TexParameteri (GL_TEXTURE_CUBE_MAP_ARRAY, sh_tex, GL_TEXTURE_COMPARE_MODE, GL_NONE);
-	glBindVertexArray_fp (sh_dbgvao);
-	glDrawArrays_fp (GL_TRIANGLES, 0, 3);
+	R_BindVertexArray (sh_dbgvao);
+	R_DrawArrays (GL_TRIANGLES, 0, 3);
 	R_BindTextureForEdit (GL_TEXTURE_CUBE_MAP_ARRAY, sh_tex);
 	R_TexParameteri (GL_TEXTURE_CUBE_MAP_ARRAY, sh_tex, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
 	R_BindTextureForEdit (GL_TEXTURE_CUBE_MAP_ARRAY, 0);
@@ -1746,8 +1780,8 @@ void R_Shadow_Shutdown (void)
 	if (sh_prog) { glDeleteProgram_fp (sh_prog); sh_prog = 0; }
 	if (sh_dbgprog) { glDeleteProgram_fp (sh_dbgprog); sh_dbgprog = 0; }
 	if (sh_aprog) { glDeleteProgram_fp (sh_aprog); sh_aprog = 0; }
-	if (sh_dbgvao) { glDeleteVertexArrays_fp (1, &sh_dbgvao); sh_dbgvao = 0; }
-	if (sh_ubo) { GL_ForgetBuffer (sh_ubo); glDeleteBuffers_fp (1, &sh_ubo); sh_ubo = 0; }
+	if (sh_dbgvao) { R_DeleteVertexArrays (1, &sh_dbgvao); sh_dbgvao = 0; }
+	if (sh_ubo) { GL_ForgetBuffer (sh_ubo); R_DeleteBuffers (1, &sh_ubo); sh_ubo = 0; }
 	SH_FreeTexture ();
 	if (sh_none)
 		R_DeleteTextures (1, &sh_none);

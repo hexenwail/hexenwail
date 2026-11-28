@@ -21,6 +21,9 @@
 #ifndef GL_TEXTURE_CUBE_MAP_ARRAY
 #define GL_TEXTURE_CUBE_MAP_ARRAY	0x9009
 #endif
+#ifndef GL_MAX_CUBE_MAP_TEXTURE_SIZE
+#define GL_MAX_CUBE_MAP_TEXTURE_SIZE	0x851C
+#endif
 
 static int	rtc_mismatches;
 
@@ -235,3 +238,20 @@ void R_TexParameterf (GLenum target, GLuint tex, GLenum pname, GLfloat value)
 #endif
 	glTexParameterf_fp (target, pname, value);
 }
+
+#ifndef USE_GLES
+int R_MaxCubeMapSize (void)
+{
+	GLint	size = 0;
+
+#ifdef USE_SDL_GPU
+	if (R_GPU ())
+	{
+		RG_NoteUnhandled ("R_MaxCubeMapSize (P6b)");
+		return 0;
+	}
+#endif
+	glGetIntegerv_fp (GL_MAX_CUBE_MAP_TEXTURE_SIZE, &size);
+	return size;
+}
+#endif

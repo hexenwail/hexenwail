@@ -98,7 +98,7 @@ typedef struct {
 	qboolean	arena_valid;
 } rgblock_t;
 
-#define RG_MAX_BLOCKS	16
+#define RG_MAX_BLOCKS	24
 static rgblock_t	rgb_blocks[RG_MAX_BLOCKS];
 static int		rgb_count;
 

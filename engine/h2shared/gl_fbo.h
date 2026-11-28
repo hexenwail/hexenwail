@@ -21,8 +21,13 @@
  * SDL_GPU cannot make: a depth copy other than whole, 1:1 and between one
  * format, a colour blit from a renderbuffer.
  *
- * MSAA (glRenderbufferStorageMultisample) is P6 and has no seam: -gpu forces
- * the chain's sample count to 0 (PP_CreateFBO). */
+ * The layered attachment, the per-draw-buffer clear and multisampled
+ * storage (#340 P6a) are seams with GL's signatures too, each GL arm the
+ * bare call.  Their -gpu arms count themselves in gpu_unrouted and do
+ * nothing until the sub-phase that builds them: layers are P6b (the cube
+ * shadow maps), per-buffer clears P6b/P6c, multisampled storage P6d.  Every
+ * caller is held off under -gpu today (R_Shadow_Prepare, the OIT gates,
+ * PP_SceneSamples). */
 
 #ifndef GL_FBO_H
 #define GL_FBO_H
@@ -38,12 +43,20 @@ void	R_FramebufferRenderbuffer (GLenum target, GLenum attachment, GLenum rbtarge
 GLenum	R_CheckFramebufferStatus (GLenum target);
 /* The draw buffers of the framebuffer bound to GL_DRAW_FRAMEBUFFER. */
 void	R_DrawBuffers (GLsizei n, const GLenum *bufs);
+/* One layer of an array, cube or cube-array texture as the attachment. */
+void	R_FramebufferTextureLayer (GLenum target, GLenum attachment, GLuint texture,
+				   GLint level, GLint layer);
+/* glClearBufferfv: GL_COLOR and a draw-buffer index, or GL_DEPTH and 0, of
+ * the framebuffer bound to GL_DRAW_FRAMEBUFFER. */
+void	R_ClearBufferfv (GLenum buffer, GLint drawbuffer, const GLfloat *value);
 
 void	R_GenRenderbuffers (GLsizei n, GLuint *rbs);
 void	R_DeleteRenderbuffers (GLsizei n, const GLuint *rbs);
 void	R_BindRenderbuffer (GLenum target, GLuint rb);
 void	R_RenderbufferStorage (GLenum target, GLenum internalformat,
 			       GLsizei width, GLsizei height);
+void	R_RenderbufferStorageMultisample (GLenum target, GLsizei samples, GLenum internalformat,
+					  GLsizei width, GLsizei height);
 
 /* glBlitFramebuffer from the bound read framebuffer to the bound draw
  * framebuffer.  False when the copy was not made: the GL arm always makes
