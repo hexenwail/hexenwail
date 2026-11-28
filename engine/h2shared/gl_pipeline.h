@@ -165,7 +165,8 @@ void	GL_SetScissor (int x, int y, int width, int height);
 void	GL_ResetScissor (void);
 /* Whether the scissor test is on, and if so its box into box[4] as
  * glGetIntegerv (GL_SCISSOR_BOX) gives it: gl_shadow.c's save and restore
- * around its passes (#340 P6a).  The -gpu arm is P6b's; it answers off. */
+ * around its passes (#340 P6a).  Under -gpu, rg_frame.c's record of what
+ * GL_SetScissor and GL_ResetScissor set (#340 P6b). */
 qboolean R_GetScissor (GLint box[4]);
 void	GL_SetSampleShading (float frac);	/* <= 0 turns it off */
 void	R_UseProgram (GLuint program);

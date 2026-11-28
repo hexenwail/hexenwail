@@ -247,8 +247,7 @@ int R_MaxCubeMapSize (void)
 #ifdef USE_SDL_GPU
 	if (R_GPU ())
 	{
-		RG_NoteUnhandled ("R_MaxCubeMapSize (P6b)");
-		return 0;
+		return RG_MaxTextureSize ();
 	}
 #endif
 	glGetIntegerv_fp (GL_MAX_CUBE_MAP_TEXTURE_SIZE, &size);

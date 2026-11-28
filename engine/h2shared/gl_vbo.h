@@ -43,7 +43,8 @@ void	R_DrawArrays (GLenum mode, GLint first, GLsizei count);
 #ifndef USE_GLES
 void	R_DrawElementsIndirect (GLenum mode, GLenum type, const void *indirect);
 /* glMultiDrawElements (#340 P6a): the shadow maps' world and brush-entity
- * runs.  Desktop only, as WebGL2 has none.  The -gpu arm is P6b's. */
+ * runs.  Desktop only, as WebGL2 has none.  Under -gpu one RG_DrawIndexed
+ * per run (#340 P6b). */
 void	R_MultiDrawElements (GLenum mode, const GLsizei *counts, GLenum type,
 			     const void *const *offsets, GLsizei drawcount);
 #endif

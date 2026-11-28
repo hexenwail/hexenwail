@@ -176,10 +176,15 @@ static unsigned long	rgt_created, rgt_recreated, rgt_uploads, rgt_upload_bytes;
 typedef struct {
 	SDL_GPUTexture		*tex;
 	qboolean		depth;
+	int			layer;		/* a render pass binds one layer */
 } rgclear_t;
 static rgclear_t	*rgt_clears;
 static int		rgt_numclears, rgt_maxclears;
 static unsigned long	rgt_cleared;
+/* Samplers of a depth texture built NEAREST where GL asked for LINEAR: the
+ * device cannot filter that format (RG_DepthFiltersLinear, #340 P6b). */
+static unsigned long	rgs_depth_nearest;
+static qboolean		rgs_depth_nearest_said;
 
 /* ------------------------------------------------------------------ */
 /* Names                                                               */
@@ -927,6 +932,25 @@ static SDL_GPUSampler *RGT_SamplerFor (const SDL_GPUSamplerCreateInfo *info)
 	return rgs_cache[rgs_count++].sampler;
 }
 
+static qboolean RGT_IsDepth (SDL_GPUTextureFormat fmt)
+{
+	return fmt == SDL_GPU_TEXTUREFORMAT_D16_UNORM || fmt == SDL_GPU_TEXTUREFORMAT_D24_UNORM ||
+	       fmt == SDL_GPU_TEXTUREFORMAT_D32_FLOAT || fmt == SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT ||
+	       fmt == SDL_GPU_TEXTUREFORMAT_D32_FLOAT_S8_UINT;
+}
+
+static const char *RGT_DepthName (SDL_GPUTextureFormat fmt)
+{
+	switch (fmt)
+	{
+	case SDL_GPU_TEXTUREFORMAT_D16_UNORM:		return "D16";
+	case SDL_GPU_TEXTUREFORMAT_D24_UNORM:		return "D24";
+	case SDL_GPU_TEXTUREFORMAT_D32_FLOAT:		return "D32";
+	case SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT:	return "D24S8";
+	default:					return "D32S8";
+	}
+}
+
 /* GL's sampling rules, for the state a texture holds: a non-mipmap minify
  * filter samples the base level only; a mipmap one samples up to
  * GL_TEXTURE_MAX_LEVEL and the levels that exist. */
@@ -958,6 +982,22 @@ static SDL_GPUSampler *RGT_Sampler (rgtex_t *t)
 		info.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_LINEAR; break;
 	}
 	info.mag_filter = (t->mag_filter == GL_NEAREST) ? SDL_GPU_FILTER_NEAREST : SDL_GPU_FILTER_LINEAR;
+	/* Linear filtering of a depth format is optional in Vulkan, and a
+	 * sampler asking for it on a device without it is a validation error
+	 * at every draw.  The shadow maps then sample NEAREST, as at
+	 * r_shadow_filter 0: said once, counted. */
+	if (RGT_IsDepth (t->fmt) && !RG_DepthFiltersLinear (t->fmt) &&
+	    (info.min_filter == SDL_GPU_FILTER_LINEAR || info.mag_filter == SDL_GPU_FILTER_LINEAR))
+	{
+		info.min_filter = info.mag_filter = SDL_GPU_FILTER_NEAREST;
+		rgs_depth_nearest++;
+		if (!rgs_depth_nearest_said)
+		{
+			rgs_depth_nearest_said = true;
+			Con_Printf ("SDL_GPU: this device cannot filter %s depth linearly; shadow maps are "
+				    "sampled NEAREST, as at r_shadow_filter 0\n", RGT_DepthName (t->fmt));
+		}
+	}
 	info.address_mode_u = RGT_Wrap (t->wrap_s);
 	info.address_mode_v = RGT_Wrap (t->wrap_t);
 	info.address_mode_w = RGT_Wrap (t->wrap_r);
@@ -1139,13 +1179,6 @@ static rg_sampclass_t RGT_FormatClass (SDL_GPUTextureFormat fmt)
 	default:
 		return RG_SC_FLOAT;
 	}
-}
-
-static qboolean RGT_IsDepth (SDL_GPUTextureFormat fmt)
-{
-	return fmt == SDL_GPU_TEXTUREFORMAT_D16_UNORM || fmt == SDL_GPU_TEXTUREFORMAT_D24_UNORM ||
-	       fmt == SDL_GPU_TEXTUREFORMAT_D32_FLOAT || fmt == SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT ||
-	       fmt == SDL_GPU_TEXTUREFORMAT_D32_FLOAT_S8_UINT;
 }
 
 qboolean RG_Res_ForDraw (GLuint unit, rg_textype_t type, rg_sampclass_t sclass, qboolean shadow,
@@ -1627,28 +1660,56 @@ qboolean RG_ReadTexture (GLenum target, GLuint texture, GLint level, GLenum form
 /* Render targets (#340 P4a-2)                                         */
 /* ------------------------------------------------------------------ */
 
-qboolean RG_Res_RenderTarget (GLuint name, SDL_GPUTextureUsageFlags usage, SDL_GPUTexture **tex,
+/* The layers a render pass can bind one of: SDL_GPU's layer index of a
+ * cube-map array counts layer-faces, as GL's does. */
+static int RGT_Layers (const rgtex_t *t)
+{
+	switch (t->type)
+	{
+	case RG_TT_CUBE:	return 6;
+	case RG_TT_2D_ARRAY:
+	case RG_TT_CUBE_ARRAY:	return t->d;
+	default:		return 1;
+	}
+}
+
+qboolean RG_Res_RenderTarget (GLuint name, SDL_GPUTextureUsageFlags usage, int layer, SDL_GPUTexture **tex,
 			      SDL_GPUTextureFormat *fmt, SDL_GPUTextureUsageFlags *have, int *w, int *h)
 {
 	rgtex_t	*t = RGT_Get (name);
+	int	k, n;
 
-	if (!t || !t->defined || t->type != RG_TT_2D)
+	if (!t || !t->defined)
+		return false;
+	/* glFramebufferTexture2D attaches a 2D texture, glFramebufferTextureLayer
+	 * a layer of a layered one; neither takes the other's. */
+	if (layer < 0 ? t->type != RG_TT_2D
+		      : (t->type != RG_TT_2D_ARRAY && t->type != RG_TT_CUBE && t->type != RG_TT_CUBE_ARRAY))
+		return false;
+	/* SDL_GPUDepthStencilTargetInfo.layer is a Uint8, and SDL refuses to
+	 * bind any layer of a depth texture with more than 255. */
+	if (layer >= RGT_Layers (t) || RGT_Layers (t) > 255)
 		return false;
 	RGT_Realize (t);
 	if (!t->tex || !(t->tex_usage & usage))
 		return false;
 	if (t->unwritten)
 	{
-		if (rgt_numclears == rgt_maxclears)
+		n = RGT_Layers (t);
+		for (k = 0; k < n; k++)
 		{
-			rgt_maxclears = rgt_maxclears ? rgt_maxclears * 2 : 16;
-			rgt_clears = (rgclear_t *) realloc (rgt_clears, rgt_maxclears * sizeof(rgclear_t));
-			if (!rgt_clears)
-				Sys_Error ("SDL_GPU: out of memory queueing render-target clears");
+			if (rgt_numclears == rgt_maxclears)
+			{
+				rgt_maxclears = rgt_maxclears ? rgt_maxclears * 2 : 16;
+				rgt_clears = (rgclear_t *) realloc (rgt_clears, rgt_maxclears * sizeof(rgclear_t));
+				if (!rgt_clears)
+					Sys_Error ("SDL_GPU: out of memory queueing render-target clears");
+			}
+			rgt_clears[rgt_numclears].tex = t->tex;
+			rgt_clears[rgt_numclears].depth = RGT_IsDepth (t->fmt);
+			rgt_clears[rgt_numclears].layer = k;
+			rgt_numclears++;
 		}
-		rgt_clears[rgt_numclears].tex = t->tex;
-		rgt_clears[rgt_numclears].depth = RGT_IsDepth (t->fmt);
-		rgt_numclears++;
 		t->unwritten = false;
 	}
 	*tex = t->tex;
@@ -1679,12 +1740,16 @@ void RG_Res_ClearTargets (SDL_GPUCommandBuffer *cmd)
 	{
 		const rgclear_t	*c = &rgt_clears[rgt_numclears - 1];
 
+		/* Never cycled: a cycle swaps the whole texture, every layer the
+		 * clears before this one wrote (#340 P6b). */
 		if (c->depth)
 		{
 			SDL_zero (ds);
 			ds.texture = c->tex;
 			ds.load_op = ds.stencil_load_op = SDL_GPU_LOADOP_CLEAR;
 			ds.store_op = ds.stencil_store_op = SDL_GPU_STOREOP_STORE;
+			ds.layer = (Uint8) c->layer;
+			ds.cycle = false;
 			pass = SDL_BeginGPURenderPass (cmd, NULL, 0, &ds);
 		}
 		else
@@ -1693,6 +1758,8 @@ void RG_Res_ClearTargets (SDL_GPUCommandBuffer *cmd)
 			ct.texture = c->tex;
 			ct.load_op = SDL_GPU_LOADOP_CLEAR;
 			ct.store_op = SDL_GPU_STOREOP_STORE;
+			ct.layer_or_depth_plane = (Uint32) c->layer;
+			ct.cycle = false;
 			pass = SDL_BeginGPURenderPass (cmd, &ct, 1, NULL);
 		}
 		if (!pass)
@@ -1955,4 +2022,13 @@ void RG_Res_Status (void)
 		    alive, made, rgt_created, rgt_recreated, rgt_storage_recreated, rgs_count, rgs_flushes,
 		    rgt_uploads, rgt_upload_bytes / 1024, (unsigned int)rgt_pending_bytes, rgt_cleared,
 		    rgt_readbacks, rgt_numscratch, rgt_scratch_made);
+	if (!RG_DepthFiltersAsked ())
+		Con_Printf ("[RENDERER] SDL_GPU depth filtering: unknown (the device could not be asked; GL's "
+			    "filter kept)\n");
+	else
+		Con_Printf ("[RENDERER] SDL_GPU depth filtering: D16 %s, D32 %s linearly; %lu depth samplers "
+			    "made NEAREST for want of it\n",
+			    RG_DepthFiltersLinear (SDL_GPU_TEXTUREFORMAT_D16_UNORM) ? "filters" : "does not filter",
+			    RG_DepthFiltersLinear (SDL_GPU_TEXTUREFORMAT_D32_FLOAT) ? "filters" : "does not filter",
+			    rgs_depth_nearest);
 }

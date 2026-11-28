@@ -104,8 +104,9 @@ void	R_TexParameterf (GLenum target, GLuint tex, GLenum pname, GLfloat value);
 
 #ifndef USE_GLES
 /* glGetIntegerv (GL_MAX_CUBE_MAP_TEXTURE_SIZE), 0 for no answer: the cube
- * shadow maps' size cap (#340 P6a).  The -gpu arm is P6b's; it answers 0,
- * which the caller reads as no cap. */
+ * shadow maps' size cap (#340 P6a).  Under -gpu, RG_MaxTextureSize: SDL has
+ * no cube query, and the maps stop at 1024, well inside every backend's
+ * cube limit (#340 P6b). */
 int	R_MaxCubeMapSize (void);
 #endif
 

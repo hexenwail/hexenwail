@@ -1408,11 +1408,15 @@ def check_world_imm(root):
         fail("rg_frame.c: the depth load op must clear when a clear asked for depth or the scene has "
              "not started, `ds.load_op = ((rgf_clear_mask & GL_DEPTH_BUFFER_BIT) || first) ? "
              "SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;` (#340 P2b; `first` since P4a-2)")
-    cd = re.findall(r"\bclear_depth\s*=\s*([^;]+);", frame)
-    if cd != ["rgf_clear_depth"]:
-        fail("rg_frame.c: the render pass must clear depth to what RG_Clear was handed, "
-             "`ds.clear_depth = rgf_clear_depth;` alone (found %s) -- a literal 1.0 under "
-             "reversed-Z's GL_GEQUAL draws no 3D at all (#340 P2b)" % (cd or "none"))
+    # Since P6b a pass whose mask asks for depth clears to the value its own
+    # clear was handed (glClearBufferfv's does not outlive its pass), and a
+    # first pass nothing asked of to glClear's last (check_p6b pins which).
+    cd = [re.sub(r"\s+", " ", c) for c in re.findall(r"\bclear_depth\s*=\s*([^;]+);", frame)]
+    if cd != ["(rgf_clear_mask & GL_DEPTH_BUFFER_BIT) ? rgf_pass_clear_depth : rgf_clear_depth"]:
+        fail("rg_frame.c: the render pass must clear depth to what RG_Clear or RG_ClearBuffer was handed, "
+             "`ds.clear_depth = (rgf_clear_mask & GL_DEPTH_BUFFER_BIT) ? rgf_pass_clear_depth : "
+             "rgf_clear_depth;` alone (found %s) -- a literal 1.0 under reversed-Z's GL_GEQUAL draws no 3D "
+             "at all (#340 P2b, P6b)" % (cd or "none"))
 
     # The clear seam's GL arms, call for call what R_Clear and its neighbours made.
     gp = "engine/h2shared/gl_pipeline.c"
@@ -1596,7 +1600,7 @@ def check_stencil(root):
         if not re.search(r"\bds\.stencil_store_op\s*=\s*SDL_GPU_STOREOP_STORE\s*;", b):
             fail("%s: the stencil must be stored, ds.stencil_store_op = SDL_GPU_STOREOP_STORE -- the "
                  "pre-pass and the skybox can land in different passes (#340 P2c)" % rf)
-    b = body_named(root, rf, "RG_Clear")
+    b = body_named(root, rf, "RGF_QueueClear")	# RG_Clear's body since #340 P6b
     if b is not None:
         km = re.search(r"\bmask\s*&=\s*([^;]*);", b)
         if not km or "GL_STENCIL_BUFFER_BIT" not in km.group(1):
@@ -2034,11 +2038,14 @@ STANDIN_PINS = (
      r"^\s*\{\s*return\s+lc_valid_this_frame\s*;\s*\}?\s*$",
      "the per-frame truth: the grid was built and dispatched for this frame"),
     ("engine/h2shared/rg_frame.c", "RGF_PoseVertType",
-     r"!strcmp\s*\(\s*st->ubos\[i\]\.name\s*,\s*\"VertParams\"\s*\).*"
-     r"\bb\s*=\s*RG_Frame_BlockIndex\s*\(\s*\"VertParams\"\s*\)\s*;.*"
-     r"rgb_blocks\[b\]\.size\s*<\s*\(int\)\s*sizeof\s*\(\s*r_vertparams_t\s*\).*"
-     r"rgb_blocks\[b\]\.flushed\s*\+\s*offsetof\s*\(\s*r_vertparams_t\s*,\s*posei\s*\)\s*\+\s*2\s*\*\s*sizeof\s*\(\s*int\s*\)",
-     "the pose type is the stage's own VertParams as flushed, u_vposei.z (uniforms.inc)"),
+     r"RGF_StageHasBlock\s*\(\s*st\s*,\s*\"VertParams\"\s*\)\s*\)\s*\{\s*name\s*=\s*\"VertParams\"\s*;\s*"
+     r"ofs\s*=\s*\(int\)\s*\(\s*offsetof\s*\(\s*r_vertparams_t\s*,\s*posei\s*\)\s*\+\s*2\s*\*\s*sizeof\s*\(\s*int\s*\)\s*\)\s*;\s*"
+     r"need\s*=\s*\(int\)\s*sizeof\s*\(\s*r_vertparams_t\s*\)\s*;.*"
+     r"\bb\s*=\s*RG_Frame_BlockIndex\s*\(\s*name\s*\)\s*;\s*"
+     r"if\s*\(\s*b\s*<\s*0\s*\|\|\s*rgb_blocks\[b\]\.size\s*<\s*need\s*\)\s*return\s+-1\s*;\s*"
+     r"memcpy\s*\(\s*&v\s*,\s*rgb_blocks\[b\]\.flushed\s*\+\s*ofs\s*,",
+     "the pose type is the stage's own VertParams as flushed, u_vposei.z (uniforms.inc), or for a "
+     "shadow caster its ShadowPass u_shadowpose.z (#340 P6b)"),
 )
 # The one writer of each gate uniform's C mirror (gl_uniforms.c), and who
 # calls it: (regex over gl_uniforms.c, the function it must sit in).
@@ -2273,11 +2280,6 @@ GPU_GATES = (
     ("engine/hexen2/r_part.c", "R_GPU_Particles_Init", "",
      r"\bGL_CreateParticleResources\s*\(", None,
      "the GPU particle buffers are raw GL, into the null table, for a path nothing draws"),
-    ("engine/h2shared/gl_shadow.c", "R_Shadow_Prepare", "",
-     r"\bSH_BuildPrograms\s*\(|\bSH_Select\s*\(", r"\bsh_ndraws\s*=\s*0\s*;",
-     "the cube shadow maps are P6: the light cluster runs under -gpu since P5b, so "
-     "R_LightCluster_Available no longer holds them off at the default r_dlight_occlusion 2 "
-     "(#340 P5a-1, P5b); the frame's block is still cleared first, as R_Shadow_Draw flushes it"),
 )
 
 
@@ -2928,10 +2930,29 @@ FBO_SEAMS = ("GenFramebuffers", "DeleteFramebuffers", "BindFramebuffer", "Frameb
 # The gl_fbo.c seams P6a adds: (the -gpu arm's answer, its note).  Until
 # P6b-d builds them each counts itself and does nothing.
 P6A_FBO_SEAMS = {
-    "FramebufferTextureLayer": ("", "R_FramebufferTextureLayer (layered attachments are P6b)"),
-    "ClearBufferfv": ("", "R_ClearBufferfv (per-draw-buffer clears are P6b/P6c)"),
     "RenderbufferStorageMultisample": ("", "R_RenderbufferStorageMultisample (MSAA targets are P6d)"),
 }
+# The P6a seams whose -gpu arm P6b made real: (file, function, the -gpu arm
+# exactly, the GL arm exactly; whitespace dropped).  The GL arms are P6a's,
+# unchanged.
+P6B_SEAMS = (
+    ("engine/h2shared/gl_fbo.c", "R_FramebufferTextureLayer",
+     "if(R_GPU()){RG_FramebufferTextureLayer(target,attachment,texture,level,layer);return;}",
+     "{glFramebufferTextureLayer_fp(target,attachment,texture,level,layer);}"),
+    ("engine/h2shared/gl_fbo.c", "R_ClearBufferfv",
+     "if(R_GPU()){RG_ClearBuffer(buffer,drawbuffer,value);return;}",
+     "{glClearBufferfv_fp(buffer,drawbuffer,value);}"),
+    ("engine/h2shared/gl_vbo.c", "R_MultiDrawElements",
+     "if(R_GPU()){GLsizeii;for(i=0;i<drawcount;i++)RG_DrawIndexed(mode,counts[i],type,offsets[i],1);"
+     "return;}",
+     "{glMultiDrawElements_fp(mode,counts,type,offsets,drawcount);}"),
+    ("engine/h2shared/gl_pipeline.c", "R_GetScissor",
+     "if(R_GPU()){returnRG_GetScissor(box);}",
+     "{if(!glIsEnabled_fp(GL_SCISSOR_TEST))returnfalse;glGetIntegerv_fp(GL_SCISSOR_BOX,box);returntrue;}"),
+    ("engine/h2shared/gl_texcreate.c", "R_MaxCubeMapSize",
+     "if(R_GPU()){returnRG_MaxTextureSize();}",
+     "{GLintsize=0;glGetIntegerv_fp(GL_MAX_CUBE_MAP_TEXTURE_SIZE,&size);returnsize;}"),
+)
 
 
 def check_p6a_seam(rel, code, heads, bodies, fn, glcall, ret, note, gl_body=None, gpu_extra=""):
@@ -3156,7 +3177,8 @@ def check_postprocess(root):
 # deletes stay raw, each under `if (sh_*prog)`.
 SHADOW_RAW_OK = {
     "glDeleteProgram": (6, "SH_Fail's and R_Shadow_Shutdown's program deletes, each under "
-                           "`if (sh_*prog)`; under -gpu no program is made until P6b lifts the gate"),
+                           "`if (sh_*prog)`: graphics programs are restart-only under -gpu, so "
+                           "these reach the null table's no-op, at shutdown or after a failed build"),
 }
 
 
@@ -3181,7 +3203,7 @@ def check_p6a(root):
         code = strip_c_comments((root / rel).read_text(errors="replace"))
         heads = {m.group(1): m.group(2) for m in re.finditer(head_rx, code, re.M)}
         bodies = {n: code[b:e + 1] for n, b, e in functions(code)}
-        check_p6a_seam(rel, code, heads, bodies, fn, glcall, ret, note, gl_body, extra)
+        # the arms themselves are P6b's now: check_p6b, P6B_SEAMS
         m = re.search(r"\b%s\s*\(" % fn, code)
         if gles and m:
             stack = []
@@ -3330,6 +3352,178 @@ def check_p6a(root):
                      % (rel, fn, w))
     if len(re.findall(r"\bRG_UniformBlock(?:Register|Flushed)\s*\(\s*\"OitParams\"", pcode)) != 2:
         fail("%s: OitParams must be registered once and flushed once, at the resolve (#340 P6a)" % pp)
+
+
+def check_p6b(root):
+    """#340 P6b: the cube shadow maps under -gpu."""
+    def code_of(rel):
+        path = root / rel
+        if not path.is_file():
+            fail("%s: missing -- the #340 P6b pins have nothing to read" % rel)
+            return None
+        return strip_c_comments(path.read_text(errors="replace"))
+
+    head_rx = r"^\w[\w \t\*]*?\b(R_\w+)\s*\(([^;{}]*)\)\s*\{"
+    # The P6a seams' real arms; GL's arms are the bare calls P6a pinned.
+    for rel, fn, gpu, gl in P6B_SEAMS:
+        code = code_of(rel)
+        if code is None:
+            continue
+        bodies = {n: code[b:e + 1] for n, b, e in functions(code)}
+        if fn not in bodies:
+            fail("%s: no %s -- the #340 P6a seam is gone" % (rel, fn))
+            continue
+        got = re.sub(r"\s+", "", gl_arm(bodies[fn]))
+        if got != gl:
+            fail("%s: %s's GL arm must be exactly `%s`, found `%s` (whitespace dropped; #340 P6a)"
+                 % (rel, fn, gl, got))
+        arm = re.search(r"#\s*ifdef\s+USE_SDL_GPU\b(.*?)#\s*endif", bodies[fn], re.S)
+        arm = re.sub(r"\s+", "", arm.group(1)) if arm else ""
+        if arm != gpu:
+            fail("%s: %s's SDL_GPU arm must be exactly `%s` (whitespace dropped; #340 P6b), found `%s`"
+                 % (rel, fn, gpu, arm))
+
+    # Top risk 1: nothing that begins a render pass ever cycles.  A cycled
+    # write on the shadow maps' array swaps the whole texture for a fresh
+    # one, and every cached map with it.
+    fr = code_of("engine/h2shared/rg_frame.c")
+    rs = code_of("engine/h2shared/rg_resource.c")
+    for rel, code in (("engine/h2shared/rg_frame.c", fr), ("engine/h2shared/rg_resource.c", rs),
+                      ("engine/h2shared/rg_target.c", code_of("engine/h2shared/rg_target.c"))):
+        if code is None:
+            continue
+        for m in re.finditer(r"\b(ds|ct)\.cycle\s*=\s*([^;]+);", code):
+            if m.group(2).strip() != "false":
+                fail("%s: `%s` -- a render pass's target never cycles: the shadow maps' cube-map array "
+                     "would lose every cached map at the first face drawn (#340 P6b, top risk 1)"
+                     % (rel, m.group(0)))
+    if fr is not None:
+        b = body_named(root, "engine/h2shared/rg_frame.c", "RGF_EndSegment") or ""
+        need = ("ct.cycle = false;", "ds.cycle = false;", "ds.layer = (Uint8) rgf_tgt.dlayer;")
+        for w in need:
+            if squash(w) not in squash(b):
+                fail("rg_frame.c: RGF_EndSegment must set `%s` on the pass it begins (#340 P6b)" % w)
+        cd = re.search(r"ds\.clear_depth\s*=\s*\(\s*rgf_clear_mask\s*&\s*GL_DEPTH_BUFFER_BIT\s*\)\s*\?\s*"
+                       r"rgf_pass_clear_depth\s*:\s*rgf_clear_depth\s*;", b)
+        if not cd:
+            fail("rg_frame.c: RGF_EndSegment must clear depth to rgf_pass_clear_depth when the pass's "
+                 "mask asks, and to rgf_clear_depth (glClearDepth's) on a first pass nothing asked of: "
+                 "glClearBufferfv's value is its own pass's alone (#340 P6b)")
+        if not re.search(r"\bpass\s*=\s*SDL_BeginGPURenderPass\s*\(\s*rgf_cmd\s*,\s*rgf_tgt\.color\s*\?\s*&ct\s*:"
+                         r"\s*NULL\s*,\s*rgf_tgt\.color\s*\?\s*1\s*:\s*0\s*,\s*rgf_tgt\.depth\s*\?\s*&ds\s*:"
+                         r"\s*NULL\s*\)", b):
+            fail("rg_frame.c: RGF_EndSegment must begin a depth-only pass with no colour target (#340 P6b)")
+        bd = body_named(root, "engine/h2shared/rg_frame.c", "RGF_BeginDraw") or ""
+        if not re.search(r"if\s*\(\s*!rgf_tgt_ok\s*\|\|\s*\(\s*!rgf_tgt\.color\s*&&\s*!rgf_tgt\.depth\s*\)\s*\)", bd):
+            fail("rg_frame.c: RGF_BeginDraw must draw into a depth-only target and drop only an incomplete "
+                 "one or one with neither (#340 P6b: the shadow maps)")
+        qc = body_named(root, "engine/h2shared/rg_frame.c", "RGF_QueueClear") or ""
+        cb = body_named(root, "engine/h2shared/rg_frame.c", "RG_ClearBuffer") or ""
+        if not re.search(r"rgf_pass_clear_depth\s*=\s*depth\s*;\s*if\s*\(\s*keep\s*\)\s*rgf_clear_depth\s*=\s*depth\s*;", qc):
+            fail("rg_frame.c: RGF_QueueClear must set the pass's depth, and glClearDepth's only when `keep` "
+                 "(#340 P6b)")
+        if not re.search(r"if\s*\(\s*buffer\s*==\s*GL_DEPTH\s*&&\s*drawbuffer\s*==\s*0\s*\)\s*\{\s*"
+                         r"RGF_QueueClear\s*\(\s*GL_DEPTH_BUFFER_BIT\s*,\s*NULL\s*,\s*value\s*\[\s*0\s*\]\s*,"
+                         r"\s*0\s*,\s*false\s*\)\s*;\s*return\s*;\s*\}\s*RG_NoteUnhandled\s*\(", cb):
+            fail("rg_frame.c: RG_ClearBuffer must queue GL_DEPTH's clear of draw buffer 0 without touching "
+                 "glClearDepth's value, and count everything else (#340 P6b; colour is P6c)")
+        rc = body_named(root, "engine/h2shared/rg_frame.c", "RG_Clear") or ""
+        if squash("RGF_QueueClear (mask, color, depth, stencil, true);") not in squash(rc):
+            fail("rg_frame.c: RG_Clear must be RGF_QueueClear (..., true): glClear's depth is the first "
+                 "pass's from then on (#340 P6b)")
+        gs = body_named(root, "engine/h2shared/rg_frame.c", "RG_GetScissor") or ""
+        if squash(gs).strip("{}") != squash("memcpy (box, rgf_scissor, sizeof(rgf_scissor));return rgf_scissor_on;"):
+            fail("rg_frame.c: RG_GetScissor must hand back RG_SetScissor's box and switch (#340 P6b)")
+        pv = body_named(root, "engine/h2shared/rg_frame.c", "RGF_PoseVertType") or ""
+        if not re.search(r'RGF_StageHasBlock\s*\(\s*st\s*,\s*"VertParams"\s*\).*?'
+                         r'else\s+if\s*\(\s*RGF_StageHasBlock\s*\(\s*st\s*,\s*"ShadowPass"\s*\)\s*\)\s*\{\s*'
+                         r'name\s*=\s*"ShadowPass"\s*;\s*ofs\s*=\s*SHADOWPASS_POSE_FORMAT_OFS\s*;\s*'
+                         r'need\s*=\s*SHADOWPASS_SIZE\s*;', pv, re.S):
+            fail("rg_frame.c: RGF_PoseVertType must read VertParams' pose type, or for a stage with "
+                 "ShadowPass and no VertParams (sshadow_alias_vert) u_shadowpose.z at "
+                 "SHADOWPASS_POSE_FORMAT_OFS: without it every alias caster reports its other pose "
+                 "buffers unbound (#340 P6b, top risk 6)")
+    # A vertex input the VAO leaves off past the standard constants
+    # (sshadow_alias_vert's a_indices from a Quake mesh's VAO) is fed one:
+    # the stage's inputs reflected by location, each indexed draw feeding
+    # what its layout lacks before the layout is interned.
+    if fr is not None:
+        for fn in ("RG_DrawIndexed", "RG_DrawElementsIndirect"):
+            b = body_named(root, "engine/h2shared/rg_frame.c", fn) or ""
+            m = re.search(r"[;}]\s*RG_Buf_FeedInputs\s*\(\s*&in\s*,\s*prog->stage\[RPROG_STAGE_VERTEX\]\.in_mask\s*,"
+                          r"\s*prog->stage\[RPROG_STAGE_VERTEX\]\.in_int_mask\s*,\s*prog->stage\[RPROG_STAGE_VERTEX\]\.in_sint_mask\s*\)\s*;", b)
+            li = re.search(r"\blayout\s*=\s*RG_LayoutIntern\s*\(\s*&in\.layout\s*\)", b)
+            if not (m and li and m.start() < li.start()):
+                fail("rg_frame.c: %s must RG_Buf_FeedInputs the vertex stage's in_mask before it interns "
+                     "the layout: an input the pipeline does not supply is VUID-...-Input-07904 (#340 P6b)" % fn)
+    sc = code_of("engine/h2shared/rg_shader.c")
+    if sc is not None:
+        rf = body_named(root, "engine/h2shared/rg_shader.c", "RG_Reflect") or ""
+        if not re.search(r"w\s*\[\s*p\s*\+\s*2\s*\]\s*==\s*SPV_DecLocation\s*&&\s*wc\s*>=\s*4\s*\)\s*"
+                         r"d->location\s*=\s*w\s*\[\s*p\s*\+\s*3\s*\]\s*,\s*d->has_location\s*=\s*true\s*;", rf) or \
+                not re.search(r"v->b\s*==\s*SPV_ScInput\s*&&\s*v->has_location", rf) or \
+                not re.search(r"out->in_int_mask\s*\|=", rf) or not re.search(r"out->in_sint_mask\s*\|=", rf) or \
+                not re.search(r"SPV_DecLocation\s*=\s*30\b", sc) or not re.search(r"SPV_ScInput\s*=\s*1\b", sc) \
+                or not re.search(r"SPV_OpTypeVector\s*=\s*23\b", sc):
+            fail("rg_shader.c: RG_Reflect must record each Input variable's Location in in_mask, and the "
+                 "integer ones in in_int_mask (#340 P6b)")
+    sh_h = (root / "engine/h2shared/gl_shadow.h").read_text(errors="replace")
+    sh_c = (root / "engine/h2shared/gl_shadow.c").read_text(errors="replace")
+    if not (re.search(r"#define\s+SHADOWPASS_SIZE\s+160\b", sh_h) and
+            re.search(r"#define\s+SHADOWPASS_POSE_FORMAT_OFS\s+152\b", sh_h) and
+            squash("COMPILE_TIME_ASSERT(shadowpass_pose_format, offsetof(r_shadowpass_t, pose) + 2 * sizeof(int) "
+                   "== SHADOWPASS_POSE_FORMAT_OFS);") in squash(sh_c) and
+            squash("COMPILE_TIME_ASSERT(shadowpass_size_h, sizeof(r_shadowpass_t) == SHADOWPASS_SIZE);")
+            in squash(sh_c)):
+        fail("gl_shadow.h must define SHADOWPASS_SIZE 160 and SHADOWPASS_POSE_FORMAT_OFS 152, and gl_shadow.c "
+             "assert both against r_shadowpass_t: rg_frame.c reads the pose type there (#340 P6b)")
+    if rs is not None:
+        ct = body_named(root, "engine/h2shared/rg_resource.c", "RG_Res_ClearTargets") or ""
+        for w in ("ds.layer = (Uint8) c->layer;", "ds.cycle = false;", "ct.cycle = false;",
+                  "ct.layer_or_depth_plane = (Uint32) c->layer;"):
+            if squash(w) not in squash(ct):
+                fail("rg_resource.c: RG_Res_ClearTargets must set `%s`: a layered target's first clears are "
+                     "one pass per layer, none cycled (#340 P6b)" % w)
+        rt = body_named(root, "engine/h2shared/rg_resource.c", "RG_Res_RenderTarget") or ""
+        if not re.search(r"for\s*\(\s*k\s*=\s*0\s*;\s*k\s*<\s*n\s*;\s*k\+\+\s*\)", rt) or \
+                "RGT_Layers (t) > 255" not in rt or \
+                not re.search(r"rgt_clears\s*\[\s*rgt_numclears\s*\]\s*\.\s*layer\s*=\s*k\s*;", rt):
+            fail("rg_resource.c: RG_Res_RenderTarget must queue a clear per layer of a new layered target "
+                 "and refuse a layer past SDL's Uint8 (#340 P6b)")
+        if not re.search(r"if\s*\(\s*layer\s*<\s*0\s*\?\s*t->type\s*!=\s*RG_TT_2D\s*:\s*\(\s*t->type\s*!=\s*"
+                         r"RG_TT_2D_ARRAY\s*&&\s*t->type\s*!=\s*RG_TT_CUBE\s*&&\s*t->type\s*!=\s*RG_TT_CUBE_ARRAY\s*\)"
+                         r"\s*\)\s*return\s+false\s*;\s*if\s*\(\s*layer\s*>=\s*RGT_Layers\s*\(\s*t\s*\)", rt):
+            fail("rg_resource.c: RG_Res_RenderTarget must take a 2D texture whole (layer -1) and only a "
+                 "layer it has of a 2D array, cube or cube-map array, as GL's two attach calls do (#340 P6b)")
+        sm = body_named(root, "engine/h2shared/rg_resource.c", "RGT_Sampler") or ""
+        if not re.search(r"if\s*\(\s*RGT_IsDepth\s*\(\s*t->fmt\s*\)\s*&&\s*!RG_DepthFiltersLinear\s*\(\s*t->fmt\s*\)"
+                         r"\s*&&[^{]*\{\s*info\.min_filter\s*=\s*info\.mag_filter\s*=\s*SDL_GPU_FILTER_NEAREST\s*;"
+                         r"\s*rgs_depth_nearest\+\+\s*;", sm):
+            fail("rg_resource.c: RGT_Sampler must make a depth sampler NEAREST, counted, on a device that "
+                 "cannot filter that format linearly (#340 P6b, top risk 7)")
+    dv = code_of("engine/h2shared/rg_device.c")
+    if dv is not None:
+        if not re.search(r"if\s*\(\s*fp\.optimal\s*&\s*RGV_FILTER_LINEAR\s*\)", dv) or \
+                not re.search(r"#define\s+RGV_FILTER_LINEAR\s+0x00001000u", dv):
+            fail("rg_device.c: the depth linear-filter probe must read optimal-tiling "
+                 "VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT (0x1000) (#340 P6b)")
+        if not re.search(r'"\[RENDERER\] SDL_GPU P6b: ', dv):
+            fail("rg_device.c: the renderer_status phase line must read P6b (#340 P6b)")
+    pp = code_of("engine/h2shared/rg_pipeline.c")
+    if pp is not None:
+        if not re.search(r"if\s*\(\s*k->color_fmt\s*!=\s*SDL_GPU_TEXTUREFORMAT_INVALID\s*\)\s*\{\s*"
+                         r"ci\.target_info\.color_target_descriptions\s*=\s*&ct\s*;\s*"
+                         r"ci\.target_info\.num_color_targets\s*=\s*1\s*;\s*\}", pp) or \
+                len(re.findall(r"num_color_targets\s*=", pp)) != 1:
+            fail("rg_pipeline.c: a pipeline has one colour target only when the target has a colour format: "
+                 "a depth-only one has none, or SDL refuses it and every shadow draw drops (#340 P6b)")
+    # The gate and the menu's -gpu ceiling are gone.
+    prep = body_named(root, "engine/h2shared/gl_shadow.c", "R_Shadow_Prepare") or ""
+    if re.search(r"if\s*\(\s*(?:R|SH)_GPU\s*\(\s*\)\s*\)\s*return\b", prep):
+        fail("gl_shadow.c: R_Shadow_Prepare returns under -gpu again -- P6b lifted that gate (#340)")
+    menu = code_of("engine/hexen2/menu.c")
+    if menu is not None and re.search(r"\bR_GPU\s*\(", menu):
+        fail("engine/hexen2/menu.c: the occlusion row's -gpu ceiling is back (#340 P6b lifted it)")
 
 
 def squash(s):
@@ -3508,7 +3702,7 @@ def check_render_targets(root):
             fail("%s: RGF_EndSegment must begin the scene's first pass even with nothing drawn or asked for "
                  "(`if (rgf_active && (rgf_numdraws || first || rgf_clear_mask))`) -- a blit into the scene "
                  "relies on RG_Frame_Break having cleared every aspect before it writes (#548)" % rf)
-    b = body_named(root, rf, "RG_Clear")
+    b = body_named(root, rf, "RGF_QueueClear")	# RG_Clear's body since #340 P6b
     if b is not None:
         rs = re.search(r"\bif\s*\(\s*rgf_tgt_dirty\s*\)\s*RGF_ResolveTarget\s*\(\s*\)\s*;", b)
         mk = re.search(r"\brgf_clear_mask\s*\|=\s*mask\s*;", b)
@@ -5241,6 +5435,7 @@ def main(argv=None):
     check_hiz(root)
     check_ssao(root)
     check_p6a(root)
+    check_p6b(root)
     check_compute_waits(root)
     nfiles = 0
     rg_files = []

@@ -40,7 +40,10 @@ qboolean		rg_headless;
 /* The Vulkan device's maxImageDimension2D, 0 until asked or when the asking
  * failed (RG_VulkanMax2D, #340 P5f). */
 static int		rg_vk_max2d;
-static int		RG_VulkanMax2D (const char *name);
+/* The depth formats it filters linearly, a bit per RGV_DEPTH_FORMATS entry,
+ * asked the same way (#340 P6b). */
+static Uint32		rg_vk_depth_linear;
+static int		RG_VulkanMax2D (const char *name, Uint32 *depth_linear);
 static SDL_GPUPresentMode	rg_present_mode = SDL_GPU_PRESENTMODE_VSYNC;
 static float		rg_clear[3] = { 0.25f, 0.5f, 0.75f };
 
@@ -273,7 +276,8 @@ qboolean RG_CreateDevice (SDL_Window *window, int vsync)
 
 	name = SDL_GetStringProperty (SDL_GetGPUDeviceProperties (rg_dev),
 				      SDL_PROP_GPU_DEVICE_NAME_STRING, "unknown device");
-	rg_vk_max2d = !strcmp (RG_DriverName (), "vulkan") ? RG_VulkanMax2D (name) : 0;
+	rg_vk_depth_linear = 0;
+	rg_vk_max2d = !strcmp (RG_DriverName (), "vulkan") ? RG_VulkanMax2D (name, &rg_vk_depth_linear) : 0;
 	Con_SafePrintf ("SDL_GPU: %s on %s, present %s, debug %s%s, shaders from %s, textures to %d\n",
 			RG_DriverName (), name, rg_headless ? "headless" : RG_PresentModeName (rg_present_mode),
 			debug ? "on" : "off", software ? ", software drivers allowed" : "",
@@ -323,6 +327,7 @@ void RG_Shutdown (void)
 	rg_win = NULL;
 	rg_headless = false;
 	rg_vk_max2d = 0;
+	rg_vk_depth_linear = 0;
 	rg_active = false;
 }
 
@@ -399,18 +404,63 @@ typedef int (RG_VKAPI *rgvk_create_t) (const rgvkinstinfo_t *info, const void *a
 typedef void (RG_VKAPI *rgvk_destroy_t) (void *instance, const void *alloc);
 typedef int (RG_VKAPI *rgvk_enum_t) (void *instance, Uint32 *count, void **devices);
 typedef void (RG_VKAPI *rgvk_props_t) (void *device, void *props);
+/* VkFormatProperties: linear-tiling, optimal-tiling and buffer features. */
+typedef struct {
+	Uint32	linear, optimal, buffer;
+} rgvkfmtprops_t;
+typedef void (RG_VKAPI *rgvk_fmtprops_t) (void *device, int format, rgvkfmtprops_t *props);
+#define RGV_FILTER_LINEAR	0x00001000u	/* VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT */
+/* rg_vk_depth_linear: the device was asked.  Unasked (a driver other than
+ * Vulkan, or the instance failed) is not a "no": the sampler keeps what GL
+ * asked for, as before P6b, and renderer_status says it is unknown. */
+#define RGV_ASKED		0x80000000u
+
+/* The depth formats SDL_GPU has, and the VkFormat SDL 3.4.12 makes each of
+ * (SDL_gpu_vulkan.c SDLToVK_TextureFormat). */
+static const struct {
+	SDL_GPUTextureFormat	sdl;
+	int			vk;
+} RGV_DEPTH_FORMATS[] = {
+	{ SDL_GPU_TEXTUREFORMAT_D16_UNORM,		124 },	/* VK_FORMAT_D16_UNORM */
+	{ SDL_GPU_TEXTUREFORMAT_D24_UNORM,		125 },	/* VK_FORMAT_X8_D24_UNORM_PACK32 */
+	{ SDL_GPU_TEXTUREFORMAT_D32_FLOAT,		126 },	/* VK_FORMAT_D32_SFLOAT */
+	{ SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT,	129 },	/* VK_FORMAT_D24_UNORM_S8_UINT */
+	{ SDL_GPU_TEXTUREFORMAT_D32_FLOAT_S8_UINT,	130 },	/* VK_FORMAT_D32_SFLOAT_S8_UINT */
+};
+
+qboolean RG_DepthFiltersAsked (void)
+{
+	return (rg_vk_depth_linear & RGV_ASKED) != 0;
+}
+
+qboolean RG_DepthFiltersLinear (SDL_GPUTextureFormat fmt)
+{
+	size_t	i;
+
+	if (!(rg_vk_depth_linear & RGV_ASKED))
+		return true;
+	for (i = 0; i < sizeof(RGV_DEPTH_FORMATS) / sizeof(RGV_DEPTH_FORMATS[0]); i++)
+	{
+		if (RGV_DEPTH_FORMATS[i].sdl == fmt)
+			return (rg_vk_depth_linear >> i) & 1;
+	}
+	return false;
+}
 
 /* maxImageDimension2D of the physical device SDL_GPU named `name`, from an
  * instance of our own (no layers, no extensions, no surface); 0 when any
  * step fails or no device has that name.  SDL's Vulkan backend names the
- * device with its deviceName, so the two match. */
-static int RG_VulkanMax2D (const char *name)
+ * device with its deviceName, so the two match.  *depth_linear gets the
+ * RGV_DEPTH_FORMATS it filters linearly in optimal tiling, the tiling SDL
+ * makes every texture in (#340 P6b); 0 when that cannot be asked. */
+static int RG_VulkanMax2D (const char *name, Uint32 *depth_linear)
 {
 	rgvk_gipa_t	gipa;
 	rgvk_create_t	create;
 	rgvk_destroy_t	destroy;
 	rgvk_enum_t	enumerate;
 	rgvk_props_t	props;
+	rgvk_fmtprops_t	fmtprops;
 	rgvkinstinfo_t	info;
 	void		*inst = NULL, *devs[16];
 	Uint32		i, n = 16;
@@ -428,6 +478,7 @@ static int RG_VulkanMax2D (const char *name)
 		destroy = (rgvk_destroy_t) gipa (inst, "vkDestroyInstance");
 		enumerate = (rgvk_enum_t) gipa (inst, "vkEnumeratePhysicalDevices");
 		props = (rgvk_props_t) gipa (inst, "vkGetPhysicalDeviceProperties");
+		fmtprops = (rgvk_fmtprops_t) gipa (inst, "vkGetPhysicalDeviceFormatProperties");
 		/* VK_INCOMPLETE (5) still fills the first 16 */
 		if (enumerate && props && enumerate (inst, &n, devs) >= 0)
 		{
@@ -437,7 +488,22 @@ static int RG_VulkanMax2D (const char *name)
 				props (devs[i], &pr);
 				pr.p.device_name[sizeof(pr.p.device_name) - 1] = 0;
 				if (!strcmp (pr.p.device_name, name))
+				{
+					size_t	k;
+
 					found = (int) pr.p.limits.max2d;
+					for (k = 0; fmtprops && k < sizeof(RGV_DEPTH_FORMATS) / sizeof(RGV_DEPTH_FORMATS[0]); k++)
+					{
+						rgvkfmtprops_t	fp;
+
+						memset (&fp, 0, sizeof(fp));
+						fmtprops (devs[i], RGV_DEPTH_FORMATS[k].vk, &fp);
+						if (fp.optimal & RGV_FILTER_LINEAR)
+							*depth_linear |= 1u << k;
+					}
+					if (fmtprops)
+						*depth_linear |= RGV_ASKED;
+				}
 			}
 		}
 		if (destroy)
@@ -465,12 +531,12 @@ void RG_Status (void)
 	Con_Printf ("[RENDERER] SDL_GPU driver=%s device=%s present=%s swapchain=%s\n",
 		    RG_DriverName (), name, rg_headless ? "headless" : RG_PresentModeName (rg_present_mode),
 		    rg_dev && !rg_headless ? "SDR" : "none");
-	Con_Printf ("[RENDERER] SDL_GPU P6a: 2D, world, brush and alias models, the stencilled sky, liquids, "
+	Con_Printf ("[RENDERER] SDL_GPU P6b: 2D, world, brush and alias models, the stencilled sky, liquids, "
 		    "particles, sprites, glows, fog and mirrors drawn, post-process (gamma, contrast, r_scale, FXAA, "
 		    "r_softemu on the GPU palette LUT, the underwater warp, motion blur, bloom, HDR) on render "
 		    "targets, compute passes and readbacks, clustered dynamic lights and GPU lightstyles, "
 		    "the GPU world cull and its indirect draws, the Hi-Z pyramid with no fence wait, SSAO, "
-		    "soft particles, the world, "
+		    "soft particles, the dynamic lights' cube shadow maps, the world, "
 		    "brush models, sky pre-pass and alias meshes from their vertex buffers, instanced and "
 		    "skeletal alias models from their storage buffers; GL runs against "
 		    "the null table (%lu calls into %d entry points, see gpu_unrouted)\n", total, hit);

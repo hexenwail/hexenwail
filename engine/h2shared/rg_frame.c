@@ -78,6 +78,7 @@
 #include "gl_vbo.h"		/* GL_IMM_MAX_VERTS */
 #include "gl_uniforms.h"	/* r_vertparams_t: the pose type a draw reads (#520) */
 #include "gl_lightcluster.h"	/* R_LightCluster_Available: LightBuffer's excuse (#340 P5a-2) */
+#include "gl_shadow.h"		/* SHADOWPASS_POSE_FORMAT_OFS: an alias caster's pose type (#340 P6b) */
 #include <stddef.h>		/* offsetof */
 
 /* ------------------------------------------------------------------ */
@@ -275,6 +276,11 @@ static GLbitfield		rgf_clear_mask;
 static float			rgf_clear_rgba[4];
 static float			rgf_clear_depth = 0.0f;
 static Uint8			rgf_clear_stencil;
+/* The depth the next pass clears to when its mask asks: glClear's value,
+ * which rgf_clear_depth keeps too, or glClearBufferfv's, which it does not
+ * -- that one is for its own pass, and GL's glClearDepth is left as it was
+ * (RG_ClearBuffer, #340 P6b). */
+static float			rgf_pass_clear_depth = 0.0f;
 
 #define RG_QUAD_INDICES	((GL_IMM_MAX_VERTS / 4) * 6)
 
@@ -300,6 +306,11 @@ static unsigned long		rgf_waits;
 static int			rgf_last_indirect, rgf_frame_indirect;
 static unsigned long		rgf_cdropped_base, rgf_last_cdropped;
 static int			rgf_last_areads, rgf_frame_areads;
+/* Render passes per frame with no colour target, and those on a layer of a
+ * layered depth texture: the shadow maps' faces, six per map drawn
+ * (#340 P6b) */
+static int			rgf_last_depthonly, rgf_frame_depthonly;
+static int			rgf_last_layered, rgf_frame_layered;
 
 /* The storage buffers the draw being recorded reads, stamped once it is
  * committed (RG_Buf_StampRead), so an upload into one ends the segment. */
@@ -411,6 +422,12 @@ void RG_SetScissor (qboolean enable, int x, int y, int width, int height)
 	rgf_scissor[1] = y;
 	rgf_scissor[2] = width;
 	rgf_scissor[3] = height;
+}
+
+qboolean RG_GetScissor (int box[4])
+{
+	memcpy (box, rgf_scissor, sizeof(rgf_scissor));
+	return rgf_scissor_on;
 }
 
 static void *RGF_Grow (void *p, Uint32 *max, Uint32 need, const char *what)
@@ -556,6 +573,7 @@ void RG_BeginFrame (int width, int height)
 	rgf_frame_ssbo = rgf_frame_standin = 0;
 	rgf_frame_cpasses = rgf_frame_reads = rgf_frame_waits = 0;
 	rgf_frame_indirect = rgf_frame_areads = 0;
+	rgf_frame_depthonly = rgf_frame_layered = 0;
 	rgf_cdropped_base = RG_ComputeDropped ();
 	RGF_ReadbacksAge ();
 }
@@ -575,26 +593,47 @@ static Uint32 RGF_BlockOffset (rgblock_t *b)
 	return b->arena_ofs;
 }
 
-/* The u_poseverttype this draw reads: VertParams as last flushed, which is
- * what the draw's uniform arena copy holds; -1 when the stage has no
- * VertParams or the block is not registered. */
-static int RGF_PoseVertType (const rgstage_t *st)
+static qboolean RGF_StageHasBlock (const rgstage_t *st, const char *name)
 {
-	int	i, b;
-	int	v;
+	int	i;
 
 	for (i = 0; i < st->num_ubos; i++)
 	{
-		if (!strcmp (st->ubos[i].name, "VertParams"))
-			break;
+		if (!strcmp (st->ubos[i].name, name))
+			return true;
 	}
-	if (i == st->num_ubos)
+	return false;
+}
+
+/* The pose type this draw reads, as last flushed, which is what the draw's
+ * uniform arena copy holds: VertParams' u_poseverttype, or for a shadow
+ * caster, whose stage has no VertParams, ShadowPass's u_shadowpose.z
+ * (sshadow_alias_vert, #340 P6b).  -1 when the stage has neither or the
+ * block is not registered. */
+static int RGF_PoseVertType (const rgstage_t *st)
+{
+	const char	*name;
+	int		b, ofs, need;
+	int		v;
+
+	if (RGF_StageHasBlock (st, "VertParams"))
+	{
+		name = "VertParams";
+		ofs = (int) (offsetof(r_vertparams_t, posei) + 2 * sizeof(int));
+		need = (int) sizeof(r_vertparams_t);
+	}
+	else if (RGF_StageHasBlock (st, "ShadowPass"))
+	{
+		name = "ShadowPass";
+		ofs = SHADOWPASS_POSE_FORMAT_OFS;
+		need = SHADOWPASS_SIZE;
+	}
+	else
 		return -1;
-	b = RG_Frame_BlockIndex ("VertParams");
-	if (b < 0 || rgb_blocks[b].size < (int) sizeof(r_vertparams_t))
+	b = RG_Frame_BlockIndex (name);
+	if (b < 0 || rgb_blocks[b].size < need)
 		return -1;
-	memcpy (&v, rgb_blocks[b].flushed + offsetof(r_vertparams_t, posei) + 2 * sizeof(int),
-		sizeof(v));
+	memcpy (&v, rgb_blocks[b].flushed + ofs, sizeof(v));
 	return v;
 }
 
@@ -725,10 +764,11 @@ static rgdraw_t *RGF_BeginDraw (const rgprog_t *prog, SDL_GPUPrimitiveType prim,
 		return NULL;
 	if (rgf_tgt_dirty)
 		RGF_ResolveTarget ();
-	if (!rgf_tgt_ok || !rgf_tgt.color)
+	if (!rgf_tgt_ok || (!rgf_tgt.color && !rgf_tgt.depth))
 	{
-		/* GL draws nothing into an incomplete framebuffer either. */
-		RG_NoteUnhandled ("draw into an incomplete framebuffer, or one with no colour drawn (dropped)");
+		/* GL draws nothing into an incomplete framebuffer either.  A
+		 * depth-only one is drawn into (#340 P6b: the shadow maps). */
+		RG_NoteUnhandled ("draw into an incomplete framebuffer, or one with nothing to draw into (dropped)");
 		rgf_dropped++;
 		return NULL;
 	}
@@ -980,6 +1020,9 @@ void RG_DrawIndexed (GLenum mode, GLsizei count, GLenum type, const void *indice
 		rgf_dropped++;
 		return;
 	}
+	RG_Buf_FeedInputs (&in, prog->stage[RPROG_STAGE_VERTEX].in_mask,
+			   prog->stage[RPROG_STAGE_VERTEX].in_int_mask,
+			   prog->stage[RPROG_STAGE_VERTEX].in_sint_mask);
 	/* GL reads past the data store as an error or as zeros (robust
 	 * access); a Vulkan read past the buffer is undefined. */
 	if ((Uint64) first + (Uint64) count > in.ib_count)
@@ -1053,6 +1096,9 @@ void RG_DrawElementsIndirect (GLenum mode, GLenum type, const void *indirect)
 		rgf_dropped++;
 		return;
 	}
+	RG_Buf_FeedInputs (&in, prog->stage[RPROG_STAGE_VERTEX].in_mask,
+			   prog->stage[RPROG_STAGE_VERTEX].in_int_mask,
+			   prog->stage[RPROG_STAGE_VERTEX].in_sint_mask);
 	/* See RGB_Usage: an element buffer with vertex usage is read as
 	 * indices with no barrier after the pass that wrote them. */
 	if (in.ib_usage & SDL_GPU_BUFFERUSAGE_VERTEX)
@@ -1434,6 +1480,12 @@ static void RGF_EndSegment (void)
 			SDL_zero (ct);
 			ct.texture = rgf_tgt.color;
 			ct.store_op = SDL_GPU_STOREOP_STORE;
+			/* Never cycled, either attachment: a pass draws into what
+			 * the passes before it left, and a cycle hands it a fresh
+			 * texture.  For the shadow maps' cube-map array that would
+			 * be every cached map lost at the first face drawn
+			 * (#340 P6b). */
+			ct.cycle = false;
 			if (rgf_clear_mask & GL_COLOR_BUFFER_BIT)
 			{
 				ct.load_op = SDL_GPU_LOADOP_CLEAR;
@@ -1454,13 +1506,16 @@ static void RGF_EndSegment (void)
 				ct.load_op = SDL_GPU_LOADOP_LOAD;
 			SDL_zero (ds);
 			ds.texture = rgf_tgt.depth;
+			ds.layer = (Uint8) rgf_tgt.dlayer;
+			ds.cycle = false;
 			ds.load_op = ((rgf_clear_mask & GL_DEPTH_BUFFER_BIT) || first)
 					? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
 			ds.store_op = SDL_GPU_STOREOP_STORE;
 			ds.stencil_load_op = ((rgf_clear_mask & GL_STENCIL_BUFFER_BIT) || first)
 					? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
 			ds.stencil_store_op = SDL_GPU_STOREOP_STORE;
-			ds.clear_depth = rgf_clear_depth;
+			ds.clear_depth = (rgf_clear_mask & GL_DEPTH_BUFFER_BIT) ? rgf_pass_clear_depth
+										 : rgf_clear_depth;
 			ds.clear_stencil = rgf_clear_stencil;
 			pass = SDL_BeginGPURenderPass (rgf_cmd, rgf_tgt.color ? &ct : NULL,
 						       rgf_tgt.color ? 1 : 0, rgf_tgt.depth ? &ds : NULL);
@@ -1473,6 +1528,11 @@ static void RGF_EndSegment (void)
 				rgf_cleared = true;
 			rgf_frame_draws += rgf_numdraws;
 			rgf_frame_segments++;
+			if (!rgf_tgt.color)
+			{
+				rgf_frame_depthonly++;
+				rgf_frame_layered += rgf_tgt.dlayered;
+			}
 			for (i = 0; i < rgf_numdraws; i++)
 			{
 				rgf_frame_indexed += (rgf_draws[i].indexed == RGD_BUFFER);
@@ -1522,7 +1582,30 @@ SDL_GPUCommandBuffer *RG_Frame_Break (void)
 	return rgf_cmd;
 }
 
+/* Queue `mask`'s clear for the next pass; `keep` false leaves the depth a
+ * frame's first pass clears to as it was (glClearBufferfv, RG_ClearBuffer). */
+static void RGF_QueueClear (GLbitfield mask, const float color[4], float depth, int stencil,
+			    qboolean keep);
+
 void RG_Clear (GLbitfield mask, const float color[4], float depth, int stencil)
+{
+	RGF_QueueClear (mask, color, depth, stencil, true);
+}
+
+void RG_ClearBuffer (GLenum buffer, GLint drawbuffer, const GLfloat *value)
+{
+	if (buffer == GL_DEPTH && drawbuffer == 0)
+	{
+		RGF_QueueClear (GL_DEPTH_BUFFER_BIT, NULL, value[0], 0, false);
+		return;
+	}
+	/* GL_COLOR i is MRT's per-target clear, P6c; GL_STENCIL and
+	 * GL_DEPTH_STENCIL nothing calls. */
+	RG_NoteUnhandled ("glClearBufferfv other than GL_DEPTH (per-draw-buffer colour clears are P6c; ignored)");
+}
+
+static void RGF_QueueClear (GLbitfield mask, const float color[4], float depth, int stencil,
+			    qboolean keep)
 {
 	const rpipestate_t	*ps = R_PipelineState ();
 
@@ -1554,7 +1637,11 @@ void RG_Clear (GLbitfield mask, const float color[4], float depth, int stencil)
 	if (mask & GL_COLOR_BUFFER_BIT)
 		memcpy (rgf_clear_rgba, color, sizeof(rgf_clear_rgba));
 	if (mask & GL_DEPTH_BUFFER_BIT)
-		rgf_clear_depth = depth;
+	{
+		rgf_pass_clear_depth = depth;
+		if (keep)
+			rgf_clear_depth = depth;
+	}
 	if (mask & GL_STENCIL_BUFFER_BIT)
 		rgf_clear_stencil = (Uint8) stencil;
 }
@@ -2147,6 +2234,8 @@ void RG_Frame_End (qboolean show)
 	rgf_last_waits = rgf_frame_waits;
 	rgf_last_indirect = rgf_frame_indirect;
 	rgf_last_areads = rgf_frame_areads;
+	rgf_last_depthonly = rgf_frame_depthonly;
+	rgf_last_layered = rgf_frame_layered;
 	rgf_last_cdropped = RG_ComputeDropped () - rgf_cdropped_base;
 	rgf_frames++;
 	RGF_NoteTimes ();
@@ -2432,6 +2521,9 @@ void RG_Frame_Status (void)
 		    "collected, %lu refused, %lu failed, %lu discarded, %lu never collected\n",
 		    rgf_last_indirect, rgf_last_cdropped, rgf_last_areads, rgr_requested, rgr_collected,
 		    rgr_refused, rgr_failed, rgr_discarded, rgr_abandoned);
+	Con_Printf ("[RENDERER] SDL_GPU last frame: %d depth-only passes, %d of them on a layer of a "
+		    "layered depth texture (the shadow maps' faces, 6 per map drawn)\n",
+		    rgf_last_depthonly, rgf_last_layered);
 	RG_Compute_Status ();
 	Con_Printf ("[RENDERER] SDL_GPU scene depth %s (%s); drawing into framebuffer %u (%dx%d%s)\n",
 		    RGF_DepthName (rgf_depth_fmt), rgf_depth_sampled ? "sampled too" : "not sampled",
