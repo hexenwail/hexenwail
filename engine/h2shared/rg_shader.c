@@ -394,6 +394,32 @@ static qboolean RG_Reflect (const Uint32 *w, size_t nwords, int sampler_set, int
 			else
 				s->unit = RG_UNIT_NONE;
 		}
+		else if (v->b == SPV_ScUniformConstant && ty->op == SPV_OpTypeImage && ty->f == 1)
+		{
+			/* A texture with no sampler (#340 P5f): what SDL_GPU binds
+			 * as a read-only storage texture, set 0 after the samplers.
+			 * Its GL unit is named by R_ProgramSamplerUnit, as a
+			 * sampler's is; `binding` is made the slot in RG_CheckStage. */
+			rgsampler_t	*s;
+			const char	*nm = v->name ? v->name : "";
+
+			if (rw_set < 0 || out->num_rotex == RG_MAX_STAGE_SAMPLERS || !v->has_binding ||
+			    v->binding > 255 || (int)v->set != sampler_set)
+			{
+				Con_Printf ("SDL_GPU: %s: read-only storage texture %s outside a compute "
+					    "stage's set %d\n", blob, nm, sampler_set);
+				free (ids);
+				return false;
+			}
+			s = &out->rotex[out->num_rotex++];
+			memset (s, 0, sizeof(*s));
+			q_strlcpy (s->name, nm, sizeof(s->name));
+			s->binding = (Uint8) v->binding;
+			s->type = RG_ImageType (ty->a, ty->b);
+			s->sclass = (ty->d < bound && ids[ty->d].op == SPV_OpTypeInt)
+				    ? (ids[ty->d].b ? RG_SC_SINT : RG_SC_UINT) : RG_SC_FLOAT;
+			s->unit = RG_UNIT_NONE;
+		}
 		else if (rw_set >= 0 && v->b == SPV_ScUniformConstant && ty->op == SPV_OpTypeImage &&
 			 ty->f == 2)
 		{
@@ -598,6 +624,34 @@ static qboolean RG_CheckStage (rprog_id_t id, int stage, const void *code, size_
 			}
 			seen |= 1u << slot;
 			out->ssbos[i].slot = (Uint8) slot;
+		}
+	}
+	/* The read-only storage textures sit between the samplers and the
+	 * storage buffers (#340 P5f): slots 0..n-1 past the samplers, each
+	 * once. */
+	if (out->num_rotex != refl->ro_storage_textures)
+	{
+		Con_Printf ("SDL_GPU: %s.vk.spv from %s has %d read-only storage textures, this build "
+			    "expects %d\n", blob, rg_spvsource, out->num_rotex, refl->ro_storage_textures);
+		return false;
+	}
+	{
+		Uint32	seen = 0;
+		int	i;
+
+		for (i = 0; i < out->num_rotex; i++)
+		{
+			int	slot = (int) out->rotex[i].binding - refl->samplers;
+
+			if (slot < 0 || slot >= out->num_rotex || (seen & (1u << slot)))
+			{
+				Con_Printf ("SDL_GPU: %s: read-only storage texture %s at binding %d is not one "
+					    "of slots 0..%d after the %d samplers\n", blob, out->rotex[i].name,
+					    out->rotex[i].binding, out->num_rotex - 1, refl->samplers);
+				return false;
+			}
+			seen |= 1u << slot;
+			out->rotex[i].binding = (Uint8) slot;
 		}
 	}
 	/* Set 1 (#340 P5a-2): the storage images at 0..n-1, image unit N at
@@ -844,6 +898,13 @@ GLint RG_ProgramSampler (GLuint program, const char *name)
 			if (!strcmp (p->stage[s].samplers[i].name, name))
 				return p->stage[s].samplers[i].binding;
 		}
+		/* a read-only storage texture is named the way a sampler is
+		 * (#340 P5f): its slot past the samplers' */
+		for (i = 0; i < p->stage[s].num_rotex; i++)
+		{
+			if (!strcmp (p->stage[s].rotex[i].name, name))
+				return p->stage[s].num_samplers + p->stage[s].rotex[i].binding;
+		}
 	}
 	return -1;
 }
@@ -867,6 +928,11 @@ void RG_ProgramSamplerUnit (GLuint program, const char *name, GLint unit)
 		{
 			if (!strcmp (p->stage[s].samplers[i].name, name))
 				p->stage[s].samplers[i].unit = (Uint8) unit;
+		}
+		for (i = 0; i < p->stage[s].num_rotex; i++)
+		{
+			if (!strcmp (p->stage[s].rotex[i].name, name))
+				p->stage[s].rotex[i].unit = (Uint8) unit;
 		}
 	}
 }

@@ -16,9 +16,10 @@ static const rprog_refl_t rprog_refl[] = {
 	/* blob, stage, samplers, ro storage textures, ro storage buffers,
 	 * rw storage textures, rw storage buffers, uniform buffers, threadcount */
 	{ "cull_clear.comp", RPROG_REFL_COMPUTE, 0, 0, 0, 0, 1, 1, { 64, 1, 1 } },
-	{ "cull_mark.comp", RPROG_REFL_COMPUTE, 1, 0, 4, 0, 4, 1, { 64, 1, 1 } },
+	{ "cull_mark.comp", RPROG_REFL_COMPUTE, 0, 1, 4, 0, 4, 1, { 64, 1, 1 } },
 	{ "hiz_copy.comp", RPROG_REFL_COMPUTE, 1, 0, 0, 1, 0, 1, { 8, 8, 1 } },
-	{ "hiz_reduce.comp", RPROG_REFL_COMPUTE, 1, 0, 0, 1, 0, 1, { 8, 8, 1 } },
+	{ "hiz_copy.frag", RPROG_REFL_FRAGMENT, 1, 0, 0, 0, 0, 0, { 0, 0, 0 } },
+	{ "hiz_reduce.comp", RPROG_REFL_COMPUTE, 0, 1, 0, 1, 0, 1, { 8, 8, 1 } },
 	{ "lightcluster.comp", RPROG_REFL_COMPUTE, 0, 0, 1, 1, 0, 1, { 8, 8, 1 } },
 	{ "s2d.frag", RPROG_REFL_FRAGMENT, 1, 0, 0, 0, 0, 1, { 0, 0, 0 } },
 	{ "s2d.vert", RPROG_REFL_VERTEX, 0, 0, 0, 0, 0, 1, { 0, 0, 0 } },

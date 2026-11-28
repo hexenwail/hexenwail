@@ -10,7 +10,15 @@
  * glBindBufferBase / glActiveTexture, the second the SDL_GPU slot (see
  * TEXBIND2/SSBO_RO/SSBO_RW in layout.inc).  Set 0: the pyramid, then the
  * four read-only buffers; set 1: the four written ones.
+ *
+ * -gpu reads the pyramid as a read-only storage texture (#340 P5f; see
+ * hiz_reduce_comp.glsl for why), so HIZ_AT does by hand what GL's
+ * GL_NEAREST_MIPMAP_NEAREST, GL_CLAMP_TO_EDGE sampler does at an integer
+ * lod: the level's texel under uv, clamped to its edge.
  */
+#ifdef VULKAN
+#extension GL_EXT_samplerless_texture_functions : require
+#endif
 #include "cull.inc"
 
 layout(local_size_x = 64) in;
@@ -70,7 +78,18 @@ SSBO_RW(7, 3) buffer StatsBuffer {
 /* Hi-Z pyramid bound to texture unit 1.  Under reversed-Z the
  * pyramid stores min(depth) per tile (= farthest fragment), under
  * forward-Z max(depth). */
+#ifdef VULKAN
+TEXBIND2(1, 0) uniform texture2D u_hiz_pyramid;
+float HIZ_AT (vec2 uv, int mip)
+{
+    ivec2 size = textureSize(u_hiz_pyramid, mip);
+    ivec2 t = clamp(ivec2(floor(uv * vec2(size))), ivec2(0), size - 1);
+    return texelFetch(u_hiz_pyramid, t, mip).r;
+}
+#else
 TEXBIND2(1, 0) uniform sampler2D u_hiz_pyramid;
+#define HIZ_AT(uv, mip) textureLod(u_hiz_pyramid, uv, float(mip)).r
+#endif
 
 #define STAT_INC(i) do { if (u_ccounts1.w != 0) atomicAdd(stats[i], 1u); } while(false)
 
@@ -169,10 +188,10 @@ void main() {
                  * the same way the pyramid was built. */
                 float texel = exp2(float(mip)) / max(u_chizsize.x, u_chizsize.y);
                 float occ;
-                float s0 = textureLod(u_hiz_pyramid, cuv + vec2(-0.5,-0.5)*texel, float(mip)).r;
-                float s1 = textureLod(u_hiz_pyramid, cuv + vec2( 0.5,-0.5)*texel, float(mip)).r;
-                float s2 = textureLod(u_hiz_pyramid, cuv + vec2(-0.5, 0.5)*texel, float(mip)).r;
-                float s3 = textureLod(u_hiz_pyramid, cuv + vec2( 0.5, 0.5)*texel, float(mip)).r;
+                float s0 = HIZ_AT(cuv + vec2(-0.5,-0.5)*texel, mip);
+                float s1 = HIZ_AT(cuv + vec2( 0.5,-0.5)*texel, mip);
+                float s2 = HIZ_AT(cuv + vec2(-0.5, 0.5)*texel, mip);
+                float s3 = HIZ_AT(cuv + vec2( 0.5, 0.5)*texel, mip);
                 if (u_ccounts1.z != 0) {
                     occ = min(min(s0,s1), min(s2,s3));
                     /* AABB's nearest depth < occluder's min => fully behind */

@@ -132,7 +132,7 @@ if re.search(r"\bpp_fbo\b", re.sub(r"/\*.*?\*/", "", soft, flags=re.S)):
     errors.append("GL_SoftDepth_Capture must ask GL_GetSceneFBO (), not the raw pp_fbo")
 build = fn_body(wc, r"void R_BuildHiZForNextFrame \(void\)")
 if not re.match(r"\s*GLuint[^;]*;\s*int[^;]*;\s*int[^;]*;"
-                r"(?:\s*#ifdef USE_SDL_GPU\s*unsigned long\s+dropped = 0;\s*#endif)?"
+                r"(?:\s*#ifdef USE_SDL_GPU\s*unsigned long\s+dropped = 0(?:, drawsdropped = 0)?;\s*#endif)?"
                 r"\s*hiz_pyramid_valid = false;", build) or \
    not re.search(r"hiz_pyramid_valid = true;\s*$", build):
     errors.append("R_BuildHiZForNextFrame must invalidate the pyramid first and validate it only at the end")

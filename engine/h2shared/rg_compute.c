@@ -40,6 +40,17 @@
  * a placeholder needs none of that: the placeholders were written at boot
  * (P5c, the world cull's Hi-Z pyramid while Hi-Z is off).
  *
+ * Read-only storage textures (#340 P5f).  A stage that reads a texture with
+ * texelFetch through a texture2D and no sampler (a Vulkan arm of its own;
+ * GL's program keeps its sampler) gets it bound with
+ * SDL_BindGPUComputeStorageTextures, which moves it to its read layout with
+ * a barrier whose second scope is the compute stage: ordered after what
+ * wrote it, with no wait.  That is how the Hi-Z reduce reads the level below
+ * and the cull reads the pyramid, which took 11 waits a frame before.  The
+ * texture needs COMPUTE_STORAGE_READ usage, declared before it is made
+ * (RG_Res_StorageRead); a level the stage also writes goes through a
+ * scratch, as one a sampler reads does, since the bind moves every level.
+ *
  * Sampled and written.  A stage that samples a texture and writes one of its
  * levels as a storage image (the Hi-Z reduce: mip N-1 in, mip N out, #340
  * P5d) has the written level in the storage layout while the sampler's view,
@@ -90,6 +101,13 @@ static qboolean RGC_ImageSampled (const rgstage_t *st, const rgimage_t *im)
 		if (RG_Res_ImageSampled (im->binding, st->samplers[i].unit, (rg_textype_t) st->samplers[i].type))
 			return true;
 	}
+	/* or as a read-only storage texture: SDL moves the whole texture to
+	 * that layout when it is bound, the written level with it (P5f) */
+	for (i = 0; i < st->num_rotex; i++)
+	{
+		if (RG_Res_ImageSampled (im->binding, st->rotex[i].unit, (rg_textype_t) st->rotex[i].type))
+			return true;
+	}
 	return false;
 }
 
@@ -99,7 +117,7 @@ static qboolean RGC_Bind (const rgstage_t *st, const Uint32 cover[3],
 			  SDL_GPUStorageTextureReadWriteBinding *img,
 			  SDL_GPUStorageBufferReadWriteBinding *rw,
 			  SDL_GPUTextureSamplerBinding *smp, SDL_GPUBuffer **ro,
-			  rgcscratch_t *sc, int *nsc)
+			  SDL_GPUTexture **rot, rgcscratch_t *sc, int *nsc)
 {
 	int	i;
 	void	*read;
@@ -149,6 +167,16 @@ static qboolean RGC_Bind (const rgstage_t *st, const Uint32 cover[3],
 				     s->shadow, &smp[s->binding]))
 			return false;
 	}
+	for (i = 0; i < st->num_rotex; i++)
+	{
+		const rgsampler_t *s = &st->rotex[i];
+
+		if (s->unit == RG_UNIT_NONE)
+			RG_NoteUnhandled ("read-only storage texture with no GL unit mapping (placeholder bound)");
+		if (!RG_Res_StorageRead (s->unit, (rg_textype_t) s->type, (rg_sampclass_t) s->sclass,
+					 &rot[s->binding]))
+			return false;
+	}
 	for (i = 0; i < st->num_ssbos; i++)
 	{
 		const rgssbo_t	*sb = &st->ssbos[i];
@@ -169,6 +197,7 @@ void RG_DispatchCompute (GLuint groups_x, GLuint groups_y, GLuint groups_z)
 	SDL_GPUStorageBufferReadWriteBinding	rw[RG_MAX_STAGE_SSBOS];
 	SDL_GPUTextureSamplerBinding		smp[RG_MAX_STAGE_SAMPLERS];
 	SDL_GPUBuffer				*ro[RG_MAX_STAGE_SSBOS];
+	SDL_GPUTexture				*rot[RG_MAX_STAGE_SAMPLERS];
 	rgcscratch_t				sc[RG_MAX_STAGE_IMAGES];
 	SDL_GPUCommandBuffer			*cmd;
 	SDL_GPUComputePass			*pass;
@@ -209,13 +238,17 @@ void RG_DispatchCompute (GLuint groups_x, GLuint groups_y, GLuint groups_z)
 		 * it lands first (#340 P5d) */
 		target |= RG_Res_UnitIsTarget (st->samplers[i].unit, (rg_textype_t) st->samplers[i].type);
 	}
+	/* A read-only storage texture is no sample: SDL's barrier into its
+	 * layout has the compute stage as its second scope (#340 P5f). */
+	for (i = 0; i < st->num_rotex; i++)
+		target |= RG_Res_UnitIsTarget (st->rotex[i].unit, (rg_textype_t) st->rotex[i].type);
 	cmd = RG_Frame_ComputeBegin (target, samples);
 	if (!cmd)
 	{
 		rgc_dropped++;
 		return;
 	}
-	if (!RGC_Bind (st, cover, img, rw, smp, ro, sc, &nsc))
+	if (!RGC_Bind (st, cover, img, rw, smp, ro, rot, sc, &nsc))
 	{
 		rgc_dropped++;
 		RG_Frame_ComputeEnd (false);
@@ -226,6 +259,7 @@ void RG_DispatchCompute (GLuint groups_x, GLuint groups_y, GLuint groups_z)
 		if (!sc[i].preload)
 			continue;
 		copy = SDL_BeginGPUCopyPass (cmd);
+		RG_Frame_CountCopyPass ();
 		if (!copy)
 		{
 			rgc_dropped++;
@@ -248,6 +282,8 @@ void RG_DispatchCompute (GLuint groups_x, GLuint groups_y, GLuint groups_z)
 	SDL_BindGPUComputePipeline (pass, prog->cs);
 	if (st->num_samplers)
 		SDL_BindGPUComputeSamplers (pass, 0, smp, (Uint32) st->num_samplers);
+	if (st->num_rotex)
+		SDL_BindGPUComputeStorageTextures (pass, 0, rot, (Uint32) st->num_rotex);
 	if (st->num_ssbos)
 		SDL_BindGPUComputeStorageBuffers (pass, 0, ro, (Uint32) st->num_ssbos);
 	for (i = 0; i < st->num_ubos; i++)
@@ -273,6 +309,7 @@ void RG_DispatchCompute (GLuint groups_x, GLuint groups_y, GLuint groups_z)
 		/* The level lands where GL would have stored it.  A copy pass
 		 * that cannot begin leaves it as it was: counted, as a drop. */
 		copy = SDL_BeginGPUCopyPass (cmd);
+		RG_Frame_CountCopyPass ();
 		if (!copy)
 			rgc_dropped++;
 		for (i = 0; copy && i < nsc; i++)

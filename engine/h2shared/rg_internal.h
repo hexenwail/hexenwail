@@ -176,6 +176,7 @@
 /* rg_device.c */
 extern SDL_GPUDevice	*rg_dev;
 extern SDL_Window	*rg_win;
+extern qboolean		rg_headless;	/* -gpuheadless: no swapchain (#340 P5f) */
 float	*RG_ClearColor (void);		/* gpu_clearcolor, rgb */
 
 /* ------------------------------------------------------------------ */
@@ -279,6 +280,14 @@ qboolean RG_Res_ImageIsTarget (int unit);
 /* Whether image unit `unit` holds the texture a sampler of dimensionality
  * `type` reading GL unit `sunit` would sample (#340 P5d). */
 qboolean RG_Res_ImageSampled (int unit, GLuint sunit, rg_textype_t type);
+/* A compute stage's read-only storage texture (#340 P5f): the texture GL
+ * unit `unit` holds for `type`, with COMPUTE_STORAGE_READ usage, or the 2D
+ * float placeholder.  SDL puts it in the storage layout with a barrier
+ * whose second scope is the compute stage, so reading it needs no wait,
+ * where sampling it does (RG_Frame_ComputeBegin).  False: nothing to bind,
+ * counted. */
+qboolean RG_Res_StorageRead (GLuint unit, rg_textype_t type, rg_sampclass_t sclass,
+			     SDL_GPUTexture **out);
 /* Image unit `unit`'s binding `b` (RG_Res_StorageImage's) moved onto a
  * scratch texture of the bound level's size and format, made once per shape
  * and kept: a dispatch that samples a texture and writes one of its levels
@@ -373,6 +382,12 @@ typedef struct {
 	rgubo_t		ubos[RG_MAX_STAGE_UBOS];
 	int		num_ssbos;	/* read-only storage buffers, the reflection row's */
 	rgssbo_t	ssbos[RG_MAX_STAGE_SSBOS];
+	/* a compute stage's read-only storage textures (#340 P5f): set 0 after
+	 * the samplers, a texture2D read with texelFetch.  `binding` is the
+	 * SDL_GPU slot, `unit` the GL texture unit it reads, as a sampler's;
+	 * sclass, shadow and ms are unused. */
+	int		num_rotex;
+	rgsampler_t	rotex[RG_MAX_STAGE_SAMPLERS];
 	/* a compute stage's set 1 (#340 P5a-2): storage images, then
 	 * read-write storage buffers, each slot counted from 0 */
 	int		num_images;
@@ -617,5 +632,8 @@ unsigned int RG_Frame_ReadbackRequest (const SDL_GPUBufferRegion *buf);
 /* ------------------------------------------------------------------ */
 
 void	RG_Compute_Status (void);
+/* gpu_frametimes (#340 P5f, dev-only), and the copy passes it counts */
+void	RG_FrameTimes_f (void);
+void	RG_Frame_CountCopyPass (void);
 
 #endif /* RG_INTERNAL_H */

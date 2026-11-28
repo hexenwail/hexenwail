@@ -98,6 +98,7 @@ typedef enum {
 	RPROG_CULL_MARK,
 	RPROG_HIZ_COPY,
 	RPROG_HIZ_REDUCE,
+	RPROG_HIZ_COPY_DRAW,		/* -gpu only: hiz_copy as a draw (#340 P5f) */
 	/* gl_lightcluster.c */
 	RPROG_LIGHTCLUSTER,
 	RPROG_COUNT

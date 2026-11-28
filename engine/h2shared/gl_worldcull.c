@@ -32,6 +32,9 @@
 #include "gl_compute.h"	/* dispatch, barriers, readback, program deletes (#340 P5a-1) */
 #ifdef USE_SDL_GPU
 #include "rg_device.h"	/* R_GPU (), the CullParams mirror, the stats readback (#340 P5c) */
+#define WC_GPU()	R_GPU ()
+#else
+#define WC_GPU()	false
 #endif
 
 /* The -gpu standalone depth copy's format; older GL headers (mingw's) lack
@@ -112,6 +115,15 @@ static int	hiz_stats_frame_counter;
 static GLuint	hiz_pyramid_tex;	/* binding 7 sampler in cull_mark */
 static GLuint	hiz_copy_prog;		/* copy scene depth -> mip 0 */
 static GLuint	hiz_reduce_prog;	/* min/max 2x2 reduction per mip */
+#ifdef USE_SDL_GPU
+/* -gpu's copy into mip 0 is a draw (#340 P5f, hiz_copy_frag.glsl): into
+ * hiz_copy_fbo, whose colour attachment is the pyramid's level 0, with
+ * ssao_composite.vert's attribute-less triangle.  The program outlives a map
+ * (-gpu keeps graphics programs; R_HiZ_Shutdown forgets it at vid_restart). */
+static GLuint	hiz_copy_draw_prog;
+static GLuint	hiz_copy_vao;
+static GLuint	hiz_copy_fbo;
+#endif
 static int	hiz_width;		/* mip 0 size in pixels */
 static int	hiz_height;
 static int	hiz_mip_count;
@@ -675,6 +687,83 @@ static qboolean R_HiZ_Available (void)
 	    && (glMemoryBarrier_fp   != NULL);
 }
 
+#ifdef USE_SDL_GPU
+/* -gpu: the pyramid just made gets its read-only storage use declared, and
+ * hiz_copy_fbo its level 0 (#340 P5f); the program and the VAO once. */
+static qboolean WC_HiZCopyDrawEnsure (void)
+{
+	GLuint	prev;
+	GLenum	status;
+
+	/* the reduce's writes too: the copy's draw makes the texture now */
+	R_BindImageTexture (0, hiz_pyramid_tex, 0, GL_FALSE, 0, GL_READ_ONLY, GL_R32F);
+	R_BindImageTexture (0, hiz_pyramid_tex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R32F);
+	R_BindImageTexture (0, 0, 0, GL_FALSE, 0, GL_READ_ONLY, GL_R32F);
+	if (!hiz_copy_draw_prog)
+	{
+		GLint	loc;
+
+		hiz_copy_draw_prog = R_Program_Create (RPROG_HIZ_COPY_DRAW);
+		if (!hiz_copy_draw_prog)
+			return false;
+		R_UseProgram (hiz_copy_draw_prog);
+		loc = R_ProgramSamplerLoc (hiz_copy_draw_prog, "u_scene_depth");
+		R_ProgramSamplerUnit (hiz_copy_draw_prog, loc, "u_scene_depth", 0);
+		R_UseProgram (0);
+	}
+	if (!hiz_copy_vao)
+		R_GenVertexArrays (1, &hiz_copy_vao);
+	if (!hiz_copy_fbo)
+		R_GenFramebuffers (1, &hiz_copy_fbo);
+	prev = R_FramebufferBinding (GL_DRAW_FRAMEBUFFER_BINDING);
+	R_BindFramebuffer (GL_DRAW_FRAMEBUFFER, hiz_copy_fbo);
+	R_FramebufferTexture2D (GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, hiz_pyramid_tex, 0);
+	status = R_CheckFramebufferStatus (GL_DRAW_FRAMEBUFFER);
+	R_BindFramebuffer (GL_DRAW_FRAMEBUFFER, prev);
+	if (status != GL_FRAMEBUFFER_COMPLETE)
+	{
+		Con_DPrintf ("Hi-Z: the depth copy's framebuffer is incomplete (0x%x)\n", status);
+		return false;
+	}
+	return true;
+}
+
+/* -gpu: the scene depth into mip 0 by a draw (hiz_copy_frag.glsl).  The
+ * caller's framebuffer, viewport, cull, blend and depth state are put back;
+ * the colour mask is left all on, the scissor off, no program and no VAO
+ * bound, which is what every caller here has (the end of the 3D pass). */
+static void WC_HiZCopyDraw (GLuint scene_depth_tex, int scene_w, int scene_h)
+{
+	GLint		vp[4];
+	GLuint		prev = R_FramebufferBinding (GL_DRAW_FRAMEBUFFER_BINDING);
+	qboolean	cull = R_GetCull (), blend = R_GetBlend ();
+	qboolean	depthtest = R_GetDepthTest (), depthmask = R_GetDepthMask ();
+
+	R_GetViewport (vp);
+	R_BindFramebuffer (GL_DRAW_FRAMEBUFFER, hiz_copy_fbo);
+	R_SetViewport (0, 0, scene_w, scene_h);
+	R_SetCull (false);
+	R_SetBlend (false);
+	R_SetDepthTest (false);
+	R_SetDepthMask (false);
+	R_SetColorMask (true, true, true, true);
+	GL_ResetScissor ();
+	R_UseProgram (hiz_copy_draw_prog);
+	R_BindTextureSlot (0, scene_depth_tex);
+	R_BindVertexArray (hiz_copy_vao);
+	R_DrawArrays (GL_TRIANGLES, 0, 3);
+	R_BindVertexArray (0);
+	R_BindTextureSlot (0, 0);
+	R_UseProgram (0);
+	R_SetDepthMask (depthmask);
+	R_SetDepthTest (depthtest);
+	R_SetBlend (blend);
+	R_SetCull (cull);
+	R_BindFramebuffer (GL_DRAW_FRAMEBUFFER, prev);
+	R_SetViewport (vp[0], vp[1], vp[2], vp[3]);
+}
+#endif
+
 static qboolean R_HiZ_EnsureResources (int scene_w, int scene_h)
 {
 	if (scene_w <= 0 || scene_h <= 0)
@@ -709,8 +798,20 @@ static qboolean R_HiZ_EnsureResources (int scene_w, int scene_h)
 	R_TexSetFilter(GL_TEXTURE_2D, hiz_pyramid_tex, GL_NEAREST_MIPMAP_NEAREST, GL_NEAREST);
 	R_TexSetWrap(GL_TEXTURE_2D, hiz_pyramid_tex, GL_CLAMP_TO_EDGE);
 	R_BindTextureForEdit (GL_TEXTURE_2D, 0);
+#ifdef USE_SDL_GPU
+	/* -gpu reads the pyramid as a read-only storage texture, in the
+	 * reduce and the cull (#340 P5f); SDL_GPU fixes a texture's usage when
+	 * it is made, so that is declared before anything makes it. */
+	if (R_GPU () && !WC_HiZCopyDrawEnsure ())
+	{
+		Con_Printf("Hi-Z: the depth copy's draw cannot be set up, disabling\n");
+		R_FreeHiZ();
+		return false;
+	}
+#endif
 
-	if (!hiz_copy_prog)
+	/* -gpu copies into mip 0 with a draw instead (WC_HiZCopyDrawEnsure) */
+	if (!hiz_copy_prog && !WC_GPU ())
 	{
 		hiz_copy_prog = R_Program_Create(RPROG_HIZ_COPY);
 		WC_BindHizParamsBlock(hiz_copy_prog);
@@ -721,23 +822,20 @@ static qboolean R_HiZ_EnsureResources (int scene_w, int scene_h)
 		WC_BindCullParamsBlock(hiz_reduce_prog);
 	}
 
-	if (!hiz_copy_prog || !hiz_reduce_prog)
+	if ((!hiz_copy_prog && !WC_GPU ()) || !hiz_reduce_prog)
 	{
 		Con_Printf("Hi-Z: compute shader failed, disabling\n");
 		R_FreeHiZ();
 		return false;
 	}
-	/* Both read unit 0, which TEXBIND(0) already says to GL; the Vulkan
-	 * SPIR-V keeps only the slot, so -gpu is told (#340 P5d), and -gpu
-	 * alone, so GL's calls are what they were before (P5e). */
+	/* The reduce reads unit 0, which TEXBIND(0) already says to GL; the
+	 * Vulkan SPIR-V keeps only the slot, so -gpu is told (#340 P5d), and
+	 * -gpu alone, so GL's calls are what they were before (P5e). */
 #ifdef USE_SDL_GPU
 	if (R_GPU ())
 	{
 		GLint	loc;
 
-		R_UseProgram (hiz_copy_prog);
-		loc = R_ProgramSamplerLoc (hiz_copy_prog, "u_scene_depth");
-		R_ProgramSamplerUnit (hiz_copy_prog, loc, "u_scene_depth", 0);
 		R_UseProgram (hiz_reduce_prog);
 		loc = R_ProgramSamplerLoc (hiz_reduce_prog, "u_src");
 		R_ProgramSamplerUnit (hiz_reduce_prog, loc, "u_src", 0);
@@ -775,6 +873,9 @@ void R_HiZ_ForgetView (void)
 void R_FreeHiZ (void)
 {
 	R_PipelineForgetProgram ();	/* GL reuses program names */
+#ifdef USE_SDL_GPU
+	if (hiz_copy_fbo)      { R_DeleteFramebuffers(1, &hiz_copy_fbo); hiz_copy_fbo = 0; }
+#endif
 	if (hiz_pyramid_tex)   { R_DeleteTextures (1, &hiz_pyramid_tex); hiz_pyramid_tex = 0; }
 	if (hiz_copy_prog)     { R_DeleteProgram(hiz_copy_prog);        hiz_copy_prog = 0; }
 	if (hiz_reduce_prog)   { R_DeleteProgram(hiz_reduce_prog);      hiz_reduce_prog = 0; }
@@ -784,6 +885,19 @@ void R_FreeHiZ (void)
 	hiz_width = hiz_height = hiz_mip_count = 0;
 	hiz_prev_mvp_valid = false;
 	hiz_pyramid_valid = false;
+}
+
+/* At video shutdown, after R_FreeWorldCull: what R_FreeHiZ keeps for the
+ * next map.  -gpu's copy program is not deleted, only forgotten -- the
+ * device going away takes every program with it, and -gpu deletes no
+ * graphics program (#340 P5f; vid_restart is refused under -gpu, so this
+ * runs as the device goes).  GL never makes it. */
+void R_HiZ_Shutdown (void)
+{
+#ifdef USE_SDL_GPU
+	hiz_copy_draw_prog = 0;
+	if (hiz_copy_vao) { R_DeleteVertexArrays (1, &hiz_copy_vao); hiz_copy_vao = 0; }
+#endif
 }
 
 /* uhexen2-9912: standalone depth resolve.  When the postprocess pipeline
@@ -892,7 +1006,7 @@ void R_BuildHiZForNextFrame (void)
 	int	scene_w, scene_h;
 	int	mip;
 #ifdef USE_SDL_GPU
-	unsigned long	dropped = 0;
+	unsigned long	dropped = 0, drawsdropped = 0;
 #endif
 
 	hiz_pyramid_valid = false;
@@ -936,36 +1050,37 @@ void R_BuildHiZForNextFrame (void)
 
 #ifdef USE_SDL_GPU
 	if (R_GPU ())
+	{
 		dropped = RG_ComputeDropped ();
-#endif
-
-	/* Copy scene depth -> mip 0 */
-	R_UseProgram (hiz_copy_prog);
-	R_BindTextureSlot (0, scene_depth_tex);
-	R_BindImageTexture (0, hiz_pyramid_tex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R32F);
-	/* Pushed unconditionally every dispatch.  u_size used to be a
-	 * loose uniform, which is per-PROGRAM state and so survived
-	 * between frames on its own; a block member is global and any
-	 * future writer of this binding point would silently win. */
-	hiz_params.size[0] = scene_w;
-	hiz_params.size[1] = scene_h;
-	hiz_params.size[2] = 0;
-	hiz_params.size[3] = 0;
-#ifdef USE_SDL_GPU
-	if (R_GPU ())
-		RG_UniformBlockFlushed ("HizParams");
+		drawsdropped = RG_DrawsDropped ();
+		WC_HiZCopyDraw (scene_depth_tex, scene_w, scene_h);
+	}
 	else
 #endif
 	{
-		GLuint ubo;
-		GLintptr ofs;
+		/* Copy scene depth -> mip 0 */
+		R_UseProgram (hiz_copy_prog);
+		R_BindTextureSlot (0, scene_depth_tex);
+		R_BindImageTexture (0, hiz_pyramid_tex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R32F);
+		/* Pushed unconditionally every dispatch.  u_size used to be a
+		 * loose uniform, which is per-PROGRAM state and so survived
+		 * between frames on its own; a block member is global and any
+		 * future writer of this binding point would silently win. */
+		hiz_params.size[0] = scene_w;
+		hiz_params.size[1] = scene_h;
+		hiz_params.size[2] = 0;
+		hiz_params.size[3] = 0;
+		{
+			GLuint ubo;
+			GLintptr ofs;
 
-		GL_Upload(GL_UNIFORM_BUFFER, &hiz_params, sizeof(hiz_params), &ubo, &ofs);
-		GL_BindBufferRange(GL_UNIFORM_BUFFER, HIZ_PARAMS_UBO_BINDING,
-				   ubo, ofs, sizeof(hiz_params));
+			GL_Upload(GL_UNIFORM_BUFFER, &hiz_params, sizeof(hiz_params), &ubo, &ofs);
+			GL_BindBufferRange(GL_UNIFORM_BUFFER, HIZ_PARAMS_UBO_BINDING,
+					   ubo, ofs, sizeof(hiz_params));
+		}
+		R_DispatchCompute((scene_w + 7) / 8, (scene_h + 7) / 8, 1);
+		R_MemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
 	}
-	R_DispatchCompute((scene_w + 7) / 8, (scene_h + 7) / 8, 1);
-	R_MemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
 
 	/* Reduce mip N -> mip N+1 */
 	R_UseProgram (hiz_reduce_prog);
@@ -1016,7 +1131,7 @@ void R_BuildHiZForNextFrame (void)
 	/* A level the backend dropped holds an older frame's depth, or none:
 	 * culling against it hides what is in view.  Next frame runs without
 	 * Hi-Z, and renderer_status counts the drop (#340 P5d). */
-	if (R_GPU () && RG_ComputeDropped () != dropped)
+	if (R_GPU () && (RG_ComputeDropped () != dropped || RG_DrawsDropped () != drawsdropped))
 		return;
 #endif
 	hiz_pyramid_valid = true;
@@ -1891,6 +2006,7 @@ void R_WorldCull_Init (void)
 	 * gl_buffer.c treatment. */
 
 void R_FreeWorldCull (void) {}
+void R_HiZ_Shutdown (void) {}
 void R_WorldCull_Init (void) {}
 
 #endif /* !USE_GLES */

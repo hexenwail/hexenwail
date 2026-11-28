@@ -231,12 +231,23 @@ def parse(data):
                 continue
             if kind[0] == "sampled_image":
                 cls = SAMPLED
+            elif kind[0] == "image" and kind[1] == 2 and DEC_NON_WRITABLE in vdec:
+                # SDL_gpu_vulkan.c writes a read-only storage texture as a
+                # VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE ("because shaders are
+                # stupid"), which a storage image does not match (#340 P5f).
+                problems.append("%s: readonly storage image (SDL_GPU binds a read-only storage "
+                                "texture as a sampled image: declare it texture2D, "
+                                "GL_EXT_samplerless_texture_functions)" % name)
+                continue
             elif kind[0] == "image" and kind[1] == 2:
-                ro = DEC_NON_WRITABLE in vdec
-                cls = RO_STORAGE_TEX if ro else RW_STORAGE_TEX
-                both_rw = not ro and DEC_NON_READABLE not in vdec
+                cls = RW_STORAGE_TEX
+                both_rw = DEC_NON_READABLE not in vdec
+            elif kind[0] == "image" and kind[1] == 1:
+                # A texture with no sampler, read with texelFetch: what SDL_GPU
+                # calls a read-only storage texture (#340 P5f).
+                cls = RO_STORAGE_TEX
             elif kind[0] == "image":
-                problems.append("%s: separate texture without a sampler (SDL_GPU binds combined texture-samplers)" % name)
+                problems.append("%s: separate texture of unknown sampling kind" % name)
                 continue
             elif kind[0] == "sampler":
                 problems.append("%s: separate sampler (SDL_GPU binds combined texture-samplers)" % name)

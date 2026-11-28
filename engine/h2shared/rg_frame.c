@@ -308,8 +308,43 @@ static int			rgf_npending_reads, rgf_pending_ssbo, rgf_pending_standin;
 static unsigned long		rgf_frames;
 static unsigned long		rgf_dropped;
 
+/* Frame fences and frame times (#340 P5f, dev-only: gpu_frametimes).  Every
+ * submit takes a fence, kept here until it has signalled; a frame begins by
+ * waiting for all but the newest, so at most two frames are in flight, as
+ * SDL's swapchain would allow (SDL_SetGPUAllowedFramesInFlight's default),
+ * and with -gpuheadless, where there is no swapchain to hold the CPU back.
+ * The wall time of that wait says whether the GPU (a long wait) or the CPU
+ * (none) sets the pace; RGF_SubmitMidFrame's waits are timed apart. */
+#define RGF_FENCES		8
+static SDL_GPUFence		*rgf_fences[RGF_FENCES];
+static int			rgf_numfences;
+#define RGF_TIMES		128
+typedef struct {
+	Uint64		interval_ns, cpu_ns, fence_ns, mid_ns, acquire_ns;
+	Uint64		seg_ns, comp_ns, submit_ns;	/* parts of cpu_ns */
+	int		render, compute, copy, waits, draws, indirect;
+	Uint32		stream;
+} rgftime_t;
+static rgftime_t		rgf_times[RGF_TIMES];
+static unsigned long		rgf_numtimes;
+static Uint64			rgf_t_begin, rgf_t_lastbegin;
+static Uint64			rgf_frame_fence_ns, rgf_frame_mid_ns, rgf_frame_acquire_ns;
+/* the recording's parts: ending segments (their copy pass and the replay of
+ * their draws into a render pass), compute dispatches outside those, and
+ * the submits */
+static Uint64			rgf_frame_seg_ns, rgf_frame_comp_ns, rgf_frame_submit_ns;
+static Uint64			rgf_comp_t0, rgf_comp_mid0, rgf_comp_seg0;
+static int			rgf_frame_copies;
+/* -gpuheadless's present: the scene is blitted here instead (rg_device.c) */
+static SDL_GPUTexture		*rgf_headless_tex;
+static Uint32			rgf_headless_w, rgf_headless_h;
+
 static void RGF_ReadbacksAge (void);
 static qboolean RGF_CopyOnly (void);
+static void RGF_ReadbackFenceDone (SDL_GPUFence *fence, int state);
+static void RGF_FencesWait (int keep);
+static SDL_GPUTexture *RGF_HeadlessTarget (Uint32 *w, Uint32 *h);
+static void RGF_NoteTimes (void);
 
 /* A device that fails once tends to fail every frame: say it a few times. */
 static int	rgf_warnings;
@@ -506,6 +541,12 @@ void RG_BeginFrame (int width, int height)
 	rgf_h = height;
 	if (rgf_active)
 		return;
+	rgf_t_begin = SDL_GetTicksNS ();
+	RGF_FencesWait (1);
+	rgf_frame_fence_ns = SDL_GetTicksNS () - rgf_t_begin;
+	rgf_frame_mid_ns = rgf_frame_acquire_ns = 0;
+	rgf_frame_seg_ns = rgf_frame_comp_ns = rgf_frame_submit_ns = 0;
+	rgf_frame_copies = 0;
 	RGF_EnsureScene (width, height);
 	rgf_active = true;
 	rgf_cleared = false;
@@ -1211,6 +1252,7 @@ static qboolean RGF_CopyPass (void)
 	SDL_UnmapGPUTransferBuffer (rg_dev, rgf_tbuf);
 
 	copy = SDL_BeginGPUCopyPass (rgf_cmd);
+	RG_Frame_CountCopyPass ();
 	if (stream)
 	{
 		src.transfer_buffer = rgf_tbuf;
@@ -1353,6 +1395,7 @@ static void RGF_EndSegment (void)
 {
 	qboolean	first;
 	int		i;
+	Uint64		t0 = SDL_GetTicksNS ();
 
 	if (!RGF_EnsureCmd ())
 	{
@@ -1366,7 +1409,10 @@ static void RGF_EndSegment (void)
 	 * its clear, not under it. */
 	RG_Res_ClearTargets (rgf_cmd);
 	if (!RGF_CopyPass ())
+	{
+		rgf_dropped += rgf_numdraws;	/* counted: RG_DrawsDropped's callers rely on it */
 		rgf_numdraws = 0;	/* nothing to read; drawing would fault */
+	}
 	RG_Res_ClearPlaceholders (rgf_cmd);
 
 	first = (rgf_fbo == 0 && !rgf_cleared);
@@ -1437,6 +1483,7 @@ static void RGF_EndSegment (void)
 	}
 	rgf_frame_stream += rgf_streamlen;
 	RGF_ResetSegment ();
+	rgf_frame_seg_ns += SDL_GetTicksNS () - t0;
 }
 
 void RG_Frame_BindTarget (GLuint fbo)
@@ -1548,18 +1595,6 @@ static rgreadback_t	rgr_ring[RG_READBACKS];
 static unsigned int	rgr_ticket;
 static unsigned long	rgr_requested, rgr_collected, rgr_refused, rgr_abandoned, rgr_failed, rgr_discarded;
 
-static qboolean RGF_ReadbacksRecorded (void)
-{
-	int	i;
-
-	for (i = 0; i < RG_READBACKS; i++)
-	{
-		if (rgr_ring[i].state == RGR_RECORDED)
-			return true;
-	}
-	return false;
-}
-
 static void RGF_ReadbackDone (rgreadback_t *r, int state)
 {
 	r->state = state;
@@ -1593,18 +1628,18 @@ static void RGF_ReadbacksSubmitted (SDL_GPUFence *fence, qboolean waited)
 	}
 }
 
-/* `fence` has signalled: every read it carried is READY, and it is released
- * once, here. */
-static void RGF_ReadbackFenceDone (SDL_GPUFence *fence)
+/* `fence` has signalled (or its wait failed): every read it carried is
+ * `state`, READY or FAILED.  The fence is the frame fences' (rgf_fences),
+ * which release it (RGF_FencesWait). */
+static void RGF_ReadbackFenceDone (SDL_GPUFence *fence, int state)
 {
 	int	i;
 
 	for (i = 0; i < RG_READBACKS; i++)
 	{
 		if (rgr_ring[i].state == RGR_SUBMITTED && rgr_ring[i].fence == fence)
-			RGF_ReadbackDone (&rgr_ring[i], RGR_READY);
+			RGF_ReadbackDone (&rgr_ring[i], state);
 	}
-	SDL_ReleaseGPUFence (rg_dev, fence);
 }
 
 static void RGF_ReadbacksAge (void)
@@ -1616,7 +1651,7 @@ static void RGF_ReadbacksAge (void)
 		rgreadback_t	*r = &rgr_ring[i];
 
 		if (r->state == RGR_SUBMITTED && SDL_QueryGPUFence (rg_dev, r->fence))
-			RGF_ReadbackFenceDone (r->fence);
+			RGF_ReadbackFenceDone (r->fence, RGR_READY);
 		if ((r->state == RGR_READY || r->state == RGR_FAILED) &&
 		    (r->discard || rgf_frames - r->done_frame > RG_READBACK_ABANDON))
 		{
@@ -1688,6 +1723,7 @@ unsigned int RG_Frame_ReadbackRequest (const SDL_GPUBufferRegion *buf)
 		return 0;
 	}
 	copy = SDL_BeginGPUCopyPass (rgf_cmd);
+	RG_Frame_CountCopyPass ();
 	if (!copy)
 	{
 		rgr_refused++;
@@ -1723,7 +1759,7 @@ int RG_ReadbackCollect (unsigned int ticket, void *data, Uint32 size)
 	if (!r)
 		return -1;
 	if (r->state == RGR_SUBMITTED && SDL_QueryGPUFence (rg_dev, r->fence))
-		RGF_ReadbackFenceDone (r->fence);
+		RGF_ReadbackFenceDone (r->fence, RGR_READY);
 	if (r->state == RGR_RECORDED || r->state == RGR_SUBMITTED)
 		return 0;
 	if (r->state == RGR_FAILED)
@@ -1776,8 +1812,7 @@ static void RGF_ReadbacksShutdown (void)
 	{
 		rgreadback_t	*r = &rgr_ring[i];
 
-		if (r->state == RGR_SUBMITTED)
-			RGF_ReadbackFenceDone (r->fence);
+		/* the fence is released with the frame fences */
 		if (r->tb)
 			SDL_ReleaseGPUTransferBuffer (rg_dev, r->tb);
 		memset (r, 0, sizeof(*r));
@@ -1795,21 +1830,51 @@ static void RGF_EndOfFrame (void)
 		SDL_ReleaseGPUBuffer (rg_dev, rgf_retired_bufs[--rgf_numretired_bufs]);
 }
 
+/* Wait for the kept fences until `keep` are left, newest last; each one
+ * that signalled completes the reads it carried, and is released. */
+static void RGF_FencesWait (int keep)
+{
+	int		i, n;
+	qboolean	ok;
+
+	if (rgf_numfences <= keep)
+		return;
+	n = rgf_numfences - keep;
+	/* One queue: the newest of them signalling means the rest have too. */
+	ok = SDL_WaitForGPUFences (rg_dev, true, rgf_fences, (Uint32) n);
+	if (!ok)
+		RGF_Warn ("SDL_GPU: waiting for a frame failed (%s)\n", SDL_GetError ());
+	for (i = 0; i < n; i++)
+	{
+		/* a failed wait fails what they carried, as RGF_SubmitMidFrame's */
+		RGF_ReadbackFenceDone (rgf_fences[i], ok ? RGR_READY : RGR_FAILED);
+		SDL_ReleaseGPUFence (rg_dev, rgf_fences[i]);
+	}
+	memmove (rgf_fences, rgf_fences + n, (size_t) keep * sizeof(rgf_fences[0]));
+	rgf_numfences = keep;
+}
+
 static void RGF_Submit (void)
 {
-	/* A fence only when a download is aboard: that is what reads it. */
-	if (rgf_cmd && RGF_ReadbacksRecorded ())
-	{
-		SDL_GPUFence	*fence = SDL_SubmitGPUCommandBufferAndAcquireFence (rgf_cmd);
+	SDL_GPUFence	*fence;
+	Uint64		t0 = SDL_GetTicksNS ();
 
+	if (rgf_cmd)
+	{
+		fence = SDL_SubmitGPUCommandBufferAndAcquireFence (rgf_cmd);
 		if (!fence)
 			RGF_Warn ("SDL_GPU: submit failed (%s)\n", SDL_GetError ());
 		RGF_ReadbacksSubmitted (fence, false);
+		if (fence)
+		{
+			if (rgf_numfences == RGF_FENCES)
+				RGF_FencesWait (RGF_FENCES - 1);
+			rgf_fences[rgf_numfences++] = fence;
+		}
 	}
-	else if (rgf_cmd && !SDL_SubmitGPUCommandBuffer (rgf_cmd))
-		RGF_Warn ("SDL_GPU: submit failed (%s)\n", SDL_GetError ());
 	rgf_cmd = NULL;
 	RGF_EndOfFrame ();
+	rgf_frame_submit_ns += SDL_GetTicksNS () - t0;
 }
 
 /* Submit what is recorded and wait for it to finish, the frame staying open
@@ -1819,6 +1884,8 @@ static void RGF_Submit (void)
 static qboolean RGF_SubmitMidFrame (void)
 {
 	SDL_GPUFence	*fence;
+	Uint64		t0;
+	qboolean	ok;
 
 	if (!rgf_cmd)
 		return false;
@@ -1832,7 +1899,10 @@ static qboolean RGF_SubmitMidFrame (void)
 		RGF_ReadbacksSubmitted (NULL, false);
 		return false;
 	}
-	if (!SDL_WaitForGPUFences (rg_dev, true, &fence, 1))
+	t0 = SDL_GetTicksNS ();
+	ok = SDL_WaitForGPUFences (rg_dev, true, &fence, 1);
+	rgf_frame_mid_ns += SDL_GetTicksNS () - t0;
+	if (!ok)
 	{
 		RGF_Warn ("SDL_GPU: waiting for submitted work failed (%s)\n", SDL_GetError ());
 		SDL_ReleaseGPUFence (rg_dev, fence);
@@ -1880,6 +1950,9 @@ qboolean RG_Frame_ComputeBinding (void)
 
 SDL_GPUCommandBuffer *RG_Frame_ComputeBegin (qboolean touches_target, qboolean samples)
 {
+	rgf_comp_t0 = SDL_GetTicksNS ();
+	rgf_comp_mid0 = rgf_frame_mid_ns;
+	rgf_comp_seg0 = rgf_frame_seg_ns;
 	if (rgf_numdraws || (rgf_clear_mask && touches_target))
 		RGF_EndSegment ();
 	else if (!RGF_CopyOnly ())
@@ -1888,8 +1961,10 @@ SDL_GPUCommandBuffer *RG_Frame_ComputeBegin (qboolean touches_target, qboolean s
 	 * with a barrier whose second scope is the vertex and fragment stages
 	 * alone, and SDL_BindGPUComputeSamplers adds none: a compute read of
 	 * what this command buffer wrote would race it.  A submit and its fence
-	 * make the writes visible to the next submit; the dispatches that sample
-	 * are rare (the palette LUT at a metric change), so the stall is too. */
+	 * make the writes visible to the next submit.  Since P5f no pass of the
+	 * default frame samples (the Hi-Z reduce and the cull read read-only
+	 * storage textures, rg_compute.c); the palette LUT at a metric change
+	 * and SSAO's five passes still do, and pay this. */
 	if (samples && !RGF_SubmitMidFrame ())
 		return NULL;
 	if (!RGF_EnsureCmd ())
@@ -1901,6 +1976,9 @@ SDL_GPUCommandBuffer *RG_Frame_ComputeBegin (qboolean touches_target, qboolean s
 void RG_Frame_ComputeEnd (qboolean dispatched)
 {
 	rgf_compute_bind = false;
+	/* the segment it ended and the wait it paid are counted apart */
+	rgf_frame_comp_ns += SDL_GetTicksNS () - rgf_comp_t0 - (rgf_frame_mid_ns - rgf_comp_mid0) -
+			     (rgf_frame_seg_ns - rgf_comp_seg0);
 	if (dispatched)
 	{
 		rgf_frame_cpasses++;
@@ -1942,6 +2020,7 @@ qboolean RG_Frame_Readback (const SDL_GPUTextureRegion *tex, const SDL_GPUBuffer
 		return false;
 	}
 	copy = SDL_BeginGPUCopyPass (rgf_cmd);
+	RG_Frame_CountCopyPass ();
 	if (tex)
 	{
 		SDL_GPUTextureTransferInfo	d;
@@ -2025,8 +2104,16 @@ void RG_Frame_End (qboolean show)
 		rgf_tgt_ok = ok;
 		rgf_tgt_dirty = true;
 	}
-	if (show && !SDL_WaitAndAcquireGPUSwapchainTexture (rgf_cmd, rg_win, &swap, &sw, &sh))
-		Con_DPrintf ("SDL_GPU: no swapchain texture (%s)\n", SDL_GetError ());
+	if (show && rg_headless)
+		swap = RGF_HeadlessTarget (&sw, &sh);
+	else if (show)
+	{
+		Uint64	t0 = SDL_GetTicksNS ();
+
+		if (!SDL_WaitAndAcquireGPUSwapchainTexture (rgf_cmd, rg_win, &swap, &sw, &sh))
+			Con_DPrintf ("SDL_GPU: no swapchain texture (%s)\n", SDL_GetError ());
+		rgf_frame_acquire_ns = SDL_GetTicksNS () - t0;
+	}
 	/* Not shown, or NULL with success (a minimised or occluded window): the
 	 * frame is still submitted, there is just nowhere to show it. */
 	if (swap)
@@ -2062,6 +2149,130 @@ void RG_Frame_End (qboolean show)
 	rgf_last_areads = rgf_frame_areads;
 	rgf_last_cdropped = RG_ComputeDropped () - rgf_cdropped_base;
 	rgf_frames++;
+	RGF_NoteTimes ();
+}
+
+/* -gpuheadless: a texture of the window's size the present blits into, so
+ * the frame costs what a shown one does, minus the swapchain. */
+static SDL_GPUTexture *RGF_HeadlessTarget (Uint32 *w, Uint32 *h)
+{
+	int	ww = 0, wh = 0;
+
+	SDL_GetWindowSizeInPixels (rg_win, &ww, &wh);
+	if (ww <= 0 || wh <= 0)
+		ww = rgf_tw, wh = rgf_th;
+	if (!rgf_headless_tex || rgf_headless_w != (Uint32) ww || rgf_headless_h != (Uint32) wh)
+	{
+		if (rgf_headless_tex)
+			SDL_ReleaseGPUTexture (rg_dev, rgf_headless_tex);
+		rgf_headless_tex = RGF_MakeTarget (SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM,
+						   SDL_GPU_TEXTUREUSAGE_COLOR_TARGET, ww, wh);
+		rgf_headless_w = rgf_headless_tex ? (Uint32) ww : 0;
+		rgf_headless_h = rgf_headless_tex ? (Uint32) wh : 0;
+	}
+	*w = rgf_headless_w;
+	*h = rgf_headless_h;
+	return rgf_headless_tex;
+}
+
+/* The frame just submitted, into gpu_frametimes' ring. */
+static void RGF_NoteTimes (void)
+{
+	Uint64		now = SDL_GetTicksNS ();
+	rgftime_t	*t = &rgf_times[rgf_numtimes++ % RGF_TIMES];
+	Uint64		spent = now - rgf_t_begin;
+	Uint64		waits = rgf_frame_fence_ns + rgf_frame_mid_ns + rgf_frame_acquire_ns;
+
+	t->interval_ns = rgf_t_lastbegin ? rgf_t_begin - rgf_t_lastbegin : 0;
+	t->cpu_ns = spent > waits ? spent - waits : 0;
+	t->fence_ns = rgf_frame_fence_ns;
+	t->mid_ns = rgf_frame_mid_ns;
+	t->acquire_ns = rgf_frame_acquire_ns;
+	t->seg_ns = rgf_frame_seg_ns;
+	t->comp_ns = rgf_frame_comp_ns;
+	t->submit_ns = rgf_frame_submit_ns;
+	t->render = rgf_last_segments;
+	t->compute = rgf_last_cpasses;
+	t->copy = rgf_frame_copies;
+	t->waits = rgf_last_waits;
+	t->draws = rgf_last_draws;
+	t->indirect = rgf_last_indirect;
+	t->stream = rgf_last_stream;
+	rgf_t_lastbegin = rgf_t_begin;
+}
+
+unsigned long RG_DrawsDropped (void)
+{
+	return rgf_dropped;
+}
+
+void RG_Frame_CountCopyPass (void)
+{
+	rgf_frame_copies++;
+}
+
+/* gpu_frametimes [frames]: the last frames' times and passes (#340 P5f).
+ * Dev-only, a command and no cvar.  cpu is the recording, with every wait
+ * taken out; fence the wait at the frame's start for the frame before last
+ * (the GPU setting the pace), mid the submits inside the frame that wait
+ * (RGF_SubmitMidFrame), acquire the swapchain's. */
+void RG_FrameTimes_f (void)
+{
+	int		n = Cmd_Argc () > 1 ? atoi (Cmd_Argv (1)) : RGF_TIMES;
+	int		i, have = (int) q_min (rgf_numtimes, (unsigned long) RGF_TIMES);
+	double		sum[8] = { 0 }, mx[8] = { 0 }, cnt[7] = { 0 };
+	const char	*name[8] = { "frame", "cpu", "fence", "mid", "acquire", "segments", "compute", "submit" };
+
+	if (!rg_dev)
+	{
+		Con_Printf ("gpu_frametimes: the SDL_GPU backend is not running (-gpu)\n");
+		return;
+	}
+	n = CLAMP (1, n, have);
+	if (have < 1)
+	{
+		Con_Printf ("gpu_frametimes: no frames yet\n");
+		return;
+	}
+	for (i = 0; i < n; i++)
+	{
+		const rgftime_t	*t = &rgf_times[(rgf_numtimes - 1 - i) % RGF_TIMES];
+		double		v[8];
+		int		k;
+
+		v[0] = t->interval_ns / 1e6;
+		v[1] = t->cpu_ns / 1e6;
+		v[2] = t->fence_ns / 1e6;
+		v[3] = t->mid_ns / 1e6;
+		v[4] = t->acquire_ns / 1e6;
+		v[5] = t->seg_ns / 1e6;
+		v[6] = t->comp_ns / 1e6;
+		v[7] = t->submit_ns / 1e6;
+		for (k = 0; k < 8; k++)
+		{
+			sum[k] += v[k];
+			mx[k] = q_max (mx[k], v[k]);
+		}
+		cnt[0] += t->render;
+		cnt[1] += t->compute;
+		cnt[2] += t->copy;
+		cnt[3] += t->waits;
+		cnt[4] += t->draws;
+		cnt[5] += t->indirect;
+		cnt[6] += t->stream;
+	}
+	Con_Printf ("gpu_frametimes: last %d frames, ms mean/max:", n);
+	for (i = 0; i < 5; i++)
+		Con_Printf (" %s %.3f/%.3f", name[i], sum[i] / n, mx[i]);
+	Con_Printf ("\n");
+	Con_Printf ("gpu_frametimes: of cpu, ms mean/max:");
+	for (i = 5; i < 8; i++)
+		Con_Printf (" %s %.3f/%.3f", name[i], sum[i] / n, mx[i]);
+	Con_Printf ("\n");
+	Con_Printf ("gpu_frametimes: per frame: %.1f render passes, %.1f compute passes, %.1f copy "
+		    "passes, %.1f fence waits, %.0f draws, %.1f indirect draws, %.0f stream bytes%s\n",
+		    cnt[0] / n, cnt[1] / n, cnt[2] / n, cnt[3] / n, cnt[4] / n, cnt[5] / n, cnt[6] / n,
+		    rg_headless ? " (headless)" : "");
 }
 
 /* ------------------------------------------------------------------ */
@@ -2172,7 +2383,13 @@ void RG_Frame_Shutdown (void)
 	if (!rg_dev)
 		return;
 	SDL_WaitForGPUIdle (rg_dev);
+	RGF_FencesWait (0);
 	RGF_ReadbacksShutdown ();
+	if (rgf_headless_tex)
+		SDL_ReleaseGPUTexture (rg_dev, rgf_headless_tex);
+	rgf_headless_tex = NULL;
+	rgf_headless_w = rgf_headless_h = 0;
+	rgf_t_lastbegin = 0;
 	while (rgf_numretired_bufs)
 		SDL_ReleaseGPUBuffer (rg_dev, rgf_retired_bufs[--rgf_numretired_bufs]);
 	if (rgf_vbuf)	SDL_ReleaseGPUBuffer (rg_dev, rgf_vbuf);

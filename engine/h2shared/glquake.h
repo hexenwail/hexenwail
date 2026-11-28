@@ -722,6 +722,7 @@ qboolean R_WorldCullAvailable (void);
 void R_WorldCull_Init (void);	/* worldcull_verify (#340 P5c) */
 void R_BuildHiZ (void);
 void R_FreeHiZ (void);
+void R_HiZ_Shutdown (void);	/* vid_restart: after R_FreeWorldCull (#340 P5f) */
 void R_BuildHiZForNextFrame (void);
 void R_HiZ_ForgetView (void);
 void GL_SetupLightmapFmt (void);

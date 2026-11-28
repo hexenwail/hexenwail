@@ -29,9 +29,11 @@ engine/h2shared/gl_progid_refl.h:
     samplers for set 0);
   * cull_mark: IndirectBuffer 3 / DstIndexBuffer 5 / DedupBuffer 6 /
     StatsBuffer 7 at slots 0-3, SurfaceBuffer 0 / MarkSurfBuffer 1 /
-    VisBuffer 2 / SrcIndexBuffer 4 at slots 0-3, u_hiz_pyramid at sampler
-    binding 0 with no unit until R_ProgramSamplerUnit names one, CullParams
-    at uniform slot 0; cull_clear: IndirectBuffer 3 at slot 0;
+    VisBuffer 2 / SrcIndexBuffer 4 at slots 0-3, u_hiz_pyramid a read-only
+    storage texture at slot 0 with no unit until R_ProgramSamplerUnit names
+    one (its Vulkan arm reads with texelFetch and no sampler, #340 P5f), no
+    sampler, CullParams at uniform slot 0; hiz_reduce: u_src the same, at
+    slot 0; cull_clear: IndirectBuffer 3 at slot 0;
   * RG_CheckStage REFUSES cull_mark with DstIndexBuffer's binding moved
     onto IndirectBuffer's (two blocks at one slot), with a read-write block
     renamed to one no table maps (point -1 is RG_Buf_Storage's "nothing
@@ -151,6 +153,8 @@ int main (int argc, char **argv)
 			st.samplers[i].unit);
 	for (i = 0; i < st.num_ssbos; i++)
 		printf ("RO %s slot=%d point=%d\n", st.ssbos[i].name, st.ssbos[i].slot, st.ssbos[i].point);
+	for (i = 0; i < st.num_rotex; i++)
+		printf ("ROTEX %s binding=%d unit=%d\n", st.rotex[i].name, st.rotex[i].binding, st.rotex[i].unit);
 	for (i = 0; i < st.num_images; i++)
 		printf ("IMAGE %s binding=%d\n", st.images[i].name, st.images[i].binding);
 	for (i = 0; i < st.num_rwssbos; i++)
@@ -252,7 +256,9 @@ def run(exe, blob, spv, row):
 
 
 def parse(out):
-    got = {"ok": "CHECK-OK" in out, "RO": {}, "RW": {}, "SAMPLER": {}, "UBO": {}, "IMAGE": {}}
+    got = {"ok": "CHECK-OK" in out, "RO": {}, "RW": {}, "SAMPLER": {}, "UBO": {}, "IMAGE": {}, "ROTEX": {}}
+    for m in re.finditer(r"^ROTEX (\w+) binding=(\d+) unit=(\d+)$", out, re.M):
+        got["ROTEX"][m.group(1)] = (int(m.group(2)), int(m.group(3)))
     for m in re.finditer(r"^(RO|RW) (\w+) slot=(\d+) point=(-?\d+)$", out, re.M):
         got[m.group(1)][m.group(2)] = (int(m.group(3)), int(m.group(4)))
     for m in re.finditer(r"^SAMPLER (\w+) binding=(\d+) unit=(\d+)$", out, re.M):
@@ -388,11 +394,18 @@ def main(argv=None):
             if cm["RO"] != want_ro:
                 fail("cull_mark: read-only blocks (slot, GL point) %s, gl_worldcull.c binds %s"
                      % (cm["RO"], want_ro))
-            if cm["SAMPLER"] != {"u_hiz_pyramid": (0, 0xFF)}:
-                fail("cull_mark: samplers %s, want u_hiz_pyramid at binding 0 with no unit until "
-                     "R_ProgramSamplerUnit names one" % cm["SAMPLER"])
+            if cm["SAMPLER"] or cm["ROTEX"] != {"u_hiz_pyramid": (0, 0xFF)}:
+                fail("cull_mark: samplers %s, read-only storage textures %s, want u_hiz_pyramid a read-only "
+                     "storage texture at slot 0 with no unit until R_ProgramSamplerUnit names one, and no "
+                     "sampler (#340 P5f)" % (cm["SAMPLER"], cm["ROTEX"]))
             if cm["UBO"] != {"CullParams": 0}:
                 fail("cull_mark: uniform blocks %s, want CullParams at slot 0" % cm["UBO"])
+        hr = results.get("hiz_reduce")
+        if hr and hr["ok"] and (hr["SAMPLER"] or hr["ROTEX"] != {"u_src": (0, 0xFF)} or
+                                hr["IMAGE"] != {"u_dst": 0}):
+            fail("hiz_reduce: samplers %s, read-only storage textures %s, images %s, want u_src a read-only "
+                 "storage texture at slot 0 and u_dst storage image 0 (#340 P5f)"
+                 % (hr["SAMPLER"], hr["ROTEX"], hr["IMAGE"]))
         cc = results.get("cull_clear")
         if cc and cc["ok"] and (cc["RW"] != {"IndirectBuffer": (0, 3)} or cc["RO"] or cc["SAMPLER"]):
             fail("cull_clear: RW %s RO %s samplers %s, want IndirectBuffer alone at slot 0, GL point 3"

@@ -85,7 +85,9 @@ else:
 
 # --- 4. the shader maps dnear, between the corners and the compare ---------
 loop_end = mark.find("ry1 = max(ry1, ndc.y);")
-compare = mark.find("textureLod(u_hiz_pyramid")
+# the first of the four samples (HIZ_AT since #340 P5f: GL's textureLod, a
+# texelFetch in the Vulkan arm), not the macro defined above main
+compare = mark.find("HIZ_AT(cuv")
 m = re.search(r"dnear\s*=\s*([^;]*u_cdepthrange[^;]*);", mark)
 if not m:
     errors.append("cull_mark_comp never maps dnear through u_cdepthrange")
