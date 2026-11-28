@@ -19,7 +19,15 @@ pins each piece of it in the source:
   - muzzle.hc is compiled into every image of its tree ahead of the weapons,
     and the two trees' copies are identical;
   - the engine registers the cvar archived with default "0", and the Game
-    menu row is what sets it.
+    menu row is what sets it;
+  - the necromancer's spellbook spells (magic missile, bone shards) leave
+    from the casting hand.  spllbook.mdl holds the book left of centre and
+    the hand right of it; the first cut took the model's forward-most vertex,
+    which is the book's corner, so the shots came off the book (4 to 9 units
+    LEFT and 15 down).  In every fire frame the hand is right of centre and
+    never lower than 14 units below the camera, and the book is never higher
+    than that (tools/muzzle_sheet.py draws it), so a book-spell muzzle must
+    have right > 0 and up > -12.
 
 Run with a directory argument to check another tree, e.g. an export of the
 pre-fix master, which fails.
@@ -182,6 +190,7 @@ def check_tree(tree, SITES, ALLOWED, srcs):
                         re.search(r"(?<![\w.])%s\.velocity=" % re.escape(m), tail):
                     errors.append(f"{f}:{fn}: {m}'s origin or velocity is set after MuzzleFix")
 
+    seen_book = set()
     pinned = {(f, fn) for f, fn, *_ in SITES}
     spawn = re.compile(r"self\.origin\s*\+\s*self\.proj_ofs")
     seen = set()
@@ -195,8 +204,27 @@ def check_tree(tree, SITES, ALLOWED, srcs):
             if (f, fn) not in pinned and (f, fn) not in ALLOWED:
                 errors.append(f"{f}:{fn} positions something at self.origin + self.proj_ofs; "
                               "pin it in SITES (and call MuzzleFix) or say why in ALLOWED")
+    # spllbook.mdl: muzzle must be on the casting hand (right of centre, up
+    # -10..+1), not the book (up -14 and below).  No forward bound: the
+    # fingertips reach 29 units forward in fire6.
+    for f in ("magicmis.hc", "boner.hc"):
+        if f not in src:
+            continue
+        for line in strip_comments(src[f]).splitlines():
+            m = re.search(r"MuzzleFix\s*\(\s*\w+\s*,\s*self\s*,\s*'(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)'", line)
+            if not m:
+                continue
+            _fwd, right, up = map(float, m.groups())
+            if right <= 0 or up <= -12:
+                errors.append(f"{f}: spellbook muzzle '{' '.join(m.groups())}' is on the book, "
+                              "not the casting hand (want right > 0, up > -12)")
+            seen_book.add(f)
     for f, fn in sorted(set(ALLOWED) - seen):
         errors.append(f"ALLOWED names {f}:{fn}, which no longer uses self.origin + self.proj_ofs")
+
+    for f in ("magicmis.hc", "boner.hc"):
+        if f in src and f not in seen_book:
+            errors.append(f"{f}: no spellbook MuzzleFix call with a literal muzzle to check")
 
     for name in srcs:
         p = TREE / name
