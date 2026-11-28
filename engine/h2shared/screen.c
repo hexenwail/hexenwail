@@ -146,7 +146,8 @@ cvar_t		scr_menubgalpha = {"scr_menubgalpha", "1", CVAR_ARCHIVE};
 
 #if !defined(H2W)
 static qboolean	scr_drawloading;
-static double	scr_disabled_time;	/* Sys_DoubleTime of the last progress */
+/* realtime of the last progress, for the 25 s load timeout: see gl_screen.c */
+static double	scr_disabled_time;
 int		total_loading_size, current_loading_size, loading_stage;
 #endif	/* H2W */
 qboolean	scr_disabled_for_loading;
@@ -970,7 +971,7 @@ void SCR_BeginLoadingPlaque (void)
 	scr_drawloading = false;
 
 	scr_disabled_for_loading = true;
-	scr_disabled_time = Sys_DoubleTime ();
+	scr_disabled_time = realtime;
 }
 
 /*
@@ -1760,7 +1761,7 @@ void SCR_UpdateScreen (void)
 #else
 	if (scr_disabled_for_loading)
 	{
-		if (!scr_loadingintick && Sys_DoubleTime () - scr_disabled_time > 25) {
+		if (!scr_loadingintick && realtime - scr_disabled_time > 25) {
 		/* this can happen with clients connected to servers
 		 * older than uHexen2-1.5.6 who don't issue an error
 		 * upon changelevel failures. Or, it could happen if

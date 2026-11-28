@@ -14,7 +14,14 @@ This pins the parts that are easy to lose in a later edit:
   carry it, through the one shared include;
 - a live frame never renders the world: it can land mid-precache;
 - every stage names itself on the plaque, and the blocking loops tick it;
-- HexenWorld no longer drops the plaque on a retry or a download.
+- HexenWorld no longer drops the plaque on a retry or a download;
+- a local game (single player, a listen server's own client, a demo) shows
+  no network stage: no "Connecting to local...", "Waiting for server info"
+  or "Signon n/4";
+- the 25 s "load timeout" counts realtime, not wall clock, so a slow local
+  map load is not mistaken for a server that stopped answering;
+- a connect retry updates the text but is not progress, so it never
+  restarts that timeout.
 
 A source pin: the live check is the headless connect run in the PR.
 """
@@ -76,10 +83,17 @@ if "Sys_DoubleTime" not in due:
 tick = body(inc, "void SCR_LoadingTick (void)", inc_path)
 if "scr_disabled_for_loading" not in tick:
     errors.append(f"{inc_path}: SCR_LoadingTick must do nothing unless the plaque is up")
+settext = body(inc, "static void SCR_LoadingSetText (qboolean progress, const char *fmt, va_list argptr)", inc_path)
+if not re.search(r"if \(progress\)\s*scr_disabled_time = realtime;", settext):
+    errors.append(f"{inc_path}: progress, and only progress, must restart the load "
+                  "timeout, on realtime (see the timeout check below)")
 status = body(inc, "void SCR_SetLoadingStatus (const char *fmt, ...)", inc_path)
-if "scr_disabled_time = Sys_DoubleTime ()" not in status:
-    errors.append(f"{inc_path}: a status change must restart the load timeout, on "
-                  "Sys_DoubleTime: realtime jumps by a whole blocking load at once")
+if "SCR_LoadingSetText (true, fmt, argptr);" not in status:
+    errors.append(f"{inc_path}: SCR_SetLoadingStatus is progress: it must restart the timeout")
+retry = body(inc, "void SCR_SetLoadingRetry (const char *fmt, ...)", inc_path)
+if "SCR_LoadingSetText (false, fmt, argptr);" not in retry:
+    errors.append(f"{inc_path}: SCR_SetLoadingRetry must update the text without "
+                  "restarting the timeout")
 if "scr_loadingintick" not in tick:
     errors.append(f"{inc_path}: SCR_LoadingTick must mark itself, so the timeout "
                   "never drops the plaque mid-precache")
@@ -111,9 +125,19 @@ for path in ("engine/h2shared/gl_screen.c", "engine/h2shared/screen.c"):
     end = body(src, "void SCR_EndLoadingPlaque (void)", path)
     if "SCR_LoadingEnd ();" not in end:
         errors.append(f"{path}: SCR_EndLoadingPlaque must clear the status line")
-    if not re.search(r"if \(!scr_loadingintick && Sys_DoubleTime \(\) - scr_disabled_time > 25\)", upd):
-        errors.append(f"{path}: the load timeout must run on Sys_DoubleTime and never "
-                      "inside SCR_LoadingTick")
+    # The timeout is for a server that stopped answering, so it counts only
+    # time the host loop ran free: realtime, which Sys_MainFrame advances by
+    # 0.1 s for any frame over 0.5 s.  On Sys_DoubleTime the engine's own
+    # blocking load counted, and a slow single-player `map` fired "load
+    # timeout." at Host_Connect_f's plaque, right after SV_SpawnServer.
+    if not re.search(r"if \(!scr_loadingintick && realtime - scr_disabled_time > 25\)", upd):
+        errors.append(f"{path}: the load timeout must run on realtime, not wall clock, "
+                      "and never inside SCR_LoadingTick")
+    if "scr_disabled_time = realtime;" not in begin:
+        errors.append(f"{path}: SCR_BeginLoadingPlaque must start the load timeout on realtime")
+    if re.search(r"Sys_DoubleTime \(\)\s*-\s*scr_disabled_time|scr_disabled_time\s*=\s*Sys_DoubleTime", src):
+        errors.append(f"{path}: the load timeout must not use Sys_DoubleTime: a long local "
+                      "load is not a stalled server")
     dl = body(src, "void SCR_DrawLoading (void)", path)
     if "SCR_DrawLoadingStatus (" not in dl:
         errors.append(f"{path}: SCR_DrawLoading must draw the status line")
@@ -133,7 +157,6 @@ if "scr_drawloading = was_drawloading;" not in upd:
 # (file, function signature, status text, needs a tick after it)
 STAGES = [
     ("engine/hexen2/host_cmd.c", "static void Host_Connect_f (void)", "Connecting to %s...", False),
-    ("engine/hexen2/net_dgrm.c", "static qsocket_t *_Datagram_Connect (const char *host)", "(retry %d)", False),
     ("engine/hexen2/cl_main.c", "void CL_EstablishConnection (const char *host)", "Waiting for server info", False),
     ("engine/hexen2/cl_main.c", "void CL_SignonReply (void)", "Signon 1/4", False),
     ("engine/hexen2/cl_main.c", "void CL_SignonReply (void)", "Signon 2/4", False),
@@ -142,7 +165,6 @@ STAGES = [
     ("engine/hexen2/cl_parse.c", "static void CL_ParseServerInfo (void)", "Precaching models %d/%d", True),
     ("engine/hexen2/cl_parse.c", "static void CL_ParseServerInfo (void)", "Precaching sounds %d/%d", True),
     ("engine/hexen2/cl_parse.c", "static void CL_ParseServerInfo (void)", "Building world", True),
-    ("engine/hexen2/cl_hw.c", "static void HWCL_SendConnectPacket (void)", "(retry %d)", False),
     ("engine/hexen2/cl_hw.c", "static void HWCL_ConnectionlessPacket (void)", "Waiting for server info", False),
     ("engine/hexen2/cl_hw.c", "static void HWCL_ParseServerData (void)", "Receiving sound list", False),
     ("engine/hexen2/cl_hw.c", "static qboolean HWCL_LoadModels (void)", "Loading map %s", True),
@@ -157,11 +179,31 @@ STAGES = [
 ]
 for path, sig, text, ticks in STAGES:
     fn = body(read(path), sig, path)
-    m = re.search(r'SCR_SetLoadingStatus \("[^"]*' + re.escape(text), fn)
+    m = re.search(r'SCR_SetLoadingStatus \((?:local \? "[^"]*" : )?"[^"]*' + re.escape(text), fn)
     if not m:
         errors.append(f"{path}: {sig.split('(')[0].split()[-1].lstrip('*')} must set the status '{text}'")
     elif ticks and "SCR_LoadingTick ();" not in fn[m.end():m.end() + 300]:
         errors.append(f"{path}: '{text}' is a blocking step and must be followed by SCR_LoadingTick ()")
+
+# A connect retry is the client resending, not the server answering.  It
+# names itself on the plaque but must not restart the 25 s load timeout:
+# HexenWorld resent every 5 s and each "(retry N)" reset the clock, so a
+# dead server's plaque could only end through the separate 15 s handshake
+# timeout, and the load timeout itself never fired.
+RETRY_SITES = [
+    ("engine/hexen2/net_dgrm.c", "static qsocket_t *_Datagram_Connect (const char *host)"),
+    ("engine/hexen2/cl_hw.c", "static void HWCL_SendConnectPacket (void)"),
+]
+for path, sig in RETRY_SITES:
+    fn = body(read(path), sig, path)
+    if not re.search(r'SCR_SetLoadingRetry \("[^"]*\(retry %d\)', fn):
+        errors.append(f"{path}: {sig.split('(')[0].split()[-1].lstrip('*')} must show its "
+                      "retries through SCR_SetLoadingRetry")
+for path in ("engine/hexen2/net_dgrm.c", "engine/hexen2/cl_hw.c", "engine/hexen2/cl_main.c",
+             "engine/hexen2/host_cmd.c", "engine/hexen2/cl_parse.c", "engine/hexen2/cl_hw_download.inc"):
+    if re.search(r'SCR_SetLoadingStatus \([^;]*retry', strip_comments(read(path)), re.I):
+        errors.append(f"{path}: a retry must go through SCR_SetLoadingRetry, not "
+                      "SCR_SetLoadingStatus (it is not progress)")
 
 # The datagram handshake blocks for up to 7.5 s; its wait loop ticks.
 dg = body(read("engine/hexen2/net_dgrm.c"),
@@ -200,14 +242,61 @@ chk = strip_comments(body(read("engine/hexen2/cl_hw_download.inc"),
 if "SCR_EndLoadingPlaque" in chk:
     errors.append("cl_hw_download.inc: a download must not drop the plaque")
 
+# --- single player says nothing about networks -----------------------------
+# A local game (single player, a listen server's own client, a demo) signs on
+# over loopback through the same stages, so without these guards a slow local
+# map load flashed "Connecting to local...", "Waiting for server info" and
+# "Signon n/4" on the plaque.  Remote Hexen II joins keep every stage above.
+NETWORDS = re.compile(r"connect|retry|signon|server|waiting|timeout", re.I)
+conn_src = strip_comments(conn)
+if not re.search(r'if \(q_strcasecmp \(name, "local"\)\)\s*SCR_SetLoadingStatus \("Connecting to %s\.\.\.", name\);',
+                 conn_src):
+    errors.append('host_cmd.c: Host_Connect_f must not say "Connecting to local..." '
+                  "for a local game")
+est = strip_comments(body(read("engine/hexen2/cl_main.c"),
+                          "void CL_EstablishConnection (const char *host)", "cl_main.c"))
+if not re.search(r'if \(!NET_IsLocalConnection \(cls\.netcon\)\)\s*SCR_SetLoadingStatus \("Waiting for server info"\);', est):
+    errors.append('cl_main.c: CL_EstablishConnection must not say "Waiting for server info" '
+                  "over loopback")
+elif est.find("cls.netcon = NET_Connect (host);") > est.find("NET_IsLocalConnection (cls.netcon)"):
+    errors.append("cl_main.c: CL_EstablishConnection must test NET_IsLocalConnection after "
+                  "NET_Connect, or cls.netcon is still NULL and every game reads as remote")
+sig = strip_comments(body(read("engine/hexen2/cl_main.c"), "void CL_SignonReply (void)", "cl_main.c"))
+if not re.search(r"qboolean\s+local = cls\.demoplayback \|\| NET_IsLocalConnection \(cls\.netcon\);", sig):
+    errors.append("cl_main.c: CL_SignonReply must know a local (loopback or demo) signon")
+calls = re.findall(r"SCR_SetLoadingStatus \(([^;]*)\);", sig)
+if len(calls) != 3:
+    errors.append(f"cl_main.c: CL_SignonReply should set 3 stages, found {len(calls)}")
+for c in calls:
+    m = re.fullmatch(r'local \? "([^"]*)" : "(Signon [1-3]/4[^"]*)"', c.strip())
+    if not m:
+        errors.append(f"cl_main.c: CL_SignonReply stage {c.strip()} must pick a neutral "
+                      "local text before its \"Signon n/4\" one")
+    elif NETWORDS.search(m.group(1)):
+        errors.append(f"cl_main.c: local signon text \"{m.group(1)}\" names the network")
+# What a local `map` shows before the client takes over.
+hmap = strip_comments(body(read("engine/hexen2/host_cmd.c"), "static void Host_Map_f (void)", "host_cmd.c"))
+if 'SCR_SetLoadingStatus ("Loading map %s", Cmd_Argv(1));' not in hmap:
+    errors.append('host_cmd.c: Host_Map_f must say "Loading map %s" (the local game\'s stage '
+                  "while the server spawns)")
+
+# The realtime timeout above depends on this clamp: a frame that took more
+# than half a second (a blocking load) adds only 0.1 s to realtime.
+mf = strip_comments(body(read("engine/h2shared/sys_sdl.c"), "static void Sys_MainFrame (void)", "sys_sdl.c"))
+if not re.search(r"if \(time > 0\.5\)\s*time = 0\.1;", mf):
+    errors.append("sys_sdl.c: Sys_MainFrame must fold a frame over 0.5 s into 0.1 s, "
+                  "or the realtime load timeout counts blocking loads again")
+
 # Every caller sees a prototype.
 hdr = read("engine/h2shared/screen.h")
 for proto in ("void SCR_SetLoadingStatus (const char *fmt, ...) FUNC_PRINTF(1,2);",
+              "void SCR_SetLoadingRetry (const char *fmt, ...) FUNC_PRINTF(1,2);",
               "void SCR_LoadingTick (void);"):
     if proto not in hdr:
         errors.append(f"screen.h: missing '{proto}'")
 
 if errors:
     sys.exit("FAIL:\n  " + "\n  ".join(errors))
-print(f"PASS the loading plaque stays live and every join stage names itself "
-      f"({len(STAGES)} stages, #571)")
+print(f"PASS the loading plaque stays live, every join stage names itself "
+      f"({len(STAGES)} stages, #571), and a local game shows no network stage "
+      f"or wall-clock load timeout")

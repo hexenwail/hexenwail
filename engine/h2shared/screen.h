@@ -38,6 +38,7 @@ void SCR_DrawLoading (void);	// for the Loading plaque
 // The stage line under the plaque.  SCR_LoadingTick redraws it from inside
 // a blocking loop; both are no-ops when the plaque is down.  GitHub #571.
 void SCR_SetLoadingStatus (const char *fmt, ...) FUNC_PRINTF(1,2);
+void SCR_SetLoadingRetry (const char *fmt, ...) FUNC_PRINTF(1,2);	// text only, not progress
 void SCR_LoadingTick (void);
 
 void SCR_SetPlaqueMessage (const char *msg);	// set pointer to current plaque message
