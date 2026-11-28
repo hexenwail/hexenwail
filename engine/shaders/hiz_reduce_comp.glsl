@@ -6,11 +6,27 @@
  * No #version line: gl_worldcull.c passes HIZ_COMPUTE_VERSION as a separate
  * glShaderSource chunk, and EmbedShaders.cmake prepends its own for the
  * offline SPIR-V compile.  Moved from gl_worldcull.c's hiz_reduce_src (#450).
+ *
+ * -gpu reads the level below as a read-only storage texture, a texture2D
+ * with no sampler (#340 P5f).  SDL 3.4.12 orders a sampled read only for the
+ * vertex and fragment stages, so a sampling dispatch had to submit and wait
+ * for the level the one before it wrote: 11 waits a frame for the pyramid.
+ * A read-only storage texture is put in its layout by a barrier whose second
+ * scope is the compute stage, so the level is ordered with none.  texelFetch
+ * reads the same texel either way; GL's program is the sampler arm, as it
+ * was.
  */
+#ifdef VULKAN
+#extension GL_EXT_samplerless_texture_functions : require
+#endif
 #include "cull.inc"
 
 layout(local_size_x = 8, local_size_y = 8) in;
+#ifdef VULKAN
+TEXBIND(0) uniform texture2D u_src;
+#else
 TEXBIND(0) uniform sampler2D u_src;
+#endif
 IMGBIND(0, r32f) uniform writeonly image2D u_dst;
 void main() {
     ivec2 p = ivec2(gl_GlobalInvocationID.xy);

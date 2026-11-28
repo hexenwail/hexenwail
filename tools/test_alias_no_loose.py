@@ -96,7 +96,8 @@ FLOOR = {"u_alias_caustics", "u_alias_dlight", "u_alias_lightdir", "u_alias_mate
 # u_color and the sky programs' u_time / u_skyfog / u_wind / u_wind3 /
 # u_skyrot until their plumbing went too (#450); keep it empty.
 NON_ALIAS_DEAD = set()
-OPAQUE = re.compile(r"^(?:[iu]?sampler\w*|[iu]?image\w*)$")
+# texture2D: a Vulkan arm's read-only storage texture, opaque too (#340 P5f)
+OPAQUE = re.compile(r"^(?:[iu]?sampler\w*|[iu]?image\w*|[iu]?texture\w*)$")
 ALIAS_PROG = r"gl_shader_(?:alias|skeletal|world)\w*"
 QUALS = r"(?:(?:lowp|mediump|highp|readonly|writeonly|coherent|volatile|restrict)\s+)*"
 

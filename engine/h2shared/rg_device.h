@@ -230,6 +230,9 @@ void	RG_ReadbackDiscard (unsigned int ticket);
  * missing leaves its outputs as the last one wrote them, which a caller
  * that draws from them has to know (#340 P5c). */
 unsigned long RG_ComputeDropped (void);
+/* Draws dropped since boot (rg_frame.c), the same for a draw: the Hi-Z
+ * copy's under -gpu (#340 P5f). */
+unsigned long RG_DrawsDropped (void);
 qboolean RG_ReadTexture (GLenum target, GLuint texture, GLint level, GLenum format,
 			 GLenum type, void *pixels);
 /* Whether a texture of `internalformat` on `target` can be sampled and bound

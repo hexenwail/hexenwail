@@ -29,8 +29,11 @@
 #      counts 0 routed calls and no null-table call but glGetError (a load's
 #      two, LM_BuildStyleLayers' error drain, on master too); renderer_status
 #      there shows no dispatch dropped and at least MIN_DISPATCH (default 9:
-#      the boot's, 05-07's, 10-12's and the round trip's two) since boot, every one with
-#      its image cycled (the LUT is overwritten whole).
+#      the boot's, 05-07's, 10-12's and the round trip's two) since boot, and
+#      images cycled (the LUT is overwritten whole).  Not every dispatch since
+#      boot is the LUT's -- the light cluster, the world cull and Hi-Z run under
+#      -gpu since P5b-P5d -- so the cycled count is held to MIN_DISPATCH, not
+#      to the dispatch count, and the line's scratch count is skipped (#340 P5f).
 #
 # THE NUMBERS, measured 2026-11-26 on the P5a-2 binary, 800x600, llvmpipe GL
 # (Mesa 26.2.0) against lavapipe -gpu, three runs a side, and two Tesla P4
@@ -155,10 +158,10 @@ c=$(printf '%s\n' "$m" | grep -a "calls into .* GL entry points")
 ok=1; case "$r" in "gpu_unrouted: 0 routed calls"*) [ -z "$x" ] && [ -n "$c" ] && ok=0 ;; esac
 report "map change routed calls" $ok "${r:-no REPORT-MAP}; ${c:-no null-table count}; other than glGetError: ${x:-none}"
 s=$(sed -n '/^REPORT-MAP-BEGIN/,/^REPORT-MAP-END/p' "$GPU/qconsole.log" | grep -a "SDL_GPU compute since boot:")
-n=$(printf '%s' "$s" | sed -n 's/.*since boot: \([0-9]*\) dispatches (\([0-9]*\) images cycled), \([0-9]*\) dropped.*/\1 \2 \3/p')
+n=$(printf '%s' "$s" | sed -n 's/.*since boot: \([0-9]*\) dispatches (\([0-9]*\) images cycled[^)]*), \([0-9]*\) dropped.*/\1 \2 \3/p')
 set -- $n
-ok=1; [ $# = 3 ] && [ "$1" -ge "$MIN_DISPATCH" ] && [ "$2" = "$1" ] && [ "$3" = 0 ] && ok=0
-report "dispatches" $ok "${s:-no compute line in REPORT-MAP}; min $MIN_DISPATCH, all cycled, 0 dropped"
+ok=1; [ $# = 3 ] && [ "$1" -ge "$MIN_DISPATCH" ] && [ "$2" -ge "$MIN_DISPATCH" ] && [ "$3" = 0 ] && ok=0
+report "dispatches" $ok "${s:-no compute line in REPORT-MAP}; min $MIN_DISPATCH dispatches and cycled images, 0 dropped"
 
 [ $rc -eq 0 ] && echo "lut-diff: all checks pass" || echo "lut-diff: DIFFERENCES FOUND"
 exit $rc

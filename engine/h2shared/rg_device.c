@@ -24,11 +24,23 @@
 #include "quakedef.h"
 #include "cfgfile.h"
 #include "rg_internal.h"
+#include <SDL3/SDL_vulkan.h>	/* RG_VulkanMax2D's instance (#340 P5f) */
+#include <stddef.h>		/* offsetof */
 
 qboolean	rg_active = false;
 
 SDL_GPUDevice		*rg_dev;
 SDL_Window		*rg_win;
+/* -gpuheadless (#340 P5f, test-only): the device renders without claiming
+ * the window, and the present blits into a stand-in texture instead of a
+ * swapchain.  For timing a GPU with no display to present to (the build
+ * box's Tesla P4: SDL's offscreen video driver has no Vulkan surface there),
+ * as GL's offscreen EGL path does.  Not in any menu, not a cvar. */
+qboolean		rg_headless;
+/* The Vulkan device's maxImageDimension2D, 0 until asked or when the asking
+ * failed (RG_VulkanMax2D, #340 P5f). */
+static int		rg_vk_max2d;
+static int		RG_VulkanMax2D (const char *name);
 static SDL_GPUPresentMode	rg_present_mode = SDL_GPU_PRESENTMODE_VSYNC;
 static float		rg_clear[3] = { 0.25f, 0.5f, 0.75f };
 
@@ -169,6 +181,7 @@ void RG_Init (void)
 	RG_ClearColor_f (&gpu_clearcolor);
 
 	Cmd_AddCommand ("gpu_unrouted", RG_Unrouted_f);
+	Cmd_AddCommand ("gpu_frametimes", RG_FrameTimes_f);
 }
 
 static const char *RG_PresentModeName (SDL_GPUPresentMode mode)
@@ -230,7 +243,8 @@ qboolean RG_CreateDevice (SDL_Window *window, int vsync)
 				software ? "" : "; software drivers are refused unless gpu_allow_software is 1");
 		return false;
 	}
-	if (!SDL_ClaimWindowForGPUDevice (rg_dev, window))
+	rg_headless = COM_CheckParm ("-gpuheadless") != 0;
+	if (!rg_headless && !SDL_ClaimWindowForGPUDevice (rg_dev, window))
 	{
 		Con_SafePrintf ("SDL_GPU: cannot claim the window (%s)\n", SDL_GetError ());
 		SDL_DestroyGPUDevice (rg_dev);
@@ -247,20 +261,23 @@ qboolean RG_CreateDevice (SDL_Window *window, int vsync)
 	{
 		Con_SafePrintf ("SDL_GPU: no SPIR-V shaders (the embedded table has no s2d.vert, and "
 				"no -gpushaders <dir> holding s2d.vert.vk.spv was given)\n");
-		SDL_ReleaseWindowFromGPUDevice (rg_dev, window);
+		if (!rg_headless)
+			SDL_ReleaseWindowFromGPUDevice (rg_dev, window);
 		SDL_DestroyGPUDevice (rg_dev);
 		rg_dev = NULL;
 		rg_win = NULL;
+		rg_headless = false;
 		return false;
 	}
 	RG_SetVSync (vsync);
 
 	name = SDL_GetStringProperty (SDL_GetGPUDeviceProperties (rg_dev),
 				      SDL_PROP_GPU_DEVICE_NAME_STRING, "unknown device");
-	Con_SafePrintf ("SDL_GPU: %s on %s, present %s, debug %s%s, shaders from %s\n",
-			RG_DriverName (), name, RG_PresentModeName (rg_present_mode),
+	rg_vk_max2d = !strcmp (RG_DriverName (), "vulkan") ? RG_VulkanMax2D (name) : 0;
+	Con_SafePrintf ("SDL_GPU: %s on %s, present %s, debug %s%s, shaders from %s, textures to %d\n",
+			RG_DriverName (), name, rg_headless ? "headless" : RG_PresentModeName (rg_present_mode),
 			debug ? "on" : "off", software ? ", software drivers allowed" : "",
-			RG_ShaderSource ());
+			RG_ShaderSource (), RG_MaxTextureSize ());
 	rg_active = true;
 	RG_Res_Init ();
 	RG_Buf_Init ();
@@ -274,7 +291,7 @@ qboolean RG_CreateDevice (SDL_Window *window, int vsync)
  * as SDL_GL_SetSwapInterval does on the GL path. */
 void RG_SetVSync (int vsync)
 {
-	if (!rg_dev || !rg_win)
+	if (!rg_dev || !rg_win || rg_headless)
 		return;
 	rg_present_mode = RG_PickPresentMode (vsync);
 	if (!SDL_SetGPUSwapchainParameters (rg_dev, rg_win,
@@ -299,11 +316,13 @@ void RG_Shutdown (void)
 	RG_Shader_Shutdown ();
 	RG_Res_Shutdown ();
 	RG_Buf_Shutdown ();
-	if (rg_win)
+	if (rg_win && !rg_headless)
 		SDL_ReleaseWindowFromGPUDevice (rg_dev, rg_win);
 	SDL_DestroyGPUDevice (rg_dev);
 	rg_dev = NULL;
 	rg_win = NULL;
+	rg_headless = false;
+	rg_vk_max2d = 0;
 	rg_active = false;
 }
 
@@ -325,19 +344,107 @@ const char *RG_DriverName (void)
  *   vulkan       4096  maxImageDimension2D's required minimum (Vulkan spec,
  *                      "Required Limits"); SDL checks no limit when it picks
  *                      a physical device, so a 4096 part is accepted
- * An unknown driver gets the smallest of them.  The cost is on Vulkan, the
- * only driver RG_CreateDevice can get while it offers SPIR-V alone (the
- * 16384 arms wait for DXIL / MSL, P7): a desktop part that reports 16384
- * still gets textures over 4096 scaled down, and a map past 120 lightmap
- * pages (15 rows of 8 at 260 px, gl_rsurf.c) loses the atlas, where GL on
- * the same box keeps both.  Eleven big retail maps checked use 14 at most. */
+ * An unknown driver gets the smallest of them.  Vulkan, the only driver
+ * RG_CreateDevice can get while it offers SPIR-V alone, asks the device
+ * itself (rg_vk_max2d, #340 P5f): at the floor a map past 120 lightmap pages
+ * (15 rows of 8 at 260 px, gl_rsurf.c) lost the atlas and with it GPU
+ * lightstyles and the GPU world cull, where GL on the same box kept them --
+ * Storm over Thyrion's courtyard has 189. */
 int RG_MaxTextureSize (void)
 {
 	const char	*d = RG_DriverName ();
 
 	if (!strcmp (d, "direct3d12") || !strcmp (d, "metal"))
 		return 16384;
+	if (!strcmp (d, "vulkan") && rg_vk_max2d >= 4096)
+		return rg_vk_max2d < 16384 ? rg_vk_max2d : 16384;
 	return 4096;
+}
+
+/* The head of VkPhysicalDeviceProperties, through limits.maxImageDimension2D
+ * and on to the first VkDeviceSize, which gives the limits their 8-byte
+ * alignment.  Vulkan's ABI has been fixed since 1.0 (vulkan_core.h); spelled
+ * here because the build has SDL_vulkan.h's handles and no Vulkan headers. */
+typedef struct {
+	Uint32	api_version, driver_version, vendor_id, device_id, device_type;
+	char	device_name[256];	/* VK_MAX_PHYSICAL_DEVICE_NAME_SIZE */
+	Uint8	cache_uuid[16];		/* VK_UUID_SIZE */
+	struct {
+		Uint32	max1d, max2d, max3d, maxcube, maxlayers, maxtexelbuf, maxubo, maxssbo,
+			maxpush, maxalloc, maxsamplers;
+		Uint64	buffer_image_granularity;
+	} limits;
+} rgvkprops_t;
+COMPILE_TIME_ASSERT (rgvkprops_name, offsetof (rgvkprops_t, device_name) == 20);
+COMPILE_TIME_ASSERT (rgvkprops_max2d, offsetof (rgvkprops_t, limits.max2d) == 300);
+
+typedef struct {
+	int		stype;		/* VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO, 1 */
+	const void	*next;
+	Uint32		flags;
+	const void	*app;
+	Uint32		nlayers;
+	const char	*const *layers;
+	Uint32		nexts;
+	const char	*const *exts;
+} rgvkinstinfo_t;
+
+#if defined(_WIN32) && !defined(_WIN64)
+#define RG_VKAPI	__stdcall
+#else
+#define RG_VKAPI
+#endif
+typedef void *(RG_VKAPI *rgvk_gipa_t) (void *instance, const char *name);
+typedef int (RG_VKAPI *rgvk_create_t) (const rgvkinstinfo_t *info, const void *alloc, void **instance);
+typedef void (RG_VKAPI *rgvk_destroy_t) (void *instance, const void *alloc);
+typedef int (RG_VKAPI *rgvk_enum_t) (void *instance, Uint32 *count, void **devices);
+typedef void (RG_VKAPI *rgvk_props_t) (void *device, void *props);
+
+/* maxImageDimension2D of the physical device SDL_GPU named `name`, from an
+ * instance of our own (no layers, no extensions, no surface); 0 when any
+ * step fails or no device has that name.  SDL's Vulkan backend names the
+ * device with its deviceName, so the two match. */
+static int RG_VulkanMax2D (const char *name)
+{
+	rgvk_gipa_t	gipa;
+	rgvk_create_t	create;
+	rgvk_destroy_t	destroy;
+	rgvk_enum_t	enumerate;
+	rgvk_props_t	props;
+	rgvkinstinfo_t	info;
+	void		*inst = NULL, *devs[16];
+	Uint32		i, n = 16;
+	int		found = 0;
+	union { rgvkprops_t p; Uint8 bytes[2048]; } pr;	/* the whole struct is 824 bytes */
+
+	if (!name || !SDL_Vulkan_LoadLibrary (NULL))
+		return 0;
+	gipa = (rgvk_gipa_t) SDL_Vulkan_GetVkGetInstanceProcAddr ();
+	create = gipa ? (rgvk_create_t) gipa (NULL, "vkCreateInstance") : NULL;
+	SDL_zero (info);
+	info.stype = 1;
+	if (create && create (&info, NULL, &inst) == 0 && inst)
+	{
+		destroy = (rgvk_destroy_t) gipa (inst, "vkDestroyInstance");
+		enumerate = (rgvk_enum_t) gipa (inst, "vkEnumeratePhysicalDevices");
+		props = (rgvk_props_t) gipa (inst, "vkGetPhysicalDeviceProperties");
+		/* VK_INCOMPLETE (5) still fills the first 16 */
+		if (enumerate && props && enumerate (inst, &n, devs) >= 0)
+		{
+			for (i = 0; i < n && i < 16 && !found; i++)
+			{
+				memset (&pr, 0, sizeof(pr));
+				props (devs[i], &pr);
+				pr.p.device_name[sizeof(pr.p.device_name) - 1] = 0;
+				if (!strcmp (pr.p.device_name, name))
+					found = (int) pr.p.limits.max2d;
+			}
+		}
+		if (destroy)
+			destroy (inst, NULL);
+	}
+	SDL_Vulkan_UnloadLibrary ();
+	return found;
 }
 
 void RG_EndFrame (qboolean show)
@@ -356,13 +463,13 @@ void RG_Status (void)
 				       SDL_PROP_GPU_DEVICE_NAME_STRING, "unknown device") : "none";
 
 	Con_Printf ("[RENDERER] SDL_GPU driver=%s device=%s present=%s swapchain=%s\n",
-		    RG_DriverName (), name, RG_PresentModeName (rg_present_mode),
-		    rg_dev ? "SDR" : "none");
+		    RG_DriverName (), name, rg_headless ? "headless" : RG_PresentModeName (rg_present_mode),
+		    rg_dev && !rg_headless ? "SDR" : "none");
 	Con_Printf ("[RENDERER] SDL_GPU P6a: 2D, world, brush and alias models, the stencilled sky, liquids, "
 		    "particles, sprites, glows, fog and mirrors drawn, post-process (gamma, contrast, r_scale, FXAA, "
 		    "r_softemu on the GPU palette LUT, the underwater warp, motion blur, bloom, HDR) on render "
 		    "targets, compute passes and readbacks, clustered dynamic lights and GPU lightstyles, "
-		    "the GPU world cull and its indirect draws, the Hi-Z pyramid, SSAO, "
+		    "the GPU world cull and its indirect draws, the Hi-Z pyramid with no fence wait, SSAO, "
 		    "soft particles, the world, "
 		    "brush models, sky pre-pass and alias meshes from their vertex buffers, instanced and "
 		    "skeletal alias models from their storage buffers; GL runs against "

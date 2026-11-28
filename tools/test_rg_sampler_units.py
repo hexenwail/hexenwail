@@ -101,7 +101,8 @@ RAW_OK = {}
 # composite at P5a-1, the OIT resolve and its MSAA twin at P6a.
 RAW_PROGRAMS = set()
 # Files whose functions set sampler units through the seam.
-SETUP_FILES = (SHADER_C, SHADOW_C, "engine/h2shared/gl_postprocess.c", "engine/h2shared/gl_ssao.c")
+SETUP_FILES = (SHADER_C, SHADOW_C, "engine/h2shared/gl_postprocess.c", "engine/h2shared/gl_ssao.c",
+               "engine/h2shared/gl_worldcull.c")
 
 # The unit each sampler is bound at, as the C spells it.
 CANON = {"u_texture%d" % n: str(n) for n in range(5)}
@@ -134,12 +135,18 @@ CANON.update({
     # the OIT resolve and its MSAA twin (OIT_EndTranslucency, #340 P6a): the
     # accumulation target at 0, revealage or MBOIT's b0 at 1
     "TexAccum": "0", "TexReveal": "1",
+    # the world cull's Hi-Z (gl_worldcull.c, #340 P5c, P5d): the pyramid at
+    # unit 1 in cull_mark (TEXBIND2(1, 0)), the level below at 0 in the
+    # reduce (TEXBIND(0))
+    "u_hiz_pyramid": "1", "u_src": "0",
 })
 # (set-up function, program, sampler) -> its unit, where one sampler name is
 # bound at different units by different programs: ssao_mip reads the scene's
 # depth at TEXBIND2(8), the composite at SSAO_TEX_UNIT + 1 (#340 P5e).
 CANON_AT = {
     ("SS_BindSamplers", "ss_mip_prog", "u_scene_depth"): "SSAO_TEX_UNIT",
+    # -gpu's Hi-Z copy draw reads the scene depth at 0 (#340 P5f)
+    ("WC_HiZCopyDrawEnsure", "hiz_copy_draw_prog", "u_scene_depth"): "0",
     ("SS_BindSamplers", "ss_filter_prog", "source"): "SSAO_TEX_UNIT",
     ("SS_BindSamplers", "ss_filter_prog", "edges"): "SSAO_TEX_UNIT + 1",
 }
@@ -147,7 +154,11 @@ CANON_AT = {
 # since #532: an unset sampler reads unit 0 on GL and is counted under -gpu
 # ("sampler with no GL unit mapping") on every draw, so give it its unit
 # rather than listing it here.
-UNSET_OK = {}
+UNSET_OK = {
+    # GL-only since #340 P5f: TEXBIND(0) gives GL the unit, and -gpu never
+    # builds hiz_copy -- it copies with hiz_copy_draw, whose unit is set
+    ("hiz_copy", "u_scene_depth"),
+}
 
 errors = []
 
@@ -386,9 +397,11 @@ def header_defines(header):
 
 
 def refl_rows(root):
+    """blob -> the textures it reads: samplers plus read-only storage
+    textures, which a Vulkan arm may declare where GL samples (#340 P5f)."""
     t = (root / "engine/h2shared/gl_progid_refl.h").read_text()
-    return {m.group(1): int(m.group(2)) for m in
-            re.finditer(r'\{ "([\w.]+)", RPROG_REFL_\w+, (\d+),', t)}
+    return {m.group(1): int(m.group(2)) + int(m.group(3)) for m in
+            re.finditer(r'\{ "([\w.]+)", RPROG_REFL_\w+, (\d+), (\d+),', t)}
 
 
 # --------------------------------------------------------------------------
@@ -1111,7 +1124,7 @@ def check_backend(root, verbose):
     if "RG_Res_StageUploads (map + stream + quad + ssbo, stream + quad + ssbo);" not in cps0:
         fail("RGF_CopyPass must stage the textures after the stand-in's zeros, not over them")
     es = lift(rgf, r"^static void RGF_EndSegment \(", "RGF_EndSegment")
-    if not re.search(r"if \(!RGF_CopyPass \(\)\)[^;]*;[^\n]*\n\s*RG_Res_ClearPlaceholders \(rgf_cmd\);", es):
+    if not re.search(r"if \(!RGF_CopyPass \(\)\)(?:[^;]*;[^\n]*\n|\s*\{[^}]*\}\n)\s*RG_Res_ClearPlaceholders \(rgf_cmd\);", es):
         fail("RGF_EndSegment must clear the depth placeholders after the copy pass, before the scene's pass")
 
     # draw time: the unmapped note, and every storage-buffer slot bound

@@ -19,7 +19,9 @@ submit's fence has signalled, and checks:
   * reads of one submit share one fence, released exactly once, never queried
     after its release, whichever read is collected first or whether the frame
     start (RGF_ReadbacksAge) sees it first;
-  * the frame's submit takes a fence only with a read aboard;
+  * every submit takes a fence, owned by the frame fences (RGF_FencesWait,
+    lifted too, #340 P5f), which release it once a frame start has waited
+    for it: a frame starts once the frame before last is done;
   * a mid-frame submit's wait completes what it carried; a failed submit or
     wait fails it (collect answers -1 and frees the slot);
   * a completed read nobody collects is freed RG_READBACK_ABANDON frames
@@ -28,7 +30,8 @@ submit's fence has signalled, and checks:
     reads are collected; a request outside a frame is refused;
   * a discarded read keeps its slot while in flight and frees it once done;
     one already done is freed at once;
-  * shutdown releases a pending fence once and every transfer buffer.
+  * shutdown (the frame fences drained, then the ring) releases every fence
+    once and every transfer buffer.
 
 Stock python3 and a C compiler; lint.yml.
 """
@@ -47,7 +50,7 @@ PRELUDE = r"""
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
-typedef uint8_t Uint8; typedef uint32_t Uint32; typedef int qboolean;
+typedef uint8_t Uint8; typedef uint32_t Uint32; typedef uint64_t Uint64; typedef int qboolean;
 #define true 1
 #define false 0
 #define SDL_zero(x) memset (&(x), 0, sizeof(x))
@@ -77,6 +80,15 @@ static qboolean RGF_EnsureCmd (void) { if (!rgf_cmd) { rgf_cmd = &cmds[ncmds++];
 static void RGF_EndSegment (void) { ends++; RGF_EnsureCmd (); rgf_numdraws = 0; }
 static qboolean RGF_CopyOnly (void) { copies++; return RGF_EnsureCmd (); }
 static void RGF_EndOfFrame (void) { }
+static Uint64 SDL_GetTicksNS (void) { return 0; }
+static Uint64 rgf_frame_mid_ns, rgf_frame_submit_ns;
+/* the frame fences (#340 P5f), as rg_frame.c declares them */
+#define RGF_FENCES 8
+typedef struct SDL_GPUFence SDL_GPUFence;
+static SDL_GPUFence *rgf_fences[RGF_FENCES];
+static int rgf_numfences;
+static void RGF_FencesWait (int keep);
+static void RG_Frame_CountCopyPass (void) { }
 
 /* downloads run when the fence of their command buffer signals */
 typedef struct { SDL_GPUCommandBuffer *cmd; SDL_GPUBufferRegion src; SDL_GPUTransferBuffer *tb; Uint8 bytes[256]; int done; SDL_GPUFence *fence; } dl_t;
@@ -125,7 +137,8 @@ static qboolean SDL_WaitForGPUFences (SDL_GPUDevice *d, qboolean all, SDL_GPUFen
 {
 	(void) d; (void) all; (void) n;
 	if (fail_wait) return false;
-	Signal (f[0]);
+	for (Uint32 i = 0; i < n; i++)
+		Signal (f[i]);
 	return true;
 }
 static qboolean SDL_QueryGPUFence (SDL_GPUDevice *d, SDL_GPUFence *f)
@@ -154,7 +167,7 @@ static void SDL_UnmapGPUTransferBuffer (SDL_GPUDevice *d, SDL_GPUTransferBuffer 
 
 HARNESS = r"""
 static SDL_GPUBuffer buf;
-static void FrameStart (void) { rgf_frames++; rgf_active = true; RGF_ReadbacksAge (); }
+static void FrameStart (void) { rgf_frames++; rgf_active = true; RGF_FencesWait (1); RGF_ReadbacksAge (); }
 static void FrameEnd (void) { RGF_EnsureCmd (); RGF_Submit (); rgf_active = false; }
 static unsigned int Ask (Uint8 v)
 {
@@ -195,15 +208,16 @@ int main (void)
 	CHECK (Get (t1, &v) == 0, "submitted, unsignalled: not collectable");
 	Signal (&fences[0]);
 	CHECK (Get (t1, &v) == 1 && v == 0x11, "signalled: collected, the bytes it was recorded against");
-	CHECK (Released () == 1 && Overreleased () == 0, "its fence released once");
+	CHECK (Released () == 0, "its fence kept: the frame fences own it, not the read (#340 P5f)");
 	CHECK (Get (t1, &v) == -1, "a collected ticket is spent");
 	CHECK (mapped_early == 0, "nothing mapped before its download ran");
 	CHECK (Free () == RG_READBACKS, "the slot is free again");
 
-	/* 2. a frame with no read submits without a fence */
+	/* 2. a frame with no read takes a fence too (#340 P5f) */
 	f0 = nfences;
 	FrameStart (); FrameEnd ();
-	CHECK (nfences == f0, "no read aboard: no fence");
+	CHECK (nfences == f0 + 1, "every submit takes a fence");
+	f0 = nfences;
 
 	/* 3. two reads of one submit share its fence; the frame start sees it first */
 	FrameStart ();
@@ -215,7 +229,8 @@ int main (void)
 	CHECK (nfences == f0 + 1, "one fence for the submit");
 	Signal (&fences[f0]);
 	FrameStart ();
-	CHECK (Released () == 2 && Overreleased () == 0, "the frame start found it signalled and released it once");
+	CHECK (Released () == 2 && Overreleased () == 0, "the frame start released the frame before last's, once, "
+	       "and found this one signalled without releasing it");
 	CHECK (Get (t2, &v) == 1 && v == 0x22 && Get (t1, &v) == 1 && v == 0x21, "both reads, each its own bytes, any order");
 	CHECK (Queried () == 0, "no fence queried after its release");
 	FrameEnd ();
@@ -261,11 +276,17 @@ int main (void)
 	t2 = Ask (0x72);
 	FrameEnd ();
 	pending = &fences[nfences - 1];
+	CHECK (Get (t2, &v) == 0, "a read whose fence has not signalled is not collectable");
+	FrameStart ();
+	CHECK (Get (t2, &v) == 0 && !pending->released, "the next frame start keeps its fence: the newest");
+	FrameEnd ();
+	FrameStart ();
+	CHECK (pending->signalled && pending->released == 1, "two frames on, the frame start waited for it and released it");
+	CHECK (Get (t2, &v) == 1 && v == 0x72, "and its read is done");
+	FrameEnd ();
 	for (i = 0; i < RG_READBACK_ABANDON + 2; i++) { FrameStart (); FrameEnd (); }
 	CHECK (Get (t1, &v) == -1, "a done read nobody collected is freed after RG_READBACK_ABANDON frames");
-	CHECK (Get (t2, &v) == 0, "a read whose fence has not signalled keeps its slot however long");
-	Signal (pending);
-	CHECK (Get (t2, &v) == 1 && v == 0x72 && Free () == RG_READBACKS, "and is collected once it signals");
+	CHECK (Free () == RG_READBACKS, "every slot free again");
 
 	/* 8. the ring full */
 	FrameStart ();
@@ -300,9 +321,10 @@ int main (void)
 	FrameStart ();
 	t1 = Ask (0xA1);
 	FrameEnd ();
-	f0 = Released ();
+	RGF_FencesWait (0);
 	RGF_ReadbacksShutdown ();
-	CHECK (Released () == f0 + 1 && Overreleased () == 0, "shutdown releases the pending fence once");
+	CHECK (rgf_numfences == 0 && Released () == nfences && Overreleased () == 0,
+	       "shutdown releases every fence once");
 	for (i = 0; i < ntbs; i++)
 		CHECK (tbs[i].released == 1, "every transfer buffer released once");
 	CHECK (Queried () == 0, "no fence queried after its release");
@@ -322,8 +344,8 @@ def main():
         sys.exit("FAIL: cannot find the readback ring in rg_frame.c")
     ring = code[a:b]
     subs = []
-    for name in ("RGF_Submit", "RGF_SubmitMidFrame"):
-        m = re.search(r"^static (?:void|qboolean) %s \(void\)\n\{.*?^\}\n" % name, code, re.M | re.S)
+    for name in ("RGF_FencesWait", "RGF_Submit", "RGF_SubmitMidFrame"):
+        m = re.search(r"^static (?:void|qboolean) %s \((?:void|int keep)\)\n\{.*?^\}\n" % name, code, re.M | re.S)
         if not m:
             sys.exit("FAIL: cannot lift %s" % name)
         subs.append(m.group(0))
@@ -340,8 +362,8 @@ def main():
         if r.returncode:
             sys.exit("FAIL: the readback ring breaks a promise:\n" + (r.stdout + r.stderr)[-3000:])
     print("PASS rg_frame.c's readback ring: reads mapped only after their fence, one fence per submit "
-          "released once and never queried after, mid-frame waits and failures, abandoned and in-flight "
-          "slots, the ring full, discards and shutdown (#340 P5c)")
+          "released once by the frame fences and never queried after, two frames in flight, mid-frame waits "
+          "and failures, abandoned and in-flight slots, the ring full, discards and shutdown (#340 P5c, P5f)")
 
 
 if __name__ == "__main__":

@@ -193,7 +193,7 @@ else
 	set -- $lit
 	ok=1; [ $# = 2 ] && [ "$1" -gt 0 ] && [ "$2" = 0 ] && [ "$cl" = "1 passes, 0 readbacks, 0 fence waits" ] && ok=0
 	report "LightBuffer bound, no wait" $ok "grid frame: ${1:-?} storage slots bound, ${2:-?} to the stand-in; compute ${cl:-none}"
-	d=$(sed -n '/^REPORT-ALL-BEGIN/,/^REPORT-ALL-END/p' "$L" | sed -n 's/.*since boot: \([0-9]*\) dispatches ([0-9]* images cycled), \([0-9]*\) dropped.*/\1 \2/p')
+	d=$(sed -n '/^REPORT-ALL-BEGIN/,/^REPORT-ALL-END/p' "$L" | sed -n 's/.*since boot: \([0-9]*\) dispatches ([0-9]* images cycled[^)]*), \([0-9]*\) dropped.*/\1 \2/p')
 	set -- $d
 	ok=1; [ $# = 2 ] && [ "$1" -gt 0 ] && [ "$2" = 0 ] && ok=0
 	report "dispatches" $ok "${1:-?} since boot, ${2:-?} dropped"

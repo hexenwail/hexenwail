@@ -150,6 +150,7 @@ static SDL_GPUTexture	*rgt_ph[RG_SC_COUNT][RG_TT_COUNT];
 static SDL_GPUTexture	*rgt_ph_shadow;		/* RG_TT_CUBE_ARRAY */
 static SDL_GPUSampler	*rgt_ph_sampler, *rgt_ph_shadow_sampler;
 static qboolean		rgt_ph_uploaded, rgt_ph_shadow_cleared;
+static qboolean		rgt_ph_storage_read;	/* the 2D float one has COMPUTE_STORAGE_READ */
 
 /* Samplers are few and shared; keyed by their whole create-info. */
 #define RG_MAX_SAMPLERS	64
@@ -1067,6 +1068,21 @@ static void RGT_CreatePlaceholders (void)
 		for (i = 0; i < RG_TT_COUNT; i++)
 			rgt_ph[c][i] = RGT_MakePlaceholder (i, fmts[c], SDL_GPU_TEXTUREUSAGE_SAMPLER);
 	}
+	/* The 2D float one also stands in for a read-only storage texture
+	 * (#340 P5f: the world cull's Hi-Z pyramid while Hi-Z is off). */
+	{
+		SDL_GPUTexture	*ro = RGT_MakePlaceholder (RG_TT_2D, fmts[RG_SC_FLOAT],
+							   SDL_GPU_TEXTUREUSAGE_SAMPLER |
+							   SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_READ);
+
+		if (ro)
+		{
+			if (rgt_ph[RG_SC_FLOAT][RG_TT_2D])
+				SDL_ReleaseGPUTexture (rg_dev, rgt_ph[RG_SC_FLOAT][RG_TT_2D]);
+			rgt_ph[RG_SC_FLOAT][RG_TT_2D] = ro;
+		}
+		rgt_ph_storage_read = (ro != NULL);
+	}
 	/* The 2D white one is what every 2D draw falls back on. */
 	if (!rgt_ph[RG_SC_FLOAT][RG_TT_2D])
 		Sys_Error ("SDL_GPU: cannot create the placeholder texture (%s)", SDL_GetError ());
@@ -1231,28 +1247,11 @@ qboolean RG_StorageFormatOk (GLenum internalformat, GLenum target, GLenum access
 					     SDL_GPU_TEXTUREUSAGE_SAMPLER | RGT_StorageUsage (access));
 }
 
-void RG_BindImageTexture (GLuint unit, GLuint texture, GLint level, GLboolean layered,
-			  GLint layer, GLenum access, GLenum format)
+/* Storage usage `want` for t from now on: a storage image's bind, and a read-
+ * only storage texture's (#340 P5f). */
+static void RGT_AddStorage (rgtex_t *t, SDL_GPUTextureUsageFlags want)
 {
-	rgimageunit_t	*u;
-	rgtex_t		*t;
-
-	if (unit >= RG_MAX_STAGE_IMAGES)
-	{
-		RG_NoteUnhandled ("image unit above 7 (dropped)");
-		return;
-	}
-	u = &rgt_images[unit];
-	u->tex = texture;
-	u->level = level;
-	u->layered = layered;
-	u->layer = layer;
-	u->access = access;
-	u->format = format;
-	t = RGT_Get (texture);
-	if (!t)
-		return;
-	t->storage |= RGT_StorageUsage (access);
+	t->storage |= want;
 	if (!t->defined)
 		return;
 	t->usage |= t->storage;
@@ -1272,6 +1271,29 @@ void RG_BindImageTexture (GLuint unit, GLuint texture, GLint level, GLboolean la
 		rgt_recreated++;
 		rgt_storage_recreated++;
 	}
+}
+
+void RG_BindImageTexture (GLuint unit, GLuint texture, GLint level, GLboolean layered,
+			  GLint layer, GLenum access, GLenum format)
+{
+	rgimageunit_t	*u;
+	rgtex_t		*t;
+
+	if (unit >= RG_MAX_STAGE_IMAGES)
+	{
+		RG_NoteUnhandled ("image unit above 7 (dropped)");
+		return;
+	}
+	u = &rgt_images[unit];
+	u->tex = texture;
+	u->level = level;
+	u->layered = layered;
+	u->layer = layer;
+	u->access = access;
+	u->format = format;
+	t = RGT_Get (texture);
+	if (t)
+		RGT_AddStorage (t, RGT_StorageUsage (access));
 }
 
 qboolean RG_Res_ImageIsTarget (int unit)
@@ -1382,6 +1404,50 @@ qboolean RG_Res_ImageSampled (int unit, GLuint sunit, rg_textype_t type)
 
 	return name && sunit < RT_MAX_TEXTURE_UNITS && (int) type < RG_TT_COUNT &&
 	       rgt_units[sunit][type] == name;
+}
+
+qboolean RG_Res_StorageRead (GLuint unit, rg_textype_t type, rg_sampclass_t sclass, SDL_GPUTexture **out)
+{
+	rgtex_t	*t = (unit < RT_MAX_TEXTURE_UNITS && (int) type < RG_TT_COUNT)
+		     ? RGT_Get (rgt_units[unit][type]) : NULL;
+
+	*out = NULL;
+	if (t && t->defined && t->type == type)
+	{
+		if (RGT_IsDepth (t->fmt) || RGT_FormatClass (t->fmt) != sclass)
+			RG_NoteUnhandled ("read-only storage texture of a format it cannot read "
+					  "(dispatch dropped)");
+		else
+		{
+			/* The usage is declared by whoever makes the texture, with
+			 * R_BindImageTexture GL_READ_ONLY before its first use: made
+			 * here it would be a new object, whatever the texture held
+			 * lost, so a texture without it reads the placeholder. */
+			if (t->usage & SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_READ)
+				RGT_Realize (t);
+			if (t->tex && (t->tex_usage & SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_READ))
+			{
+				t->read_segment = RG_Frame_Segment ();
+				t->read_ever = true;
+				*out = t->tex;
+				return true;
+			}
+			RG_NoteUnhandled ("read-only storage texture made without storage-read usage "
+					  "(dispatch dropped)");
+			return false;
+		}
+		/* A placeholder in its place would be read as if it were the texture:
+		 * the Hi-Z reduce would build a pyramid from it, the cull fetch levels
+		 * it does not have.  The dispatch is dropped, and its caller sees it. */
+		return false;
+	}
+	if (type == RG_TT_2D && sclass == RG_SC_FLOAT && rgt_ph_storage_read)
+	{
+		*out = rgt_ph[RG_SC_FLOAT][RG_TT_2D];
+		return true;
+	}
+	RG_NoteUnhandled ("read-only storage texture kind with no placeholder (dispatch dropped)");
+	return false;
 }
 
 static SDL_GPUTexture *RGT_Scratch (SDL_GPUTextureType type, SDL_GPUTextureFormat fmt,

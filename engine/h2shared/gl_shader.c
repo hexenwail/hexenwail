@@ -576,6 +576,11 @@ static const rprog_def_t rprog_defs[RPROG_COUNT] = {
 		{ TIER_CORE, hiz_copy_comp, "hiz_copy.comp" } } },
 	[RPROG_HIZ_REDUCE] = { "hiz_reduce", RPROG_LINK_COMPUTE, {
 		{ TIER_CORE, hiz_reduce_comp, "hiz_reduce.comp" } } },
+	/* -gpu only (#340 P5f): the scene depth into the pyramid's mip 0 as a
+	 * draw, so the reduce after it needs no wait; GL copies with hiz_copy */
+	[RPROG_HIZ_COPY_DRAW] = { "hiz_copy_draw", RPROG_LINK_ATTRIBS, {
+		{ TIER_CORE, ssao_composite_vert, "ssao_composite.vert" },
+		{ TIER_CORE, hiz_copy_frag, "hiz_copy.frag" } } },
 	/* gl_lightcluster.c: LC_Init */
 	[RPROG_LIGHTCLUSTER] = { "lightcluster", RPROG_LINK_COMPUTE, {
 		{ GLSL_LIGHTCLUSTER_HEADER, lightcluster_comp, "lightcluster.comp" } } },

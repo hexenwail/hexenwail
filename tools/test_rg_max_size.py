@@ -8,8 +8,11 @@ GL entry point is a counting no-op from rg_null.c, whose GL_MAX_TEXTURE_SIZE
 answer is a fixed 16384, so reading it there handed a 4096 Vulkan part
 uploads it cannot create.  SDL 3.4 has no query for the limit, so
 RG_MaxTextureSize (rg_device.c) returns the floor each backend's
-requirements guarantee.  Checked, stock python3 plus a C compiler
-(lint.yml):
+requirements guarantee, and on Vulkan the device's own maxImageDimension2D,
+asked through an instance of the engine's (rg_vk_max2d, #340 P5f: at the
+4096 floor Storm over Thyrion's courtyard lost the lightmap atlas, and with
+it GPU lightstyles and the world cull).  Checked, stock python3 plus a C
+compiler (lint.yml):
 
   * GL_Init dispatches to GL_Init_NullGL under R_GPU () and returns, so
     the GL arm's GL_MAX_TEXTURE_SIZE query never runs under -gpu;
@@ -20,9 +23,11 @@ requirements guarantee.  Checked, stock python3 plus a C compiler
     assignment, an increment, or its address handed out, even read-only:
     the check cannot tell), so no later query can put the null table's
     value back;
-  * RG_MaxTextureSize, lifted and run against each SDL_GPU driver name:
-    direct3d12 and metal 16384, vulkan 4096, anything else 4096, and never
-    above SDL_CreateGPUTexture's own 16384 or below GL_Init's 256 floor.
+  * RG_MaxTextureSize, lifted and run against each SDL_GPU driver name and
+    Vulkan answer: direct3d12 and metal 16384; vulkan the device's limit,
+    4096 when it was not asked or answered below 4096, never above
+    SDL_CreateGPUTexture's own 16384; anything else 4096; never below
+    GL_Init's 256 floor.
 
     test_rg_max_size.py            check, exit 1 on any failure
     test_rg_max_size.py --root D   check the tree at D
@@ -43,13 +48,20 @@ errors = []
 # (SDL_gpu_vulkan.c, SDL_gpu_d3d12.c, SDL_gpu_metal.m), plus RG_DriverName's
 # "none" and "webgpu", standing in for any driver name the function does not
 # know.
-EXPECT = {
-    "direct3d12": 16384,
-    "metal": 16384,
-    "vulkan": 4096,
-    "none": 4096,
-    "webgpu": 4096,
-}
+# (driver, rg_vk_max2d, what RG_MaxTextureSize must answer)
+EXPECT = (
+    ("direct3d12", 0, 16384),
+    ("metal", 0, 16384),
+    ("metal", 8192, 16384),
+    ("vulkan", 0, 4096),		# not asked, or the asking failed
+    ("vulkan", 2048, 4096),		# below the spec's floor: not believed
+    ("vulkan", 4096, 4096),
+    ("vulkan", 8192, 8192),
+    ("vulkan", 16384, 16384),
+    ("vulkan", 32768, 16384),		# SDL's own cap
+    ("none", 32768, 4096),
+    ("webgpu", 32768, 4096),
+)
 SDL_MAX_2D = 16384	# SDL_gpu.c SDL_CreateGPUTexture, MAX_2D_DIMENSION
 GL_FLOOR = 256		# gl_vidsdl.c GL_Init refuses less
 
@@ -175,13 +187,14 @@ def check_limits(root):
     if not re.search(r"\bint\s+RG_MaxTextureSize\s*\(\s*void\s*\)\s*;", hdr):
         fail("rg_device.h does not declare int RG_MaxTextureSize (void)")
     cc = os.environ.get("CC", "cc")
-    src = ["#include <stdio.h>", "#include <string.h>",
+    src = ["#include <stdio.h>", "#include <stdlib.h>", "#include <string.h>",
            "static const char *drv;",
+           "static int rg_vk_max2d;",
            "static const char *RG_DriverName (void) { return drv; }",
            body,
            "int main (int argc, char **argv) {",
-           "  int i; for (i = 1; i < argc; i++) { drv = argv[i];"
-           " printf (\"%s %d\\n\", drv, RG_MaxTextureSize ()); }",
+           "  int i; for (i = 1; i + 1 < argc; i += 2) { drv = argv[i]; rg_vk_max2d = atoi (argv[i + 1]);"
+           " printf (\"%s %d %d\\n\", drv, rg_vk_max2d, RG_MaxTextureSize ()); }",
            "  return 0; }"]
     with tempfile.TemporaryDirectory() as tmp:
         c = Path(tmp) / "maxsize.c"
@@ -192,13 +205,14 @@ def check_limits(root):
         if r.returncode:
             fail("RG_MaxTextureSize does not compile lifted:\n" + r.stderr)
             return
-        out = subprocess.run([str(exe)] + list(EXPECT), capture_output=True, text=True,
+        args = [x for d, m, _ in EXPECT for x in (d, str(m))]
+        out = subprocess.run([str(exe)] + args, capture_output=True, text=True,
                              check=True).stdout.split("\n")
-    got = dict(l.split() for l in out if l.strip())
-    for name, want in EXPECT.items():
-        v = int(got.get(name, -1))
+    got = {(d, int(m)): int(v) for d, m, v in (l.split() for l in out if l.strip())}
+    for name, max2d, want in EXPECT:
+        v = got.get((name, max2d), -1)
         if v != want:
-            fail("RG_MaxTextureSize: driver %r gives %d, want %d" % (name, v, want))
+            fail("RG_MaxTextureSize: driver %r with the device at %d gives %d, want %d" % (name, max2d, v, want))
         if not GL_FLOOR <= v <= SDL_MAX_2D:
             fail("RG_MaxTextureSize: driver %r gives %d, outside %d..%d" % (name, v, GL_FLOOR, SDL_MAX_2D))
 
@@ -217,7 +231,7 @@ def main():
             print("FAIL: " + e)
         sys.exit(1)
     print("test_rg_max_size: OK, -gpu takes gl_max_size from RG_MaxTextureSize "
-          "(%s)" % ", ".join("%s %d" % kv for kv in EXPECT.items()))
+          "(%s)" % ", ".join("%s@%d %d" % e for e in EXPECT))
 
 
 if __name__ == "__main__":

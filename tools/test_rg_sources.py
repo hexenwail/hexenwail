@@ -1745,7 +1745,7 @@ BUFFER_PINS = (
      "a recorded draw, and only a recorded one, marks its buffers read"),
     ("rg_frame.c", "RGF_EndOfFrame", r"\bRG_Buf_EndFrame\s*\(\s*\)\s*;",
      "retired buffers are released after the frame's command buffer is submitted"),
-    ("rg_frame.c", "RGF_Submit", r"\bSDL_SubmitGPUCommandBuffer\s*\(\s*rgf_cmd\s*\).*"
+    ("rg_frame.c", "RGF_Submit", r"\bSDL_SubmitGPUCommandBufferAndAcquireFence\s*\(\s*rgf_cmd\s*\).*"
      r"\brgf_cmd\s*=\s*NULL\s*;\s*RGF_EndOfFrame\s*\(\s*\)\s*;",
      "the end-of-frame work runs after the frame's command buffer is submitted"),
     ("rg_buffer.c", "RG_BufferSubData", r"\bRGB_FlushIfRead\s*\(\s*b\s*\)\s*;\s*RGB_Queue\s*\(\s*b\s*,\s*"
@@ -4104,17 +4104,19 @@ def check_compute(root):
 COMPUTE_DISPATCH_ORDER = (
     "samples|=RG_Res_UnitHolds(st->samplers[i].unit,(rg_textype_t)st->samplers[i].type);",
     "cmd=RG_Frame_ComputeBegin(target,samples);",
-    "if(!RGC_Bind(st,cover,img,rw,smp,ro,sc,&nsc))",
+    "if(!RGC_Bind(st,cover,img,rw,smp,ro,rot,sc,&nsc))",
     "for(i=0;i<nsc;i++){if(!sc[i].preload)continue;copy=SDL_BeginGPUCopyPass(cmd);",
     "SDL_CopyGPUTextureToTexture(copy,&sc[i].home,&sc[i].scratch,sc[i].size[0],sc[i].size[1],sc[i].size[2],false);",
     "pass=SDL_BeginGPUComputePass(cmd,img,(Uint32)st->num_images,rw,(Uint32)st->num_rwssbos);",
     "SDL_BindGPUComputePipeline(pass,prog->cs);",
     "SDL_BindGPUComputeSamplers(pass,0,smp,(Uint32)st->num_samplers);",
+    "if(st->num_rotex)SDL_BindGPUComputeStorageTextures(pass,0,rot,(Uint32)st->num_rotex);",
     "SDL_BindGPUComputeStorageBuffers(pass,0,ro,(Uint32)st->num_ssbos);",
     "SDL_PushGPUComputeUniformData(cmd,u->binding,data,(Uint32)size);",
     "SDL_DispatchGPUCompute(pass,groups_x,groups_y,groups_z);",
     "SDL_EndGPUComputePass(pass);",
-    "if(nsc){copy=SDL_BeginGPUCopyPass(cmd);if(!copy)rgc_dropped++;for(i=0;copy&&i<nsc;i++)",
+    "if(nsc){copy=SDL_BeginGPUCopyPass(cmd);RG_Frame_CountCopyPass();if(!copy)rgc_dropped++;"
+    "for(i=0;copy&&i<nsc;i++)",
     "SDL_CopyGPUTextureToTexture(copy,&sc[i].scratch,&sc[i].home,sc[i].size[0],sc[i].size[1],sc[i].size[2],false);",
     "RG_Frame_ComputeEnd(true);",
 )
@@ -4206,9 +4208,13 @@ def check_compute_backend(root):
             if pin not in s:
                 fail("%s: RG_Res_StorageImage must make `%s` -- %s (#340 P5a-2)" % (rr, pin, why))
     b = body_named(root, rr, "RG_BindImageTexture")
+    if b is None or "if(t)RGT_AddStorage(t,RGT_StorageUsage(access));" not in squash(b):
+        fail("%s: RG_BindImageTexture must give the texture its storage usage through RGT_AddStorage "
+             "(#340 P5a-2, P5f)" % rr)
+    b = body_named(root, rr, "RGT_AddStorage")
     if b is not None:
         s = squash(b)
-        for pin in ("t->storage|=RGT_StorageUsage(access);", "t->usage|=t->storage;",
+        for pin in ("t->storage|=want;", "t->usage|=t->storage;",
                     "if(t->tex&&!RGT_HasStorage(t->tex_usage,t->storage))", "RGT_Retire(t->tex);t->tex=NULL;",
                     "rgt_storage_recreated++;"):
             if pin not in s:
@@ -4342,7 +4348,8 @@ def check_compute_backend(root):
              "that samples: SDL 3.4.12 syncs a texture's return to SAMPLER for the graphics stages only "
              "(#340 P5a-2)" % rf)
     b = body_named(root, rf, "RGF_SubmitMidFrame")
-    if b is not None and not re.search(r"if\s*\(\s*!\s*SDL_WaitForGPUFences\s*\([^;]*\)\s*\)\s*\{[^}]*return\s+false\s*;", b):
+    if b is not None and not re.search(r"\bok\s*=\s*SDL_WaitForGPUFences\s*\([^;]*\)\s*;[^{}]*"
+                                       r"if\s*\(\s*!\s*ok\s*\)\s*\{[^}]*return\s+false\s*;", b):
         fail("%s: RGF_SubmitMidFrame must answer false when the wait fails -- a readback would map "
              "unfinished data (#340 P5a-2)" % rf)
     b = body_named(root, rr, "RGT_HasStorage")
@@ -4544,9 +4551,15 @@ RG_INDIRECT_ORDER = (
 # (function, what it must hold, whitespace dropped, why) in rg_frame.c.
 RG_READBACK_PINS = (
     ("RG_BeginFrame", "RGF_ReadbacksAge();", "each frame's start finds the reads whose fence signalled"),
-    ("RGF_Submit", "if(rgf_cmd&&RGF_ReadbacksRecorded()){SDL_GPUFence*fence="
-     "SDL_SubmitGPUCommandBufferAndAcquireFence(rgf_cmd);",
-     "the frame's submit takes a fence when a download is aboard: nothing else says it landed"),
+    ("RGF_Submit", "if(rgf_cmd){fence=SDL_SubmitGPUCommandBufferAndAcquireFence(rgf_cmd);",
+     "every submit takes a fence: the reads it carried wait on it, and the frames after it (#340 P5f)"),
+    ("RGF_Submit", "if(rgf_numfences==RGF_FENCES)RGF_FencesWait(RGF_FENCES-1);rgf_fences[rgf_numfences++]=fence;",
+     "the frame fences keep it, waiting for the oldest when they are full (#340 P5f)"),
+    ("RGF_FencesWait", "RGF_ReadbackFenceDone(rgf_fences[i],ok?RGR_READY:RGR_FAILED);SDL_ReleaseGPUFence(rg_dev,rgf_fences[i]);",
+     "a fence that signalled completes the reads it carried, a failed wait fails them, then it is released, "
+     "once (#340 P5f)"),
+    ("RG_BeginFrame", "rgf_t_begin=SDL_GetTicksNS();RGF_FencesWait(1);",
+     "a frame starts once the frame before last is done: two in flight, as a swapchain allows (#340 P5f)"),
     ("RGF_Submit", "RGF_ReadbacksSubmitted(fence,false);",
      "the reads it carried wait on that fence (none: they failed)"),
     ("RGF_ReadbacksSubmitted", "if(waited)RGF_ReadbackDone(r,RGR_READY);elseif(!fence)RGF_ReadbackDone(r,RGR_FAILED);"
@@ -4565,9 +4578,7 @@ RG_READBACK_PINS = (
     ("RG_Frame_ReadbackRequest", "r->state=RGR_RECORDED;", "a request is in rgf_cmd until it is submitted"),
     ("RG_ReadbackCollect", "if(r->state==RGR_RECORDED||r->state==RGR_SUBMITTED)return0;",
      "a read in flight is not mapped: its transfer buffer is still being written"),
-    ("RGF_ReadbackFenceDone", "SDL_ReleaseGPUFence(rg_dev,fence);",
-     "one fence carries every read of a submit, and is released once, when it signalled"),
-    ("RG_Frame_Shutdown", "SDL_WaitForGPUIdle(rg_dev);RGF_ReadbacksShutdown();",
+    ("RG_Frame_Shutdown", "SDL_WaitForGPUIdle(rg_dev);RGF_FencesWait(0);RGF_ReadbacksShutdown();",
      "the download buffers are released only after the device is idle"),
     ("RGF_EndSegment", "rgf_frame_indirect+=(rgf_draws[i].indexed==RGD_INDIRECT);",
      "renderer_status counts the indirect draws each frame replays"),
@@ -4728,10 +4739,10 @@ def check_world_cull(root):
 # R_BuildHiZForNextFrame, whitespace dropped (#340 P5d): in this order.
 HIZ_BUILD_ORDER = (
     "hiz_pyramid_valid=false;",
-    "dropped=RG_ComputeDropped();",
+    "if(R_GPU()){dropped=RG_ComputeDropped();drawsdropped=RG_DrawsDropped();"
+    "WC_HiZCopyDraw(scene_depth_tex,scene_w,scene_h);}else#endif{",
     "R_UseProgram(hiz_copy_prog);R_BindTextureSlot(0,scene_depth_tex);",
     "hiz_params.size[0]=scene_w;hiz_params.size[1]=scene_h;hiz_params.size[2]=0;hiz_params.size[3]=0;",
-    'if(R_GPU())RG_UniformBlockFlushed("HizParams");else',
     "GL_Upload(GL_UNIFORM_BUFFER,&hiz_params,sizeof(hiz_params),&ubo,&ofs);",
     "R_DispatchCompute((scene_w+7)/8,(scene_h+7)/8,1);",
     "R_UseProgram(hiz_reduce_prog);R_BindTextureSlot(0,hiz_pyramid_tex);",
@@ -4740,7 +4751,7 @@ HIZ_BUILD_ORDER = (
     'if(R_GPU())RG_UniformBlockFlushed("CullParams");else',
     "GL_Upload(GL_UNIFORM_BUFFER,&cull_params,sizeof(cull_params),&ubo,&ofs);",
     "R_DispatchCompute((dst_w+7)/8,(dst_h+7)/8,1);",
-    "if(R_GPU()&&RG_ComputeDropped()!=dropped)return;",
+    "if(R_GPU()&&(RG_ComputeDropped()!=dropped||RG_DrawsDropped()!=drawsdropped))return;",
     "hiz_pyramid_valid=true;",
 )
 
@@ -4787,13 +4798,15 @@ def check_hiz(root):
                      "a dropped level noticed (#340 P5d)" % (rel, step))
                 break
             at = i + len(step)
-        for blk in ("HizParams", "CullParams"):
-            if sb.count('RG_UniformBlockFlushed("%s")' % blk) != 1:
-                fail("%s: R_BuildHiZForNextFrame must flush %s in one place (#340 P5d)" % (rel, blk))
+        if sb.count('RG_UniformBlockFlushed("CullParams")') != 1:
+            fail("%s: R_BuildHiZForNextFrame must flush CullParams in one place (#340 P5d)" % rel)
+        if 'RG_UniformBlockFlushed("HizParams")' in sb:
+            fail("%s: R_BuildHiZForNextFrame flushes HizParams, which only GL's compute copy reads -- -gpu's "
+                 "copy is a draw (#340 P5f)" % rel)
     b = body_named(root, rel, "R_HiZ_EnsureResources")
     if b is not None:
         sb = squash(b)
-        for prog, name in (("hiz_copy_prog", "u_scene_depth"), ("hiz_reduce_prog", "u_src")):
+        for prog, name in (("hiz_reduce_prog", "u_src"),):
             if ('R_UseProgram(%s);loc=R_ProgramSamplerLoc(%s,"%s");R_ProgramSamplerUnit(%s,loc,"%s",0);'
                     % (prog, prog, name, prog, name)) not in sb:
                 fail("%s: R_HiZ_EnsureResources must name %s's unit, 0, through R_ProgramSamplerUnit -- the "
@@ -5029,14 +5042,169 @@ def check_ssao(root):
     b = body_named(root, wc, "R_HiZ_EnsureResources")
     if b is not None:
         sb = squash(b)
-        want = ('#ifdefUSE_SDL_GPUif(R_GPU()){GLintloc;R_UseProgram(hiz_copy_prog);'
-                'loc=R_ProgramSamplerLoc(hiz_copy_prog,"u_scene_depth");'
-                'R_ProgramSamplerUnit(hiz_copy_prog,loc,"u_scene_depth",0);R_UseProgram(hiz_reduce_prog);'
+        want = ('#ifdefUSE_SDL_GPUif(R_GPU()){GLintloc;R_UseProgram(hiz_reduce_prog);'
                 'loc=R_ProgramSamplerLoc(hiz_reduce_prog,"u_src");R_ProgramSamplerUnit(hiz_reduce_prog,loc,"u_src",0);'
                 'R_UseProgram(0);}#endif')
         if want not in sb:
             fail("%s: R_HiZ_EnsureResources must name the Hi-Z samplers' units under -gpu alone -- TEXBIND(0) "
                  "says them to GL, whose calls stay what they were before P5d (#340 P5e)" % wc)
+
+
+# (function, what it must hold, whitespace dropped, why), #340 P5f.
+COMPUTE_WAIT_PINS = (
+    ("engine/h2shared/rg_compute.c", "RGC_Bind",
+     "for(i=0;i<st->num_rotex;i++){constrgsampler_t*s=&st->rotex[i];",
+     "each read-only storage texture is bound"),
+    ("engine/h2shared/rg_compute.c", "RGC_Bind",
+     "if(!RG_Res_StorageRead(s->unit,(rg_textype_t)s->type,(rg_sampclass_t)s->sclass,&rot[s->binding]))"
+     "returnfalse;",
+     "from the texture its GL unit holds, or the placeholder"),
+    ("engine/h2shared/rg_compute.c", "RGC_ImageSampled",
+     "for(i=0;i<st->num_rotex;i++){if(RG_Res_ImageSampled(im->binding,st->rotex[i].unit,"
+     "(rg_textype_t)st->rotex[i].type))returntrue;}",
+     "a level read as a read-only storage texture and written is written through a scratch: SDL moves the "
+     "whole texture to the read layout when it is bound"),
+    ("engine/h2shared/rg_compute.c", "RG_DispatchCompute",
+     "for(i=0;i<st->num_rotex;i++)target|=RG_Res_UnitIsTarget(st->rotex[i].unit,(rg_textype_t)st->rotex[i].type);"
+     "cmd=RG_Frame_ComputeBegin(target,samples);",
+     "a read-only storage texture ends the segment that draws into it, and is no sample: SDL's barrier into "
+     "its layout has the compute stage in its second scope, so it takes no wait"),
+    ("engine/h2shared/rg_resource.c", "RG_Res_StorageRead",
+     "if(t->usage&SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_READ)RGT_Realize(t);"
+     "if(t->tex&&(t->tex_usage&SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_READ))",
+     "only a texture declared with storage-read usage is bound: made here it would be a new object, and "
+     "whatever it held lost"),
+    ("engine/h2shared/rg_resource.c", "RG_Res_StorageRead",
+     '(dispatchdropped)");returnfalse;}returnfalse;}',
+     "a texture on the unit that cannot be read drops the dispatch: a placeholder in its place would be read as "
+     "the pyramid"),
+    ("engine/h2shared/rg_frame.c", "RGF_EndSegment",
+     "if(!RGF_CopyPass()){rgf_dropped+=rgf_numdraws;rgf_numdraws=0;}",
+     "draws lost with a failed copy pass are counted: the Hi-Z copy's caller checks RG_DrawsDropped"),
+    ("engine/h2shared/rg_resource.c", "RG_Res_StorageRead",
+     "if(type==RG_TT_2D&&sclass==RG_SC_FLOAT&&rgt_ph_storage_read){*out=rgt_ph[RG_SC_FLOAT][RG_TT_2D];returntrue;}",
+     "anything else reads the 2D float placeholder (the cull's pyramid with Hi-Z off)"),
+    ("engine/h2shared/rg_shader.c", "RG_Reflect",
+     "elseif(v->b==SPV_ScUniformConstant&&ty->op==SPV_OpTypeImage&&ty->f==1)",
+     "a texture with no sampler is SDL_GPU's read-only storage texture"),
+    ("engine/h2shared/rg_shader.c", "RG_CheckStage",
+     "if(out->num_rotex!=refl->ro_storage_textures)",
+     "its count is the reflection row's, which the pipeline is created with"),
+    ("engine/h2shared/rg_shader.c", "RG_CheckStage",
+     "intslot=(int)out->rotex[i].binding-refl->samplers;",
+     "its slot counts from the first binding past the samplers"),
+    ("engine/h2shared/rg_shader.c", "RG_ProgramSamplerUnit",
+     "for(i=0;i<p->stage[s].num_rotex;i++){if(!strcmp(p->stage[s].rotex[i].name,name))"
+     "p->stage[s].rotex[i].unit=(Uint8)unit;}",
+     "its GL unit is named the way a sampler's is"),
+    ("engine/h2shared/gl_worldcull.c", "WC_HiZCopyDrawEnsure",
+     "R_BindImageTexture(0,hiz_pyramid_tex,0,GL_FALSE,0,GL_READ_ONLY,GL_R32F);"
+     "R_BindImageTexture(0,hiz_pyramid_tex,0,GL_FALSE,0,GL_WRITE_ONLY,GL_R32F);"
+     "R_BindImageTexture(0,0,0,GL_FALSE,0,GL_READ_ONLY,GL_R32F);",
+     "the pyramid's read-only storage use, and the reduce's writes, declared before the copy's draw makes "
+     "the texture: SDL_GPU fixes usage at creation"),
+    ("engine/h2shared/gl_worldcull.c", "WC_HiZCopyDrawEnsure",
+     "R_FramebufferTexture2D(GL_DRAW_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,hiz_pyramid_tex,0);"
+     "status=R_CheckFramebufferStatus(GL_DRAW_FRAMEBUFFER);R_BindFramebuffer(GL_DRAW_FRAMEBUFFER,prev);",
+     "the copy draws into the pyramid's level 0, and the caller's framebuffer is put back"),
+    ("engine/h2shared/gl_worldcull.c", "WC_HiZCopyDraw",
+     "R_BindFramebuffer(GL_DRAW_FRAMEBUFFER,hiz_copy_fbo);R_SetViewport(0,0,scene_w,scene_h);",
+     "the draw covers level 0, the size of the scene"),
+    ("engine/h2shared/gl_worldcull.c", "WC_HiZCopyDraw",
+     "R_UseProgram(hiz_copy_draw_prog);R_BindTextureSlot(0,scene_depth_tex);R_BindVertexArray(hiz_copy_vao);"
+     "R_DrawArrays(GL_TRIANGLES,0,3);",
+     "one full-screen triangle sampling the scene depth on unit 0"),
+    ("engine/h2shared/gl_worldcull.c", "WC_HiZCopyDraw",
+     "R_BindFramebuffer(GL_DRAW_FRAMEBUFFER,prev);R_SetViewport(vp[0],vp[1],vp[2],vp[3]);",
+     "the caller's framebuffer and viewport are put back"),
+    ("engine/h2shared/gl_worldcull.c", "R_HiZ_EnsureResources",
+     "if(R_GPU()&&!WC_HiZCopyDrawEnsure()){",
+     "under -gpu the copy's draw is set up with the pyramid, or Hi-Z is off"),
+    ("engine/h2shared/gl_worldcull.c", "R_HiZ_EnsureResources",
+     "if(!hiz_copy_prog&&!WC_GPU()){hiz_copy_prog=R_Program_Create(RPROG_HIZ_COPY);",
+     "GL keeps its compute copy; -gpu never builds it"),
+    ("engine/h2shared/rg_frame.c", "RGF_SubmitMidFrame",
+     "t0=SDL_GetTicksNS();ok=SDL_WaitForGPUFences(rg_dev,true,&fence,1);rgf_frame_mid_ns+=SDL_GetTicksNS()-t0;",
+     "gpu_frametimes reports what the waits inside a frame cost"),
+    ("engine/h2shared/rg_frame.c", "RG_Frame_End",
+     "if(show&&rg_headless)swap=RGF_HeadlessTarget(&sw,&sh);",
+     "-gpuheadless blits the scene into a stand-in, so a timed frame costs what a shown one does"),
+    ("engine/h2shared/rg_device.c", "RG_CreateDevice",
+     'rg_headless=COM_CheckParm("-gpuheadless")!=0;if(!rg_headless&&!SDL_ClaimWindowForGPUDevice(rg_dev,window))',
+     "-gpuheadless is a command-line switch, and it alone skips the claim"),
+    ("engine/h2shared/rg_device.c", "RG_Init",
+     'Cmd_AddCommand("gpu_frametimes",RG_FrameTimes_f);',
+     "gpu_frametimes is a command"),
+)
+
+
+def check_compute_waits(root):
+    """#340 P5f: compute reads that need no fence wait, and the dev-only timing."""
+    for rel, fn, pin, why in COMPUTE_WAIT_PINS:
+        b = body_named(root, rel, fn)
+        if b is not None and pin not in squash(b):
+            fail("%s: %s must make `%s` -- %s (#340 P5f)" % (rel, fn, pin, why))
+    b = body_named(root, "engine/h2shared/rg_resource.c", "RG_Res_StorageRead")
+    if b is not None and "RGT_AddStorage" in b:
+        fail("engine/h2shared/rg_resource.c: RG_Res_StorageRead must not add storage usage: a texture made "
+             "again at a dispatch loses what it held (#340 P5f)")
+    b = body_named(root, "engine/h2shared/rg_frame.c", "RGF_ReadbackFenceDone")
+    if b is not None and "SDL_ReleaseGPUFence" in b:
+        fail("engine/h2shared/rg_frame.c: RGF_ReadbackFenceDone must not release the fence: the frame fences "
+             "own it and release it once (RGF_FencesWait), or it is released twice (#340 P5f)")
+    b = body_named(root, "engine/h2shared/rg_compute.c", "RG_DispatchCompute")
+    if b is not None:
+        sb = squash(b)
+        i = sb.find("for(i=0;i<st->num_rotex;i++)target|=")
+        j = sb.find("cmd=RG_Frame_ComputeBegin(target,samples);")
+        if i >= 0 and j > i and "samples" in sb[i:j]:
+            fail("engine/h2shared/rg_compute.c: RG_DispatchCompute must not count a read-only storage texture "
+                 "as a sample -- it would wait for nothing (#340 P5f)")
+    # Dev-only: no cvar, no menu entry.
+    for rel in ("engine/h2shared/rg_device.c", "engine/h2shared/rg_frame.c"):
+        code = strip_c_comments((root / rel).read_text(errors="replace"))
+        if re.search(r'cvar_t\s+\w+\s*=\s*\{\s*"gpu_(frametimes|fence_split|headless)', code):
+            fail("%s: the P5f instrumentation is dev-only: a command and a command-line switch, no cvar "
+                 "(#340 P5f, decision Q10)" % rel)
+    # The shaders: the Vulkan arm reads with texelFetch from a texture with no
+    # sampler, and GL's arm is the program it was.
+    sh = root / "engine/shaders"
+
+    def arms(name):
+        src = strip_c_comments((sh / name).read_text(errors="replace")) if (sh / name).is_file() else ""
+        m = re.search(r"#ifdef\s+VULKAN\s*\n(.*?)#else\s*\n(.*?)#endif", src.split("#include", 1)[-1], re.S)
+        return src, (squash(m.group(1)), squash(m.group(2))) if m else ("", "")
+
+    src, (vk, gl) = arms("hiz_reduce_comp.glsl")
+    if not re.search(r"#ifdef\s+VULKAN\s*#extension\s+GL_EXT_samplerless_texture_functions\s*:\s*require\s*#endif"
+                     r"\s*#include", src):
+        fail("engine/shaders/hiz_reduce_comp.glsl: the Vulkan arm needs GL_EXT_samplerless_texture_functions, "
+             "ahead of the #include (#340 P5f)")
+    if vk != "TEXBIND(0)uniformtexture2Du_src;" or gl != "TEXBIND(0)uniformsampler2Du_src;":
+        fail("engine/shaders/hiz_reduce_comp.glsl: u_src must be a texture2D under VULKAN and GL's sampler2D "
+             "otherwise (#340 P5f)")
+    src, (vk, gl) = arms("cull_mark_comp.glsl")
+    if not re.search(r"#ifdef\s+VULKAN\s*#extension\s+GL_EXT_samplerless_texture_functions\s*:\s*require\s*#endif"
+                     r"\s*#include", src):
+        fail("engine/shaders/cull_mark_comp.glsl: the Vulkan arm needs GL_EXT_samplerless_texture_functions, "
+             "ahead of the #include (#340 P5f)")
+    if not vk.startswith("TEXBIND2(1,0)uniformtexture2Du_hiz_pyramid;") or \
+            "ivec2size=textureSize(u_hiz_pyramid,mip);" not in vk or \
+            "ivec2t=clamp(ivec2(floor(uv*vec2(size))),ivec2(0),size-1);" not in vk or \
+            "returntexelFetch(u_hiz_pyramid,t,mip).r;" not in vk:
+        fail("engine/shaders/cull_mark_comp.glsl: the Vulkan arm's HIZ_AT must be the nearest texel of the "
+             "level, clamped to its edge: GL's GL_NEAREST_MIPMAP_NEAREST, GL_CLAMP_TO_EDGE sample (#340 P5f)")
+    if gl != "TEXBIND2(1,0)uniformsampler2Du_hiz_pyramid;#defineHIZ_AT(uv,mip)textureLod(u_hiz_pyramid,uv,float(mip)).r":
+        fail("engine/shaders/cull_mark_comp.glsl: GL's arm must be its sampler and HIZ_AT the textureLod it "
+             "always made -- GL's program is unchanged (#340 P5f)")
+    if squash(src).count("HIZ_AT(cuv+vec2(") != 4 or "textureLod(u_hiz_pyramid" in squash(src).replace(
+            "#defineHIZ_AT(uv,mip)textureLod(u_hiz_pyramid", ""):
+        fail("engine/shaders/cull_mark_comp.glsl: the four Hi-Z samples must go through HIZ_AT (#340 P5f)")
+    frag = sh / "hiz_copy_frag.glsl"
+    fs = squash(strip_c_comments(frag.read_text(errors="replace"))) if frag.is_file() else ""
+    if "out_depth=vec4(texelFetch(u_scene_depth,ivec2(gl_FragCoord.xy),0).r,0.0,0.0,0.0);" not in fs:
+        fail("engine/shaders/hiz_copy_frag.glsl: the copy must write the depth texel under the fragment, as "
+             "hiz_copy_comp.glsl stores the one under its invocation (#340 P5f)")
 
 
 def main(argv=None):
@@ -5073,6 +5241,7 @@ def main(argv=None):
     check_hiz(root)
     check_ssao(root)
     check_p6a(root)
+    check_compute_waits(root)
     nfiles = 0
     rg_files = []
     for p in sorted(eng.rglob("*")):
