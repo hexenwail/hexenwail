@@ -25,10 +25,10 @@
  * storage (#340 P6a) are seams with GL's signatures too, each GL arm the
  * bare call.  Since P6b the layer is rg_target.c's (one layer of a layered
  * texture as a depth attachment: the cube shadow maps' faces) and the clear's
- * GL_DEPTH rg_frame.c's; a colour layer, a colour draw buffer's clear (MRT,
- * P6c) and multisampled storage (P6d) count themselves in gpu_unrouted and do
- * nothing, and their callers are held off under -gpu (the OIT gates,
- * PP_SceneSamples). */
+ * GL_DEPTH rg_frame.c's; since P6c a colour draw buffer's clear is too (OIT's
+ * MRT).  A colour layer and multisampled storage (P6d) count themselves in
+ * gpu_unrouted and do nothing, and the latter's caller is held off under
+ * -gpu (PP_SceneSamples). */
 
 #ifndef GL_FBO_H
 #define GL_FBO_H

@@ -37,12 +37,12 @@
 #      the upscale).  In 06 (0.75) the 3D view has at
 #      most 3/4 of its 560 rows distinct (+1%, 426), on each side: every
 #      fourth row repeats the one above.
-#   5. The gate that keeps P6's work off under -gpu, as frames that must be
-#      identical on -gpu: 13-pools-oit equals 09-pools (r_oit 1: OIT is P6,
-#      its gates off -- a removed gate loses every translucent).  GL's pair
-#      is printed, not checked: GL's OIT resolves one water layer to the
-#      pixels sorted blending gives (0 differ at gamma 0.9), so what shows
-#      the gate matters is the broken build without it, not GL.  Bloom runs
+#   5. OIT through the chain: 13-pools-oit (r_oit 1) equals 09-pools on each
+#      side.  OIT resolves one water layer to the pixels sorted blending
+#      gives (0 differ at gamma 0.9, on GL and, since #340 P6c lifted the
+#      OIT gates, on -gpu), so a resolve that lost the water, or drew it
+#      twice, shows here; tools/sweep-oit-gpu.steps checks OIT itself, its
+#      overlaps and r_oit 2 included.  Bloom runs
 #      under -gpu since P4e: 20-gy-bloom (r_bloom 1) differs from
 #      14-gy-gamma09 in at least MIN_CHANGED pixels on each side
 #      (tools/bloom-diff.sh checks the bloom itself).
@@ -169,10 +169,11 @@ fi
 
 # 5
 if has 13-pools-oit 09-pools; then
-	c=$(changed "$GPU/13-pools-oit.png" "$GPU/09-pools.png")
-	[ "${c:-1}" = 0 ]; report "oit gate -gpu" $? "-gpu: 13-pools-oit against 09-pools, $c pixels differ, want 0"
-	c=$(changed "$GL/13-pools-oit.png" "$GL/09-pools.png"); c=${c:-0}
-	printf '%-32s INFO  (GL: 13-pools-oit against 09-pools, %s pixels differ, not checked)\n' "oit effect GL" "$c"
+	for side in GL GPU; do
+		eval d=\$$side
+		c=$(changed "$d/13-pools-oit.png" "$d/09-pools.png")
+		[ "${c:-1}" = 0 ]; report "oit water $side" $? "$side: 13-pools-oit against 09-pools, $c pixels differ, want 0"
+	done
 fi
 if has 20-gy-bloom 14-gy-gamma09; then
 	for side in GL GPU; do

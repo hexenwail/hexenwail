@@ -1,0 +1,203 @@
+# sweep-oit-gpu.steps -- order-independent transparency under -gpu against
+# GL (#340 P6c): r_oit 1 (weighted blended OIT, two colour targets with a
+# blend each) and r_oit 2 (moment-based OIT: a moment pass into R32F and
+# RGBA32F, then a composite into accum alone), each then resolved into the
+# scene.  demo1, retail data.
+#
+# Run the SAME binary both ways, with identical settings:
+#
+#   A="-fsaa 0 +gamma 1 +map demo1"
+#   STEPS=tools/sweep-oit-gpu.steps ENGINE=$E ./tools/headless-drive.sh script /tmp/oit-gl ~/hexen2 $A
+#   VK_ICD_FILENAMES=<lvp_icd json> STEPS=tools/sweep-oit-gpu.steps ENGINE=$E \
+#       ./tools/headless-drive.sh script /tmp/oit-gpu ~/hexen2 -gpu +gpu_allow_software 1 +gpu_debug 1 $A
+#   ./tools/oit-diff.sh /tmp/oit-gl /tmp/oit-gpu
+#
+# With the Vulkan validation layers on (VK_LAYER_PATH=..., and
+# VK_KHRONOS_VALIDATION_VALIDATE_SYNC=true for synchronization validation)
+# the -gpu run must log no "Validation Error".  Between REPORT-OIT-BEGIN and
+# -END in the -gpu run's qconsole.log, gpu_unrouted counts 0 calls (reset
+# ahead, so every r_oit state above counts, and read before renderer_status,
+# whose GL strings are null-table calls of its own), renderer_status shows passes
+# with more than one colour target, and nothing is dropped for a
+# multisample sampler (the OIT twins' sampler2DMS, the P6c shader change).
+#
+# THE FRAMES.  Gamma 0.9 throughout, so the post-process chain is up at
+# r_oit 0 too (OIT raises it; the chain's identity is not under test here).
+#   01-03  demo1's pools (sweep-liquid-gpu.steps' 01), r_wateralpha 0.33,
+#          r_oit 0 / 1 / 2
+#   04-06  the same at r_wateralpha 0.6
+#   07-09  the graveyard's west wall with overlapping translucents: three
+#          explosion sprites (drawflags 128) one behind the other and two
+#          translucent sheep (the alias twin) among them, r_oit 0 / 1 / 2.
+#          One layer resolves to what sorted blending gives; it is the
+#          overlaps that OIT changes, and these are what 07-09 are for
+#   10-12  testparticles 80 on the graveyard (the particle twin; its
+#          overlapping cluster), r_oit 0 / 1 / 2
+#   13     the pools at r_oit 1 with r_scale 0.5
+#   14-15  the pools with bloom (threshold 0.3: at the default 1 the pools
+#          bloom nothing, and the pair would be 01 / 02 again), r_oit 0 / 1
+#   16     the pools at r_oit 1 with r_softemu 2
+#   17-18  map_checks 1, r_oit 1 / 0: OIT_Active is false under map_checks,
+#          but OIT_BeginTranslucency asks r_oit alone, so the pass still
+#          runs with the plain programs' one output into two targets:
+#          undefined, printed by oit-diff.sh and not checked
+#   19     the pools after r_oit 2 -> 1 -> 0 at runtime: must equal 01
+#   20     the pools at r_oit 2 again after 19: must equal 03 (the MBOIT
+#          targets come back with no vid_restart)
+#   21-22  the pools at viewsize 100 with the viewmodel, r_oit 1 / 0: the
+#          viewmodel draws after the resolve, inside a 3D view that is not
+#          the whole buffer, so a resolve that leaves its full-buffer
+#          viewport behind moves it (uhexen2-osya)
+#
+# SETTINGS.  sweep-liquid-gpu.steps' list (r_dynamic 0, no caustics, the
+# warp speed 0, pause and settle) and con_notifytime 0.  oit-diff.sh masks
+# the mini status bar's health.
+
+sleep 20
+cmd god
+cmd notarget
+cmd noclip
+cmd con_notifytime 0
+cmd viewsize 120
+cmd crosshair 0
+cmd showpause 0
+cmd r_skyspeed_back 0
+cmd r_skyspeed_front 0
+cmd r_flatlightstyles 1
+cmd r_dynamic 0
+cmd r_gpulightstyles 0
+cmd r_ssao 0
+cmd r_bloom 0
+cmd r_bloom_threshold 1
+cmd r_dlight_occlusion 1
+cmd r_alias_gpu 0
+cmd fog 0
+cmd gl_texture_anisotropy 1
+cmd r_oit 0
+cmd r_waterwarp 0
+cmd r_motionblur 0
+cmd r_softparticles 0
+cmd r_softemu 0
+cmd r_scale 1
+cmd gl_fxaa 0
+cmd contrast 1
+cmd gl_waterwarp_speed 0
+cmd r_caustics 0
+cmd gl_glows 0
+cmd gl_missile_glows 0
+cmd gl_other_glows 0
+cmd r_drawviewmodel 0
+cmd r_drawentities 0
+cmd r_drawparticles 1
+cmd gl_particles 1
+cmd r_wateralpha 0.33
+cmd r_lavaalpha 0
+cmd r_water_pixel_warp 0
+cmd gamma 0.9
+sleep 2
+cmd gpu_unrouted reset
+
+# --- the pools ---
+cmd setpos -1007 2200 -442 25 152 0
+sleep 2
+cmd pause
+shot 01-pools-oit0
+cmd r_oit 1
+shot 02-pools-oit1
+cmd r_oit 2
+shot 03-pools-oit2
+cmd r_wateralpha 0.6
+cmd r_oit 0
+shot 04-pools-wa06-oit0
+cmd r_oit 1
+shot 05-pools-wa06-oit1
+cmd r_oit 2
+shot 06-pools-wa06-oit2
+cmd r_wateralpha 0.33
+cmd r_oit 1
+cmd r_scale 0.5
+shot 13-pools-oit1-scale05
+cmd r_scale 1
+cmd r_oit 0
+cmd r_bloom 1
+cmd r_bloom_threshold 0.3
+shot 14-pools-bloom-oit0
+cmd r_oit 1
+shot 15-pools-bloom-oit1
+cmd r_bloom 0
+cmd r_bloom_threshold 1
+cmd r_softemu 2
+shot 16-pools-oit1-softemu2
+cmd r_softemu 0
+cmd map_checks 1
+shot 17-pools-checks-oit1
+cmd r_oit 0
+shot 18-pools-checks-oit0
+cmd map_checks 0
+cmd r_oit 2
+sleep 1
+cmd r_oit 1
+sleep 1
+cmd r_oit 0
+shot 19-pools-oit-back0
+cmd r_oit 2
+shot 20-pools-oit2-again
+cmd r_oit 0
+cmd viewsize 100
+cmd r_drawviewmodel 1
+cmd r_oit 1
+shot 21-pools-vm-oit1
+cmd r_oit 0
+shot 22-pools-vm-oit0
+cmd r_drawviewmodel 0
+cmd viewsize 120
+cmd pause
+
+# --- overlapping translucent sprites and alias models ---
+cmd r_drawentities 1
+cmd testentity models/s_explod.spr -1270 -1850 40 0 0 0 3 128
+cmd testentity models/s_explod.spr -1300 -1830 46 0 0 0 5 128
+cmd testentity models/s_explod.spr -1330 -1815 36 0 0 0 7 128
+cmd testentity models/sheep.mdl -1250 -1830 10 0 200 0 0 128
+cmd testentity models/sheep.mdl -1290 -1805 14 0 160 0 0 128
+cmd setpos -1150 -1800 0 0 170 0
+sleep 2
+cmd pause
+cmd r_oit 0
+shot 07-trans-oit0
+cmd r_oit 1
+shot 08-trans-oit1
+cmd r_oit 2
+shot 09-trans-oit2
+cmd r_oit 0
+cmd pause
+cmd r_drawentities 0
+
+# --- particles ---
+cmd setpos -918 -2034 0 0 135 0
+sleep 2
+cmd pause
+sleep 1
+cmd testparticles 80
+cmd r_oit 0
+shot 10-part-oit0
+cmd r_oit 1
+shot 11-part-oit1
+cmd r_oit 2
+shot 12-part-oit2
+cmd r_oit 0
+cmd pause
+
+cmd echo REPORT-OIT-BEGIN
+cmd r_oit 1
+sleep 2
+cmd r_oit 2
+sleep 2
+cmd gpu_unrouted
+cmd renderer_status
+cmd r_oit 1
+sleep 2
+cmd renderer_status
+cmd r_oit 0
+cmd echo REPORT-OIT-END
+sleep 1

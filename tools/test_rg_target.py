@@ -103,6 +103,7 @@ typedef unsigned int GLbitfield;
 #define GL_FRAMEBUFFER_COMPLETE 0x8CD5
 #define GL_COLOR_ATTACHMENT0 0x8CE0
 #define GL_COLOR_ATTACHMENT1 0x8CE1
+#define GL_COLOR_ATTACHMENT15 0x8CEF
 #define GL_DEPTH_ATTACHMENT 0x8D00
 #define GL_DEPTH_STENCIL_ATTACHMENT 0x821A
 void Sys_Error (const char *fmt, ...);
@@ -222,7 +223,10 @@ void RG_DeleteTextures (GLsizei n, const GLuint *t)
 		 * frame's target dirty if it holds the texture, then every
 		 * framebuffer drops the name; a dirty target is resolved
 		 * again before the next draw or pass, after both. */
-		qboolean dirty = frame_ok && (frame_tgt.color == &tex[t[i]].tex || frame_tgt.depth == &tex[t[i]].tex);
+		qboolean dirty = frame_ok && frame_tgt.depth == &tex[t[i]].tex;
+		int k;
+		for (k = 0; k < frame_tgt.ncolor; k++)
+			dirty = dirty || (frame_ok && frame_tgt.color[k] == &tex[t[i]].tex);
 		RG_Target_TextureDeleted (t[i]);
 		tex[t[i]].alive = 0;
 		if (dirty)
@@ -279,11 +283,12 @@ static SDL_GPUCommandBuffer *const cmdbuf = (SDL_GPUCommandBuffer *) 16;
 void RG_Frame_SceneTarget (rgtarget_t *out)
 {
 	memset (out, 0, sizeof(*out));
-	out->color = &scene_color;
+	out->color[0] = &scene_color;
+	out->ncolor = 1;
 	out->depth = &scene_depth;
-	out->cfmt = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+	out->cfmt[0] = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
 	out->dfmt = SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT;
-	out->cusage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+	out->cusage[0] = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
 	out->dusage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
 	out->w = 64;
 	out->h = 32;
@@ -364,7 +369,7 @@ static void read_side_drawbuffers (void)
 	RG_BindFramebuffer (GL_FRAMEBUFFER, fbo[0]);
 	RG_FramebufferTexture2D (GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, a, 0);
 	RG_DrawBuffers (1, &none);
-	CHECK (frame_ok && frame_fbo == fbo[0] && !frame_tgt.color && frame_tgt.w == 64,
+	CHECK (frame_ok && frame_fbo == fbo[0] && !frame_tgt.color[0] && frame_tgt.w == 64,
 	       "drawn into, a GL_NONE framebuffer is complete with no colour target");
 	CHECK (RG_CheckFramebufferStatus (GL_READ_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE,
 	       "a GL_NONE framebuffer is complete to read");
@@ -390,14 +395,14 @@ static void read_side_drawbuffers (void)
 static void bad_attachment_replaced (void)
 {
 	GLuint fbo, c = ColorTex (64, 32), d = DepthTex (64, 32), rb = 0;
-	const GLenum one = GL_COLOR_ATTACHMENT0, two[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
+	const GLenum one = GL_COLOR_ATTACHMENT0, rev[2] = { GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT0 };
 	int b0, u0;
 
 	RG_GenFramebuffers (1, &fbo);
 	RG_BindFramebuffer (GL_FRAMEBUFFER, fbo);
 	RG_FramebufferTexture2D (GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, c, 0);
 	RG_FramebufferTexture2D (GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, d, 0);
-	CHECK (Status () == GL_FRAMEBUFFER_COMPLETE && frame_ok && frame_tgt.color == &tex[c].tex,
+	CHECK (Status () == GL_FRAMEBUFFER_COMPLETE && frame_ok && frame_tgt.color[0] == &tex[c].tex,
 	       "colour + depth-stencil is complete and is the frame's target");
 
 	/* A mip level: incomplete, and the frame knows at once. */
@@ -406,14 +411,14 @@ static void bad_attachment_replaced (void)
 	CHECK (Status () != GL_FRAMEBUFFER_COMPLETE, "a mip level attached is incomplete");
 	CHECK (binds > b0 && !frame_ok, "a bad attachment to the bound framebuffer re-resolves the frame's target");
 	RG_FramebufferTexture2D (GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, c, 0);
-	CHECK (Status () == GL_FRAMEBUFFER_COMPLETE && frame_ok && frame_tgt.color == &tex[c].tex,
+	CHECK (Status () == GL_FRAMEBUFFER_COMPLETE && frame_ok && frame_tgt.color[0] == &tex[c].tex,
 	       "level 0 attached in its place: complete again");
 
 	/* A cube face, then a detach. */
 	RG_FramebufferTexture2D (GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_CUBE_MAP_POSITIVE_X, c, 0);
 	CHECK (Status () != GL_FRAMEBUFFER_COMPLETE && !frame_ok, "a cube face attached is incomplete");
 	RG_FramebufferTexture2D (GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
-	CHECK (Status () == GL_FRAMEBUFFER_COMPLETE && frame_ok && !frame_tgt.color && frame_tgt.depth == &tex[d].tex,
+	CHECK (Status () == GL_FRAMEBUFFER_COMPLETE && frame_ok && !frame_tgt.color[0] && frame_tgt.depth == &tex[d].tex,
 	       "detached: complete, depth only");
 	RG_FramebufferTexture2D (GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, c, 0);
 
@@ -434,11 +439,12 @@ static void bad_attachment_replaced (void)
 	CHECK (Status () == GL_FRAMEBUFFER_COMPLETE && frame_ok && frame_tgt.depth != NULL,
 	       "a real renderbuffer in its place: complete again");
 
-	/* MRT draw buffers, then one. */
-	RG_DrawBuffers (2, two);
-	CHECK (Status () != GL_FRAMEBUFFER_COMPLETE && !frame_ok, "MRT draw buffers are incomplete (P6)");
+	/* Draw buffers out of order, then one. */
+	RG_DrawBuffers (2, rev);
+	CHECK (Status () != GL_FRAMEBUFFER_COMPLETE && !frame_ok,
+	       "draw buffers other than ATT0 .. n-1 in order are incomplete");
 	RG_DrawBuffers (1, &one);
-	CHECK (Status () == GL_FRAMEBUFFER_COMPLETE && frame_ok && frame_tgt.color == &tex[c].tex,
+	CHECK (Status () == GL_FRAMEBUFFER_COMPLETE && frame_ok && frame_tgt.color[0] == &tex[c].tex,
 	       "a later glDrawBuffers (GL_COLOR_ATTACHMENT0) replaces it: complete again");
 
 	/* GL_INVALID_ENUM changes nothing. */
@@ -462,8 +468,8 @@ static void delete_detaches (void)
 	RG_GenFramebuffers (1, &fbo);
 	RG_BindFramebuffer (GL_FRAMEBUFFER, fbo);
 	RG_FramebufferTexture2D (GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, c, 0);
-	RG_FramebufferTexture2D (GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, x, 0);
-	CHECK (Status () != GL_FRAMEBUFFER_COMPLETE && !frame_ok, "a second colour attachment is unsupported (P6)");
+	RG_FramebufferTexture2D (GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, x, 3);
+	CHECK (Status () != GL_FRAMEBUFFER_COMPLETE && !frame_ok, "a second colour attachment's mip level is incomplete");
 	RG_DeleteTextures (1, &x);
 	CHECK (Status () == GL_FRAMEBUFFER_COMPLETE && frame_ok, "deleting the second colour detaches it");
 
@@ -478,7 +484,7 @@ static void delete_detaches (void)
 	/* With no colour drawn the frame's target holds no colour texture, so
 	 * only the detach can tell it the framebuffer is now empty. */
 	RG_DrawBuffers (1, &none);
-	CHECK (frame_ok && !frame_tgt.color, "GL_NONE: complete, no colour target");
+	CHECK (frame_ok && !frame_tgt.color[0], "GL_NONE: complete, no colour target");
 	b0 = binds;
 	RG_DeleteTextures (1, &c);
 	CHECK (binds > b0 && !frame_ok, "deleting the bound framebuffer's only attachment re-resolves the frame's target");
@@ -519,7 +525,7 @@ static void layered_depth (void)
 	RG_DrawBuffers (1, &none);
 	RG_FramebufferTextureLayer (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, a, 0, 7);
 	CHECK (Status () == GL_FRAMEBUFFER_COMPLETE && frame_ok, "a layer-face of a depth cube array is complete");
-	CHECK (!frame_tgt.color && frame_tgt.depth == &tex[a].tex && frame_tgt.dlayer == 7 && frame_tgt.dlayered
+	CHECK (!frame_tgt.color[0] && frame_tgt.depth == &tex[a].tex && frame_tgt.dlayer == 7 && frame_tgt.dlayered
 	       && frame_tgt.w == 32 && frame_tgt.h == 32,
 	       "the target is depth-only, on that layer, the texture's size");
 	RG_FramebufferTextureLayer (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, a, 0, 11);
@@ -543,7 +549,7 @@ static void layered_depth (void)
 	u0 = unhandled;
 	RG_FramebufferTextureLayer (GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, a, 0, 3);
 	CHECK (unhandled > u0 && Status () != GL_FRAMEBUFFER_COMPLETE && !frame_ok,
-	       "a colour layer is noted and incomplete (P6c)");
+	       "a colour layer is noted and incomplete");
 	RG_FramebufferTexture2D (GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
 	RG_FramebufferTextureLayer (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, a, 0, 5);
 	CHECK (Status () == GL_FRAMEBUFFER_COMPLETE && frame_ok && frame_tgt.dlayer == 5,
@@ -576,6 +582,92 @@ static void layered_depth (void)
 	(void) c;
 }
 
+/* #340 P6c: OIT's framebuffers, as gl_postprocess.c builds them. */
+static void mrt (void)
+{
+	GLuint fbo, a = ColorTex (64, 32), r = ColorTex (64, 32), d = DepthTex (64, 32), big = ColorTex (32, 32);
+	GLuint x[4];
+	const GLenum one = GL_COLOR_ATTACHMENT0, none = GL_NONE;
+	const GLenum two[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
+	const GLenum four[4] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT0 + 2,
+				 GL_COLOR_ATTACHMENT0 + 3 };
+	const GLenum gap[2] = { GL_COLOR_ATTACHMENT0, GL_NONE };
+	int i;
+
+	RG_GenFramebuffers (1, &fbo);
+	RG_BindFramebuffer (GL_FRAMEBUFFER, fbo);
+	RG_FramebufferTexture2D (GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, a, 0);
+	RG_FramebufferTexture2D (GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, r, 0);
+	RG_FramebufferTexture2D (GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, d, 0);
+	CHECK (Status () == GL_FRAMEBUFFER_COMPLETE && frame_ok && frame_tgt.ncolor == 1 &&
+	       frame_tgt.color[0] == &tex[a].tex && !frame_tgt.color[1],
+	       "two attached, ATT0 drawn (GL's default): one colour target, the second left out");
+	RG_DrawBuffers (2, two);
+	CHECK (Status () == GL_FRAMEBUFFER_COMPLETE && frame_ok && frame_tgt.ncolor == 2 &&
+	       frame_tgt.color[0] == &tex[a].tex && frame_tgt.color[1] == &tex[r].tex &&
+	       frame_tgt.depth == &tex[d].tex,
+	       "ATT0 and ATT1 drawn: two colour targets in order, and the depth (WBOIT)");
+	RG_DrawBuffers (1, &one);
+	CHECK (frame_ok && frame_tgt.ncolor == 1 && frame_tgt.color[0] == &tex[a].tex && !frame_tgt.color[1] &&
+	       !frame_tgt.cfmt[1] && !frame_tgt.cusage[1],
+	       "back to ATT0 alone (MBOIT's composite): revealage attached and left out, its slot zeroed");
+	RG_DrawBuffers (1, &none);
+	CHECK (frame_ok && frame_tgt.ncolor == 0 && !frame_tgt.color[0] && frame_tgt.depth == &tex[d].tex,
+	       "GL_NONE: depth only");
+	RG_DrawBuffers (2, gap);
+	CHECK (Status () != GL_FRAMEBUFFER_COMPLETE && !frame_ok, "GL_NONE inside a list is unsupported");
+
+	/* ATT1 drawn but its texture deleted: GL discards what is written there. */
+	RG_DrawBuffers (2, two);
+	RG_DeleteTextures (1, &r);
+	CHECK (Status () == GL_FRAMEBUFFER_COMPLETE && frame_ok && frame_tgt.ncolor == 1,
+	       "a trailing drawn attachment with nothing attached is left out");
+	/* ...but ATT0 empty with ATT1 attached is a gap no pass has. */
+	r = ColorTex (64, 32);
+	RG_FramebufferTexture2D (GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, r, 0);
+	RG_FramebufferTexture2D (GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
+	CHECK (Status () != GL_FRAMEBUFFER_COMPLETE && !frame_ok, "ATT0 empty, ATT1 drawn and attached: unsupported");
+	RG_FramebufferTexture2D (GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, a, 0);
+	CHECK (frame_ok && frame_tgt.ncolor == 2, "ATT0 back: complete with two");
+
+	/* Every attachment's size counts, drawn or not. */
+	RG_DrawBuffers (1, &one);
+	RG_FramebufferTexture2D (GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, big, 0);
+	CHECK (Status () != GL_FRAMEBUFFER_COMPLETE && !frame_ok, "an undrawn attachment of another size is unsupported");
+	RG_FramebufferTexture2D (GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, r, 0);
+
+	/* Colour alone: an undrawn attachment's size counts with no depth to
+	 * catch it either. */
+	RG_FramebufferTexture2D (GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, 0, 0);
+	RG_FramebufferTexture2D (GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, big, 0);
+	CHECK (Status () != GL_FRAMEBUFFER_COMPLETE && !frame_ok,
+	       "no depth, an undrawn colour attachment of another size: unsupported");
+	RG_FramebufferTexture2D (GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, r, 0);
+	CHECK (frame_ok && frame_tgt.ncolor == 1 && !frame_tgt.depth, "colour alone, one drawn: complete");
+
+	/* Four targets (RG_MAX_COLOR is at least that), and one past them. */
+	for (i = 0; i < 4; i++)
+		x[i] = ColorTex (64, 32);
+	for (i = 0; i < RG_MAX_COLOR && i < 4; i++)
+		RG_FramebufferTexture2D (GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + i, GL_TEXTURE_2D, x[i], 0);
+	RG_DrawBuffers (4, four);
+	CHECK (Status () == GL_FRAMEBUFFER_COMPLETE && frame_ok && frame_tgt.ncolor == 4 &&
+	       frame_tgt.color[3] == &tex[x[3]].tex, "four colour targets (RG_MAX_COLOR)");
+	RG_FramebufferTexture2D (GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + RG_MAX_COLOR, GL_TEXTURE_2D, r, 0);
+	CHECK (Status () != GL_FRAMEBUFFER_COMPLETE && !frame_ok, "a colour attachment past RG_MAX_COLOR is unsupported");
+	RG_FramebufferTexture2D (GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + RG_MAX_COLOR, GL_TEXTURE_2D, 0, 0);
+	CHECK (frame_ok, "detached: complete again");
+
+	/* The read side reads ATT0, whatever is drawn. */
+	RG_BindFramebuffer (GL_READ_FRAMEBUFFER, fbo);
+	RG_BindFramebuffer (GL_DRAW_FRAMEBUFFER, 0);
+	nblits = 0;
+	CHECK (RG_BlitFramebuffer (0, 0, 64, 32, 0, 0, 64, 32, GL_COLOR_BUFFER_BIT, GL_NEAREST) && nblits == 1 &&
+	       last_blit.source.texture == &tex[x[0]].tex, "a blit from an MRT framebuffer reads ATT0");
+	RG_BindFramebuffer (GL_FRAMEBUFFER, 0);
+	RG_DeleteFramebuffers (1, &fbo);
+}
+
 int main (void)
 {
 	RG_Target_Init ();
@@ -584,6 +676,7 @@ int main (void)
 	delete_detaches ();
 	blit_after_break ();
 	layered_depth ();
+	mrt ();
 	RG_Target_Shutdown ();
 	if (failures)
 		return 1;
@@ -678,9 +771,10 @@ def function(text, head_rx, what):
 def rgtarget_block():
     h = INTERNAL.read_text()
     m = re.search(r"typedef struct \{[^{}]*\} rgtarget_t;", h)
-    if not m:
-        sys.exit("FAIL: rg_internal.h has no rgtarget_t")
-    return m.group(0)
+    mc = re.search(r"#define\s+RG_MAX_COLOR\s+\d+", h)
+    if not m or not mc:
+        sys.exit("FAIL: rg_internal.h has no rgtarget_t, or no RG_MAX_COLOR")
+    return mc.group(0) + "\n" + m.group(0)
 
 
 def compile_and_run(cc, td, sources, what):

@@ -29,8 +29,9 @@
 # nothing), gamma 0.7, gamma 0.85 with contrast 1.5, r_scale 0.5 and 0.75,
 # FXAA, and the three together.  14 the graveyard at gamma 0.9 and 20 the
 # same with bloom.  09 the pools (sweep-liquid-gpu.steps' 01, translucent
-# water into the scene FBO) and 13 the same with r_oit 1, which under -gpu
-# must equal 09 (OIT is P6, gated off: a removed gate loses the water).  12
+# water into the scene FBO) and 13 the same with r_oit 1, which must equal
+# 09 on each side: OIT resolves one water layer to what sorted blending
+# gives (under -gpu since #340 P6c; tools/sweep-oit-gpu.steps checks OIT).  12
 # the console, drawn into the native FBO.  20-29 reach the code P4b-P4e
 # route: bloom on the graveyard and the torch room, soft particles on
 # testentity sprites flush with the west wall with post-process off (the fb0
@@ -106,8 +107,8 @@
 #   sampler    the final pass's scene sampler unset    02-28 at 0.8 .. 2.3
 #   noflush    PpParams never flushed                  02-28 at 10.8 .. 17.6
 #   firstall   every target's first pass clears        02-28 at 4.8 .. 11.1
-#   oit        the OIT gates removed (P6)              13 at 24.7, oit gate,
-#                                                      4282 null-table calls
+#   oit        the OIT gates removed (before P6c:       13 at 24.7, oit gate,
+#              the twins' sampler2DMS dropped them)    4282 null-table calls
 #   bloom      the bloom gate removed (P4e did that:   bloom gate (89812 px)
 #              the gate is gone, its check with it)
 #   fbofail    every framebuffer incomplete            03-28 at 19.2 .. 38.8,

@@ -75,8 +75,17 @@ FRAG_UBO(OIT_UBO) uniform OitFrag {
 #define u_mboit_ms  u_foit.y
 FRAG_TEX(OIT_TEX0) uniform sampler2D u_mboit_b0;
 FRAG_TEX(OIT_TEX0 + 1) uniform sampler2D u_mboit_mom;
+/* SDL_GPU can bind no multisampled texture to a sampler (#340 P6c), and a
+ * stage declaring one has every draw dropped.  Under VULKAN the pair is
+ * sampler2D, which texelFetch (s, pix, 0) reads alike; u_mboit_ms is always
+ * 0 there, so the branch reading them never runs.  GL's program unchanged. */
+#ifdef VULKAN
+FRAG_TEX(OIT_TEX0 + 2) uniform sampler2D u_mboit_b0_ms;
+FRAG_TEX(OIT_TEX0 + 3) uniform sampler2D u_mboit_mom_ms;
+#else
 FRAG_TEX(OIT_TEX0 + 2) uniform sampler2DMS u_mboit_b0_ms;
 FRAG_TEX(OIT_TEX0 + 3) uniform sampler2DMS u_mboit_mom_ms;
+#endif
 #define OIT_TEX_COUNT 4
 #define MBOIT_OVERESTIMATION 0.25
 /* log-warp view distance to [-1,1]: 14 octaves from the 4-unit near plane,

@@ -13,12 +13,20 @@
  * the one the present blits to the swapchain.
  *
  * glCheckFramebufferStatus is honest: COMPLETE only for what a render pass
- * can be begun on -- at most one colour attachment (rg_pipeline.c builds one
- * colour target; two would be OIT's MRT, P6c), a defined 2D texture with the
- * target usage for each attachment, or for depth one layer of a layered one
- * (the shadow maps' cube-map array, #340 P6b), equal sizes.  Anything else is
- * incomplete, and the post-process chain turns itself off on that rather
- * than drawing into a target that is not there.
+ * can be begun on -- colour attachments 0 .. RG_MAX_COLOR-1 (OIT's MRT,
+ * #340 P6c), a defined 2D texture with the target usage for each attachment,
+ * or for depth one layer of a layered one (the shadow maps' cube-map array,
+ * #340 P6b), equal sizes.  Anything else is incomplete, and the post-process
+ * chain turns itself off on that rather than drawing into a target that is
+ * not there.
+ *
+ * glDrawBuffers takes GL_NONE alone or GL_COLOR_ATTACHMENT0 .. n-1 in
+ * order, and the pass's colour targets are the drawn attachments: one
+ * attached and not drawn is left out of the pass (MBOIT's composite draws
+ * accum alone with revealage attached), and one drawn with nothing attached
+ * past the last attached is too, as GL discards what is written there.  A
+ * gap -- a drawn attachment empty with a later one attached -- has no
+ * SDL_GPU pass and is unsupported.
  *
  * glBlitFramebuffer ends the segment and records outside any pass: colour by
  * SDL_BlitGPUTexture with GL's rectangles as they are -- render targets and
@@ -80,16 +88,19 @@ typedef struct {
 	 * was attached whole, as a 2D texture or a renderbuffer (#340 P6b). */
 	int		dlayer;
 	/* RGTG_BAD_*: what no render pass can take (a level, a cube face, a
-	 * renderbuffer never made, MRT), by attachment point, so that what
-	 * replaces it there, or deleting it, takes it back as GL's does. */
+	 * renderbuffer never made, draw buffers out of order), by attachment
+	 * point, so that what replaces it there, or deleting it, takes it back
+	 * as GL's does. */
 	unsigned int	bad;
-	qboolean	draw_none;	/* glDrawBuffers (GL_NONE): no colour drawn */
+	/* glDrawBuffers: GL_COLOR_ATTACHMENT0 .. ndraw-1 are drawn, 0 for
+	 * GL_NONE; a new framebuffer draws GL_COLOR_ATTACHMENT0, as GL's. */
+	int		ndraw;
 } rgfbo_t;
 
 #define RGTG_BAD_COLOR(n)	(1u << (n))	/* GL_COLOR_ATTACHMENT0 + n */
 #define RGTG_BAD_DEPTH		(1u << 16)
 #define RGTG_BAD_STENCIL	(1u << 17)
-#define RGTG_BAD_DRAWBUFS	(1u << 18)	/* MRT (P6) */
+#define RGTG_BAD_DRAWBUFS	(1u << 18)	/* other than NONE, or ATT0 .. n-1 in order */
 
 typedef struct {
 	qboolean	alive;
@@ -189,6 +200,7 @@ void RG_GenFramebuffers (GLsizei n, GLuint *fbos)
 		memset (&rgfb[name], 0, sizeof(rgfbo_t));
 		rgfb[name].alive = true;
 		rgfb[name].dlayer = -1;
+		rgfb[name].ndraw = 1;
 		fbos[i] = name;
 	}
 }
@@ -348,9 +360,9 @@ void RG_FramebufferTextureLayer (GLenum target, GLenum attachment, GLuint textur
 	}
 	else if (texture && !(RGTG_Point (attachment) & (RGTG_BAD_DEPTH | RGTG_BAD_STENCIL)))
 	{
-		/* A colour layer would be a pass's colour target's layer: MRT and
-		 * the layered colour targets are P6c's. */
-		RG_NoteUnhandled ("layered colour attachment (P6c; incomplete)");
+		/* A colour layer would be a pass's colour target's layer, which
+		 * nothing attaches. */
+		RG_NoteUnhandled ("layered colour attachment (incomplete)");
 		bad = true;
 	}
 	/* Whether the texture is layered, and has the layer, is RGTG_Complete's
@@ -379,6 +391,7 @@ void RG_FramebufferRenderbuffer (GLenum target, GLenum attachment, GLenum rbtarg
 void RG_DrawBuffers (GLsizei n, const GLenum *bufs)
 {
 	rgfbo_t	*f = RGTG_Fbo (rgfb_draw);
+	GLsizei	i;
 
 	if (!f)
 	{
@@ -389,22 +402,51 @@ void RG_DrawBuffers (GLsizei n, const GLenum *bufs)
 	/* Each call replaces the last, an unsupported one included. */
 	f->bad &= ~RGTG_BAD_DRAWBUFS;
 	if (n == 1 && bufs[0] == GL_NONE)
-		f->draw_none = true;
-	else if (n == 1 && bufs[0] == GL_COLOR_ATTACHMENT0)
-		f->draw_none = false;
+	{
+		f->ndraw = 0;
+		RGTG_Changed (f);
+		return;
+	}
+	for (i = 0; i < n; i++)
+	{
+		if (bufs[i] != GL_COLOR_ATTACHMENT0 + (GLenum) i)
+			break;
+	}
+	if (n >= 1 && n <= RG_MAX_COLOR && i == n)
+		f->ndraw = (int) n;
 	else
 	{
-		RG_NoteUnhandled ("glDrawBuffers other than GL_NONE or GL_COLOR_ATTACHMENT0 alone (MRT is P6)");
+		RG_NoteUnhandled ("glDrawBuffers other than GL_NONE alone or GL_COLOR_ATTACHMENT0 .. n-1 in order");
 		f->bad |= RGTG_BAD_DRAWBUFS;
 	}
 	RGTG_Changed (f);
 }
 
+/* GL_COLOR_ATTACHMENT0 + i's texture name. */
+static GLuint RGTG_Color (const rgfbo_t *f, int i)
+{
+	return i ? f->extra[i - 1] : f->color;
+}
+
+/* Any colour attachment at all. */
+static qboolean RGTG_HasAnyColor (const rgfbo_t *f)
+{
+	int	i;
+
+	for (i = 0; i <= RGTG_EXTRA; i++)
+	{
+		if (RGTG_Color (f, i))
+			return true;
+	}
+	return false;
+}
+
+/* A colour attachment past what a pass can hold. */
 static qboolean RGTG_HasExtra (const rgfbo_t *f)
 {
 	int	i;
 
-	for (i = 0; i < RGTG_EXTRA; i++)
+	for (i = RG_MAX_COLOR - 1; i < RGTG_EXTRA; i++)
 	{
 		if (f->extra[i])
 			return true;
@@ -418,23 +460,41 @@ static qboolean RGTG_HasExtra (const rgfbo_t *f)
  * render to is found here. */
 static GLenum RGTG_Complete (const rgfbo_t *f, qboolean draw, rgtarget_t *out)
 {
-	rgtarget_t	t;
+	rgtarget_t			t;
+	SDL_GPUTexture			*ctex[RG_MAX_COLOR];
+	SDL_GPUTextureFormat		cfmt[RG_MAX_COLOR];
+	SDL_GPUTextureUsageFlags	cusage[RG_MAX_COLOR];
+	qboolean			sized = false;
+	int				i, n;
 
 	SDL_zero (t);
+	SDL_zero (ctex);
+	SDL_zero (cfmt);
+	SDL_zero (cusage);
 	t.dfmt = SDL_GPU_TEXTUREFORMAT_INVALID;
 	if (f->bad)
 		return GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT;
 	if (RGTG_HasExtra (f))
-		return GL_FRAMEBUFFER_UNSUPPORTED;	/* one colour target per pass (P6) */
-	if (!f->color && !f->depth && !f->stencil)
+		return GL_FRAMEBUFFER_UNSUPPORTED;	/* past RG_MAX_COLOR colour targets */
+	if (!f->color && !f->depth && !f->stencil && !RGTG_HasAnyColor (f))
 		return GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT;
 	if (f->stencil && f->stencil != f->depth)
 		return GL_FRAMEBUFFER_UNSUPPORTED;	/* SDL_GPU has one depth-stencil texture */
-	if (f->color)
+	/* Every attachment is checked, drawn or not, as GL's completeness is. */
+	for (i = 0; i < RG_MAX_COLOR; i++)
 	{
-		if (!RG_Res_RenderTarget (f->color, SDL_GPU_TEXTUREUSAGE_COLOR_TARGET, -1, &t.color,
-					  &t.cfmt, &t.cusage, &t.w, &t.h))
+		int	w, h;
+
+		if (!RGTG_Color (f, i))
+			continue;
+		if (!RG_Res_RenderTarget (RGTG_Color (f, i), SDL_GPU_TEXTUREUSAGE_COLOR_TARGET, -1, &ctex[i],
+					  &cfmt[i], &cusage[i], &w, &h))
 			return GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT;
+		if (sized && (w != t.w || h != t.h))
+			return GL_FRAMEBUFFER_UNSUPPORTED;	/* a render pass takes equal sizes */
+		t.w = w;
+		t.h = h;
+		sized = true;
 	}
 	if (f->depth)
 	{
@@ -445,17 +505,25 @@ static GLenum RGTG_Complete (const rgfbo_t *f, qboolean draw, rgtarget_t *out)
 			return GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT;
 		t.dlayered = f->dlayer >= 0;
 		t.dlayer = t.dlayered ? f->dlayer : 0;
-		if (t.color && (w != t.w || h != t.h))
+		if (sized && (w != t.w || h != t.h))
 			return GL_FRAMEBUFFER_UNSUPPORTED;	/* a render pass takes equal sizes */
 		t.w = w;
 		t.h = h;
 	}
-	if (draw && f->draw_none)
+	/* The pass's colour targets: drawn, from 0, up to the last attached.
+	 * The read side reads GL_COLOR_ATTACHMENT0, glReadBuffer's default. */
+	n = draw ? f->ndraw : 1;
+	while (n > 0 && !ctex[n - 1])
+		n--;
+	for (i = 0; i < n; i++)
 	{
-		t.color = NULL;
-		t.cfmt = SDL_GPU_TEXTUREFORMAT_INVALID;
-		t.cusage = 0;
+		if (!ctex[i])
+			return GL_FRAMEBUFFER_UNSUPPORTED;	/* a gap SDL_GPU has no pass for */
+		t.color[i] = ctex[i];
+		t.cfmt[i] = cfmt[i];
+		t.cusage[i] = cusage[i];
 	}
+	t.ncolor = n;
 	if (out)
 		*out = t;
 	return GL_FRAMEBUFFER_COMPLETE;
@@ -600,12 +668,12 @@ static qboolean RGTG_BlitColor (SDL_GPUCommandBuffer *cmd, const rgtarget_t *src
 	qboolean	sbx, sby, dbx, dby;
 	int		flip = SDL_FLIP_NONE;
 
-	if (!src->color || !dst->color || src->color == dst->color)
+	if (!src->color[0] || !dst->color[0] || src->color[0] == dst->color[0])
 	{
 		RG_NoteUnhandled ("colour blit with no colour on a side, or within one texture (declined)");
 		return false;
 	}
-	if (!(src->cusage & SDL_GPU_TEXTUREUSAGE_SAMPLER))
+	if (!(src->cusage[0] & SDL_GPU_TEXTUREUSAGE_SAMPLER))
 	{
 		RG_NoteUnhandled ("colour blit from a renderbuffer (multisample resolve is P6; declined)");
 		return false;
@@ -617,10 +685,10 @@ static qboolean RGTG_BlitColor (SDL_GPUCommandBuffer *cmd, const rgtarget_t *src
 		return false;
 	}
 	SDL_zero (bi);
-	bi.source.texture = src->color;
+	bi.source.texture = src->color[0];
 	RGTG_Span (sx0, sx1, &bi.source.x, &bi.source.w, &sbx);
 	RGTG_Span (sy0, sy1, &bi.source.y, &bi.source.h, &sby);
-	bi.destination.texture = dst->color;
+	bi.destination.texture = dst->color[0];
 	RGTG_Span (dx0, dx1, &bi.destination.x, &bi.destination.w, &dbx);
 	RGTG_Span (dy0, dy1, &bi.destination.y, &bi.destination.h, &dby);
 	if (!bi.source.w || !bi.source.h || !bi.destination.w || !bi.destination.h)

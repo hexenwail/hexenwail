@@ -2083,6 +2083,11 @@ static void GL_Init_NullGL (void)
 	 * R16G16B16A16_FLOAT, and RGT_Format maps GL_RGBA16F to it (#340 P4e).
 	 * Before GL_PostProcess_Init, which reads it. */
 	gl_renderer_caps.float_color_buffer = true;
+	/* OIT's two colour targets with a blend each (#340 P6c): SDL_GPU asks
+	 * every Vulkan device for independentBlend, and rg_pipeline.c keys a
+	 * blend per target.  renderer_status says so, as GL's caps do. */
+	gl_renderer_caps.indexed_blending = true;
+	gl_renderer_caps.oit = true;
 	Con_SafeDPrintf ("[RENDERER] Profile: %s\n", gl_renderer_caps.profile_name);
 	gl_max_anisotropy = 1;
 

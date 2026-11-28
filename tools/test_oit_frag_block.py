@@ -342,11 +342,42 @@ for st in STAGES:
     if "main_body" in code:
         errors.append(f"{st}: names main_body; oit.inc renames the stage's main, the stage must not")
 
-samp = re.findall(r"\bFRAG_TEX\(OIT_TEX0(?:\s*\+\s*(\d+))?\)\s*uniform\s+(\w+)\s+(\w+)\s*;", oitc)
-want_s = [(0, "sampler2D", "u_mboit_b0"), (1, "sampler2D", "u_mboit_mom"),
-          (2, "sampler2DMS", "u_mboit_b0_ms"), (3, "sampler2DMS", "u_mboit_mom_ms")]
-if [(int(k or 0), ty, n) for k, ty, n in samp] != want_s:
-    errors.append(f"oit.inc's samplers are {samp}; they are the four moment targets at OIT_TEX0 + 0..3")
+def vulkan_arm(text, vulkan):
+    """text with each `#ifdef VULKAN` / `#else` / `#endif` resolved for one
+    compile: glslang predefines VULKAN, GL's compiler does not."""
+    out, stack = [], []
+    for line in text.splitlines():
+        d = re.match(r"\s*#\s*(ifdef|ifndef|if|else|elif|endif)\b\s*(\w*)", line)
+        if d and d.group(1) in ("ifdef", "ifndef", "if"):
+            stack.append(None if d.group(2) != "VULKAN" or d.group(1) == "if"
+                         else (vulkan if d.group(1) == "ifdef" else not vulkan))
+            if stack[-1] is not None:
+                continue
+        elif d and d.group(1) == "else" and stack and stack[-1] is not None:
+            stack[-1] = not stack[-1]
+            continue
+        elif d and d.group(1) == "endif" and stack:
+            if stack.pop() is not None:
+                continue
+        if all(v is not False for v in stack):
+            out.append(line)
+    return "\n".join(out)
+
+
+# GL's program declares the multisampled pair as sampler2DMS; under VULKAN
+# they are sampler2D, since SDL_GPU binds no multisampled texture to a
+# sampler and drops every draw of a stage that declares one (#340 P6c,
+# Q3 option A).  The slots and names are the same in both.
+samp = None
+for vulkan, ms in ((False, "sampler2DMS"), (True, "sampler2D")):
+    got = re.findall(r"\bFRAG_TEX\(OIT_TEX0(?:\s*\+\s*(\d+))?\)\s*uniform\s+(\w+)\s+(\w+)\s*;",
+                     vulkan_arm(oitc, vulkan))
+    want_s = [(0, "sampler2D", "u_mboit_b0"), (1, "sampler2D", "u_mboit_mom"),
+              (2, ms, "u_mboit_b0_ms"), (3, ms, "u_mboit_mom_ms")]
+    if [(int(k or 0), ty, n) for k, ty, n in got] != want_s:
+        errors.append(f"oit.inc's samplers {'under VULKAN' if vulkan else 'on GL'} are {got}; they are the "
+                      f"four moment targets at OIT_TEX0 + 0..3, the last two {ms}")
+    samp = samp if samp is not None else got
 cnt = re.search(r"^\s*#\s*define\s+OIT_TEX_COUNT\s+(\d+)\s*$", oitc, re.M)
 if not cnt or int(cnt.group(1)) != len(samp):
     errors.append("oit.inc's OIT_TEX_COUNT must equal its sampler count")

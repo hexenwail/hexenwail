@@ -1860,14 +1860,19 @@ static qboolean OIT_CreateFBO (int width, int height, GLuint depth_stencil_rb, G
 	GLenum drawbufs[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
 	GLenum textarget = (samples > 1) ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D;
 
-#ifdef USE_SDL_GPU
-	/* OIT is P6 of #340.  Its twins read the targets through sampler2DMS,
-	 * which -gpu drops, so once P4 turns post-process on under -gpu,
-	 * r_oit 1 would lose every translucent: -gpu stays on sorted blending. */
-	if (R_GPU ())
-		return false;
-#endif
 	OIT_DeleteFBO();
+#ifdef USE_SDL_GPU
+	/* SDL_GPU can sample no multisampled texture, so neither the per-sample
+	 * resolve nor the composite's moment reads have a -gpu arm: under MSAA
+	 * there is no OIT there, as on the GLES tier (#340 P6c; P6e resolves
+	 * the targets on store instead). */
+	if (R_GPU () && samples > 1)
+	{
+		Con_SafePrintf("OIT: unavailable with MSAA under -gpu (no multisample sampling)\n");
+		oit_samples = 0;
+		return false;
+	}
+#endif
 #ifdef USE_GLES
 	/* ES 3.0 and WebGL2 have no multisample textures, so the two OIT
 	 * targets cannot match a multisampled scene's depth.  Creating them as
@@ -1984,6 +1989,17 @@ static qboolean OIT_CreateFBO (int width, int height, GLuint depth_stencil_rb, G
 		mboit_available = (status == GL_FRAMEBUFFER_COMPLETE);
 		if (!mboit_available)
 			Con_SafePrintf("OIT: MBOIT moment targets incomplete (status 0x%x); r_oit 2 falls back to 1\n", status);
+#ifdef USE_SDL_GPU
+		/* The moment pass blends into both; blending into R32F and
+		 * RGBA32F is optional in Vulkan, where GL 4.3 requires it.
+		 * Counted in renderer_status (#340 P6c). */
+		else if (R_GPU () && !(RG_TargetFormatBlends (GL_R32F) && RG_TargetFormatBlends (GL_RGBA32F)))
+		{
+			mboit_available = false;
+			Con_SafePrintf("OIT: the device cannot blend into the MBOIT moment targets (R32F, RGBA32F); "
+				       "r_oit 2 falls back to 1\n");
+		}
+#endif
 	}
 #endif
 	return true;
@@ -1991,13 +2007,6 @@ static qboolean OIT_CreateFBO (int width, int height, GLuint depth_stencil_rb, G
 
 static qboolean OIT_InitShader (void)
 {
-#ifdef USE_SDL_GPU
-	/* OIT is P6 (see OIT_CreateFBO).  Gated here as well because this runs
-	 * at every -gpu boot: the null glBlendFunci is not NULL, so
-	 * HW_OIT_HAS_BLEND_FUNCI lets it in, and all it would do is raw GL. */
-	if (R_GPU ())
-		return false;
-#endif
 	/* Created into the file-scope names, which OIT_EndTranslucency's
 	 * per-frame sampler re-set names (tools/test_rg_sampler_units.py). */
 	oit_resolve_prog = R_Program_Create(RPROG_OIT_RESOLVE);
@@ -2025,7 +2034,12 @@ static qboolean OIT_InitShader (void)
 #ifndef USE_GLES
 	/* MSAA per-sample resolve variant — best-effort. If it fails to build
 	 * the MSAA OIT path is simply never selected, since oit_samples stays 0
-	 * then.  Not built at all on the ES tier — see oit_resolve_frag_msaa. */
+	 * then.  Not built at all on the ES tier — see oit_resolve_frag_msaa —
+	 * nor under -gpu, where its sampler2DMS can never be bound and
+	 * OIT_CreateFBO refuses MSAA (#340 P6c). */
+#ifdef USE_SDL_GPU
+	if (!R_GPU ())
+#endif
 	oit_resolve_prog_msaa = R_Program_Create(RPROG_OIT_RESOLVE_MSAA);
 	if (oit_resolve_prog_msaa)
 	{
@@ -2048,10 +2062,6 @@ void OIT_BeginTranslucency (void)
 	static const float zeroes[4] = {0.f, 0.f, 0.f, 0.f};
 	static const float ones[4] = {1.f, 1.f, 1.f, 1.f};
 
-#ifdef USE_SDL_GPU
-	if (R_GPU ())	/* P6, see OIT_CreateFBO */
-		return;
-#endif
 	if (!oit_available || !r_oit.integer || !HW_OIT_HAS_BLEND_FUNCI)
 		return;
 
@@ -2133,10 +2143,6 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 	qboolean cull_was_on, mboit;
 	GLint saved_viewport[4];
 
-#ifdef USE_SDL_GPU
-	if (R_GPU ())	/* P6, see OIT_CreateFBO */
-		return;
-#endif
 	if (!oit_available || !r_oit.integer || !HW_OIT_HAS_BLEND_FUNCI)
 		return;
 
@@ -2263,10 +2269,6 @@ qboolean OIT_Active (void)
 	 * uhexen2-a5nn.34 */
 	if (map_checks.integer)
 		return false;
-#ifdef USE_SDL_GPU
-	if (R_GPU ())	/* P6, see OIT_CreateFBO */
-		return false;
-#endif
 	return oit_available && r_oit.integer && HW_OIT_HAS_BLEND_FUNCI;
 }
 

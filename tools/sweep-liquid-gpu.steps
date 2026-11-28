@@ -37,7 +37,7 @@
 #
 # SETTINGS.  On top of tools/sweep-world-gpu.steps' list (what -gpu does not
 # draw yet, and what makes a frame repeatable), on BOTH sides:
-#   r_oit 0              OIT is P6; -gpu takes sorted blending whatever it says
+#   r_oit 0              OIT has its own sweep (sweep-oit-gpu.steps, #340 P6c)
 #   r_waterwarp 0        the underwater screen warp is a post-process pass (P4)
 #   r_softparticles 0    the soft-particle depth snapshot is P4
 #   r_softemu 0, r_scale 1   post-process (P4)

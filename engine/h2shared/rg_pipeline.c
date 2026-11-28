@@ -62,8 +62,12 @@
  * hashed and compared as bytes. */
 typedef struct {
 	GLuint		program;
-	Uint32		prim, layout, color_fmt, depth_fmt;
-	Uint32		blend, blend_src, blend_dst;
+	Uint32		prim, layout, depth_fmt;
+	/* The colour targets, each with its own blend funcs (#340 P6c: WBOIT's
+	 * revealage blends ZERO, ONE_MINUS_SRC_COLOR beside accum's ONE, ONE);
+	 * the slots past ncolor zero. */
+	Uint32		ncolor, color_fmt[RG_MAX_COLOR];
+	Uint32		blend, blend_src[RG_MAX_COLOR], blend_dst[RG_MAX_COLOR];
 	Uint32		depth_test, depth_write, depth_func;
 	Uint32		cull_face;		/* 0 = no culling */
 	Uint32		fill;
@@ -179,22 +183,35 @@ static SDL_GPUStencilOp RG_StencilOp (GLenum op)
 
 /* The key for the current state; false for a state SDL_GPU cannot draw. */
 static qboolean RG_MakeKey (rgpipekey_t *k, const rgprog_t *prog, SDL_GPUPrimitiveType prim,
-			    Uint32 layout, SDL_GPUTextureFormat color,
-			    SDL_GPUTextureFormat depth)
+			    Uint32 layout, const rgtarget_t *tgt)
 {
 	const rpipestate_t	*s = R_PipelineState ();
+	SDL_GPUTextureFormat	depth = tgt->dfmt;
+	int			i;
 
 	memset (k, 0, sizeof(*k));
 	k->program = prog->name;
 	k->prim = prim;
 	k->layout = layout;
-	k->color_fmt = color;
+	k->ncolor = (Uint32) q_max (q_min (tgt->ncolor, RG_MAX_COLOR), 0);
+	for (i = 0; i < (int) k->ncolor; i++)
+		k->color_fmt[i] = tgt->cfmt[i];
 	k->depth_fmt = depth;
-	if (s->blend)
+	if (s->blend && k->ncolor)
 	{
 		k->blend = 1;
-		k->blend_src = s->blend_eff_src[0];
-		k->blend_dst = s->blend_eff_dst[0];
+		/* Draw buffer i blends with glBlendFunci (i)'s funcs.  The shadow
+		 * holds the first RP_MAX_BLEND_TARGETS (2, all OIT uses); a buffer
+		 * past them takes the last one's, which is GL's only after
+		 * glBlendFunc, so nothing may draw into more until the shadow
+		 * grows to RG_MAX_COLOR. */
+		for (i = 0; i < (int) k->ncolor; i++)
+		{
+			int	b = q_min (i, RP_MAX_BLEND_TARGETS - 1);
+
+			k->blend_src[i] = s->blend_eff_src[b];
+			k->blend_dst[i] = s->blend_eff_dst[b];
+		}
 	}
 	k->depth_test = s->depth_test;
 	k->depth_write = s->depth_mask;
@@ -222,9 +239,9 @@ static qboolean RG_MakeKey (rgpipekey_t *k, const rgprog_t *prog, SDL_GPUPrimiti
 			(s->color_mask[2] ? 4 : 0) | (s->color_mask[3] ? 8 : 0);
 	/* Blending and the colour mask act on a colour target alone: a
 	 * depth-only pass (#340 P6b) keys neither, so whatever the 3D view
-	 * left them at, its faces share one pipeline. */
-	if (color == SDL_GPU_TEXTUREFORMAT_INVALID)
-		k->blend = k->blend_src = k->blend_dst = k->color_mask = 0;
+	 * left them at, its faces share one pipeline (blend is left 0 above). */
+	if (!k->ncolor)
+		k->color_mask = 0;
 	if (s->poly_offset_fill || (s->poly_offset_line && k->fill))
 	{
 		k->poly_offset = 1;
@@ -256,7 +273,8 @@ static qboolean RG_MakeKey (rgpipekey_t *k, const rgprog_t *prog, SDL_GPUPrimiti
 static SDL_GPUGraphicsPipeline *RG_CreatePipeline (const rgpipekey_t *k, const rgprog_t *prog)
 {
 	SDL_GPUGraphicsPipelineCreateInfo	ci;
-	SDL_GPUColorTargetDescription		ct;
+	SDL_GPUColorTargetDescription		ct[RG_MAX_COLOR];
+	SDL_GPUColorComponentFlags		mask;
 	SDL_GPUVertexBufferDescription		vb[RG_MAX_VBUFS];
 	SDL_GPUVertexAttribute			va[RG_MAX_VATTRS];
 	const rgvlayout_t			*l = &rg_layouts[k->layout];
@@ -327,35 +345,40 @@ static SDL_GPUGraphicsPipeline *RG_CreatePipeline (const rgpipekey_t *k, const r
 		ci.depth_stencil_state.write_mask = 0xFF;
 	}
 
-	ct.format = (SDL_GPUTextureFormat) k->color_fmt;
-	if (k->blend)
-	{
-		SDL_GPUBlendFactor	src = RG_BlendFactor (k->blend_src);
-		SDL_GPUBlendFactor	dst = RG_BlendFactor (k->blend_dst);
-
-		if (src == SDL_GPU_BLENDFACTOR_INVALID || dst == SDL_GPU_BLENDFACTOR_INVALID)
-		{
-			RG_NoteUnhandled ("blend factor with no SDL_GPU equivalent");
-			return NULL;
-		}
-		ct.blend_state.enable_blend = true;
-		ct.blend_state.src_color_blendfactor = ct.blend_state.src_alpha_blendfactor = src;
-		ct.blend_state.dst_color_blendfactor = ct.blend_state.dst_alpha_blendfactor = dst;
-		ct.blend_state.color_blend_op = ct.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
-	}
-	ct.blend_state.enable_color_write_mask = true;
-	ct.blend_state.color_write_mask = (SDL_GPUColorComponentFlags)
+	/* glColorMask, unindexed, masks every draw buffer alike. */
+	mask = (SDL_GPUColorComponentFlags)
 		(((k->color_mask & 1) ? SDL_GPU_COLORCOMPONENT_R : 0) |
 		 ((k->color_mask & 2) ? SDL_GPU_COLORCOMPONENT_G : 0) |
 		 ((k->color_mask & 4) ? SDL_GPU_COLORCOMPONENT_B : 0) |
 		 ((k->color_mask & 8) ? SDL_GPU_COLORCOMPONENT_A : 0));
-	/* A depth-only target (the shadow maps, #340 P6b) has no colour
-	 * target to describe: SDL refuses a pipeline whose one colour target
-	 * has no format. */
-	if (k->color_fmt != SDL_GPU_TEXTUREFORMAT_INVALID)
+	for (i = 0; i < k->ncolor; i++)
 	{
-		ci.target_info.color_target_descriptions = &ct;
-		ci.target_info.num_color_targets = 1;
+		ct[i].format = (SDL_GPUTextureFormat) k->color_fmt[i];
+		if (k->blend)
+		{
+			SDL_GPUBlendFactor	src = RG_BlendFactor (k->blend_src[i]);
+			SDL_GPUBlendFactor	dst = RG_BlendFactor (k->blend_dst[i]);
+
+			if (src == SDL_GPU_BLENDFACTOR_INVALID || dst == SDL_GPU_BLENDFACTOR_INVALID)
+			{
+				RG_NoteUnhandled ("blend factor with no SDL_GPU equivalent");
+				return NULL;
+			}
+			ct[i].blend_state.enable_blend = true;
+			ct[i].blend_state.src_color_blendfactor = ct[i].blend_state.src_alpha_blendfactor = src;
+			ct[i].blend_state.dst_color_blendfactor = ct[i].blend_state.dst_alpha_blendfactor = dst;
+			ct[i].blend_state.color_blend_op = ct[i].blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+		}
+		ct[i].blend_state.enable_color_write_mask = true;
+		ct[i].blend_state.color_write_mask = mask;
+	}
+	/* A depth-only target (the shadow maps, #340 P6b) has no colour
+	 * target to describe: num_color_targets 0, as SDL refuses a colour
+	 * target with no format. */
+	if (k->ncolor)
+	{
+		ci.target_info.color_target_descriptions = ct;
+		ci.target_info.num_color_targets = k->ncolor;
 	}
 	if (k->depth_fmt != SDL_GPU_TEXTUREFORMAT_INVALID)
 	{
@@ -371,8 +394,7 @@ static SDL_GPUGraphicsPipeline *RG_CreatePipeline (const rgpipekey_t *k, const r
 }
 
 SDL_GPUGraphicsPipeline *RG_PipelineFor (const rgprog_t *prog, SDL_GPUPrimitiveType prim,
-					 Uint32 layout, SDL_GPUTextureFormat color,
-					 SDL_GPUTextureFormat depth)
+					 Uint32 layout, const rgtarget_t *tgt)
 {
 	rgpipekey_t	k;
 	rgpipe_t	*p;
@@ -380,7 +402,7 @@ SDL_GPUGraphicsPipeline *RG_PipelineFor (const rgprog_t *prog, SDL_GPUPrimitiveT
 
 	if (!prog || prog->compute || layout >= (Uint32) rg_numlayouts)
 		return NULL;
-	if (!RG_MakeKey (&k, prog, prim, layout, color, depth))
+	if (!RG_MakeKey (&k, prog, prim, layout, tgt))
 		return NULL;
 	b = RG_KeyHash (&k) & (RG_PIPE_BUCKETS - 1);
 	for (p = rg_pipes[b]; p; p = p->next)
